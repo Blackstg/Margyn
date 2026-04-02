@@ -821,8 +821,8 @@ Stock faible (<20 unités): ${lowStock || 'Aucun'}`
             <section className="space-y-3">
               <h2 className="text-sm font-semibold text-[#1a1a2e]">Produits</h2>
               <ProductsView
-                bestSellers={bestSellers.filter((b) => !exclusions.includes(b.title))}
-                inventory={inventory.filter((i) => !exclusions.includes(i.title))}
+                bestSellers={bestSellers.filter((b) => !exclusions.includes(b.title) && !b.title.includes(' + '))}
+                inventory={inventory.filter((i) => !exclusions.includes(i.title) && !i.title.includes(' + '))}
                 loading={loading}
                 stockThreshold={stockThreshold}
               />
