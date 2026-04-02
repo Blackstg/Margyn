@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useRef, useLayoutEffect } from 'react'
+import { useState, useRef, useEffect } from 'react'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -117,7 +117,7 @@ export default function AnnualChart({ data, loading }: Props) {
   const [focus, setFocus]       = useState<'current' | 'prev' | null>(null)
   const currentYear             = new Date().getFullYear()
 
-  useLayoutEffect(() => {
+  useEffect(() => {
     if (!wrapperRef.current) return
     setSvgWidth(wrapperRef.current.offsetWidth)
     const obs = new ResizeObserver(([entry]) => setSvgWidth(entry.contentRect.width))
@@ -231,116 +231,109 @@ export default function AnnualChart({ data, loading }: Props) {
         <div ref={wrapperRef} className="relative select-none w-full" onMouseLeave={() => setTooltip(null)}>
           {svgWidth === 0 ? (
             <div style={{ height: H }} />
-          ) : null}
-          <svg width="100%" height={H} style={{ display: svgWidth === 0 ? 'none' : 'block' }}>
-            <defs>
-              {/* Hatch patterns */}
-              <pattern id="hatch-curr" patternUnits="userSpaceOnUse" width="5" height="5" patternTransform="rotate(45)">
-                <rect width="5" height="5" fill="transparent" />
-                <line x1="0" y1="0" x2="0" y2="5" stroke="#6b6e9a" strokeWidth="1.8" />
-              </pattern>
-              <pattern id="hatch-prev" patternUnits="userSpaceOnUse" width="5" height="5" patternTransform="rotate(45)">
-                <rect width="5" height="5" fill="transparent" />
-                <line x1="0" y1="0" x2="0" y2="5" stroke="#b06070" strokeWidth="1.8" />
-              </pattern>
-            </defs>
+          ) : (
+            <>
+              <svg width="100%" height={H}>
+                <defs>
+                  <pattern id="hatch-curr" patternUnits="userSpaceOnUse" width="5" height="5" patternTransform="rotate(45)">
+                    <rect width="5" height="5" fill="transparent" />
+                    <line x1="0" y1="0" x2="0" y2="5" stroke="#6b6e9a" strokeWidth="1.8" />
+                  </pattern>
+                  <pattern id="hatch-prev" patternUnits="userSpaceOnUse" width="5" height="5" patternTransform="rotate(45)">
+                    <rect width="5" height="5" fill="transparent" />
+                    <line x1="0" y1="0" x2="0" y2="5" stroke="#b06070" strokeWidth="1.8" />
+                  </pattern>
+                </defs>
 
-            <g transform={`translate(${ML}, ${MT})`}>
+                <g transform={`translate(${ML}, ${MT})`}>
+                  {ticks.map((tick) => (
+                    <g key={tick}>
+                      <line
+                        x1={0} y1={chartH - scaleH(tick)}
+                        x2={chartW} y2={chartH - scaleH(tick)}
+                        stroke="#f0ede9" strokeWidth={1}
+                      />
+                      <text
+                        x={-6} y={chartH - scaleH(tick)}
+                        dy="0.35em" textAnchor="end"
+                        fontSize={10} fill="#9b9b93" fontFamily="inherit"
+                      >
+                        {fmtAxis(tick)}
+                      </text>
+                    </g>
+                  ))}
 
-              {/* Y axis grid + labels */}
-              {ticks.map((tick) => (
-                <g key={tick}>
-                  <line
-                    x1={0} y1={chartH - scaleH(tick)}
-                    x2={chartW} y2={chartH - scaleH(tick)}
-                    stroke="#f0ede9" strokeWidth={1}
-                  />
-                  <text
-                    x={-6} y={chartH - scaleH(tick)}
-                    dy="0.35em" textAnchor="end"
-                    fontSize={10} fill="#9b9b93" fontFamily="inherit"
-                  >
-                    {fmtAxis(tick)}
-                  </text>
+                  {data.map((point, i) => {
+                    const bottom = chartH
+                    const h2026  = scaleH(point.ca)
+                    const h2025  = scaleH(point.ca_prev)
+                    const hm2026 = Math.min(scaleH(Math.max(point.net_margin, 0)), h2026)
+                    const hm2025 = Math.min(scaleH(Math.max(point.net_margin_prev, 0)), h2025)
+
+                    return (
+                      <g
+                        key={point.month}
+                        onMouseEnter={() => setTooltip({ x: ML + i * colW + colW / 2, point })}
+                        style={{ cursor: 'default' }}
+                      >
+                        <rect x={i * colW} y={0} width={colW} height={chartH} fill="transparent" />
+
+                        {(() => {
+                          const x2026 = i * colW + colPad
+                          if (point.isFuture) return (
+                            <rect x={x2026} y={bottom - 3} width={barW} height={3}
+                              fill="#aeb0c9" fillOpacity={0.15} rx={2} />
+                          )
+                          return h2026 > 0 ? (
+                            <>
+                              <rect x={x2026} y={bottom - h2026} width={barW} height={h2026}
+                                fill="#aeb0c9" fillOpacity={currentOp} rx={3} />
+                              {hm2026 > 0 && (
+                                <rect x={x2026} y={bottom - hm2026} width={barW} height={hm2026}
+                                  fill="url(#hatch-curr)" fillOpacity={currentOp} rx={3} />
+                              )}
+                            </>
+                          ) : null
+                        })()}
+
+                        {(() => {
+                          const x2025 = i * colW + colPad + barW + barGap
+                          return h2025 > 0 ? (
+                            <>
+                              <rect x={x2025} y={bottom - h2025} width={barW} height={h2025}
+                                fill="#e7c0c0" fillOpacity={0.85 * prevOp} rx={3} />
+                              {hm2025 > 0 && (
+                                <rect x={x2025} y={bottom - hm2025} width={barW} height={hm2025}
+                                  fill="url(#hatch-prev)" fillOpacity={prevOp} rx={3} />
+                              )}
+                            </>
+                          ) : null
+                        })()}
+
+                        <text
+                          x={i * colW + colW / 2} y={chartH + 16}
+                          textAnchor="middle" fontSize={10} fill="#9b9b93" fontFamily="inherit"
+                        >
+                          {point.label}
+                        </text>
+                      </g>
+                    )
+                  })}
                 </g>
-              ))}
+              </svg>
 
-              {/* Bars */}
-              {data.map((point, i) => {
-                const bottom = chartH
-
-                const h2026  = scaleH(point.ca)
-                const h2025  = scaleH(point.ca_prev)
-                const hm2026 = Math.min(scaleH(Math.max(point.net_margin, 0)), h2026)
-                const hm2025 = Math.min(scaleH(Math.max(point.net_margin_prev, 0)), h2025)
-
-                return (
-                  <g
-                    key={point.month}
-                    onMouseEnter={() => setTooltip({ x: ML + i * colW + colW / 2, point })}
-                    style={{ cursor: 'default' }}
-                  >
-                    {/* Transparent hover zone */}
-                    <rect x={i * colW} y={0} width={colW} height={chartH} fill="transparent" />
-
-                    {/* ── 2026 bar (left) ── */}
-                    {(() => {
-                      const x2026 = i * colW + colPad
-                      if (point.isFuture) return (
-                        <rect x={x2026} y={bottom - 3} width={barW} height={3}
-                          fill="#aeb0c9" fillOpacity={0.15} rx={2} />
-                      )
-                      return h2026 > 0 ? (
-                        <>
-                          <rect x={x2026} y={bottom - h2026} width={barW} height={h2026}
-                            fill="#aeb0c9" fillOpacity={currentOp} rx={3} />
-                          {hm2026 > 0 && (
-                            <rect x={x2026} y={bottom - hm2026} width={barW} height={hm2026}
-                              fill="url(#hatch-curr)" fillOpacity={currentOp} rx={3} />
-                          )}
-                        </>
-                      ) : null
-                    })()}
-
-                    {/* ── 2025 bar (right) ── */}
-                    {(() => {
-                      const x2025 = i * colW + colPad + barW + barGap
-                      return h2025 > 0 ? (
-                        <>
-                          <rect x={x2025} y={bottom - h2025} width={barW} height={h2025}
-                            fill="#e7c0c0" fillOpacity={0.85 * prevOp} rx={3} />
-                          {hm2025 > 0 && (
-                            <rect x={x2025} y={bottom - hm2025} width={barW} height={hm2025}
-                              fill="url(#hatch-prev)" fillOpacity={prevOp} rx={3} />
-                          )}
-                        </>
-                      ) : null
-                    })()}
-
-                    {/* X label — centré sur le groupe */}
-                    <text
-                      x={i * colW + colW / 2} y={chartH + 16}
-                      textAnchor="middle" fontSize={10} fill="#9b9b93" fontFamily="inherit"
-                    >
-                      {point.label}
-                    </text>
-                  </g>
-                )
-              })}
-            </g>
-          </svg>
-
-          {/* Floating tooltip */}
-          {tooltip && (
-            <div
-              className="absolute pointer-events-none z-10 bg-white border border-[#e8e4e0] rounded-xl shadow-lg px-3.5 py-3 min-w-[210px]"
-              style={{
-                left: Math.min(Math.max(tooltip.x - 105, 0), svgWidth - 220),
-                top: 4,
-              }}
-            >
-              <TooltipContent point={tooltip.point} currentYear={currentYear} />
-            </div>
+              {tooltip && (
+                <div
+                  className="absolute pointer-events-none z-10 bg-white border border-[#e8e4e0] rounded-xl shadow-lg px-3.5 py-3 min-w-[210px]"
+                  style={{
+                    left: Math.min(Math.max(tooltip.x - 105, 0), svgWidth - 220),
+                    top: 4,
+                  }}
+                >
+                  <TooltipContent point={tooltip.point} currentYear={currentYear} />
+                </div>
+              )}
+            </>
           )}
         </div>
       )}
