@@ -32,6 +32,11 @@ const STORES: ShopifyConfig[] = [
     accessToken: process.env.SHOPIFY_MOOM_ACCESS_TOKEN!,
     brand: 'moom',
   },
+  {
+    shop: process.env.SHOPIFY_KROM_SHOP!,
+    accessToken: process.env.SHOPIFY_KROM_ACCESS_TOKEN!,
+    brand: 'krom',
+  },
 ]
 
 // ─── Auth guard ───────────────────────────────────────────────────────────────

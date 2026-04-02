@@ -17,7 +17,7 @@ import AiInsights from '@/components/dashboard/AiInsights'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-type Brand = 'bowa' | 'moom'
+type Brand = 'bowa' | 'moom' | 'krom'
 type Period = '7j' | '30j' | 'mois'
 
 // ─── Supabase client ──────────────────────────────────────────────────────────
@@ -517,7 +517,7 @@ function DashboardPage() {
 
   const [brand, setBrandState] = useState<Brand>(() => {
     const b = searchParams.get('brand')
-    return b === 'moom' ? 'moom' : 'bowa'
+    return b === 'moom' ? 'moom' : b === 'krom' ? 'krom' : 'bowa'
   })
   const [period, setPeriodState] = useState<Period>(() =>
     urlToPeriod(searchParams.get('period'))
@@ -574,6 +574,7 @@ function DashboardPage() {
   const [brandLogos] = useState<Record<Brand, string | null>>({
     bowa: 'https://cdn.shopify.com/s/files/1/0617/2806/3648/files/profil.png?v=1693451968',
     moom: 'https://cdn.shopify.com/s/files/1/0506/0689/9391/files/moom-profil.png?v=1682403928',
+    krom: 'https://cdn.shopify.com/s/files/1/0590/8755/2558/files/favicon.png?v=1764213860',
   })
 
   const yesterday = getYesterday()
@@ -659,6 +660,7 @@ function DashboardPage() {
   const brandTabs: { id: Brand; label: string }[] = [
     { id: 'bowa', label: 'Bowa' },
     { id: 'moom', label: 'Mōom' },
+    { id: 'krom', label: 'Krom' },
   ]
 
   const periodTabs: { id: Period; label: string }[] = [

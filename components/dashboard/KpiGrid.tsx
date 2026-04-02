@@ -30,7 +30,7 @@ interface Props {
   current:    KpiData | null
   previous:   KpiData | null
   loading:    boolean
-  brand:      'bowa' | 'moom'
+  brand:      'bowa' | 'moom' | 'krom'
   sparklines?: SparklineData
 }
 

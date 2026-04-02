@@ -111,7 +111,7 @@ function CoverageBadge({ days }: { days: number | null }) {
 
 // ─── Print PO ─────────────────────────────────────────────────────────────────
 
-function printPO(cartItems: CartItem[], rowMap: Map<string, ReplenishmentRow>, deadline: Date) {
+function printPO(cartItems: CartItem[], rowMap: Map<string, ReplenishmentRow>, deadline: Date, brandLabel: string) {
   const included = cartItems.filter((c) => c.qty > 0)
   const totalQty = included.reduce((s, c) => s + c.qty, 0)
   const dateStr  = new Date().toLocaleDateString('fr-FR', { day: '2-digit', month: 'long', year: 'numeric' })
@@ -136,7 +136,7 @@ function printPO(cartItems: CartItem[], rowMap: Map<string, ReplenishmentRow>, d
 <html lang="fr">
 <head>
   <meta charset="UTF-8" />
-  <title>Bon de commande — Mōom Paris</title>
+  <title>Bon de commande — ${brandLabel}</title>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body { font-family: 'Helvetica Neue', Arial, sans-serif; font-size: 12px; color: #1a1a2e; background: white; padding: 40px; }
@@ -163,7 +163,7 @@ function printPO(cartItems: CartItem[], rowMap: Map<string, ReplenishmentRow>, d
 <body>
   <div class="header">
     <div>
-      <div class="logo">Mōom Paris</div>
+      <div class="logo">${brandLabel}</div>
       <div class="subtitle">Bon de commande fournisseur</div>
     </div>
     <div class="meta">
@@ -200,7 +200,12 @@ function printPO(cartItems: CartItem[], rowMap: Map<string, ReplenishmentRow>, d
 
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
+const BRAND_LABELS: Record<string, string> = { bowa: 'Bowa', moom: 'Mōom Paris', krom: 'Krom' }
+
 export default function ReapproPage() {
+  // ── Brand ─────────────────────────────────────────────────────────────────
+  const [brand, setBrand] = useState<'bowa' | 'moom' | 'krom'>('moom')
+
   // ── Settings ──────────────────────────────────────────────────────────────
   const [refFrom,    setRefFrom]    = useState('2025-04-01')
   const [refTo,      setRefTo]      = useState('2025-07-31')
@@ -210,6 +215,9 @@ export default function ReapproPage() {
   const [buffer,     setBuffer]     = useState(20)
   const [search,     setSearch]     = useState('')
   const [showAll,    setShowAll]    = useState(false)
+
+  // Reset cart when brand changes
+  useEffect(() => { setCartItems([]) }, [brand])
 
   // ── Cart / sidebar ─────────────────────────────────────────────────────────
   const [sidebarOpen, setSidebarOpen] = useState(false)
@@ -260,7 +268,7 @@ export default function ReapproPage() {
         supabase
           .from('product_sales')
           .select('variant_id, quantity')
-          .eq('brand', 'moom')
+          .eq('brand', brand)
           .gte('date', refFrom)
           .lte('date', refTo)
           .not('variant_id', 'is', null)
@@ -268,7 +276,7 @@ export default function ReapproPage() {
         supabase
           .from('product_sales')
           .select('variant_id, quantity')
-          .eq('brand', 'moom')
+          .eq('brand', brand)
           .gte('date', from90)
           .lte('date', today90)
           .not('variant_id', 'is', null)
@@ -276,12 +284,12 @@ export default function ReapproPage() {
         supabase
           .from('product_variants')
           .select('shopify_variant_id, shopify_product_id, product_title, variant_title, sku, stock_quantity, image_url')
-          .eq('brand', 'moom')
+          .eq('brand', brand)
           .order('product_title'),
         supabase
           .from('product_exclusions')
           .select('product_title')
-          .eq('brand', 'moom'),
+          .eq('brand', brand),
       ])
       if (cancelled) return
 
@@ -305,7 +313,7 @@ export default function ReapproPage() {
     }
     load()
     return () => { cancelled = true }
-  }, [refFrom, refTo, from90, today90])
+  }, [brand, refFrom, refTo, from90, today90])
 
   // ── Computed rows ──────────────────────────────────────────────────────────
   const rows: ReplenishmentRow[] = useMemo(() => {
@@ -408,14 +416,14 @@ export default function ReapproPage() {
       `${r.product_title}${r.variant_title ? ` — ${r.variant_title}` : ''}: stock ${r.stock_quantity}, couverture ${r.coverage_days ?? '?'} j`
     ).join('\n')
     const totalUnits = urgentRows.reduce((s, r) => s + r.qty_to_order, 0)
-    return `Marque: Mōom Paris | Réapprovisionnement
+    return `Marque: ${BRAND_LABELS[brand]} | Réapprovisionnement
 ${urgentRows.length} variants à commander en urgence (${totalUnits} unités au total)
 ${lowRows.length} variants en stock faible
 
 Urgents:\n${urgentLines || 'Aucun'}
 
 Stock faible:\n${lowLines || 'Aucun'}`
-  }, [loading, rows])
+  }, [brand, loading, rows])
 
   // ── Cart helpers ───────────────────────────────────────────────────────────
   function addToCart(row: ReplenishmentRow) {
@@ -485,7 +493,7 @@ Stock faible:\n${lowLines || 'Aucun'}`
     const url  = URL.createObjectURL(blob)
     const a    = document.createElement('a')
     a.href = url
-    a.download = `reappro-moom-${all ? 'complet-' : ''}${new Date().toISOString().slice(0, 10)}.csv`
+    a.download = `reappro-${brand}-${all ? 'complet-' : ''}${new Date().toISOString().slice(0, 10)}.csv`
     a.click()
     URL.revokeObjectURL(url)
   }
@@ -509,7 +517,7 @@ Stock faible:\n${lowLines || 'Aucun'}`
     const url  = URL.createObjectURL(blob)
     const a    = document.createElement('a')
     a.href = url
-    a.download = `bon-commande-moom-${new Date().toISOString().slice(0, 10)}.csv`
+    a.download = `bon-commande-${brand}-${new Date().toISOString().slice(0, 10)}.csv`
     a.click()
     URL.revokeObjectURL(url)
   }
@@ -523,9 +531,23 @@ Stock faible:\n${lowLines || 'Aucun'}`
         <div className="flex items-start justify-between gap-4">
           <div>
             <h1 className="text-xl font-bold text-[#1a1a2e]">Réapprovisionnement</h1>
-            <p className="text-sm text-[#6b6b63] mt-0.5">Mōom Paris — Calcul des commandes par variant</p>
+            <p className="text-sm text-[#6b6b63] mt-0.5">{BRAND_LABELS[brand]} — Calcul des commandes par variant</p>
           </div>
           <div className="flex items-center gap-2 shrink-0">
+            {/* Brand selector */}
+            {(['bowa', 'moom', 'krom'] as const).map((b) => (
+              <button
+                key={b}
+                onClick={() => setBrand(b)}
+                className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition-colors ${
+                  brand === b
+                    ? 'bg-[#1a1a2e] text-white'
+                    : 'bg-white border border-[#e8e4e0] text-[#6b6b63] hover:border-[#aeb0c9]'
+                }`}
+              >
+                {BRAND_LABELS[b]}
+              </button>
+            ))}
             {/* Bon de commande button with badge */}
             <button
               onClick={() => setSidebarOpen(true)}
@@ -946,7 +968,7 @@ Stock faible:\n${lowLines || 'Aucun'}`
                 CSV
               </button>
               <button
-                onClick={() => printPO(cartItems, rowMap, deadline)}
+                onClick={() => printPO(cartItems, rowMap, deadline, BRAND_LABELS[brand] ?? brand)}
                 disabled={cartItems.length === 0}
                 className="flex-2 flex-1 flex items-center justify-center gap-2 px-4 py-2.5 bg-[#1a1a2e] text-white rounded-xl text-sm font-medium hover:bg-[#2d2d4e] transition-colors disabled:opacity-40"
               >

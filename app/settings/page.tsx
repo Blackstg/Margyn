@@ -15,10 +15,10 @@ const supabase = createClient(
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-type BrandTab = 'bowa' | 'moom'
+type BrandTab = 'bowa' | 'moom' | 'krom'
 type Category = 'team' | 'app' | 'infra' | 'variable'
 type SaveState = 'idle' | 'saving' | 'saved' | 'error'
-type StateKey = 'bowaTeam' | 'bowaApp' | 'bowaInfra' | 'bowaVariable' | 'moomTeam' | 'moomApp'
+type StateKey = 'bowaTeam' | 'bowaApp' | 'bowaInfra' | 'bowaVariable' | 'moomTeam' | 'moomApp' | 'kromTeam' | 'kromApp'
 
 interface CostRow {
   id: string
@@ -101,9 +101,21 @@ const DEFAULT_SUPPLEMENTARY_SOURCES: Omit<CostRow, 'id'>[] = [
 ]
 const FIXED_SUPP_LABELS = new Set(DEFAULT_SUPPLEMENTARY_SOURCES.map((s) => s.label))
 
+const DEFAULT_KROM_TEAM: Omit<CostRow, 'id'>[] = [
+  { label: 'Flo', amount: '500' },
+]
+
+const DEFAULT_KROM_APPS: Omit<CostRow, 'id'>[] = [
+  { label: 'Rapi Tracking',   amount: '14' },
+  { label: 'ZipChat',         amount: '45' },
+  { label: 'Trackr',          amount: '5'  },
+  { label: 'Stamped Reviews', amount: '21' },
+]
+
 const BRAND_LABELS: Record<BrandTab, string> = {
   bowa: 'Bowa Concept',
   moom: 'Mōom Paris',
+  krom: 'Krom',
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -416,14 +428,14 @@ export default function SettingsPage() {
   const [activeBrand, setActiveBrand] = useState<BrandTab>('bowa')
 
   const [rows, setRows] = useState<Record<StateKey, CostRow[]>>({
-    bowaTeam: [], bowaApp: [], bowaInfra: [], bowaVariable: [], moomTeam: [], moomApp: [],
+    bowaTeam: [], bowaApp: [], bowaInfra: [], bowaVariable: [], moomTeam: [], moomApp: [], kromTeam: [], kromApp: [],
   })
   const [saveStates, setSaveStates] = useState<Record<StateKey, SaveState>>({
-    bowaTeam: 'idle', bowaApp: 'idle', bowaInfra: 'idle', bowaVariable: 'idle', moomTeam: 'idle', moomApp: 'idle',
+    bowaTeam: 'idle', bowaApp: 'idle', bowaInfra: 'idle', bowaVariable: 'idle', moomTeam: 'idle', moomApp: 'idle', kromTeam: 'idle', kromApp: 'idle',
   })
 
-  const [shippingCosts, setShippingCosts] = useState<Record<BrandTab, string>>({ bowa: '17', moom: '17' })
-  const [shippingSaveStates, setShippingSaveStates] = useState<Record<BrandTab, SaveState>>({ bowa: 'idle', moom: 'idle' })
+  const [shippingCosts, setShippingCosts] = useState<Record<BrandTab, string>>({ bowa: '17', moom: '17', krom: '27.21' })
+  const [shippingSaveStates, setShippingSaveStates] = useState<Record<BrandTab, SaveState>>({ bowa: 'idle', moom: 'idle', krom: 'idle' })
 
   const [variableMonth, setVariableMonth] = useState<string>(prevMonthStart)
   const [variableLoading, setVariableLoading] = useState(false)
@@ -456,6 +468,8 @@ export default function SettingsPage() {
     const bowaInfraDb = get('bowa', 'infra')
     const moomTeamDb  = get('moom', 'team')
     const moomAppDb   = get('moom', 'app')
+    const kromTeamDb  = get('krom', 'team')
+    const kromAppDb   = get('krom', 'app')
 
     setRows((prev) => ({
       ...prev,
@@ -464,6 +478,8 @@ export default function SettingsPage() {
       bowaInfra: bowaInfraDb.length > 0 ? rowsFromDb(bowaInfraDb) : rowsFromDefaults(DEFAULT_BOWA_INFRA),
       moomTeam:  moomTeamDb.length  > 0 ? rowsFromDb(moomTeamDb)  : rowsFromDefaults(DEFAULT_MOOM_TEAM),
       moomApp:   moomAppDb.length   > 0 ? rowsFromDb(moomAppDb)   : rowsFromDefaults(DEFAULT_MOOM_APPS),
+      kromTeam:  kromTeamDb.length  > 0 ? rowsFromDb(kromTeamDb)  : rowsFromDefaults(DEFAULT_KROM_TEAM),
+      kromApp:   kromAppDb.length   > 0 ? rowsFromDb(kromAppDb)   : rowsFromDefaults(DEFAULT_KROM_APPS),
     }))
 
     if (shippingData) {
@@ -658,7 +674,8 @@ export default function SettingsPage() {
   const totalFixed =
     totalOf(rows[teamKey]) +
     totalOf(rows[appKey]) +
-    (b === 'bowa' ? totalOf(rows.bowaInfra) + totalOf(rows.bowaVariable) : 0)
+    (b === 'bowa' ? totalOf(rows.bowaInfra) + totalOf(rows.bowaVariable) : 0) +
+    (b === 'moom' || b === 'krom' ? (parseFloat(shippingCosts[b]) || 0) * 500 : 0)
 
   return (
     <div className="min-h-screen bg-[#faf9f8]">
@@ -675,7 +692,7 @@ export default function SettingsPage() {
         {/* Brand selector */}
         <div className="flex items-center gap-3">
           <div className="inline-flex items-center bg-white shadow-[0_2px_16px_rgba(0,0,0,0.06)] rounded-xl p-1 gap-0.5">
-            {(['bowa', 'moom'] as BrandTab[]).map((brand) => (
+            {(['bowa', 'moom', 'krom'] as BrandTab[]).map((brand) => (
               <button
                 key={brand}
                 onClick={() => setActiveBrand(brand)}
@@ -742,11 +759,11 @@ export default function SettingsPage() {
               />
             )}
 
-            {/* Shipping cost — Mōom only */}
-            {b === 'moom' && (
+            {/* Shipping cost — Mōom & Krom */}
+            {(b === 'moom' || b === 'krom') && (
               <div className="bg-white rounded-[20px] shadow-[0_2px_16px_rgba(0,0,0,0.06)] overflow-hidden">
                 <div className="px-6 py-4 border-b border-[#f0f0ee]">
-                  <h3 className="text-sm font-semibold text-[#1a1a2e]">Livraison — Mōom Paris</h3>
+                  <h3 className="text-sm font-semibold text-[#1a1a2e]">Livraison — {BRAND_LABELS[b]}</h3>
                   <p className="text-xs text-[#6b6b63] mt-0.5">
                     Coût moyen par commande · Calculé sur la période affichée (taux × nb commandes)
                   </p>
@@ -759,10 +776,10 @@ export default function SettingsPage() {
                   <div className="flex items-center gap-2">
                     <input
                       type="number"
-                      value={shippingCosts['moom']}
-                      onChange={(e) => setShippingCosts((prev) => ({ ...prev, moom: e.target.value }))}
+                      value={shippingCosts[b]}
+                      onChange={(e) => setShippingCosts((prev) => ({ ...prev, [b]: e.target.value }))}
                       min="0"
-                      step="1"
+                      step="0.01"
                       className="w-24 text-right text-sm text-[#1a1a2e] border border-[#e8e8e4] rounded-lg px-3 py-1.5 focus:border-[#1a1a2e] focus:outline-none transition-colors"
                     />
                     <span className="text-xs text-[#6b6b63]">€ / commande</span>
@@ -773,10 +790,10 @@ export default function SettingsPage() {
                     Exemple 7j · 500 commandes →{' '}
                     <span className="font-semibold text-[#1a1a2e]">
                       {new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR', maximumFractionDigits: 0 })
-                        .format((parseFloat(shippingCosts['moom']) || 0) * 500)}
+                        .format((parseFloat(shippingCosts[b]) || 0) * 500)}
                     </span>
                   </span>
-                  <SaveButton state={shippingSaveStates['moom']} onClick={() => saveShipping('moom')} />
+                  <SaveButton state={shippingSaveStates[b]} onClick={() => saveShipping(b)} />
                 </div>
               </div>
             )}
