@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef, useEffect, useLayoutEffect } from 'react'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -112,12 +112,12 @@ function TooltipContent({ point, currentYear }: { point: MonthPoint; currentYear
 
 export default function AnnualChart({ data, loading }: Props) {
   const wrapperRef  = useRef<HTMLDivElement>(null)
-  const [svgWidth, setSvgWidth] = useState(700)
+  const [svgWidth, setSvgWidth] = useState(0)
   const [tooltip, setTooltip]   = useState<{ x: number; point: MonthPoint } | null>(null)
   const [focus, setFocus]       = useState<'current' | 'prev' | null>(null)
   const currentYear             = new Date().getFullYear()
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (!wrapperRef.current) return
     setSvgWidth(wrapperRef.current.offsetWidth)
     const obs = new ResizeObserver(([entry]) => setSvgWidth(entry.contentRect.width))
@@ -229,7 +229,10 @@ export default function AnnualChart({ data, loading }: Props) {
         <div className="h-[248px] bg-[#f5f0f2] rounded-xl animate-pulse" />
       ) : (
         <div ref={wrapperRef} className="relative select-none w-full" onMouseLeave={() => setTooltip(null)}>
-          <svg width="100%" height={H}>
+          {svgWidth === 0 ? (
+            <div style={{ height: H }} />
+          ) : null}
+          <svg width="100%" height={H} style={{ display: svgWidth === 0 ? 'none' : 'block' }}>
             <defs>
               {/* Hatch patterns */}
               <pattern id="hatch-curr" patternUnits="userSpaceOnUse" width="5" height="5" patternTransform="rotate(45)">
