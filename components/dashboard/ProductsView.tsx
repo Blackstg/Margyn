@@ -14,6 +14,7 @@ export interface InventoryItem {
   sell_price: number | null
   stock_alert_threshold: number
   image_url?: string | null
+  coverage_days?: number | null
 }
 
 interface Props {
@@ -96,9 +97,22 @@ export default function ProductsView({ bestSellers, inventory, loading, stockThr
                   {item.title}
                 </p>
                 {/* Stats */}
-                <div className="text-right shrink-0">
+                <div className="text-right shrink-0 space-y-1">
                   <p className="text-xs font-bold text-[#1a1a2e]">{fmtEur(item.revenue)}</p>
-                  <p className="text-[10px] text-[#9b9b93]">{item.quantity} cmd</p>
+                  <div className="flex items-center justify-end gap-1.5">
+                    <p className="text-[10px] text-[#9b9b93]">{item.quantity} cmd</p>
+                    {item.revenuePct > 0 && (
+                      <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-semibold ${
+                        item.revenuePct >= 20
+                          ? 'bg-[#f0faf4] text-[#1a7f4b]'
+                          : item.revenuePct >= 10
+                          ? 'bg-[#f0f0ff] text-[#6366f1]'
+                          : 'bg-[#f5f5f3] text-[#6b6b63]'
+                      }`}>
+                        {item.revenuePct.toFixed(1)}%
+                      </span>
+                    )}
+                  </div>
                 </div>
               </div>
             ))}
@@ -141,11 +155,24 @@ export default function ProductsView({ bestSellers, inventory, loading, stockThr
                   <p className="flex-1 min-w-0 text-xs font-medium text-[#1a1a2e] truncate">
                     {item.title}
                   </p>
-                  <div className="text-right shrink-0">
+                  <div className="text-right shrink-0 space-y-1">
                     <p className={`text-sm font-bold tabular-nums ${stockColor}`}>
                       {item.stock_quantity}
                     </p>
-                    <p className="text-[10px] text-[#9b9b93]">unités</p>
+                    <div className="flex items-center justify-end gap-1.5">
+                      <p className="text-[10px] text-[#9b9b93]">unités</p>
+                      {item.coverage_days != null && (
+                        <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-semibold ${
+                          item.coverage_days <= 7
+                            ? 'bg-[#fde8ea] text-[#c7293a]'
+                            : item.coverage_days <= 14
+                            ? 'bg-[#fffbeb] text-[#d97706]'
+                            : 'bg-[#f0faf4] text-[#1a7f4b]'
+                        }`}>
+                          {Math.round(item.coverage_days)}j
+                        </span>
+                      )}
+                    </div>
                   </div>
                 </div>
               )

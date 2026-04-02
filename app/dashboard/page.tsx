@@ -39,6 +39,16 @@ function getYesterday(): string {
   return fmt(d)
 }
 
+function getMonthRange(ym: string): { from: string; to: string; prevFrom: string; prevTo: string; days: number } {
+  const [y, m] = ym.split('-').map(Number)
+  const from = new Date(y, m - 1, 1)
+  const to = new Date(y, m, 0) // last day of month
+  const days = to.getDate()
+  const prevTo = new Date(y, m - 1, 0)
+  const prevFrom = new Date(y, m - 2, 1)
+  return { from: fmt(from), to: fmt(to), prevFrom: fmt(prevFrom), prevTo: fmt(prevTo), days }
+}
+
 function getRange(period: Period): { from: string; to: string; prevFrom: string; prevTo: string; days: number } {
   const today = new Date()
   today.setHours(0, 0, 0, 0)
@@ -316,13 +326,34 @@ async function fetchBestSellers(brand: Brand, from: string, to: string): Promise
 }
 
 async function fetchInventory(brand: Brand): Promise<InventoryItem[]> {
-  const { data } = await supabase
-    .from('products')
-    .select('title, stock_quantity, sell_price, stock_alert_threshold, image_url')
-    .eq('brand', brand)
-    .order('stock_quantity', { ascending: true })
+  const velocityFrom = new Date()
+  velocityFrom.setDate(velocityFrom.getDate() - 30)
+  const velocityFromStr = velocityFrom.toISOString().slice(0, 10)
 
-  return (data ?? []) as InventoryItem[]
+  const [productsRes, salesRes] = await Promise.all([
+    supabase
+      .from('products')
+      .select('title, stock_quantity, sell_price, stock_alert_threshold, image_url')
+      .eq('brand', brand)
+      .order('stock_quantity', { ascending: true }),
+    supabase
+      .from('product_sales')
+      .select('product_title, quantity')
+      .eq('brand', brand)
+      .gte('date', velocityFromStr),
+  ])
+
+  const sold30 = new Map<string, number>()
+  for (const r of salesRes.data ?? []) {
+    sold30.set(r.product_title, (sold30.get(r.product_title) ?? 0) + (r.quantity ?? 0))
+  }
+
+  return (productsRes.data ?? []).map((p) => {
+    const totalSold = sold30.get(p.title) ?? 0
+    const dailyVelocity = totalSold / 30
+    const coverage_days = dailyVelocity > 0 ? p.stock_quantity / dailyVelocity : null
+    return { ...p, coverage_days }
+  }) as InventoryItem[]
 }
 
 async function fetchSparklines(brand: Brand, from: string, to: string): Promise<SparklineData> {
@@ -478,21 +509,36 @@ function DashboardPage() {
   const [period, setPeriodState] = useState<Period>(() =>
     urlToPeriod(searchParams.get('period'))
   )
+  const [selectedMonth, setSelectedMonthState] = useState<string | null>(() => {
+    const m = searchParams.get('month')
+    return m && /^\d{4}-\d{2}$/.test(m) ? m : null
+  })
+
+  function buildParams(b: Brand, p: Period, m: string | null) {
+    const params = new URLSearchParams()
+    params.set('brand', b)
+    if (m) {
+      params.set('month', m)
+    } else {
+      params.set('period', periodToUrl(p))
+    }
+    return params
+  }
 
   function setBrand(b: Brand) {
     setBrandState(b)
-    const params = new URLSearchParams()
-    params.set('brand', b)
-    params.set('period', periodToUrl(period))
-    router.replace(`${pathname}?${params.toString()}`)
+    router.replace(`${pathname}?${buildParams(b, period, selectedMonth).toString()}`)
   }
 
   function setPeriod(p: Period) {
     setPeriodState(p)
-    const params = new URLSearchParams()
-    params.set('brand', brand)
-    params.set('period', periodToUrl(p))
-    router.replace(`${pathname}?${params.toString()}`)
+    setSelectedMonthState(null)
+    router.replace(`${pathname}?${buildParams(brand, p, null).toString()}`)
+  }
+
+  function setMonth(m: string | null) {
+    setSelectedMonthState(m)
+    router.replace(`${pathname}?${buildParams(brand, period, m).toString()}`)
   }
 
   const [snapshot, setSnapshot]                   = useState<SnapshotData | null>(null)
@@ -517,7 +563,9 @@ function DashboardPage() {
 
   const load = useCallback(async () => {
     setLoading(true)
-    const { from, to, prevFrom, prevTo, days } = getRange(period)
+    const { from, to, prevFrom, prevTo, days } = selectedMonth
+      ? getMonthRange(selectedMonth)
+      : getRange(period)
     const [snap, curr, prev, breakdown, roas, sellers, inv, excl, sparks] = await Promise.all([
       fetchSnapshotData(brand, yesterday),
       fetchKpiData(brand, from, to, days),
@@ -540,7 +588,7 @@ function DashboardPage() {
     setExclusions(excl)
     setSparklines(sparks)
     setLoading(false)
-  }, [brand, period, yesterday])
+  }, [brand, period, selectedMonth, yesterday])
 
   useEffect(() => { load() }, [load])
 
@@ -557,8 +605,8 @@ function DashboardPage() {
       .finally(() => { setSyncing(false); setSyncDone(true); load() })
   }, [loading, snapshot, brand, yesterday, load])
 
-  // Reset syncDone when brand/period changes
-  useEffect(() => { setSyncDone(false) }, [brand, period])
+  // Reset syncDone when brand/period/month changes
+  useEffect(() => { setSyncDone(false) }, [brand, period, selectedMonth])
 
   useEffect(() => {
     setAnnualLoading(true)
@@ -602,8 +650,27 @@ function DashboardPage() {
     { id: 'mois', label: 'Ce mois' },
   ]
 
-  const periodLabel = { '7j': '7 derniers jours', '30j': '30 derniers jours', mois: 'Ce mois' }[period]
-  const chartLabel  = { '7j': '7 jours', '30j': '30 jours', mois: 'Ce mois' }[period]
+  const monthOptions: { value: string; label: string }[] = (() => {
+    const opts = []
+    const d = new Date()
+    for (let i = 1; i <= 12; i++) {
+      d.setDate(1)
+      d.setMonth(d.getMonth() - 1)
+      const ym = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
+      opts.push({
+        value: ym,
+        label: d.toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' }),
+      })
+    }
+    return opts
+  })()
+
+  const periodLabel = selectedMonth
+    ? new Date(selectedMonth + '-01').toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' })
+    : { '7j': '7 derniers jours', '30j': '30 derniers jours', mois: 'Ce mois' }[period]
+  const chartLabel = selectedMonth
+    ? new Date(selectedMonth + '-01').toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' })
+    : { '7j': '7 jours', '30j': '30 jours', mois: 'Ce mois' }[period]
 
   const aiContext = useMemo(() => {
     if (!current || loading) return null
@@ -623,7 +690,7 @@ Stock faible (<20 unités): ${lowStock || 'Aucun'}`
 
   return (
     <div className="min-h-screen bg-[#faf9f8]">
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 py-5 sm:py-8 space-y-4 sm:space-y-5">
+      <main className="max-w-[90rem] mx-auto px-4 sm:px-6 py-5 sm:py-8 space-y-4 sm:space-y-5">
         {/* Sync indicator */}
         {syncing && (
           <div className="flex items-center gap-2 text-xs text-[#6b6b63]">
@@ -650,58 +717,83 @@ Stock faible (<20 unités): ${lowStock || 'Aucun'}`
               </button>
             ))}
           </div>
-          <div className="inline-flex items-center bg-white shadow-[0_2px_16px_rgba(0,0,0,0.06)] rounded-xl p-1 gap-0.5">
-            {periodTabs.map((tab) => (
-              <button
-                key={tab.id}
-                onClick={() => setPeriod(tab.id)}
-                className={`px-4 py-1.5 rounded-lg text-sm font-medium transition-all ${
-                  period === tab.id ? 'bg-[#1a1a2e] text-white' : 'text-[#6b6b63] hover:text-[#1a1a2e]'
-                }`}
-              >
-                {tab.label}
-              </button>
-            ))}
+          <div className="flex items-center gap-2">
+            <div className="inline-flex items-center bg-white shadow-[0_2px_16px_rgba(0,0,0,0.06)] rounded-xl p-1 gap-0.5">
+              {periodTabs.map((tab) => (
+                <button
+                  key={tab.id}
+                  onClick={() => setPeriod(tab.id)}
+                  className={`px-4 py-1.5 rounded-lg text-sm font-medium transition-all ${
+                    !selectedMonth && period === tab.id ? 'bg-[#1a1a2e] text-white' : 'text-[#6b6b63] hover:text-[#1a1a2e]'
+                  }`}
+                >
+                  {tab.label}
+                </button>
+              ))}
+            </div>
+            <select
+              value={selectedMonth ?? ''}
+              onChange={(e) => {
+                if (e.target.value) setMonth(e.target.value)
+                else setPeriod(period)
+              }}
+              className={`h-9 px-3 rounded-xl text-sm font-medium border-0 shadow-[0_2px_16px_rgba(0,0,0,0.06)] bg-white appearance-none cursor-pointer transition-all outline-none ${
+                selectedMonth ? 'text-[#1a1a2e] font-semibold' : 'text-[#6b6b63]'
+              }`}
+            >
+              <option value="">Mois…</option>
+              {monthOptions.map((opt) => (
+                <option key={opt.value} value={opt.value}>{opt.label}</option>
+              ))}
+            </select>
           </div>
         </div>
 
-        {/* Yesterday snapshot */}
-        <SnapshotBanner data={snapshot} date={yesterday} loading={loading} syncDone={syncDone} />
+        {/* Two-column layout: main content + AI sidebar */}
+        <div className="grid grid-cols-1 xl:grid-cols-[1fr_280px] gap-5 items-start">
+          {/* Main content column */}
+          <div className="space-y-4 sm:space-y-5 min-w-0">
+            {/* Yesterday snapshot */}
+            <SnapshotBanner data={snapshot} date={yesterday} loading={loading} syncDone={syncDone} />
 
-        {/* KPI grid */}
-        <section className="space-y-3">
-          <div className="flex items-center justify-between">
-            <h2 className="text-sm font-semibold text-[#1a1a18]">{periodLabel}</h2>
-            <span className="text-xs text-[#6b6b63]">vs période précédente</span>
+            {/* KPI grid */}
+            <section className="space-y-3">
+              <div className="flex items-center justify-between">
+                <h2 className="text-sm font-semibold text-[#1a1a18]">{periodLabel}</h2>
+                <span className="text-xs text-[#6b6b63]">vs période précédente</span>
+              </div>
+              <KpiGrid current={current} previous={previous} loading={loading} brand={brand} sparklines={sparklines} />
+            </section>
+
+            {/* Ad spend + ROAS */}
+            <AdPanel
+              spendData={spendBreakdown}
+              roasData={roasData}
+              activePlatforms={roasActivePlatforms}
+              loading={loading}
+              periodLabel={chartLabel}
+            />
+
+            {/* Products */}
+            <section className="space-y-3">
+              <h2 className="text-sm font-semibold text-[#1a1a2e]">Produits</h2>
+              <ProductsView
+                bestSellers={bestSellers.filter((b) => !exclusions.includes(b.title))}
+                inventory={inventory.filter((i) => !exclusions.includes(i.title))}
+                loading={loading}
+                stockThreshold={stockThreshold}
+              />
+            </section>
+
+            {/* Annual view */}
+            <AnnualChart data={annualData} loading={annualLoading} />
           </div>
-          <KpiGrid current={current} previous={previous} loading={loading} brand={brand} sparklines={sparklines} />
-        </section>
 
-        {/* Ad spend + ROAS */}
-        <AdPanel
-          spendData={spendBreakdown}
-          roasData={roasData}
-          activePlatforms={roasActivePlatforms}
-          loading={loading}
-          periodLabel={chartLabel}
-        />
-
-        {/* Products */}
-        <section className="space-y-3">
-          <h2 className="text-sm font-semibold text-[#1a1a2e]">Produits</h2>
-          <ProductsView
-            bestSellers={bestSellers.filter((b) => !exclusions.includes(b.title))}
-            inventory={inventory.filter((i) => !exclusions.includes(i.title))}
-            loading={loading}
-            stockThreshold={stockThreshold}
-          />
-        </section>
-
-        {/* AI Insights */}
-        <AiInsights type="dashboard" brand={brand} context={aiContext} />
-
-        {/* Annual view */}
-        <AnnualChart data={annualData} loading={annualLoading} />
+          {/* Sticky AI sidebar */}
+          <div className="xl:sticky xl:top-5">
+            <AiInsights type="dashboard" brand={brand} context={aiContext} />
+          </div>
+        </div>
       </main>
     </div>
   )
