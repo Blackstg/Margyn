@@ -241,7 +241,8 @@ async function fetchInventoryCosts(
 export async function computeMetrics(
   config: ShopifyConfig,
   orders: ShopifyOrder[],
-  products: ShopifyProduct[]
+  products: ShopifyProduct[],
+  shippingRatePerOrder = 0
 ): Promise<DailyMetrics[]> {
   // Build variant_id → inventory_item_id map from products
   const variantToInventoryItem = new Map<number, number>()
@@ -323,7 +324,7 @@ export async function computeMetrics(
     entry.total_sales += orderTotal
     entry.order_count += 1
     entry.cogs += orderCogs
-    entry.fulfillment_cost += shipping
+    entry.fulfillment_cost += shippingRatePerOrder > 0 ? shippingRatePerOrder : shipping
     entry.returns += orderReturns
     entry.discounts += discounts
 

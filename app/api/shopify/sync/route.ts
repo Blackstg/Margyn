@@ -83,6 +83,17 @@ export async function POST(req: NextRequest) {
   const supabase = getSupabase()
   const results: Record<string, { snapshots: number; products: number; product_sales?: number; error?: string }> = {}
 
+  // Load shipping rates from brand_settings (ignore errors — table may not exist yet)
+  const shippingRates: Record<string, number> = {}
+  try {
+    const { data: settingsRows } = await supabase
+      .from('brand_settings')
+      .select('brand, shipping_cost_per_order')
+    for (const row of settingsRows ?? []) {
+      if (row.shipping_cost_per_order > 0) shippingRates[row.brand] = row.shipping_cost_per_order
+    }
+  } catch { /* table not yet created — fall back to Shopify shipping */ }
+
   for (const store of stores) {
     try {
       // ── 1. Fetch raw data ──────────────────────────────────────────────────
@@ -92,8 +103,9 @@ export async function POST(req: NextRequest) {
       ])
 
       // ── 2. Compute metrics ─────────────────────────────────────────────────
+      const shippingRate = shippingRates[store.brand] ?? 0
       const [metrics, normalizedProducts, variantRows] = await Promise.all([
-        computeMetrics(store, orders, products),
+        computeMetrics(store, orders, products, shippingRate),
         normalizeProducts(store, products),
         normalizeVariants(store, products),
       ])
