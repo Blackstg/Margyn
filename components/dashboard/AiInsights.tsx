@@ -55,7 +55,7 @@ export default function AiInsights({ type, brand, context, className = '' }: Pro
       <div className="flex items-center justify-between px-5 pt-4 pb-3">
         <div className="flex items-center gap-2">
           <span className="text-base">✨</span>
-          <span className="text-sm font-semibold text-white">Intelligence Steero</span>
+          <span className="text-sm font-semibold text-white">Steero AI</span>
         </div>
         <div className="flex items-center gap-3">
           {freshLabel && !loading && (

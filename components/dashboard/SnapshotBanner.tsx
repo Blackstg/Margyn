@@ -24,54 +24,50 @@ const fmt = (n: number) =>
     maximumFractionDigits: 0,
   }).format(n)
 
-type Accent = 'neutral' | 'green' | 'red' | 'orange' | 'blue'
-
 interface Item {
   icon: React.ElementType
   label: string
   value: string
   sub: string
-  accent: Accent
+  valueColor?: string
+  subColor?: string
 }
 
 function items(d: SnapshotData, roasTarget: number): Item[] {
   const roas = d.spend > 0 ? d.total_sales / d.spend : null
   const roasGood = roas != null ? roas >= roasTarget : null
+
   return [
     {
       icon: DollarSign,
       label: 'Ventes',
       value: fmt(d.total_sales),
-      sub: `Marge brute ${d.total_sales > 0 ? ((d.gross_profit / d.total_sales) * 100).toFixed(1) : 0}%`,
-      accent: 'blue',
+      sub: `Marge ${d.total_sales > 0 ? ((d.gross_profit / d.total_sales) * 100).toFixed(1) : 0}%`,
     },
     {
       icon: TrendingUp,
       label: 'Profit brut',
       value: fmt(d.gross_profit),
       sub: 'Avant charges fixes',
-      accent: d.gross_profit > 0 ? 'green' : d.gross_profit < 0 ? 'red' : 'neutral',
+      valueColor: d.gross_profit > 0 ? 'text-[#1a7f4b]' : d.gross_profit < 0 ? 'text-[#c7293a]' : undefined,
     },
     {
       icon: ShoppingBag,
       label: 'Commandes',
       value: d.order_count.toLocaleString('fr-FR'),
       sub: d.order_count > 0 ? `Panier moy. ${fmt(d.total_sales / d.order_count)}` : '—',
-      accent: 'neutral',
     },
     {
       icon: Package,
       label: 'COGS',
       value: fmt(d.cogs),
       sub: d.total_sales > 0 ? `${((d.cogs / d.total_sales) * 100).toFixed(1)}% du CA` : '—',
-      accent: 'red',
     },
     {
       icon: Megaphone,
       label: 'Pub',
       value: fmt(d.spend),
       sub: d.total_sales > 0 ? `${((d.spend / d.total_sales) * 100).toFixed(1)}% du CA` : '—',
-      accent: 'orange',
     },
     {
       icon: Zap,
@@ -80,33 +76,10 @@ function items(d: SnapshotData, roasTarget: number): Item[] {
       sub: roas != null
         ? roas >= roasTarget ? 'Excellent' : roas >= 1.5 ? 'Correct' : 'Faible'
         : 'Pas de spend',
-      accent: roasGood === true ? 'green' : roasGood === false ? 'red' : 'neutral',
+      valueColor: roasGood === true ? 'text-[#1a7f4b]' : roasGood === false ? 'text-[#c7293a]' : undefined,
+      subColor:   roasGood === true ? 'text-[#1a7f4b]' : roasGood === false ? 'text-[#c7293a]' : undefined,
     },
   ]
-}
-
-const ACCENT_ICON: Record<Accent, string> = {
-  neutral: 'text-[#9b9b93]',
-  green:   'text-[#1a7f4b]',
-  red:     'text-[#c7293a]',
-  orange:  'text-[#d97706]',
-  blue:    'text-[#6366f1]',
-}
-
-const ACCENT_VALUE: Record<Accent, string> = {
-  neutral: 'text-[#1a1a18]',
-  green:   'text-[#1a7f4b]',
-  red:     'text-[#c7293a]',
-  orange:  'text-[#d97706]',
-  blue:    'text-[#1a1a18]',
-}
-
-const ACCENT_BG: Record<Accent, string> = {
-  neutral: 'bg-[#f5f5f3]',
-  green:   'bg-[#f0faf4]',
-  red:     'bg-[#fef3f3]',
-  orange:  'bg-[#fffbeb]',
-  blue:    'bg-[#f0f0ff]',
 }
 
 export default function SnapshotBanner({ data, date, loading, syncDone = false, roasTarget = 3 }: Props) {
@@ -146,16 +119,16 @@ export default function SnapshotBanner({ data, date, loading, syncDone = false, 
               </div>
             ))
           : data
-          ? items(data, roasTarget).map(({ icon: Icon, label, value, sub, accent }) => (
-              <div key={label} className={`rounded-xl p-3 space-y-1 ${ACCENT_BG[accent]}`}>
-                <div className={`flex items-center gap-1.5 ${ACCENT_ICON[accent]}`}>
+          ? items(data, roasTarget).map(({ icon: Icon, label, value, sub, valueColor, subColor }) => (
+              <div key={label} className="rounded-xl p-3 space-y-1 bg-[#faf9f8]">
+                <div className="flex items-center gap-1.5 text-[#9b9b93]">
                   <Icon size={13} strokeWidth={1.8} />
                   <span className="text-xs font-medium text-[#6b6b63]">{label}</span>
                 </div>
-                <p className={`text-xl sm:text-2xl font-semibold tracking-tight ${ACCENT_VALUE[accent]}`}>
+                <p className={`text-xl sm:text-2xl font-semibold tracking-tight ${valueColor ?? 'text-[#1a1a18]'}`}>
                   {value}
                 </p>
-                <p className="text-xs text-[#9b9b93]">{sub}</p>
+                <p className={`text-xs ${subColor ?? 'text-[#9b9b93]'}`}>{sub}</p>
               </div>
             ))
           : null}

@@ -330,30 +330,43 @@ async function fetchInventory(brand: Brand): Promise<InventoryItem[]> {
   velocityFrom.setDate(velocityFrom.getDate() - 30)
   const velocityFromStr = velocityFrom.toISOString().slice(0, 10)
 
-  const [productsRes, salesRes] = await Promise.all([
+  const [variantsRes, salesRes] = await Promise.all([
     supabase
-      .from('products')
-      .select('title, stock_quantity, sell_price, stock_alert_threshold, image_url')
+      .from('product_variants')
+      .select('shopify_variant_id, product_title, variant_title, stock_quantity, image_url')
       .eq('brand', brand)
       .order('stock_quantity', { ascending: true }),
     supabase
       .from('product_sales')
-      .select('product_title, quantity')
+      .select('variant_id, quantity')
       .eq('brand', brand)
-      .gte('date', velocityFromStr),
+      .gte('date', velocityFromStr)
+      .not('variant_id', 'is', null)
+      .neq('variant_id', ''),
   ])
 
   const sold30 = new Map<string, number>()
   for (const r of salesRes.data ?? []) {
-    sold30.set(r.product_title, (sold30.get(r.product_title) ?? 0) + (r.quantity ?? 0))
+    if (r.variant_id) {
+      sold30.set(r.variant_id, (sold30.get(r.variant_id) ?? 0) + (r.quantity ?? 0))
+    }
   }
 
-  return (productsRes.data ?? []).map((p) => {
-    const totalSold = sold30.get(p.title) ?? 0
+  return (variantsRes.data ?? []).map((v) => {
+    const totalSold = sold30.get(v.shopify_variant_id) ?? 0
     const dailyVelocity = totalSold / 30
-    const coverage_days = dailyVelocity > 0 ? p.stock_quantity / dailyVelocity : null
-    return { ...p, coverage_days }
-  }) as InventoryItem[]
+    const coverage_days = dailyVelocity > 0 ? v.stock_quantity / dailyVelocity : null
+    return {
+      title: v.product_title,
+      variant_title: v.variant_title ?? null,
+      stock_quantity: v.stock_quantity,
+      sell_price: null,
+      stock_alert_threshold: 0,
+      image_url: v.image_url,
+      coverage_days,
+      shopify_variant_id: v.shopify_variant_id,
+    } as InventoryItem
+  })
 }
 
 async function fetchSparklines(brand: Brand, from: string, to: string): Promise<SparklineData> {
@@ -558,6 +571,7 @@ function DashboardPage() {
   const syncAttempted                             = useRef<Set<string>>(new Set())
   const [annualData, setAnnualData]               = useState<MonthPoint[]>([])
   const [annualLoading, setAnnualLoading]         = useState(true)
+  const [brandLogos, setBrandLogos]               = useState<Record<Brand, string | null>>({ bowa: null, moom: null })
 
   const yesterday = getYesterday()
 
@@ -624,6 +638,22 @@ function DashboardPage() {
       setAnnualLoading(false)
     })
   }, [brand])
+
+  useEffect(() => {
+    Promise.all(
+      (['bowa', 'moom'] as Brand[]).map(async (b) => {
+        try {
+          const res = await fetch(`/api/shop-icon?brand=${b}`)
+          const { url } = await res.json()
+          return [b, url ?? null] as [Brand, string | null]
+        } catch {
+          return [b, null] as [Brand, string | null]
+        }
+      })
+    ).then((pairs) => {
+      setBrandLogos(Object.fromEntries(pairs) as Record<Brand, string | null>)
+    })
+  }, [])
 
   useEffect(() => {
     try {
@@ -705,17 +735,30 @@ Stock faible (<20 unités): ${lowStock || 'Aucun'}`
         {/* Filters */}
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div className="inline-flex items-center bg-white shadow-[0_2px_16px_rgba(0,0,0,0.06)] rounded-xl p-1 gap-0.5">
-            {brandTabs.map((tab) => (
-              <button
-                key={tab.id}
-                onClick={() => setBrand(tab.id)}
-                className={`px-5 py-1.5 rounded-lg text-sm font-semibold transition-all ${
-                  brand === tab.id ? 'bg-[#1a1a2e] text-white' : 'text-[#6b6b63] hover:text-[#1a1a2e]'
-                }`}
-              >
-                {tab.label}
-              </button>
-            ))}
+            {brandTabs.map((tab) => {
+              const logo = brandLogos[tab.id]
+              return (
+                <button
+                  key={tab.id}
+                  onClick={() => setBrand(tab.id)}
+                  className={`flex items-center gap-2 px-4 py-1.5 rounded-lg text-sm font-semibold transition-all ${
+                    brand === tab.id ? 'bg-[#1a1a2e] text-white' : 'text-[#6b6b63] hover:text-[#1a1a2e]'
+                  }`}
+                >
+                  {logo ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img src={logo} alt={tab.label} className="w-6 h-6 rounded-full object-cover shrink-0" />
+                  ) : (
+                    <span className={`w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-bold shrink-0 ${
+                      brand === tab.id ? 'bg-white/20 text-white' : 'bg-[#e8e8e4] text-[#6b6b63]'
+                    }`}>
+                      {tab.label[0]}
+                    </span>
+                  )}
+                  {tab.label}
+                </button>
+              )
+            })}
           </div>
           <div className="flex items-center gap-2">
             <div className="inline-flex items-center bg-white shadow-[0_2px_16px_rgba(0,0,0,0.06)] rounded-xl p-1 gap-0.5">

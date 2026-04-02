@@ -228,7 +228,7 @@ export default function AnnualChart({ data, loading }: Props) {
       {loading ? (
         <div className="h-[248px] bg-[#f5f0f2] rounded-xl animate-pulse" />
       ) : (
-        <div ref={wrapperRef} className="relative select-none" onMouseLeave={() => setTooltip(null)}>
+        <div ref={wrapperRef} className="relative select-none w-full" onMouseLeave={() => setTooltip(null)}>
           <svg width={svgWidth} height={H}>
             <defs>
               {/* Hatch patterns */}

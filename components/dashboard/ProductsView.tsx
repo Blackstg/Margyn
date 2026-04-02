@@ -10,11 +10,13 @@ export interface BestSeller {
 
 export interface InventoryItem {
   title: string
+  variant_title: string | null
   stock_quantity: number
   sell_price: number | null
   stock_alert_threshold: number
   image_url?: string | null
   coverage_days?: number | null
+  shopify_variant_id?: string
 }
 
 interface Props {
@@ -44,6 +46,34 @@ function ProductThumb({ src, title }: { src?: string | null; title: string }) {
   )
 }
 
+// ─── Coverage badge (same thresholds as Réappro) ──────────────────────────────
+
+function CoverageBadge({ days }: { days: number | null | undefined }) {
+  if (days == null) return null
+  const bg   = days < 30 ? 'bg-[#fce8ea]' : days < 60 ? 'bg-[#fff3dc]' : 'bg-[#dcf5e7]'
+  const text = days < 30 ? 'text-[#c7293a]' : days < 60 ? 'text-[#a16207]' : 'text-[#1a7f4b]'
+  const dot  = days < 30 ? 'bg-[#c7293a]'  : days < 60 ? 'bg-[#d97706]'  : 'bg-[#1a7f4b]'
+  return (
+    <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[10px] font-semibold whitespace-nowrap ${bg} ${text}`}>
+      <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${dot}`} />
+      {Math.round(days)}j
+    </span>
+  )
+}
+
+// ─── Urgency sort ─────────────────────────────────────────────────────────────
+
+function urgencySort(a: InventoryItem, b: InventoryItem): number {
+  if (a.stock_quantity < 0 && b.stock_quantity >= 0) return -1
+  if (b.stock_quantity < 0 && a.stock_quantity >= 0) return 1
+  if (a.stock_quantity === 0 && b.stock_quantity !== 0) return -1
+  if (b.stock_quantity === 0 && a.stock_quantity !== 0) return 1
+  if (a.coverage_days != null && b.coverage_days != null) return a.coverage_days - b.coverage_days
+  if (a.coverage_days != null) return -1
+  if (b.coverage_days != null) return 1
+  return a.stock_quantity - b.stock_quantity
+}
+
 // ─── Skeleton row ─────────────────────────────────────────────────────────────
 
 function SkeletonRow() {
@@ -63,10 +93,19 @@ function SkeletonRow() {
 
 export default function ProductsView({ bestSellers, inventory, loading, stockThreshold }: Props) {
   const criticalItems = inventory
-    .filter((item) => item.stock_quantity <= stockThreshold * 2)
+    .filter((item) => {
+      if (item.title.toLowerCase().includes('strap')) return false
+      if (item.coverage_days != null) return item.coverage_days < 60
+      return item.stock_quantity <= stockThreshold * 2
+    })
+    .sort(urgencySort)
     .slice(0, 8)
 
-  const criticalCount = inventory.filter((item) => item.stock_quantity <= stockThreshold).length
+  const criticalCount = inventory.filter((item) => {
+    if (item.title.toLowerCase().includes('strap')) return false
+    if (item.coverage_days != null) return item.coverage_days < 30
+    return item.stock_quantity <= stockThreshold
+  }).length
 
   return (
     <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
@@ -142,36 +181,30 @@ export default function ProductsView({ bestSellers, inventory, loading, stockThr
         ) : (
           <div className="divide-y divide-[#f5f0f2]">
             {criticalItems.map((item) => {
-              const isCritical = item.stock_quantity <= stockThreshold
               const stockColor = item.stock_quantity <= 0
                 ? 'text-[#c7293a]'
-                : isCritical
+                : item.stock_quantity <= stockThreshold
                   ? 'text-[#c7293a]'
                   : 'text-amber-600'
 
+              const key = item.shopify_variant_id ?? `${item.title}-${item.variant_title}`
+
               return (
-                <div key={item.title} className="flex items-center gap-3 py-2.5">
+                <div key={key} className="flex items-center gap-3 py-2.5">
                   <ProductThumb src={item.image_url} title={item.title} />
-                  <p className="flex-1 min-w-0 text-xs font-medium text-[#1a1a2e] truncate">
-                    {item.title}
-                  </p>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-xs font-medium text-[#1a1a2e] truncate">{item.title}</p>
+                    {item.variant_title && item.variant_title !== 'Default Title' && (
+                      <p className="text-[10px] text-[#9b9b93] truncate">{item.variant_title}</p>
+                    )}
+                  </div>
                   <div className="text-right shrink-0 space-y-1">
                     <p className={`text-sm font-bold tabular-nums ${stockColor}`}>
                       {item.stock_quantity}
                     </p>
                     <div className="flex items-center justify-end gap-1.5">
                       <p className="text-[10px] text-[#9b9b93]">unités</p>
-                      {item.coverage_days != null && (
-                        <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-semibold ${
-                          item.coverage_days <= 7
-                            ? 'bg-[#fde8ea] text-[#c7293a]'
-                            : item.coverage_days <= 14
-                            ? 'bg-[#fffbeb] text-[#d97706]'
-                            : 'bg-[#f0faf4] text-[#1a7f4b]'
-                        }`}>
-                          {Math.round(item.coverage_days)}j
-                        </span>
-                      )}
+                      <CoverageBadge days={item.coverage_days} />
                     </div>
                   </div>
                 </div>
