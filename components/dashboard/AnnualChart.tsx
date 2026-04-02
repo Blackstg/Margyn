@@ -123,7 +123,7 @@ export default function AnnualChart({ data, loading }: Props) {
     const obs = new ResizeObserver(([entry]) => setSvgWidth(entry.contentRect.width))
     obs.observe(wrapperRef.current)
     return () => obs.disconnect()
-  }, [])
+  }, [loading])
 
   // ── Chart geometry ──────────────────────────────────────────────────────────
   const H = 248, ML = 44, MR = 10, MT = 8, MB = 24
