@@ -95,6 +95,7 @@ export default function ProductsView({ bestSellers, inventory, loading, stockThr
   const criticalItems = inventory
     .filter((item) => {
       if (item.title.toLowerCase().includes('strap')) return false
+      if (item.title.includes(' + ')) return false
       if (item.coverage_days != null) return item.coverage_days < 60
       return item.stock_quantity <= stockThreshold * 2
     })
@@ -103,6 +104,7 @@ export default function ProductsView({ bestSellers, inventory, loading, stockThr
 
   const criticalCount = inventory.filter((item) => {
     if (item.title.toLowerCase().includes('strap')) return false
+    if (item.title.includes(' + ')) return false
     if (item.coverage_days != null) return item.coverage_days < 30
     return item.stock_quantity <= stockThreshold
   }).length

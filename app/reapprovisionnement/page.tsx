@@ -314,7 +314,7 @@ export default function ReapproPage() {
     const deadline   = subtractDays(targetFrom, leadTime)
 
     return variants
-      .filter((v) => !exclusions.has(v.product_title) && !v.product_title.includes('+'))
+      .filter((v) => !exclusions.has(v.product_title) && !v.product_title.includes(' + '))
       .map((v): ReplenishmentRow => {
         const ref_qty  = salesByVariant.get(v.shopify_variant_id) ?? 0
         const qty_90   = salesByVariant90.get(v.shopify_variant_id) ?? 0
