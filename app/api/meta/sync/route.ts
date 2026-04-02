@@ -21,6 +21,11 @@ const STORES: MetaAdsConfig[] = [
     accessToken: process.env.META_MOOM_ACCESS_TOKEN!,
     brand: 'moom',
   },
+  {
+    adAccountId: process.env.META_KROM_AD_ACCOUNT_ID!,
+    accessToken: process.env.META_KROM_ACCESS_TOKEN!,
+    brand: 'krom',
+  },
 ]
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
