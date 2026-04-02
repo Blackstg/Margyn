@@ -571,7 +571,10 @@ function DashboardPage() {
   const syncAttempted                             = useRef<Set<string>>(new Set())
   const [annualData, setAnnualData]               = useState<MonthPoint[]>([])
   const [annualLoading, setAnnualLoading]         = useState(true)
-  const [brandLogos, setBrandLogos]               = useState<Record<Brand, string | null>>({ bowa: null, moom: null })
+  const [brandLogos] = useState<Record<Brand, string | null>>({
+    bowa: 'https://cdn.shopify.com/s/files/1/0617/2806/3648/files/profil.png?v=1693451968',
+    moom: 'https://cdn.shopify.com/s/files/1/0506/0689/9391/files/moom-profil.png?v=1682403928',
+  })
 
   const yesterday = getYesterday()
 
@@ -638,22 +641,6 @@ function DashboardPage() {
       setAnnualLoading(false)
     })
   }, [brand])
-
-  useEffect(() => {
-    Promise.all(
-      (['bowa', 'moom'] as Brand[]).map(async (b) => {
-        try {
-          const res = await fetch(`/api/shop-icon?brand=${b}`)
-          const { url } = await res.json()
-          return [b, url ?? null] as [Brand, string | null]
-        } catch {
-          return [b, null] as [Brand, string | null]
-        }
-      })
-    ).then((pairs) => {
-      setBrandLogos(Object.fromEntries(pairs) as Record<Brand, string | null>)
-    })
-  }, [])
 
   useEffect(() => {
     try {
