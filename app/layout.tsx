@@ -1,6 +1,6 @@
 import type { Metadata } from 'next'
 import { Bricolage_Grotesque } from 'next/font/google'
-import Sidebar from '@/components/layout/Sidebar'
+import ConditionalLayout from '@/components/layout/ConditionalLayout'
 import './globals.css'
 
 const bricolage = Bricolage_Grotesque({
@@ -18,10 +18,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   return (
     <html lang="fr">
       <body className={`${bricolage.variable} antialiased`}>
-        <Sidebar />
-        <div className="pl-[72px] min-h-screen">
-          {children}
-        </div>
+        <ConditionalLayout>{children}</ConditionalLayout>
       </body>
     </html>
   )

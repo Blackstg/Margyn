@@ -1,8 +1,9 @@
 'use client'
 
 import Link from 'next/link'
-import { usePathname } from 'next/navigation'
-import { LayoutDashboard, BarChart2, PackageOpen, Settings } from 'lucide-react'
+import { usePathname, useRouter } from 'next/navigation'
+import { LayoutDashboard, BarChart2, PackageOpen, Settings, LogOut } from 'lucide-react'
+import { createBrowserClient } from '@supabase/auth-helpers-nextjs'
 
 const NAV = [
   { href: '/dashboard',           icon: LayoutDashboard, label: 'Dashboard'          },
@@ -13,6 +14,17 @@ const NAV = [
 
 export default function Sidebar() {
   const pathname = usePathname()
+  const router   = useRouter()
+  const supabase = createBrowserClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+  )
+
+  async function handleLogout() {
+    await supabase.auth.signOut()
+    router.push('/login')
+    router.refresh()
+  }
 
   return (
     <aside className="fixed top-0 left-0 h-screen w-[72px] bg-[#1a1a2e] flex flex-col items-center py-5 z-30">
@@ -52,6 +64,17 @@ export default function Sidebar() {
           )
         })}
       </nav>
+
+      {/* Logout */}
+      <button
+        onClick={handleLogout}
+        className="group relative mt-auto w-11 h-11 rounded-xl flex items-center justify-center text-white/35 hover:text-[#c9c6e8] hover:bg-[#aeb0c9]/12 transition-all cursor-pointer"
+      >
+        <LogOut size={20} strokeWidth={1.8} />
+        <span className="pointer-events-none absolute left-full ml-3 px-2.5 py-1.5 bg-[#1a1a2e] border border-white/10 text-white text-xs font-medium rounded-lg opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap shadow-lg">
+          Déconnexion
+        </span>
+      </button>
     </aside>
   )
 }

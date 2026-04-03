@@ -5,7 +5,7 @@ export const dynamic = 'force-dynamic'
 import { Suspense } from 'react'
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { useSearchParams, useRouter, usePathname } from 'next/navigation'
-import { createClient } from '@supabase/supabase-js'
+import { createBrowserClient } from '@supabase/auth-helpers-nextjs'
 import SnapshotBanner, { type SnapshotData } from '@/components/dashboard/SnapshotBanner'
 import KpiGrid, { type KpiData, type SparklineData } from '@/components/dashboard/KpiGrid'
 import { type SpendByPlatform } from '@/components/dashboard/SpendBreakdown'
@@ -22,7 +22,7 @@ type Period = '7j' | '30j' | 'mois'
 
 // ─── Supabase client ──────────────────────────────────────────────────────────
 
-const supabase = createClient(
+const supabase = createBrowserClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
 )
@@ -577,6 +577,19 @@ function DashboardPage() {
     krom: 'https://cdn.shopify.com/s/files/1/0590/8755/2558/files/favicon.png?v=1764213860',
   })
 
+  const [allowedBrands, setAllowedBrands] = useState<Brand[]>(['bowa', 'moom', 'krom'])
+
+  useEffect(() => {
+    supabase.from('user_brands').select('brand').then(({ data }) => {
+      if (data && data.length > 0) {
+        const brands = data.map((r: { brand: string }) => r.brand) as Brand[]
+        setAllowedBrands(brands)
+        if (!brands.includes(brand)) setBrand(brands[0])
+      }
+    })
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
   const yesterday = getYesterday()
 
   const load = useCallback(async () => {
@@ -657,11 +670,12 @@ function DashboardPage() {
     }
   }, [])
 
-  const brandTabs: { id: Brand; label: string }[] = [
+  const ALL_BRAND_TABS: { id: Brand; label: string }[] = [
     { id: 'bowa', label: 'Bowa' },
     { id: 'moom', label: 'Mōom' },
     { id: 'krom', label: 'Krom' },
   ]
+  const brandTabs = ALL_BRAND_TABS.filter(t => allowedBrands.includes(t.id))
 
   const periodTabs: { id: Period; label: string }[] = [
     { id: '7j',   label: '7 j'    },

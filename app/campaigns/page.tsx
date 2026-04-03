@@ -5,20 +5,20 @@ export const dynamic = 'force-dynamic'
 import { Suspense } from 'react'
 import { useState, useEffect, useCallback, useMemo } from 'react'
 import { useSearchParams, useRouter, usePathname } from 'next/navigation'
-import { createClient } from '@supabase/supabase-js'
+import { createBrowserClient } from '@supabase/auth-helpers-nextjs'
 import CampaignsTable, { type CampaignAgg } from '@/components/dashboard/CampaignsTable'
 import AiInsights from '@/components/dashboard/AiInsights'
 
 // ─── Supabase ─────────────────────────────────────────────────────────────────
 
-const supabase = createClient(
+const supabase = createBrowserClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
 )
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-type Brand  = 'bowa' | 'moom'
+type Brand  = 'bowa' | 'moom' | 'krom'
 type Period = '7j' | '30j' | 'mois'
 
 // ─── Date helpers ─────────────────────────────────────────────────────────────
@@ -104,7 +104,7 @@ function CampaignsPage() {
   const searchParams = useSearchParams()
 
   function urlToBrand(b: string | null): Brand {
-    return b === 'moom' ? 'moom' : 'bowa'
+    return b === 'moom' ? 'moom' : b === 'krom' ? 'krom' : 'bowa'
   }
   function urlToPeriod(p: string | null): Period {
     if (p === '30d')   return '30j'
@@ -155,10 +155,25 @@ function CampaignsPage() {
 
   useEffect(() => { load() }, [load])
 
-  const brandTabs: { id: Brand; label: string }[] = [
+  const [allowedBrands, setAllowedBrands] = useState<Brand[]>(['bowa', 'moom', 'krom'])
+
+  useEffect(() => {
+    supabase.from('user_brands').select('brand').then(({ data }) => {
+      if (data && data.length > 0) {
+        const brands = data.map((r: { brand: string }) => r.brand) as Brand[]
+        setAllowedBrands(brands)
+        if (!brands.includes(brand)) setBrand(brands[0])
+      }
+    })
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  const ALL_BRAND_TABS: { id: Brand; label: string }[] = [
     { id: 'bowa', label: 'Bowa' },
     { id: 'moom', label: 'Mōom' },
+    { id: 'krom', label: 'Krom' },
   ]
+  const brandTabs = ALL_BRAND_TABS.filter(t => allowedBrands.includes(t.id))
 
   const periodTabs: { id: Period; label: string }[] = [
     { id: '7j',   label: '7 j'     },

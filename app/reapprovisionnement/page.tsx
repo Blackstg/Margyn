@@ -1,11 +1,11 @@
 'use client'
 
 import { useState, useEffect, useMemo, useRef } from 'react'
-import { createClient } from '@supabase/supabase-js'
+import { createBrowserClient } from '@supabase/auth-helpers-nextjs'
 import { Download, Search, Package, ChevronDown, ClipboardList, X, GripVertical, Plus, Check } from 'lucide-react'
 import AiInsights from '@/components/dashboard/AiInsights'
 
-const supabase = createClient(
+const supabase = createBrowserClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
 )
@@ -205,6 +205,18 @@ const BRAND_LABELS: Record<string, string> = { bowa: 'Bowa', moom: 'Mōom Paris'
 export default function ReapproPage() {
   // ── Brand ─────────────────────────────────────────────────────────────────
   const [brand, setBrand] = useState<'bowa' | 'moom' | 'krom'>('moom')
+  const [allowedBrands, setAllowedBrands] = useState<('bowa' | 'moom' | 'krom')[]>(['bowa', 'moom', 'krom'])
+
+  useEffect(() => {
+    supabase.from('user_brands').select('brand').then(({ data }) => {
+      if (data && data.length > 0) {
+        const brands = data.map((r: { brand: string }) => r.brand) as ('bowa' | 'moom' | 'krom')[]
+        setAllowedBrands(brands)
+        if (!brands.includes(brand)) setBrand(brands[0])
+      }
+    })
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   // ── Settings ──────────────────────────────────────────────────────────────
   const [refFrom,    setRefFrom]    = useState('2025-04-01')
@@ -535,7 +547,7 @@ Stock faible:\n${lowLines || 'Aucun'}`
           </div>
           <div className="flex items-center gap-2 shrink-0">
             {/* Brand selector */}
-            {(['bowa', 'moom', 'krom'] as const).map((b) => (
+            {(['bowa', 'moom', 'krom'] as const).filter(b => allowedBrands.includes(b)).map((b) => (
               <button
                 key={b}
                 onClick={() => setBrand(b)}

@@ -3,12 +3,12 @@
 export const dynamic = 'force-dynamic'
 
 import React, { useState, useEffect, useCallback, useRef } from 'react'
-import { createClient } from '@supabase/supabase-js'
+import { createBrowserClient } from '@supabase/auth-helpers-nextjs'
 import { Plus, Trash2, Check, Loader2, ChevronLeft, ChevronRight, Search, X } from 'lucide-react'
 
 // ─── Supabase ─────────────────────────────────────────────────────────────────
 
-const supabase = createClient(
+const supabase = createBrowserClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
 )
@@ -426,6 +426,18 @@ function stateKey(brand: BrandTab, category: Category): StateKey {
 
 export default function SettingsPage() {
   const [activeBrand, setActiveBrand] = useState<BrandTab>('bowa')
+  const [allowedBrands, setAllowedBrands] = useState<BrandTab[]>(['bowa', 'moom', 'krom'])
+
+  useEffect(() => {
+    supabase.from('user_brands').select('brand').then(({ data }) => {
+      if (data && data.length > 0) {
+        const brands = data.map((r: { brand: string }) => r.brand) as BrandTab[]
+        setAllowedBrands(brands)
+        if (!brands.includes(activeBrand)) setActiveBrand(brands[0])
+      }
+    })
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   const [rows, setRows] = useState<Record<StateKey, CostRow[]>>({
     bowaTeam: [], bowaApp: [], bowaInfra: [], bowaVariable: [], moomTeam: [], moomApp: [], kromTeam: [], kromApp: [],
@@ -692,7 +704,7 @@ export default function SettingsPage() {
         {/* Brand selector */}
         <div className="flex items-center gap-3">
           <div className="inline-flex items-center bg-white shadow-[0_2px_16px_rgba(0,0,0,0.06)] rounded-xl p-1 gap-0.5">
-            {(['bowa', 'moom', 'krom'] as BrandTab[]).map((brand) => (
+            {(['bowa', 'moom', 'krom'] as BrandTab[]).filter(b => allowedBrands.includes(b)).map((brand) => (
               <button
                 key={brand}
                 onClick={() => setActiveBrand(brand)}
