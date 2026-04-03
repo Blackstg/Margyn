@@ -89,10 +89,10 @@ interface SnapshotRow {
 type SnapshotAgg = Omit<KpiData, 'marketing' | 'op_expenses' | 'net_profit' | 'transaction_fees' | 'app_charges'>
 
 function sumSnapshots(rows: SnapshotRow[]): SnapshotAgg {
-  return rows.reduce<SnapshotAgg>(
+  const agg = rows.reduce<SnapshotAgg>(
     (acc, r) => ({
       total_sales:  acc.total_sales  + (r.total_sales      ?? 0),
-      gross_profit: acc.gross_profit + (r.gross_profit     ?? 0),
+      gross_profit: 0, // computed below
       order_count:  acc.order_count  + (r.order_count      ?? 0),
       cogs:         acc.cogs         + (r.cogs             ?? 0),
       fulfillment:  acc.fulfillment  + (r.fulfillment_cost ?? 0),
@@ -100,6 +100,8 @@ function sumSnapshots(rows: SnapshotRow[]): SnapshotAgg {
     }),
     { total_sales: 0, gross_profit: 0, order_count: 0, cogs: 0, fulfillment: 0, returns: 0 }
   )
+  agg.gross_profit = agg.total_sales - agg.cogs
+  return agg
 }
 
 // ─── Fetchers ─────────────────────────────────────────────────────────────────
@@ -125,11 +127,12 @@ async function fetchSnapshotData(brand: Brand, date: string): Promise<SnapshotDa
     (acc, r) => ({
       total_sales:  acc.total_sales  + (r.total_sales  ?? 0),
       order_count:  acc.order_count  + (r.order_count  ?? 0),
-      gross_profit: acc.gross_profit + (r.gross_profit ?? 0),
       cogs:         acc.cogs         + (r.cogs         ?? 0),
+      gross_profit: 0, // computed below
     }),
     { total_sales: 0, order_count: 0, gross_profit: 0, cogs: 0 }
   )
+  snap.gross_profit = snap.total_sales - snap.cogs
 
   // Use campaign_stats as source of truth for spend (more granular than ad_spends)
   const spendFromCampaigns = ((campaignStatsRes as { data: { spend?: number | null }[] | null }).data ?? [])

@@ -334,7 +334,7 @@ export async function computeMetrics(
   const metrics: DailyMetrics[] = []
   for (const [date, data] of Array.from(byDate.entries())) {
     const gross_profit =
-      data.total_sales - data.cogs - data.fulfillment_cost - data.returns - data.discounts
+      data.total_sales - data.cogs
     const gross_margin =
       data.total_sales > 0 ? (gross_profit / data.total_sales) * 100 : 0
 
