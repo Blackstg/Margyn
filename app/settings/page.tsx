@@ -426,7 +426,7 @@ function stateKey(brand: BrandTab, category: Category): StateKey {
 
 export default function SettingsPage() {
   const [activeBrand, setActiveBrand] = useState<BrandTab>('bowa')
-  const [allowedBrands, setAllowedBrands] = useState<BrandTab[]>(['bowa', 'moom', 'krom'])
+  const [allowedBrands, setAllowedBrands] = useState<BrandTab[] | null>(null)
 
   useEffect(() => {
     supabase.from('user_brands').select('brand').then(({ data }) => {
@@ -704,7 +704,7 @@ export default function SettingsPage() {
         {/* Brand selector */}
         <div className="flex items-center gap-3">
           <div className="inline-flex items-center bg-white shadow-[0_2px_16px_rgba(0,0,0,0.06)] rounded-xl p-1 gap-0.5">
-            {(['bowa', 'moom', 'krom'] as BrandTab[]).filter(b => allowedBrands.includes(b)).map((brand) => (
+            {(['bowa', 'moom', 'krom'] as BrandTab[]).filter(b => allowedBrands?.includes(b) ?? false).map((brand) => (
               <button
                 key={brand}
                 onClick={() => setActiveBrand(brand)}

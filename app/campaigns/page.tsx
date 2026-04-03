@@ -155,7 +155,7 @@ function CampaignsPage() {
 
   useEffect(() => { load() }, [load])
 
-  const [allowedBrands, setAllowedBrands] = useState<Brand[]>(['bowa', 'moom', 'krom'])
+  const [allowedBrands, setAllowedBrands] = useState<Brand[] | null>(null)
 
   useEffect(() => {
     supabase.from('user_brands').select('brand').then(({ data }) => {
@@ -173,7 +173,7 @@ function CampaignsPage() {
     { id: 'moom', label: 'Mōom' },
     { id: 'krom', label: 'Krom' },
   ]
-  const brandTabs = ALL_BRAND_TABS.filter(t => allowedBrands.includes(t.id))
+  const brandTabs = allowedBrands === null ? [] : ALL_BRAND_TABS.filter(t => allowedBrands.includes(t.id))
 
   const periodTabs: { id: Period; label: string }[] = [
     { id: '7j',   label: '7 j'     },

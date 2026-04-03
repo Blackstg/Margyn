@@ -205,7 +205,7 @@ const BRAND_LABELS: Record<string, string> = { bowa: 'Bowa', moom: 'Mōom Paris'
 export default function ReapproPage() {
   // ── Brand ─────────────────────────────────────────────────────────────────
   const [brand, setBrand] = useState<'bowa' | 'moom' | 'krom'>('moom')
-  const [allowedBrands, setAllowedBrands] = useState<('bowa' | 'moom' | 'krom')[]>(['bowa', 'moom', 'krom'])
+  const [allowedBrands, setAllowedBrands] = useState<('bowa' | 'moom' | 'krom')[] | null>(null)
 
   useEffect(() => {
     supabase.from('user_brands').select('brand').then(({ data }) => {
@@ -547,7 +547,7 @@ Stock faible:\n${lowLines || 'Aucun'}`
           </div>
           <div className="flex items-center gap-2 shrink-0">
             {/* Brand selector */}
-            {(['bowa', 'moom', 'krom'] as const).filter(b => allowedBrands.includes(b)).map((b) => (
+            {(['bowa', 'moom', 'krom'] as const).filter(b => allowedBrands?.includes(b) ?? false).map((b) => (
               <button
                 key={b}
                 onClick={() => setBrand(b)}

@@ -577,7 +577,7 @@ function DashboardPage() {
     krom: 'https://cdn.shopify.com/s/files/1/0590/8755/2558/files/favicon.png?v=1764213860',
   })
 
-  const [allowedBrands, setAllowedBrands] = useState<Brand[]>(['bowa', 'moom', 'krom'])
+  const [allowedBrands, setAllowedBrands] = useState<Brand[] | null>(null)
 
   useEffect(() => {
     supabase.from('user_brands').select('brand').then(({ data }) => {
@@ -675,7 +675,7 @@ function DashboardPage() {
     { id: 'moom', label: 'Mōom' },
     { id: 'krom', label: 'Krom' },
   ]
-  const brandTabs = ALL_BRAND_TABS.filter(t => allowedBrands.includes(t.id))
+  const brandTabs = allowedBrands === null ? [] : ALL_BRAND_TABS.filter(t => allowedBrands.includes(t.id))
 
   const periodTabs: { id: Period; label: string }[] = [
     { id: '7j',   label: '7 j'    },
