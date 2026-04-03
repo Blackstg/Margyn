@@ -3,6 +3,15 @@ import { NextResponse } from 'next/server'
 import type { NextRequest } from 'next/server'
 
 export async function middleware(req: NextRequest) {
+  const { pathname } = req.nextUrl
+
+  // Skip middleware entirely for API routes — they handle their own auth
+  if (pathname.startsWith('/api/')) {
+    return NextResponse.next()
+  }
+
+  const isLoginPage = pathname === '/login'
+
   let response = NextResponse.next({ request: { headers: req.headers } })
 
   const supabase = createServerClient(
@@ -26,11 +35,7 @@ export async function middleware(req: NextRequest) {
 
   const { data: { session } } = await supabase.auth.getSession()
 
-  const { pathname } = req.nextUrl
-  const isLoginPage = pathname === '/login'
-  const isApiRoute  = pathname.startsWith('/api/')
-
-  if (!session && !isLoginPage && !isApiRoute) {
+  if (!session && !isLoginPage) {
     return NextResponse.redirect(new URL('/login', req.url))
   }
 
