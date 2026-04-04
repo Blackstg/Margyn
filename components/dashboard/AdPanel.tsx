@@ -157,7 +157,7 @@ export default function AdPanel({ spendData, roasData, activePlatforms, loading,
           <div className="flex items-start justify-between mb-4">
             <div>
               <p className="text-[10px] font-semibold uppercase tracking-[0.1em] text-[#aeb0c9]">
-                ROAS par plateforme
+                ROAS plateforme (attribution pixel)
               </p>
               <p className="text-xs text-[#6b6b63] mt-0.5">{periodLabel}</p>
             </div>

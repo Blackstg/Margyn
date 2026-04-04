@@ -241,6 +241,9 @@ export default function KpiGrid({ current, previous, loading, brand, sparklines 
   const netProfit      = grossProfitHT  - c.marketing - c.fulfillment - c.transaction_fees - c.app_charges - c.op_expenses
   const prevNetProfit  = prevGrossHT    - p.marketing - p.fulfillment - p.transaction_fees - p.app_charges - p.op_expenses
 
+  const roasReel     = c.marketing > 0 ? totalSalesHT / c.marketing : 0
+  const prevRoasReel = p.marketing > 0 ? prevSalesHT  / p.marketing : 0
+
   const tvaCollectee     = Math.round(c.total_sales / 6)
   const prevTvaCollectee = Math.round(p.total_sales / 6)
 
@@ -299,7 +302,8 @@ export default function KpiGrid({ current, previous, loading, brand, sparklines 
       {/* ── Secondary white cards ────────────────────────────────────────────── */}
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <KpiCard label="Commandes"       value={c.order_count}      formatted={fmtNum(c.order_count)}   prevValue={p.order_count}      loading={loading} />
-        <KpiCard label="Marketing"       value={c.marketing}        formatted={fmtEur(c.marketing)}     prevValue={p.marketing}        loading={loading} inverse note={totalSalesHT > 0 ? `ROAS ${(totalSalesHT / (c.marketing || 1)).toFixed(2)}` : undefined} />
+        <KpiCard label="Marketing"       value={c.marketing}        formatted={fmtEur(c.marketing)}     prevValue={p.marketing}        loading={loading} inverse />
+        <KpiCard label="ROAS réel"       value={roasReel}           formatted={`${roasReel.toFixed(2)}x`}  prevValue={prevRoasReel}    loading={loading} note="CA Shopify / dépense pub" />
         <KpiCard label="COGS"            value={c.cogs}             formatted={fmtEur(c.cogs)}          prevValue={p.cogs}             loading={loading} inverse />
         <KpiCard label="Retours"         value={c.returns}          formatted={fmtEur(c.returns)}       prevValue={p.returns}          loading={loading} inverse />
         <KpiCard label="Transaction Fees" value={c.transaction_fees} formatted={fmtEur(c.transaction_fees)} prevValue={p.transaction_fees} loading={loading} inverse note={totalSalesHT > 0 ? `${((c.transaction_fees / totalSalesHT) * 100).toFixed(1)}% du CA` : undefined} />

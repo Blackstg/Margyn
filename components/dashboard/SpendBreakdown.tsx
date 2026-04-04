@@ -108,7 +108,8 @@ export default function SpendBreakdown({ data, loading }: Props) {
                     <span className="text-sm font-semibold text-[#1a1a18] tabular-nums w-16 text-right">
                       {fmtEur(d.spend)}
                     </span>
-                    <div className="w-16 flex justify-end">
+                    <div className="w-16 flex flex-col items-end gap-0.5">
+                      <span className="text-[9px] font-medium text-[#9b9b93] uppercase tracking-wide">ROAS plat.</span>
                       <RoasBadge roas={roas} />
                     </div>
                     <span className="text-xs text-[#6b6b63] tabular-nums w-20 text-right hidden sm:block">
