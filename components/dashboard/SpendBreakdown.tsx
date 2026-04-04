@@ -36,21 +36,6 @@ const fmtEur = (n: number) =>
     maximumFractionDigits: 0,
   }).format(n)
 
-function RoasBadge({ roas }: { roas: number | null }) {
-  if (roas == null) return <span className="text-xs text-[#6b6b63]">—</span>
-  const [bg, text] =
-    roas >= 3   ? ['#f0faf5', '#1a7f4b'] :
-    roas >= 1.5 ? ['#fffbeb', '#b45309'] :
-                  ['#fff1f1', '#c7293a']
-  return (
-    <span
-      className="inline-flex items-center px-2 py-0.5 rounded-md text-xs font-semibold tabular-nums"
-      style={{ background: bg, color: text }}
-    >
-      {roas.toFixed(2)}x
-    </span>
-  )
-}
 
 export default function SpendBreakdown({ data, loading }: Props) {
   const totalSpend = data.reduce((s, d) => s + d.spend, 0)
