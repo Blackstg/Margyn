@@ -101,17 +101,21 @@ export default function SpendBreakdown({ data, loading }: Props) {
                     <span className="text-sm font-medium text-[#1a1a18] truncate">{label}</span>
                   </div>
                   {/* Right: stats */}
-                  <div className="flex items-center gap-5 flex-shrink-0">
+                  <div className="flex items-center gap-4 flex-shrink-0">
                     <span className="text-xs text-[#6b6b63] tabular-nums w-8 text-right">
                       {pct.toFixed(0)}%
                     </span>
                     <span className="text-sm font-semibold text-[#1a1a18] tabular-nums w-16 text-right">
                       {fmtEur(d.spend)}
                     </span>
-                    <div className="w-16 flex flex-col items-end gap-0.5">
-                      <span className="text-[9px] font-medium text-[#9b9b93] uppercase tracking-wide">ROAS plat.</span>
-                      <RoasBadge roas={roas} />
-                    </div>
+                    <span className="text-xs tabular-nums w-24 text-right font-medium" style={{
+                      color: roas == null ? '#9b9b93'
+                           : roas >= 3   ? '#1a7f4b'
+                           : roas >= 1.5 ? '#b45309'
+                           :               '#c7293a'
+                    }}>
+                      {roas != null ? `ROAS : ${roas.toFixed(2)}x` : 'ROAS : —'}
+                    </span>
                     <span className="text-xs text-[#6b6b63] tabular-nums w-20 text-right hidden sm:block">
                       {d.clicks.toLocaleString('fr-FR')} clics
                     </span>
