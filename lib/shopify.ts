@@ -16,8 +16,15 @@ interface ShopifyRefundLineItem {
   line_item: { variant_id: number; price: string }
 }
 
+interface ShopifyRefundTransaction {
+  kind: string
+  status: string
+  amount: string
+}
+
 interface ShopifyRefund {
   refund_line_items: ShopifyRefundLineItem[]
+  transactions: ShopifyRefundTransaction[]
 }
 
 interface ShopifyLineItem {
@@ -31,6 +38,7 @@ export interface ShopifyOrder {
   id: number
   created_at: string
   financial_status: string
+  cancel_reason: string | null
   total_price: string
   subtotal_price: string
   total_discounts: string
@@ -176,7 +184,7 @@ export async function fetchOrders(
     `&created_at_min=${encodeURIComponent(createdAtMin)}` +
     `&created_at_max=${encodeURIComponent(createdAtMax)}` +
     `&fields=id,created_at,financial_status,total_price,subtotal_price,` +
-    `total_discounts,total_shipping_price_set,line_items,refunds`
+    `total_discounts,total_shipping_price_set,line_items,refunds,cancel_reason`
 
   while (true) {
     const { data, nextPageInfo } = await shopifyFetch<{ orders: ShopifyOrder[] }>(
@@ -287,7 +295,7 @@ export async function computeMetrics(
   )
 
   for (const order of orders) {
-    if (order.financial_status === 'voided') continue
+    if (order.financial_status === 'voided' || order.financial_status === 'cancelled') continue
 
     // Bucket by Paris local date, not UTC date
     const date = utcToParisDate(order.created_at)
@@ -313,15 +321,18 @@ export async function computeMetrics(
       if (cost != null) orderCogs += cost * item.quantity
     }
 
-    // Returns from refunds
+    // Returns: sum refund transactions (authoritative amount returned to customer)
     let orderReturns = 0
     for (const refund of order.refunds) {
-      for (const rli of refund.refund_line_items) {
-        orderReturns += parseFloat(rli.subtotal)
+      for (const t of refund.transactions ?? []) {
+        if (t.kind === 'refund' && t.status === 'success') {
+          orderReturns += parseFloat(t.amount)
+        }
       }
     }
 
-    entry.total_sales += orderTotal
+    // total_sales = net of shipping and returns, matching Shopify Analytics "Total des ventes"
+    entry.total_sales += orderTotal - shipping - orderReturns
     entry.order_count += 1
     entry.cogs += orderCogs
     entry.fulfillment_cost += shippingRatePerOrder > 0 ? shippingRatePerOrder : shipping
@@ -443,7 +454,7 @@ export function aggregateProductSales(
   const byKey = new Map<string, Entry>()
 
   for (const order of orders) {
-    if (order.financial_status === 'voided') continue
+    if (order.financial_status === 'voided' || order.financial_status === 'cancelled') continue
     const date = utcToParisDate(order.created_at)
 
     for (const item of order.line_items) {
