@@ -331,8 +331,8 @@ export async function computeMetrics(
       }
     }
 
-    // total_sales = net of shipping and returns, matching Shopify Analytics "Total des ventes"
-    entry.total_sales += orderTotal - shipping - orderReturns
+    // total_sales = total_price − discounts − returns, matching Shopify Analytics "Ventes totales"
+    entry.total_sales += orderTotal - discounts - orderReturns
     entry.order_count += 1
     entry.cogs += orderCogs
     entry.fulfillment_cost += shippingRatePerOrder > 0 ? shippingRatePerOrder : shipping
