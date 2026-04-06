@@ -19,11 +19,25 @@ interface Anomaly {
   order_name: string
   detail: string
   amount: number
+  logistician_shipping?: number  // high_shipping only
 }
 
 interface SplitShipment {
   order_name: string
   amount: number
+}
+
+interface ShippingDetail {
+  country:       string
+  country_code:  string
+  customer_paid: number
+  ecart:         number
+  verdict:       'Justifié' | 'À contester'
+}
+
+function countryFlag(code: string): string {
+  if (!code || code.length !== 2) return '🌍'
+  return [...code.toUpperCase()].map(c => String.fromCodePoint(c.charCodeAt(0) + 127397)).join('')
 }
 
 interface MonthlySummary {
@@ -87,6 +101,7 @@ function detectAnomalies(
           order_name: r.order_name,
           detail: `Shipping $${r.shipping_price.toFixed(2)} vs moyenne $${mean.toFixed(2)}`,
           amount: r.shipping_price - mean,
+          logistician_shipping: r.shipping_price,
         })
       }
     }
@@ -117,7 +132,8 @@ export default function FacturesLogisticienPage() {
   const [lookingUp, setLookingUp] = useState(false)
   const [rows, setRows]           = useState<InvoiceRow[]>([])
   const [anomalies, setAnomalies] = useState<Anomaly[]>([])
-  const [splitShipments, setSplitShipments] = useState<SplitShipment[]>([])
+  const [splitShipments, setSplitShipments]   = useState<SplitShipment[]>([])
+  const [shippingDetails, setShippingDetails] = useState<Record<string, ShippingDetail>>({})
   const [history, setHistory]     = useState<MonthlySummary[]>([])
   const [aiText, setAiText]       = useState('')
   const [aiLoading, setAiLoading] = useState(false)
@@ -153,23 +169,53 @@ export default function FacturesLogisticienPage() {
 
     setLoading(false)
 
-    // Identify FW+normal pairs (double billing candidates)
-    const normalNames = new Set(parsed.filter(r => !r.isFW).map(r => r.order_name))
-    const candidates  = parsed.filter(r => r.isFW && normalNames.has(r.order_name)).map(r => r.order_name)
+    // Pre-identify double billing candidates
+    const parsedNormal   = parsed.filter(r => !r.isFW)
+    const parsedFW       = parsed.filter(r => r.isFW)
+    const normalNameSet  = new Set(parsedNormal.map(r => r.order_name))
+    const dbCandidates   = parsedFW.filter(r => normalNameSet.has(r.order_name)).map(r => r.order_name)
 
-    // Lookup each candidate order in Shopify to get warehouse info
+    // Pre-identify high shipping candidates (statistical detection)
+    const shipVals = parsedNormal.map(r => r.shipping_price).filter(v => v > 0)
+    const highShippingOrders: Record<string, number> = {}
+    if (shipVals.length > 5) {
+      const mean = shipVals.reduce((s, v) => s + v, 0) / shipVals.length
+      const std  = Math.sqrt(shipVals.reduce((s, v) => s + (v - mean) ** 2, 0) / shipVals.length)
+      const thr  = mean + 2.5 * std
+      for (const r of parsedNormal) {
+        if (r.shipping_price > thr && r.shipping_price > mean * 3) {
+          highShippingOrders[r.order_name] = r.shipping_price
+        }
+      }
+    }
+
+    // Parallel Shopify lookups: warehouse (double billing) + shipping details (high shipping)
     let orderWarehouse: Record<string, string | null> = {}
-    if (candidates.length > 0) {
+    let newShippingDetails: Record<string, ShippingDetail> = {}
+
+    if (dbCandidates.length > 0 || Object.keys(highShippingOrders).length > 0) {
       setLookingUp(true)
       try {
-        const res  = await fetch('/api/shopify/order-warehouse', {
-          method:  'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body:    JSON.stringify({ order_names: candidates }),
-        })
-        const data = await res.json()
-        orderWarehouse = data.results ?? {}
-      } catch { /* fallback: treat all as double billing */ }
+        const [warehouseRes, shippingRes] = await Promise.all([
+          dbCandidates.length > 0
+            ? fetch('/api/shopify/order-warehouse', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ order_names: dbCandidates }),
+              }).then(r => r.json()).catch(() => ({ results: {} }))
+            : Promise.resolve({ results: {} }),
+          Object.keys(highShippingOrders).length > 0
+            ? fetch('/api/shopify/order-shipping', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  order_names: Object.keys(highShippingOrders),
+                  logistician_shippings: highShippingOrders,
+                }),
+              }).then(r => r.json()).catch(() => ({ results: {} }))
+            : Promise.resolve({ results: {} }),
+        ])
+        orderWarehouse      = warehouseRes.results  ?? {}
+        newShippingDetails  = shippingRes.results   ?? {}
+      } catch { /* fallback: conservative classification */ }
       setLookingUp(false)
     }
 
@@ -177,6 +223,7 @@ export default function FacturesLogisticienPage() {
     setRows(parsed)
     setAnomalies(detected)
     setSplitShipments(splits)
+    setShippingDetails(newShippingDetails)
 
     // Auto-save summary to history
     if (month) {
@@ -265,7 +312,7 @@ Historique FW : ${history.map(h => `${h.month}: ${h.fw_count} FW ($${h.fw_total?
             <input
               type="month"
               value={month}
-              onChange={e => { setMonth(e.target.value); setRows([]); setAnomalies([]); setSplitShipments([]); setFileName(''); setAiText('') }}
+              onChange={e => { setMonth(e.target.value); setRows([]); setAnomalies([]); setSplitShipments([]); setShippingDetails({}); setFileName(''); setAiText('') }}
               className="rounded-xl border border-[#e8e4e0] px-4 py-2.5 text-sm text-[#1a1a2e] focus:outline-none focus:ring-2 focus:ring-[#aeb0c9]/40"
             />
             {month && (
@@ -345,24 +392,49 @@ Historique FW : ${history.map(h => `${h.month}: ${h.fw_count} FW ($${h.fw_total?
                   </div>
                 ) : (
                   <div className="divide-y divide-[#f8f8f7]">
-                    {anomalies.map((a, i) => (
-                      <div key={i} className="flex items-start justify-between px-5 py-3.5 gap-4">
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-center gap-2 mb-0.5">
-                            <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-md ${
-                              a.type === 'double_billing' ? 'bg-[#fce8ea] text-[#c7293a]' :
-                              a.type === 'high_shipping'  ? 'bg-[#fff3cd] text-[#b45309]' :
-                              'bg-[#f0f0ee] text-[#6b6b63]'
-                            }`}>
-                              {a.type === 'double_billing' ? 'Double billing' : a.type === 'high_shipping' ? 'Shipping élevé' : 'Suspect'}
-                            </span>
-                            <span className="font-mono text-xs text-[#1a1a2e]">{a.order_name}</span>
+                    {anomalies.map((a, i) => {
+                      const sd = a.type === 'high_shipping' ? shippingDetails[a.order_name] : undefined
+                      return (
+                        <div key={i} className="flex items-start justify-between px-5 py-3.5 gap-4">
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2 mb-0.5">
+                              <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-md ${
+                                a.type === 'double_billing' ? 'bg-[#fce8ea] text-[#c7293a]' :
+                                a.type === 'high_shipping'  ? 'bg-[#fff3cd] text-[#b45309]' :
+                                'bg-[#f0f0ee] text-[#6b6b63]'
+                              }`}>
+                                {a.type === 'double_billing' ? 'Double billing' : a.type === 'high_shipping' ? 'Shipping élevé' : 'Suspect'}
+                              </span>
+                              <span className="font-mono text-xs text-[#1a1a2e]">{a.order_name}</span>
+                            </div>
+                            <p className="text-xs text-[#9b9b93]">{a.detail}</p>
+                            {sd && (
+                              <div className="flex items-center gap-2 mt-1.5 flex-wrap">
+                                <span className="text-xs text-[#1a1a2e]">
+                                  {countryFlag(sd.country_code)} {sd.country}
+                                </span>
+                                <span className="text-[#d0cec8]">·</span>
+                                <span className="text-xs text-[#6b6b63]">
+                                  Client: <span className="font-medium text-[#1a1a2e]">${sd.customer_paid.toFixed(2)}</span>
+                                </span>
+                                <span className="text-[#d0cec8]">·</span>
+                                <span className="text-xs text-[#6b6b63]">
+                                  Écart: <span className="font-semibold text-[#c7293a]">${sd.ecart.toFixed(2)}</span>
+                                </span>
+                                <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-md ${
+                                  sd.verdict === 'À contester'
+                                    ? 'bg-[#fce8ea] text-[#c7293a]'
+                                    : 'bg-[#e6f4ec] text-[#1a7f4b]'
+                                }`}>
+                                  {sd.verdict}
+                                </span>
+                              </div>
+                            )}
                           </div>
-                          <p className="text-xs text-[#9b9b93]">{a.detail}</p>
+                          <p className="text-sm font-semibold text-[#c7293a] tabular-nums shrink-0">${a.amount.toFixed(2)}</p>
                         </div>
-                        <p className="text-sm font-semibold text-[#c7293a] tabular-nums shrink-0">${a.amount.toFixed(2)}</p>
-                      </div>
-                    ))}
+                      )
+                    })}
                   </div>
                 )}
 
