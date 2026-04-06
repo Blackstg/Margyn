@@ -2,7 +2,7 @@
 
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
-import { LayoutDashboard, BarChart2, PackageOpen, Settings, LogOut, Boxes, FileText } from 'lucide-react'
+import { LayoutDashboard, BarChart2, PackageOpen, Settings, LogOut, Boxes, FileText, Tag } from 'lucide-react'
 import { createBrowserClient } from '@supabase/auth-helpers-nextjs'
 import { useState, useEffect } from 'react'
 
@@ -12,6 +12,7 @@ const NAV = [
   { href: '/reapprovisionnement',  icon: PackageOpen,      label: 'Réappro'        },
   { href: '/reconciliation-stock',    icon: Boxes,     label: 'Réconciliation'  },
   { href: '/factures-logisticien',    icon: FileText,  label: 'Factures logo'   },
+  { href: '/produits',                icon: Tag,       label: 'Produits'        },
   { href: '/settings',                icon: Settings,  label: 'Paramètres'      },
 ]
 
