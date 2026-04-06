@@ -8,11 +8,25 @@ function getAdmin() {
   )
 }
 
-export async function GET() {
+export async function GET(req: NextRequest) {
+  const month = req.nextUrl.searchParams.get('month')
   const admin = getAdmin()
+
+  if (month) {
+    // Full data for a specific month (used when loading from history chips)
+    const { data } = await admin
+      .from('logistician_invoice_summaries')
+      .select('*')
+      .eq('brand', 'moom')
+      .eq('month', month)
+      .single()
+    return NextResponse.json({ summary: data ?? null })
+  }
+
+  // Summary list for history chips
   const { data } = await admin
     .from('logistician_invoice_summaries')
-    .select('*')
+    .select('month, fw_count, fw_total, normal_total, double_billing_count, anomaly_count')
     .eq('brand', 'moom')
     .order('month', { ascending: true })
   return NextResponse.json({ summaries: data ?? [] })

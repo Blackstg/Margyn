@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef } from 'react'
 import { read, utils } from 'xlsx'
-import { Upload, TrendingUp, Sparkles, AlertTriangle, RotateCcw, CheckCircle, GitFork } from 'lucide-react'
+import { Upload, TrendingUp, Sparkles, AlertTriangle, RotateCcw, CheckCircle, GitFork, Clock } from 'lucide-react'
 
 interface InvoiceRow {
   order_name: string
@@ -35,17 +35,25 @@ interface ShippingDetail {
   verdict:       'Justifié' | 'À contester'
 }
 
-function countryFlag(code: string): string {
-  if (!code || code.length !== 2) return '🌍'
-  return [...code.toUpperCase()].map(c => String.fromCodePoint(c.charCodeAt(0) + 127397)).join('')
+interface ShippingContext {
+  order_item_count:     number
+  similar_orders_count: number
+  similar_avg_shipping: number
+  pct_above:            number
 }
 
 interface MonthlySummary {
-  month: string
-  fw_count: number
-  fw_total: number
-  normal_total: number
+  month:                string
+  fw_count:             number
+  fw_total:             number
+  normal_total:         number
   double_billing_count: number
+  anomaly_count?:       number
+}
+
+function countryFlag(code: string): string {
+  if (!code || code.length !== 2) return '🌍'
+  return [...code.toUpperCase()].map(c => String.fromCodePoint(c.charCodeAt(0) + 127397)).join('')
 }
 
 function excelDate(v: unknown): string {
@@ -66,12 +74,12 @@ function detectAnomalies(
   rows: InvoiceRow[],
   orderWarehouse: Record<string, string | null>
 ): { anomalies: Anomaly[]; splitShipments: SplitShipment[] } {
-  const anomalies: Anomaly[]           = []
+  const anomalies: Anomaly[]            = []
   const splitShipments: SplitShipment[] = []
   const normal = rows.filter(r => !r.isFW)
   const fw     = rows.filter(r => r.isFW)
 
-  // 1. Double billing vs split shipment: FW row shares order_name with a normal row
+  // 1. Double billing vs split shipment
   const normalNames = new Set(normal.map(r => r.order_name))
   for (const r of fw) {
     if (!normalNames.has(r.order_name)) continue
@@ -124,19 +132,76 @@ function detectAnomalies(
   return { anomalies, splitShipments }
 }
 
+function computeShippingContext(
+  rows: InvoiceRow[],
+  highShippingOrders: Record<string, number>
+): Record<string, ShippingContext> {
+  const normal = rows.filter(r => !r.isFW)
+
+  // Count rows per order (proxy for item count)
+  const itemCount: Record<string, number> = {}
+  for (const r of normal) {
+    itemCount[r.order_name] = (itemCount[r.order_name] ?? 0) + 1
+  }
+
+  // One shipping value per order (first row seen)
+  const shippingPerOrder: Record<string, number> = {}
+  const seen = new Set<string>()
+  for (const r of normal) {
+    if (!seen.has(r.order_name)) {
+      shippingPerOrder[r.order_name] = r.shipping_price
+      seen.add(r.order_name)
+    }
+  }
+
+  const result: Record<string, ShippingContext> = {}
+
+  for (const orderName of Object.keys(highShippingOrders)) {
+    const n               = itemCount[orderName] ?? 1
+    const flaggedShipping = highShippingOrders[orderName]
+
+    // Similar orders: ±1 item count, positive shipping, excluding the flagged order itself
+    const similarShippings = Object.entries(itemCount)
+      .filter(([name, count]) => name !== orderName && Math.abs(count - n) <= 1)
+      .map(([name]) => shippingPerOrder[name] ?? 0)
+      .filter(v => v > 0)
+
+    const avgShipping = similarShippings.length > 0
+      ? similarShippings.reduce((s, v) => s + v, 0) / similarShippings.length
+      : 0
+
+    const pctAbove = avgShipping > 0
+      ? ((flaggedShipping - avgShipping) / avgShipping) * 100
+      : 0
+
+    result[orderName] = {
+      order_item_count:     n,
+      similar_orders_count: similarShippings.length,
+      similar_avg_shipping: avgShipping,
+      pct_above:            pctAbove,
+    }
+  }
+
+  return result
+}
+
 export default function FacturesLogisticienPage() {
-  const fileRef   = useRef<HTMLInputElement>(null)
-  const [month, setMonth]         = useState('')
-  const [fileName, setFileName]   = useState('')
-  const [loading, setLoading]     = useState(false)
-  const [lookingUp, setLookingUp] = useState(false)
-  const [rows, setRows]           = useState<InvoiceRow[]>([])
-  const [anomalies, setAnomalies] = useState<Anomaly[]>([])
-  const [splitShipments, setSplitShipments]   = useState<SplitShipment[]>([])
-  const [shippingDetails, setShippingDetails] = useState<Record<string, ShippingDetail>>({})
-  const [history, setHistory]     = useState<MonthlySummary[]>([])
-  const [aiText, setAiText]       = useState('')
-  const [aiLoading, setAiLoading] = useState(false)
+  const fileRef = useRef<HTMLInputElement>(null)
+
+  const [month, setMonth]                   = useState('')
+  const [fileName, setFileName]             = useState('')
+  const [loading, setLoading]               = useState(false)
+  const [lookingUp, setLookingUp]           = useState(false)
+  const [loadingHistory, setLoadingHistory] = useState(false)
+  const [rows, setRows]                     = useState<InvoiceRow[]>([])
+  const [anomalies, setAnomalies]           = useState<Anomaly[]>([])
+  const [splitShipments, setSplitShipments] = useState<SplitShipment[]>([])
+  const [shippingDetails, setShippingDetails]   = useState<Record<string, ShippingDetail>>({})
+  const [shippingContext, setShippingContext]    = useState<Record<string, ShippingContext>>({})
+  const [history, setHistory]               = useState<MonthlySummary[]>([])
+  const [aiText, setAiText]                 = useState('')
+  const [aiLoading, setAiLoading]           = useState(false)
+  const [confirmFile, setConfirmFile]       = useState<File | null>(null)
 
   useEffect(() => {
     fetch('/api/factures-logisticien/history')
@@ -145,10 +210,41 @@ export default function FacturesLogisticienPage() {
       .catch(() => {})
   }, [])
 
-  async function handleFile(e: React.ChangeEvent<HTMLInputElement>) {
+  async function loadHistoricalMonth(m: string) {
+    setLoadingHistory(true)
+    setMonth(m)
+    setAiText('')
+    try {
+      const d = await fetch(`/api/factures-logisticien/history?month=${m}`).then(r => r.json())
+      const s = d.summary
+      if (s) {
+        setRows(s.invoice_rows ?? [])
+        setAnomalies(s.anomalies_data ?? [])
+        setSplitShipments(s.split_shipments_data ?? [])
+        setShippingDetails(s.shipping_details_data ?? {})
+        setShippingContext(s.shipping_context_data ?? {})
+        setFileName(`${m} (historique)`)
+      }
+    } catch { /* ignore */ }
+    setLoadingHistory(false)
+  }
+
+  function handleFileInput(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0]
     if (!file) return
+    // Reset so the same file can be re-selected after cancelling
+    if (fileRef.current) fileRef.current.value = ''
     setFileName(file.name)
+
+    const monthExists = history.some(h => h.month === month)
+    if (monthExists) {
+      setConfirmFile(file)
+    } else {
+      processFile(file)
+    }
+  }
+
+  async function processFile(file: File) {
     setLoading(true)
     setAiText('')
 
@@ -158,22 +254,22 @@ export default function FacturesLogisticienPage() {
     const raw: Record<string, unknown>[] = utils.sheet_to_json(ws, { defval: '' })
 
     const parsed: InvoiceRow[] = raw.map(r => ({
-      order_name:    String(r['order_name'] ?? '').trim(),
-      date:          excelDate(r['date']),
-      service_price: toNum(r['service_price']),
-      shipping_price:toNum(r['shipping_price']),
-      total_price:   toNum(r['total_price']),
-      isFW:          isFW(r),
-      sku:           String(r['sku'] ?? r['SKU'] ?? r['product_sku'] ?? r['variant_sku'] ?? '').trim(),
+      order_name:     String(r['order_name'] ?? '').trim(),
+      date:           excelDate(r['date']),
+      service_price:  toNum(r['service_price']),
+      shipping_price: toNum(r['shipping_price']),
+      total_price:    toNum(r['total_price']),
+      isFW:           isFW(r),
+      sku:            String(r['sku'] ?? r['SKU'] ?? r['product_sku'] ?? r['variant_sku'] ?? '').trim(),
     })).filter(r => r.order_name !== '')
 
     setLoading(false)
 
     // Pre-identify double billing candidates
-    const parsedNormal   = parsed.filter(r => !r.isFW)
-    const parsedFW       = parsed.filter(r => r.isFW)
-    const normalNameSet  = new Set(parsedNormal.map(r => r.order_name))
-    const dbCandidates   = parsedFW.filter(r => normalNameSet.has(r.order_name)).map(r => r.order_name)
+    const parsedNormal  = parsed.filter(r => !r.isFW)
+    const parsedFW      = parsed.filter(r => r.isFW)
+    const normalNameSet = new Set(parsedNormal.map(r => r.order_name))
+    const dbCandidates  = parsedFW.filter(r => normalNameSet.has(r.order_name)).map(r => r.order_name)
 
     // Pre-identify high shipping candidates (statistical detection)
     const shipVals = parsedNormal.map(r => r.shipping_price).filter(v => v > 0)
@@ -189,8 +285,11 @@ export default function FacturesLogisticienPage() {
       }
     }
 
-    // Parallel Shopify lookups: warehouse (double billing) + shipping details (high shipping)
-    let orderWarehouse: Record<string, string | null> = {}
+    // Compute contextual shipping analysis (purely from invoice data)
+    const newShippingContext = computeShippingContext(parsed, highShippingOrders)
+
+    // Parallel Shopify lookups
+    let orderWarehouse:     Record<string, string | null>  = {}
     let newShippingDetails: Record<string, ShippingDetail> = {}
 
     if (dbCandidates.length > 0 || Object.keys(highShippingOrders).length > 0) {
@@ -207,14 +306,14 @@ export default function FacturesLogisticienPage() {
             ? fetch('/api/shopify/order-shipping', {
                 method: 'POST', headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
-                  order_names: Object.keys(highShippingOrders),
-                  logistician_shippings: highShippingOrders,
+                  order_names:             Object.keys(highShippingOrders),
+                  logistician_shippings:   highShippingOrders,
                 }),
               }).then(r => r.json()).catch(() => ({ results: {} }))
             : Promise.resolve({ results: {} }),
         ])
-        orderWarehouse      = warehouseRes.results  ?? {}
-        newShippingDetails  = shippingRes.results   ?? {}
+        orderWarehouse     = warehouseRes.results ?? {}
+        newShippingDetails = shippingRes.results  ?? {}
       } catch { /* fallback: conservative classification */ }
       setLookingUp(false)
     }
@@ -224,22 +323,29 @@ export default function FacturesLogisticienPage() {
     setAnomalies(detected)
     setSplitShipments(splits)
     setShippingDetails(newShippingDetails)
+    setShippingContext(newShippingContext)
 
-    // Auto-save summary to history
+    // Save full data to history
     if (month) {
-      const normal = parsed.filter(r => !r.isFW)
-      const fw     = parsed.filter(r => r.isFW)
-      const doubles = detected.filter(a => a.type === 'double_billing').length
+      const normalRows = parsed.filter(r => !r.isFW)
+      const fwRows     = parsed.filter(r => r.isFW)
+      const doubles    = detected.filter(a => a.type === 'double_billing').length
       await fetch('/api/factures-logisticien/history', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           month,
-          normal_count:         normal.length,
-          fw_count:             fw.length,
-          normal_total:         normal.reduce((s, r) => s + r.total_price, 0),
-          fw_total:             fw.reduce((s, r) => s + r.total_price, 0),
-          double_billing_count: doubles,
+          normal_count:          normalRows.length,
+          fw_count:              fwRows.length,
+          normal_total:          normalRows.reduce((s, r) => s + r.total_price, 0),
+          fw_total:              fwRows.reduce((s, r) => s + r.total_price, 0),
+          double_billing_count:  doubles,
+          anomaly_count:         detected.length,
+          invoice_rows:          parsed,
+          anomalies_data:        detected,
+          split_shipments_data:  splits,
+          shipping_details_data: newShippingDetails,
+          shipping_context_data: newShippingContext,
         }),
       })
       const updated = await fetch('/api/factures-logisticien/history').then(r => r.json())
@@ -252,10 +358,10 @@ export default function FacturesLogisticienPage() {
     setAiLoading(true)
     setAiText('')
 
-    const normal    = rows.filter(r => !r.isFW)
-    const fw        = rows.filter(r => r.isFW)
-    const total     = rows.reduce((s, r) => s + r.total_price, 0)
-    const atRisk    = anomalies.reduce((s, a) => s + a.amount, 0)
+    const normal = rows.filter(r => !r.isFW)
+    const fw     = rows.filter(r => r.isFW)
+    const total  = rows.reduce((s, r) => s + r.total_price, 0)
+    const atRisk = anomalies.reduce((s, a) => s + a.amount, 0)
 
     const context = `
 Analyse facture logisticien Mōom — ${month}
@@ -289,8 +395,10 @@ Historique FW : ${history.map(h => `${h.month}: ${h.fw_count} FW ($${h.fw_total?
   const fwTotal   = fw.reduce((s, r) => s + r.total_price, 0)
   const atRisk    = anomalies.reduce((s, a) => s + a.amount, 0)
 
-  const chartData  = [...history].sort((a, b) => a.month.localeCompare(b.month)).slice(-6)
-  const maxFW      = Math.max(...chartData.map(d => d.fw_count), 1)
+  const chartData = [...history].sort((a, b) => a.month.localeCompare(b.month)).slice(-6)
+  const maxFW     = Math.max(...chartData.map(d => d.fw_count), 1)
+
+  const sortedHistory = [...history].sort((a, b) => b.month.localeCompare(a.month))
 
   return (
     <div className="min-h-screen bg-[#f8f7f5] pl-[72px]">
@@ -302,6 +410,34 @@ Historique FW : ${history.map(h => `${h.month}: ${h.fw_count} FW ($${h.fw_total?
           <h1 className="text-xl font-bold text-[#1a1a2e]">Logistician Invoice Analysis</h1>
         </div>
 
+        {/* History chips */}
+        {sortedHistory.length > 0 && (
+          <div className="flex items-center gap-2 flex-wrap">
+            <div className="flex items-center gap-1.5 mr-1">
+              <Clock size={11} className="text-[#9b9b93]" />
+              <p className="text-[10px] font-semibold uppercase tracking-[0.1em] text-[#9b9b93]">Historique</p>
+            </div>
+            {sortedHistory.map(h => (
+              <button
+                key={h.month}
+                onClick={() => loadHistoricalMonth(h.month)}
+                className={`px-3 py-1.5 rounded-xl text-xs font-medium transition-colors flex items-center gap-1.5 ${
+                  month === h.month && rows.length > 0
+                    ? 'bg-[#1a1a2e] text-white'
+                    : 'bg-white border border-[#e8e4e0] text-[#6b6b63] hover:border-[#aeb0c9] shadow-[0_1px_4px_rgba(0,0,0,0.04)]'
+                }`}
+              >
+                {new Date(h.month + '-02').toLocaleDateString('fr-FR', { month: 'short', year: '2-digit' })}
+                {(h.anomaly_count ?? 0) > 0 && (
+                  <span className={`font-semibold ${month === h.month && rows.length > 0 ? 'text-[#f8a0a8]' : 'text-[#c7293a]'}`}>
+                    {h.anomaly_count}
+                  </span>
+                )}
+              </button>
+            ))}
+          </div>
+        )}
+
         {/* Step 1 + Step 2 — side by side */}
         <div className="grid grid-cols-2 gap-4">
           {/* Step 1 — Month */}
@@ -312,7 +448,16 @@ Historique FW : ${history.map(h => `${h.month}: ${h.fw_count} FW ($${h.fw_total?
             <input
               type="month"
               value={month}
-              onChange={e => { setMonth(e.target.value); setRows([]); setAnomalies([]); setSplitShipments([]); setShippingDetails({}); setFileName(''); setAiText('') }}
+              onChange={e => {
+                setMonth(e.target.value)
+                setRows([])
+                setAnomalies([])
+                setSplitShipments([])
+                setShippingDetails({})
+                setShippingContext({})
+                setFileName('')
+                setAiText('')
+              }}
               className="rounded-xl border border-[#e8e4e0] px-4 py-2.5 text-sm text-[#1a1a2e] focus:outline-none focus:ring-2 focus:ring-[#aeb0c9]/40"
             />
             {month && (
@@ -334,12 +479,13 @@ Historique FW : ${history.map(h => `${h.month}: ${h.fw_count} FW ($${h.fw_total?
               {fileName ? fileName : month ? 'Step 2 — Upload Excel invoice' : 'Select a month first'}
             </p>
             <p className="text-[11px] text-[#9b9b93]">.xlsx or .xls</p>
-            <input ref={fileRef} type="file" accept=".xlsx,.xls" className="hidden" onChange={handleFile} disabled={!month} />
+            <input ref={fileRef} type="file" accept=".xlsx,.xls" className="hidden" onChange={handleFileInput} disabled={!month} />
           </div>
         </div>
 
-        {loading    && <p className="text-sm text-[#9b9b93] text-center">Parsing file…</p>}
-        {lookingUp  && <p className="text-sm text-[#9b9b93] text-center">Vérification auprès de Shopify…</p>}
+        {loading        && <p className="text-sm text-[#9b9b93] text-center">Parsing file…</p>}
+        {lookingUp      && <p className="text-sm text-[#9b9b93] text-center">Vérification auprès de Shopify…</p>}
+        {loadingHistory && <p className="text-sm text-[#9b9b93] text-center">Chargement de l&apos;historique…</p>}
 
         {rows.length > 0 && (
           <>
@@ -393,7 +539,8 @@ Historique FW : ${history.map(h => `${h.month}: ${h.fw_count} FW ($${h.fw_total?
                 ) : (
                   <div className="divide-y divide-[#f8f8f7]">
                     {anomalies.map((a, i) => {
-                      const sd = a.type === 'high_shipping' ? shippingDetails[a.order_name] : undefined
+                      const sd  = a.type === 'high_shipping' ? shippingDetails[a.order_name] : undefined
+                      const ctx = a.type === 'high_shipping' ? shippingContext[a.order_name]  : undefined
                       return (
                         <div key={i} className="flex items-start justify-between px-5 py-3.5 gap-4">
                           <div className="flex-1 min-w-0">
@@ -408,6 +555,8 @@ Historique FW : ${history.map(h => `${h.month}: ${h.fw_count} FW ($${h.fw_total?
                               <span className="font-mono text-xs text-[#1a1a2e]">{a.order_name}</span>
                             </div>
                             <p className="text-xs text-[#9b9b93]">{a.detail}</p>
+
+                            {/* Shopify shipping details */}
                             {sd && (
                               <div className="flex items-center gap-2 mt-1.5 flex-wrap">
                                 <span className="text-xs text-[#1a1a2e]">
@@ -429,6 +578,18 @@ Historique FW : ${history.map(h => `${h.month}: ${h.fw_count} FW ($${h.fw_total?
                                   {sd.verdict}
                                 </span>
                               </div>
+                            )}
+
+                            {/* Contextual shipping analysis */}
+                            {ctx && ctx.similar_orders_count > 0 && (
+                              <p className="text-[11px] text-[#9b9b93] mt-1.5 leading-relaxed">
+                                Les commandes à {ctx.order_item_count} article{ctx.order_item_count !== 1 ? 's' : ''} coûtent en moyenne{' '}
+                                <span className="font-medium text-[#1a1a2e]">${ctx.similar_avg_shipping.toFixed(2)}</span> de shipping ce mois —{' '}
+                                celle-ci est à{' '}
+                                <span className="font-medium text-[#1a1a2e]">${(a.logistician_shipping ?? 0).toFixed(2)}</span>{' '}
+                                soit{' '}
+                                <span className="font-semibold text-[#c7293a]">+{ctx.pct_above.toFixed(0)}% au-dessus</span>
+                              </p>
                             )}
                           </div>
                           <p className="text-sm font-semibold text-[#c7293a] tabular-nums shrink-0">${a.amount.toFixed(2)}</p>
@@ -545,6 +706,41 @@ Historique FW : ${history.map(h => `${h.month}: ${h.fw_count} FW ($${h.fw_total?
         )}
 
       </div>
+
+      {/* Confirmation dialog — re-upload existing month */}
+      {confirmFile && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-[2px]">
+          <div className="bg-white rounded-[20px] shadow-2xl p-6 max-w-sm w-full mx-4">
+            <h3 className="font-semibold text-[#1a1a2e] mb-2">Remplacer les données ?</h3>
+            <p className="text-sm text-[#9b9b93] mb-5 leading-relaxed">
+              Un fichier pour{' '}
+              <span className="font-medium text-[#1a1a2e]">
+                {new Date(month + '-02').toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' })}
+              </span>{' '}
+              existe déjà. Voulez-vous écraser les données existantes ?
+            </p>
+            <div className="flex gap-3 justify-end">
+              <button
+                onClick={() => setConfirmFile(null)}
+                className="px-4 py-2 rounded-xl text-sm font-medium text-[#6b6b63] hover:bg-[#f5f5f3] transition-colors"
+              >
+                Annuler
+              </button>
+              <button
+                onClick={() => {
+                  const f = confirmFile
+                  setConfirmFile(null)
+                  processFile(f)
+                }}
+                className="px-4 py-2 rounded-xl bg-[#c7293a] text-white text-sm font-semibold hover:bg-[#b02234] transition-colors"
+              >
+                Remplacer
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
     </div>
   )
 }
