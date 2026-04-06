@@ -50,20 +50,18 @@ function isFW(r: Record<string, unknown>): boolean {
 
 function detectAnomalies(
   rows: InvoiceRow[],
-  skuToWarehouse: Map<string, string>
+  orderWarehouse: Record<string, string | null>
 ): { anomalies: Anomaly[]; splitShipments: SplitShipment[] } {
   const anomalies: Anomaly[]           = []
   const splitShipments: SplitShipment[] = []
   const normal = rows.filter(r => !r.isFW)
   const fw     = rows.filter(r => r.isFW)
 
-  // 1. Double billing vs split shipment: FW row has same order_name as a normal row
-  const normalByName = new Map(normal.map(r => [r.order_name, r]))
+  // 1. Double billing vs split shipment: FW row shares order_name with a normal row
+  const normalNames = new Set(normal.map(r => r.order_name))
   for (const r of fw) {
-    if (!normalByName.has(r.order_name)) continue
-    const normalRow = normalByName.get(r.order_name)!
-    // Look up warehouse from either row's SKU
-    const warehouse = skuToWarehouse.get(r.sku) ?? skuToWarehouse.get(normalRow.sku)
+    if (!normalNames.has(r.order_name)) continue
+    const warehouse = orderWarehouse[r.order_name]
     if (warehouse === 'Les deux') {
       splitShipments.push({ order_name: r.order_name, amount: r.total_price })
     } else {
@@ -116,31 +114,18 @@ export default function FacturesLogisticienPage() {
   const [month, setMonth]         = useState('')
   const [fileName, setFileName]   = useState('')
   const [loading, setLoading]     = useState(false)
+  const [lookingUp, setLookingUp] = useState(false)
   const [rows, setRows]           = useState<InvoiceRow[]>([])
   const [anomalies, setAnomalies] = useState<Anomaly[]>([])
   const [splitShipments, setSplitShipments] = useState<SplitShipment[]>([])
   const [history, setHistory]     = useState<MonthlySummary[]>([])
   const [aiText, setAiText]       = useState('')
   const [aiLoading, setAiLoading] = useState(false)
-  const [skuToWarehouse, setSkuToWarehouse] = useState<Map<string, string>>(new Map())
 
   useEffect(() => {
     fetch('/api/factures-logisticien/history')
       .then(r => r.json())
       .then(d => setHistory(d.summaries ?? []))
-      .catch(() => {})
-
-    // Build SKU → warehouse map from product_variants
-    fetch('/api/produits')
-      .then(r => r.json())
-      .then(d => {
-        const map = new Map<string, string>()
-        for (const v of (d.variants ?? [])) {
-          if (v.sku_fr && v.warehouse) map.set(v.sku_fr, v.warehouse)
-          if (v.sku_cn && v.warehouse) map.set(v.sku_cn, v.warehouse)
-        }
-        setSkuToWarehouse(map)
-      })
       .catch(() => {})
   }, [])
 
@@ -166,11 +151,32 @@ export default function FacturesLogisticienPage() {
       sku:           String(r['sku'] ?? r['SKU'] ?? r['product_sku'] ?? r['variant_sku'] ?? '').trim(),
     })).filter(r => r.order_name !== '')
 
-    const { anomalies: detected, splitShipments: splits } = detectAnomalies(parsed, skuToWarehouse)
+    setLoading(false)
+
+    // Identify FW+normal pairs (double billing candidates)
+    const normalNames = new Set(parsed.filter(r => !r.isFW).map(r => r.order_name))
+    const candidates  = parsed.filter(r => r.isFW && normalNames.has(r.order_name)).map(r => r.order_name)
+
+    // Lookup each candidate order in Shopify to get warehouse info
+    let orderWarehouse: Record<string, string | null> = {}
+    if (candidates.length > 0) {
+      setLookingUp(true)
+      try {
+        const res  = await fetch('/api/shopify/order-warehouse', {
+          method:  'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body:    JSON.stringify({ order_names: candidates }),
+        })
+        const data = await res.json()
+        orderWarehouse = data.results ?? {}
+      } catch { /* fallback: treat all as double billing */ }
+      setLookingUp(false)
+    }
+
+    const { anomalies: detected, splitShipments: splits } = detectAnomalies(parsed, orderWarehouse)
     setRows(parsed)
     setAnomalies(detected)
     setSplitShipments(splits)
-    setLoading(false)
 
     // Auto-save summary to history
     if (month) {
@@ -285,7 +291,8 @@ Historique FW : ${history.map(h => `${h.month}: ${h.fw_count} FW ($${h.fw_total?
           </div>
         </div>
 
-        {loading && <p className="text-sm text-[#9b9b93] text-center">Parsing file…</p>}
+        {loading    && <p className="text-sm text-[#9b9b93] text-center">Parsing file…</p>}
+        {lookingUp  && <p className="text-sm text-[#9b9b93] text-center">Vérification auprès de Shopify…</p>}
 
         {rows.length > 0 && (
           <>
