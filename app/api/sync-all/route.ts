@@ -24,10 +24,11 @@ export async function POST(req: NextRequest) {
   const params      = `${dateParams}${brandParam}`
   const headers     = { Authorization: `Bearer ${secret}` }
 
-  const [meta, shopify, google] = await Promise.allSettled([
+  const [meta, shopify, google, pinterest] = await Promise.allSettled([
     fetch(`${base}/api/meta/sync?${params}`,       { method: 'POST', headers }),
     fetch(`${base}/api/shopify/sync?${params}`,    { method: 'POST', headers }),
     fetch(`${base}/api/google-ads/sync?${params}`, { method: 'POST', headers }),
+    fetch(`${base}/api/pinterest/sync?${params}`,  { method: 'POST', headers }),
   ])
 
   const parse = async (r: PromiseSettledResult<Response>) => {
@@ -41,11 +42,12 @@ export async function POST(req: NextRequest) {
   }
 
   const results = {
-    meta:    await parse(meta),
-    shopify: await parse(shopify),
-    google:  await parse(google),
+    meta:      await parse(meta),
+    shopify:   await parse(shopify),
+    google:    await parse(google),
+    pinterest: await parse(pinterest),
   }
 
-  const ok = results.meta.ok && results.shopify.ok && results.google.ok
+  const ok = results.meta.ok && results.shopify.ok && results.google.ok && results.pinterest.ok
   return NextResponse.json({ ok, results }, { status: ok ? 200 : 207 })
 }

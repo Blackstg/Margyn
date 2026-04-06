@@ -1,5 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
+
+export const maxDuration = 60
+
 import {
   fetchPinterestCampaigns,
   fetchPinterestInsights,
@@ -42,6 +45,20 @@ function fmtDate(d: Date): string {
   return d.toISOString().slice(0, 10)
 }
 
+// ─── Cron entry-point (GET) ───────────────────────────────────────────────────
+
+export async function GET(req: NextRequest) {
+  const today     = new Date()
+  const yesterday = new Date(today)
+  yesterday.setDate(yesterday.getDate() - 1)
+
+  const url = new URL(req.url)
+  url.searchParams.set('from', fmtDate(yesterday))
+  url.searchParams.set('to',   fmtDate(today))
+
+  return POST(new NextRequest(url, { headers: req.headers }))
+}
+
 // ─── Handler ──────────────────────────────────────────────────────────────────
 
 export async function POST(req: NextRequest) {
@@ -69,7 +86,7 @@ export async function POST(req: NextRequest) {
     error?: string
   }> = {}
 
-  for (const store of stores) {
+  await Promise.all(stores.map(async (store) => {
     try {
       // ── 1. Campaigns ──────────────────────────────────────────────────────
       const campaigns = await fetchPinterestCampaigns(store)
@@ -173,7 +190,7 @@ export async function POST(req: NextRequest) {
       console.error(`[${store.brand}] Pinterest sync error: ${msg}`)
       results[store.brand] = { error: msg }
     }
-  }
+  }))
 
   const hasErrors = Object.values(results).some((r) => r.error)
   return NextResponse.json(
