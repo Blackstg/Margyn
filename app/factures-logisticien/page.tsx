@@ -134,15 +134,10 @@ function detectAnomalies(
 
 function computeShippingContext(
   rows: InvoiceRow[],
-  highShippingOrders: Record<string, number>
+  highShippingOrders: Record<string, number>,
+  itemCounts: Record<string, number>  // sum of line_item quantities from Shopify
 ): Record<string, ShippingContext> {
   const normal = rows.filter(r => !r.isFW)
-
-  // Count rows per order (proxy for item count)
-  const itemCount: Record<string, number> = {}
-  for (const r of normal) {
-    itemCount[r.order_name] = (itemCount[r.order_name] ?? 0) + 1
-  }
 
   // One shipping value per order (first row seen)
   const shippingPerOrder: Record<string, number> = {}
@@ -157,13 +152,13 @@ function computeShippingContext(
   const result: Record<string, ShippingContext> = {}
 
   for (const orderName of Object.keys(highShippingOrders)) {
-    const n               = itemCount[orderName] ?? 1
+    const n               = itemCounts[orderName] ?? 1
     const flaggedShipping = highShippingOrders[orderName]
 
-    // Similar orders: ±1 item count, positive shipping, excluding the flagged order itself
-    const similarShippings = Object.entries(itemCount)
-      .filter(([name, count]) => name !== orderName && Math.abs(count - n) <= 1)
-      .map(([name]) => shippingPerOrder[name] ?? 0)
+    // Similar orders: ±1 item count, positive shipping, excluding the flagged order
+    const similarShippings = Object.keys(shippingPerOrder)
+      .filter(name => name !== orderName && Math.abs((itemCounts[name] ?? 1) - n) <= 1)
+      .map(name => shippingPerOrder[name])
       .filter(v => v > 0)
 
     const avgShipping = similarShippings.length > 0
@@ -285,39 +280,50 @@ export default function FacturesLogisticienPage() {
       }
     }
 
-    // Compute contextual shipping analysis (purely from invoice data)
-    const newShippingContext = computeShippingContext(parsed, highShippingOrders)
-
     // Parallel Shopify lookups
     let orderWarehouse:     Record<string, string | null>  = {}
     let newShippingDetails: Record<string, ShippingDetail> = {}
+    let itemCounts:         Record<string, number>         = {}
 
-    if (dbCandidates.length > 0 || Object.keys(highShippingOrders).length > 0) {
+    const hasHighShipping  = Object.keys(highShippingOrders).length > 0
+    const normalOrderNames = hasHighShipping
+      ? [...new Set(parsedNormal.map(r => r.order_name))]
+      : []
+
+    if (dbCandidates.length > 0 || hasHighShipping) {
       setLookingUp(true)
       try {
-        const [warehouseRes, shippingRes] = await Promise.all([
+        const [warehouseRes, shippingRes, itemCountRes] = await Promise.all([
           dbCandidates.length > 0
             ? fetch('/api/shopify/order-warehouse', {
                 method: 'POST', headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ order_names: dbCandidates }),
               }).then(r => r.json()).catch(() => ({ results: {} }))
             : Promise.resolve({ results: {} }),
-          Object.keys(highShippingOrders).length > 0
+          hasHighShipping
             ? fetch('/api/shopify/order-shipping', {
                 method: 'POST', headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
-                  order_names:             Object.keys(highShippingOrders),
-                  logistician_shippings:   highShippingOrders,
+                  order_names:           Object.keys(highShippingOrders),
+                  logistician_shippings: highShippingOrders,
                 }),
               }).then(r => r.json()).catch(() => ({ results: {} }))
             : Promise.resolve({ results: {} }),
+          normalOrderNames.length > 0
+            ? fetch('/api/shopify/order-item-count', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ order_names: normalOrderNames }),
+              }).then(r => r.json()).catch(() => ({ results: {} }))
+            : Promise.resolve({ results: {} }),
         ])
-        orderWarehouse     = warehouseRes.results ?? {}
-        newShippingDetails = shippingRes.results  ?? {}
+        orderWarehouse     = warehouseRes.results  ?? {}
+        newShippingDetails = shippingRes.results   ?? {}
+        itemCounts         = itemCountRes.results  ?? {}
       } catch { /* fallback: conservative classification */ }
       setLookingUp(false)
     }
 
+    const newShippingContext = computeShippingContext(parsed, highShippingOrders, itemCounts)
     const { anomalies: detected, splitShipments: splits } = detectAnomalies(parsed, orderWarehouse)
     setRows(parsed)
     setAnomalies(detected)
