@@ -91,7 +91,7 @@ export async function POST(req: NextRequest) {
     error?: string
   }> = {}
 
-  for (const store of stores) {
+  await Promise.all(stores.map(async (store) => {
     try {
       // ── 1. Campaigns ──────────────────────────────────────────────────────
       const campaigns = await fetchMetaCampaigns(store)
@@ -195,7 +195,7 @@ export async function POST(req: NextRequest) {
       console.error(`[${store.brand}] Meta sync error: ${msg}`)
       results[store.brand] = { error: msg }
     }
-  }
+  }))
 
   const hasErrors = Object.values(results).some((r) => r.error)
   return NextResponse.json(

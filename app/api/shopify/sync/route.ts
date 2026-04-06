@@ -96,7 +96,7 @@ export async function POST(req: NextRequest) {
     }
   } catch { /* table not yet created — fall back to Shopify shipping */ }
 
-  for (const store of stores) {
+  await Promise.all(stores.map(async (store) => {
     try {
       // ── 1. Fetch raw data ──────────────────────────────────────────────────
       const [orders, products] = await Promise.all([
@@ -180,7 +180,7 @@ export async function POST(req: NextRequest) {
         error: err instanceof Error ? err.message : String(err),
       }
     }
-  }
+  }))
 
   const hasErrors = Object.values(results).some((r) => r.error)
 

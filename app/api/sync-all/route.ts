@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 
+export const maxDuration = 300
+
 function fmtDate(d: Date) {
   return d.toISOString().slice(0, 10)
 }
