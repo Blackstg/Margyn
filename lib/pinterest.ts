@@ -20,10 +20,24 @@ interface PinterestAnalyticsRow {
   DATE: string
   CAMPAIGN_ID: string
   SPEND_IN_MICRO_DOLLAR: number
-  IMPRESSION_1: number
-  CLICK_1: number
+  PAID_IMPRESSION: number
+  CLICKTHROUGH_1: number
   TOTAL_CHECKOUT: number
   TOTAL_CHECKOUT_VALUE_IN_MICRO_DOLLAR: number
+  TOTAL_WEB_CHECKOUT: number
+  TOTAL_WEB_CHECKOUT_VALUE_IN_MICRO_DOLLAR: number
+}
+
+interface PinterestAccountRow {
+  DATE: string
+  AD_ACCOUNT_ID: string
+  SPEND_IN_MICRO_DOLLAR: number
+  PAID_IMPRESSION?: number
+  CLICKTHROUGH_1?: number
+  TOTAL_CHECKOUT?: number
+  TOTAL_CHECKOUT_VALUE_IN_MICRO_DOLLAR?: number
+  TOTAL_WEB_CHECKOUT?: number
+  TOTAL_WEB_CHECKOUT_VALUE_IN_MICRO_DOLLAR?: number
 }
 
 // ─── Exported types ───────────────────────────────────────────────────────────
@@ -113,14 +127,15 @@ async function pinterestGet<T>(
   return results
 }
 
-// ─── fetchCampaigns ───────────────────────────────────────────────────────────
+// ─── fetchCampaigns — ALL statuses ────────────────────────────────────────────
 
 export async function fetchPinterestCampaigns(
   config: PinterestConfig
 ): Promise<RawPinterestCampaign[]> {
+  // Fetch all statuses so campaign_stats covers every campaign that could have spend
   const rows = await pinterestGet<PinterestCampaignRaw>(
     `ad_accounts/${config.adAccountId}/campaigns`,
-    { entity_statuses: ['ACTIVE', 'PAUSED'], page_size: '100' },
+    { page_size: '250' },
     config.accessToken
   )
 
@@ -131,7 +146,56 @@ export async function fetchPinterestCampaigns(
   }))
 }
 
-// ─── fetchCampaignAnalytics ───────────────────────────────────────────────────
+// ─── fetchPinterestAccountSpend — account-level daily analytics ───────────────
+// Uses /ad_accounts/{id}/analytics which aggregates ALL campaigns regardless of
+// status, giving the correct spend total (campaign endpoint misses many campaigns).
+
+export async function fetchPinterestAccountSpend(
+  config: PinterestConfig,
+  dateFrom: string,
+  dateTo: string
+): Promise<NormalizedPinterestAdSpend[]> {
+  const url = new URL(`${PINTEREST_BASE}/ad_accounts/${config.adAccountId}/analytics`)
+  url.searchParams.set('start_date', dateFrom)
+  url.searchParams.set('end_date', dateTo)
+  url.searchParams.set('granularity', 'DAY')
+  for (const col of [
+    'SPEND_IN_MICRO_DOLLAR',
+    'PAID_IMPRESSION',
+    'CLICKTHROUGH_1',
+    'TOTAL_CHECKOUT',
+    'TOTAL_CHECKOUT_VALUE_IN_MICRO_DOLLAR',
+    'TOTAL_WEB_CHECKOUT',
+    'TOTAL_WEB_CHECKOUT_VALUE_IN_MICRO_DOLLAR',
+  ]) url.searchParams.append('columns', col)
+
+  const res = await fetch(url.toString(), {
+    headers: { Authorization: `Bearer ${config.accessToken}` },
+    cache: 'no-store',
+  })
+  if (!res.ok) {
+    const err = await res.text()
+    throw new Error(`Pinterest account analytics ${res.status}: ${err}`)
+  }
+
+  const rows = await res.json() as PinterestAccountRow[]
+
+  return rows
+    .filter(r => r.DATE && (r.SPEND_IN_MICRO_DOLLAR ?? 0) > 0)
+    .map(r => ({
+      date:        r.DATE,
+      platform:    'pinterest' as const,
+      brand:       config.brand,
+      spend:       round((r.SPEND_IN_MICRO_DOLLAR ?? 0) / 1_000_000),
+      impressions: r.PAID_IMPRESSION ?? 0,
+      clicks:      r.CLICKTHROUGH_1 ?? 0,
+      // Combine web + app checkouts
+      conversions: Math.round((r.TOTAL_WEB_CHECKOUT ?? 0) + (r.TOTAL_CHECKOUT ?? 0)),
+      revenue:     round(((r.TOTAL_WEB_CHECKOUT_VALUE_IN_MICRO_DOLLAR ?? 0) + (r.TOTAL_CHECKOUT_VALUE_IN_MICRO_DOLLAR ?? 0)) / 1_000_000),
+    }))
+}
+
+// ─── fetchCampaignAnalytics — campaign-level stats (for campaign_stats table) ─
 
 export async function fetchPinterestInsights(
   config: PinterestConfig,
@@ -141,43 +205,55 @@ export async function fetchPinterestInsights(
 ): Promise<RawPinterestStat[]> {
   if (campaignIds.length === 0) return []
 
-  // Pinterest analytics endpoint returns an array directly (no pagination wrapper)
-  const url = new URL(`${PINTEREST_BASE}/ad_accounts/${config.adAccountId}/campaigns/analytics`)
-  url.searchParams.set('start_date', dateFrom)
-  url.searchParams.set('end_date', dateTo)
-  url.searchParams.set('granularity', 'DAY')
-  for (const id of campaignIds) url.searchParams.append('campaign_ids', id)
-  for (const col of [
-    'SPEND_IN_MICRO_DOLLAR',
-    'IMPRESSION_1',
-    'CLICK_1',
-    'TOTAL_CHECKOUT',
-    'TOTAL_CHECKOUT_VALUE_IN_MICRO_DOLLAR',
-  ]) url.searchParams.append('columns', col)
+  // Pinterest analytics endpoint — batch in groups of 25 to avoid query string limits
+  const BATCH = 25
+  const allRows: RawPinterestStat[] = []
 
-  const res = await fetch(url.toString(), {
-    headers: { Authorization: `Bearer ${config.accessToken}` },
-    cache: 'no-store',
-  })
+  for (let i = 0; i < campaignIds.length; i += BATCH) {
+    const batch = campaignIds.slice(i, i + BATCH)
 
-  if (!res.ok) {
-    const err = await res.text()
-    throw new Error(`Pinterest analytics ${res.status}: ${err}`)
+    const url = new URL(`${PINTEREST_BASE}/ad_accounts/${config.adAccountId}/campaigns/analytics`)
+    url.searchParams.set('start_date', dateFrom)
+    url.searchParams.set('end_date', dateTo)
+    url.searchParams.set('granularity', 'DAY')
+    for (const id of batch) url.searchParams.append('campaign_ids', id)
+    for (const col of [
+      'SPEND_IN_MICRO_DOLLAR',
+      'PAID_IMPRESSION',
+      'CLICKTHROUGH_1',
+      'TOTAL_CHECKOUT',
+      'TOTAL_CHECKOUT_VALUE_IN_MICRO_DOLLAR',
+      'TOTAL_WEB_CHECKOUT',
+      'TOTAL_WEB_CHECKOUT_VALUE_IN_MICRO_DOLLAR',
+    ]) url.searchParams.append('columns', col)
+
+    const res = await fetch(url.toString(), {
+      headers: { Authorization: `Bearer ${config.accessToken}` },
+      cache: 'no-store',
+    })
+
+    if (!res.ok) {
+      const err = await res.text()
+      throw new Error(`Pinterest analytics ${res.status}: ${err}`)
+    }
+
+    const rows = await res.json() as PinterestAnalyticsRow[]
+
+    for (const r of rows) {
+      allRows.push({
+        externalId:  r.CAMPAIGN_ID,
+        date:        r.DATE,
+        spend:       (r.SPEND_IN_MICRO_DOLLAR ?? 0) / 1_000_000,
+        impressions: r.PAID_IMPRESSION ?? 0,
+        clicks:      r.CLICKTHROUGH_1 ?? 0,
+        conversions: (r.TOTAL_WEB_CHECKOUT ?? 0) + (r.TOTAL_CHECKOUT ?? 0),
+        revenue:     ((r.TOTAL_WEB_CHECKOUT_VALUE_IN_MICRO_DOLLAR ?? 0) + (r.TOTAL_CHECKOUT_VALUE_IN_MICRO_DOLLAR ?? 0)) / 1_000_000,
+      })
+    }
   }
 
-  const rows = await res.json() as PinterestAnalyticsRow[]
-
-  console.log(`[${config.brand}] Pinterest raw rows: ${rows.length} for ${dateFrom}→${dateTo}`)
-
-  return rows.map((r) => ({
-    externalId: r.CAMPAIGN_ID,
-    date: r.DATE,
-    spend: (r.SPEND_IN_MICRO_DOLLAR ?? 0) / 1_000_000,
-    impressions: r.IMPRESSION_1 ?? 0,
-    clicks: r.CLICK_1 ?? 0,
-    conversions: r.TOTAL_CHECKOUT ?? 0,
-    revenue: (r.TOTAL_CHECKOUT_VALUE_IN_MICRO_DOLLAR ?? 0) / 1_000_000,
-  }))
+  console.log(`[${config.brand}] Pinterest campaign rows: ${allRows.length} for ${dateFrom}→${dateTo}`)
+  return allRows
 }
 
 // ─── normalizeCampaignStats ───────────────────────────────────────────────────
@@ -196,7 +272,8 @@ export function normalizePinterestStats(stats: RawPinterestStat[]): NormalizedPi
   }))
 }
 
-// ─── aggregateAdSpends ────────────────────────────────────────────────────────
+// ─── aggregatePinterestAdSpends — kept for backward compat ────────────────────
+// (no longer used for ad_spends — replaced by fetchPinterestAccountSpend)
 
 export function aggregatePinterestAdSpends(
   stats: RawPinterestStat[],

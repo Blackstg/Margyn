@@ -6,8 +6,8 @@ export const maxDuration = 60
 import {
   fetchPinterestCampaigns,
   fetchPinterestInsights,
+  fetchPinterestAccountSpend,
   normalizePinterestStats,
-  aggregatePinterestAdSpends,
   type PinterestConfig,
 } from '@/lib/pinterest'
 
@@ -163,8 +163,9 @@ export async function POST(req: NextRequest) {
         }
       }
 
-      // ── 3. Ad spends (daily aggregate) ────────────────────────────────────
-      const adSpends = aggregatePinterestAdSpends(rawStats, store.brand)
+      // ── 3. Ad spends — account-level for correct totals ───────────────────
+      // Campaign-level analytics misses many campaigns; account-level aggregates all.
+      const adSpends = await fetchPinterestAccountSpend(store, dateFrom, dateTo)
       let adSpendsCount = 0
 
       if (adSpends.length > 0) {
