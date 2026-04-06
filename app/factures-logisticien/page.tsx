@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef } from 'react'
 import { read, utils } from 'xlsx'
-import { Upload, TrendingUp, Sparkles, AlertTriangle, RotateCcw, CheckCircle } from 'lucide-react'
+import { Upload, TrendingUp, Sparkles, AlertTriangle, RotateCcw, CheckCircle, GitFork } from 'lucide-react'
 
 interface InvoiceRow {
   order_name: string
@@ -11,12 +11,18 @@ interface InvoiceRow {
   shipping_price: number
   total_price: number
   isFW: boolean
+  sku: string
 }
 
 interface Anomaly {
   type: 'double_billing' | 'high_shipping' | 'suspicious'
   order_name: string
   detail: string
+  amount: number
+}
+
+interface SplitShipment {
+  order_name: string
   amount: number
 }
 
@@ -42,19 +48,29 @@ function isFW(r: Record<string, unknown>): boolean {
   return String(r['order_id'] ?? '').startsWith('FR_') || r['attributes'] === 'FW'
 }
 
-function detectAnomalies(rows: InvoiceRow[]): Anomaly[] {
-  const anomalies: Anomaly[] = []
+function detectAnomalies(
+  rows: InvoiceRow[],
+  skuToWarehouse: Map<string, string>
+): { anomalies: Anomaly[]; splitShipments: SplitShipment[] } {
+  const anomalies: Anomaly[]           = []
+  const splitShipments: SplitShipment[] = []
   const normal = rows.filter(r => !r.isFW)
   const fw     = rows.filter(r => r.isFW)
 
-  // 1. Double billing: FW row has same order_name as a normal row
-  const normalNames = new Set(normal.map(r => r.order_name))
+  // 1. Double billing vs split shipment: FW row has same order_name as a normal row
+  const normalByName = new Map(normal.map(r => [r.order_name, r]))
   for (const r of fw) {
-    if (normalNames.has(r.order_name)) {
+    if (!normalByName.has(r.order_name)) continue
+    const normalRow = normalByName.get(r.order_name)!
+    // Look up warehouse from either row's SKU
+    const warehouse = skuToWarehouse.get(r.sku) ?? skuToWarehouse.get(normalRow.sku)
+    if (warehouse === 'Les deux') {
+      splitShipments.push({ order_name: r.order_name, amount: r.total_price })
+    } else {
       anomalies.push({
         type: 'double_billing',
         order_name: r.order_name,
-        detail: `Commande facturée en normal et en renvoi FW`,
+        detail: 'Commande facturée en normal et en renvoi FW',
         amount: r.total_price,
       })
     }
@@ -92,24 +108,39 @@ function detectAnomalies(rows: InvoiceRow[]): Anomaly[] {
     }
   }
 
-  return anomalies
+  return { anomalies, splitShipments }
 }
 
 export default function FacturesLogisticienPage() {
   const fileRef   = useRef<HTMLInputElement>(null)
-  const [month, setMonth]       = useState('')
-  const [fileName, setFileName] = useState('')
-  const [loading, setLoading]   = useState(false)
-  const [rows, setRows]         = useState<InvoiceRow[]>([])
+  const [month, setMonth]         = useState('')
+  const [fileName, setFileName]   = useState('')
+  const [loading, setLoading]     = useState(false)
+  const [rows, setRows]           = useState<InvoiceRow[]>([])
   const [anomalies, setAnomalies] = useState<Anomaly[]>([])
-  const [history, setHistory]   = useState<MonthlySummary[]>([])
-  const [aiText, setAiText]     = useState('')
+  const [splitShipments, setSplitShipments] = useState<SplitShipment[]>([])
+  const [history, setHistory]     = useState<MonthlySummary[]>([])
+  const [aiText, setAiText]       = useState('')
   const [aiLoading, setAiLoading] = useState(false)
+  const [skuToWarehouse, setSkuToWarehouse] = useState<Map<string, string>>(new Map())
 
   useEffect(() => {
     fetch('/api/factures-logisticien/history')
       .then(r => r.json())
       .then(d => setHistory(d.summaries ?? []))
+      .catch(() => {})
+
+    // Build SKU → warehouse map from product_variants
+    fetch('/api/produits')
+      .then(r => r.json())
+      .then(d => {
+        const map = new Map<string, string>()
+        for (const v of (d.variants ?? [])) {
+          if (v.sku_fr && v.warehouse) map.set(v.sku_fr, v.warehouse)
+          if (v.sku_cn && v.warehouse) map.set(v.sku_cn, v.warehouse)
+        }
+        setSkuToWarehouse(map)
+      })
       .catch(() => {})
   }, [])
 
@@ -132,11 +163,13 @@ export default function FacturesLogisticienPage() {
       shipping_price:toNum(r['shipping_price']),
       total_price:   toNum(r['total_price']),
       isFW:          isFW(r),
+      sku:           String(r['sku'] ?? r['SKU'] ?? r['product_sku'] ?? r['variant_sku'] ?? '').trim(),
     })).filter(r => r.order_name !== '')
 
-    const detected = detectAnomalies(parsed)
+    const { anomalies: detected, splitShipments: splits } = detectAnomalies(parsed, skuToWarehouse)
     setRows(parsed)
     setAnomalies(detected)
+    setSplitShipments(splits)
     setLoading(false)
 
     // Auto-save summary to history
@@ -226,7 +259,7 @@ Historique FW : ${history.map(h => `${h.month}: ${h.fw_count} FW ($${h.fw_total?
             <input
               type="month"
               value={month}
-              onChange={e => { setMonth(e.target.value); setRows([]); setAnomalies([]); setFileName(''); setAiText('') }}
+              onChange={e => { setMonth(e.target.value); setRows([]); setAnomalies([]); setSplitShipments([]); setFileName(''); setAiText('') }}
               className="rounded-xl border border-[#e8e4e0] px-4 py-2.5 text-sm text-[#1a1a2e] focus:outline-none focus:ring-2 focus:ring-[#aeb0c9]/40"
             />
             {month && (
@@ -291,7 +324,7 @@ Historique FW : ${history.map(h => `${h.month}: ${h.fw_count} FW ($${h.fw_total?
             {/* Two-column layout */}
             <div className="grid grid-cols-2 gap-4 items-start">
 
-              {/* Left — Anomalies */}
+              {/* Left — Anomalies + Split shipments */}
               <div className="bg-white rounded-[16px] shadow-[0_2px_12px_rgba(0,0,0,0.06)] overflow-hidden">
                 <div className="px-5 py-4 border-b border-[#f0f0ee] flex items-center gap-2">
                   <AlertTriangle size={13} className={anomalies.length > 0 ? 'text-[#c7293a]' : 'text-[#1a7f4b]'} />
@@ -324,6 +357,31 @@ Historique FW : ${history.map(h => `${h.month}: ${h.fw_count} FW ($${h.fw_total?
                       </div>
                     ))}
                   </div>
+                )}
+
+                {/* Split shipments légitimes */}
+                {splitShipments.length > 0 && (
+                  <>
+                    <div className="px-5 py-3 border-t border-[#f0f0ee] flex items-center gap-2 bg-[#f6faf8]">
+                      <GitFork size={12} className="text-[#1a7f4b]" />
+                      <p className="text-[10px] font-semibold uppercase tracking-[0.1em] text-[#1a7f4b]">
+                        Split shipments légitimes ({splitShipments.length})
+                      </p>
+                    </div>
+                    <div className="divide-y divide-[#f0f8f4]">
+                      {splitShipments.map((s, i) => (
+                        <div key={i} className="flex items-center justify-between px-5 py-3 gap-4 bg-[#f6faf8]/60">
+                          <div className="flex items-center gap-2">
+                            <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-md bg-[#e6f4ec] text-[#1a7f4b]">
+                              Les deux entrepôts
+                            </span>
+                            <span className="font-mono text-xs text-[#1a1a2e]">{s.order_name}</span>
+                          </div>
+                          <p className="text-sm font-medium text-[#1a7f4b] tabular-nums shrink-0">${s.amount.toFixed(2)}</p>
+                        </div>
+                      ))}
+                    </div>
+                  </>
                 )}
               </div>
 
