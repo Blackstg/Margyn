@@ -30,7 +30,10 @@ const supabase = createBrowserClient(
 // ─── Date helpers ─────────────────────────────────────────────────────────────
 
 function fmt(d: Date): string {
-  return d.toISOString().slice(0, 10)
+  const y = d.getFullYear()
+  const m = String(d.getMonth() + 1).padStart(2, '0')
+  const day = String(d.getDate()).padStart(2, '0')
+  return `${y}-${m}-${day}`
 }
 
 function getYesterday(): string {
@@ -84,6 +87,8 @@ interface SnapshotRow {
   cogs?: number | null
   fulfillment_cost?: number | null
   returns?: number | null
+  gifting_count?: number | null
+  gifting_cogs?: number | null
 }
 
 type SnapshotAgg = Omit<KpiData, 'marketing' | 'op_expenses' | 'net_profit' | 'transaction_fees' | 'app_charges'>
@@ -91,14 +96,16 @@ type SnapshotAgg = Omit<KpiData, 'marketing' | 'op_expenses' | 'net_profit' | 't
 function sumSnapshots(rows: SnapshotRow[]): SnapshotAgg {
   const agg = rows.reduce<SnapshotAgg>(
     (acc, r) => ({
-      total_sales:  acc.total_sales  + (r.total_sales      ?? 0),
-      gross_profit: 0, // computed below
-      order_count:  acc.order_count  + (r.order_count      ?? 0),
-      cogs:         acc.cogs         + (r.cogs             ?? 0),
-      fulfillment:  acc.fulfillment  + (r.fulfillment_cost ?? 0),
-      returns:      acc.returns      + (r.returns          ?? 0),
+      total_sales:   acc.total_sales   + (r.total_sales      ?? 0),
+      gross_profit:  0, // computed below
+      order_count:   acc.order_count   + (r.order_count      ?? 0),
+      cogs:          acc.cogs          + (r.cogs             ?? 0),
+      fulfillment:   acc.fulfillment   + (r.fulfillment_cost ?? 0),
+      returns:       acc.returns       + (r.returns          ?? 0),
+      gifting_count: (acc.gifting_count ?? 0) + (r.gifting_count ?? 0),
+      gifting_cogs:  (acc.gifting_cogs  ?? 0) + (r.gifting_cogs  ?? 0),
     }),
-    { total_sales: 0, gross_profit: 0, order_count: 0, cogs: 0, fulfillment: 0, returns: 0 }
+    { total_sales: 0, gross_profit: 0, order_count: 0, cogs: 0, fulfillment: 0, returns: 0, gifting_count: 0, gifting_cogs: 0 }
   )
   agg.gross_profit = agg.total_sales - agg.cogs
   return agg
@@ -115,7 +122,7 @@ async function fetchSnapshotData(brand: Brand, date: string): Promise<SnapshotDa
   const campaignIds = (campaignMeta ?? []).map((c) => c.id)
 
   const [snapshotsRes, spendRes, campaignStatsRes] = await Promise.all([
-    supabase.from('daily_snapshots').select('total_sales, order_count, gross_profit, cogs')
+    supabase.from('daily_snapshots').select('total_sales, order_count, gross_profit, cogs, fulfillment_cost')
       .eq('date', date).in('brand', brands),
     supabase.from('ad_spends').select('spend').eq('date', date).in('brand', brands),
     campaignIds.length > 0
@@ -125,12 +132,13 @@ async function fetchSnapshotData(brand: Brand, date: string): Promise<SnapshotDa
 
   const snap = (snapshotsRes.data ?? []).reduce(
     (acc, r) => ({
-      total_sales:  acc.total_sales  + (r.total_sales  ?? 0),
-      order_count:  acc.order_count  + (r.order_count  ?? 0),
-      cogs:         acc.cogs         + (r.cogs         ?? 0),
+      total_sales:      acc.total_sales      + (r.total_sales      ?? 0),
+      order_count:      acc.order_count      + (r.order_count      ?? 0),
+      cogs:             acc.cogs             + (r.cogs             ?? 0),
+      fulfillment_cost: acc.fulfillment_cost + (r.fulfillment_cost ?? 0),
       gross_profit: 0, // computed below
     }),
-    { total_sales: 0, order_count: 0, gross_profit: 0, cogs: 0 }
+    { total_sales: 0, order_count: 0, gross_profit: 0, cogs: 0, fulfillment_cost: 0 }
   )
   snap.gross_profit = snap.total_sales - snap.cogs
 
@@ -217,8 +225,25 @@ async function fetchKpiData(brand: Brand, from: string, to: string, days: number
   })).filter(i => i.amount > 0)
   const supplementary_ca = supplementary_breakdown.reduce((s, i) => s + i.amount, 0)
 
+  // Gifting columns — fetched separately, gracefully degrade if columns don't exist yet
+  let gifting_count = 0
+  let gifting_cogs  = 0
+  try {
+    const { data: giftingRows, error: giftingError } = await supabase
+      .from('daily_snapshots')
+      .select('gifting_count, gifting_cogs')
+      .gte('date', from).lte('date', to).in('brand', brands)
+    if (!giftingError && giftingRows) {
+      for (const r of giftingRows as { gifting_count?: number | null; gifting_cogs?: number | null }[]) {
+        gifting_count += r.gifting_count ?? 0
+        gifting_cogs  += r.gifting_cogs  ?? 0
+      }
+    }
+  } catch { /* columns not yet migrated — default to 0 */ }
+
   return {
     ...snaps, fulfillment, marketing, op_expenses, app_charges, transaction_fees, net_profit: null,
+    gifting_count, gifting_cogs,
     ...(brand === 'bowa' && supplementary_ca > 0 ? { supplementary_ca, supplementary_breakdown } : {}),
   }
 }
@@ -331,7 +356,7 @@ async function fetchBestSellers(brand: Brand, from: string, to: string): Promise
 async function fetchInventory(brand: Brand): Promise<InventoryItem[]> {
   const velocityFrom = new Date()
   velocityFrom.setDate(velocityFrom.getDate() - 30)
-  const velocityFromStr = velocityFrom.toISOString().slice(0, 10)
+  const velocityFromStr = fmt(velocityFrom)
 
   const [variantsRes, salesRes] = await Promise.all([
     supabase
@@ -394,11 +419,10 @@ async function fetchSparklines(brand: Brand, from: string, to: string): Promise<
   const d = new Date(from + 'T00:00:00')
   const end = new Date(to + 'T00:00:00')
   while (d <= end) {
-    const key = d.toISOString().slice(0, 10)
+    const key = fmt(d)
     const v   = byDate.get(key) ?? { sales: 0, gross: 0 }
-    const tva = brand === 'bowa' ? Math.round(v.sales / 6) : 0
-    sales.push(v.sales - tva)
-    gross.push(v.gross - tva)
+    sales.push(v.sales)
+    gross.push(v.gross)
     d.setDate(d.getDate() + 1)
   }
   return { sales, gross }

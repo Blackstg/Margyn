@@ -23,7 +23,9 @@ type Period = '7j' | '30j' | 'mois'
 
 // ─── Date helpers ─────────────────────────────────────────────────────────────
 
-function fmt(d: Date): string { return d.toISOString().slice(0, 10) }
+function fmt(d: Date): string {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
 
 function getRange(period: Period): { from: string; to: string } {
   const today = new Date()

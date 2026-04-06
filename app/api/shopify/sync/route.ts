@@ -162,6 +162,14 @@ export async function POST(req: NextRequest) {
           .from('product_variants')
           .upsert(rows, { onConflict: 'shopify_variant_id' })
         if (error) throw new Error(`product_variants upsert: ${error.message}`)
+
+        // Delete variants that no longer exist in Shopify
+        const activeIds = variantRows.map((v) => v.shopify_variant_id)
+        await supabase
+          .from('product_variants')
+          .delete()
+          .eq('brand', store.brand)
+          .not('shopify_variant_id', 'in', `(${activeIds.join(',')})`)
       }
 
       results[store.brand] = { snapshots: snapshotCount, products: productCount, product_sales: productSalesCount }

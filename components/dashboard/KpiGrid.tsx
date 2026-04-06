@@ -19,6 +19,8 @@ export interface KpiData {
   app_charges: number
   supplementary_ca?: number
   supplementary_breakdown?: SupplementaryItem[]
+  gifting_count?: number
+  gifting_cogs?: number
 }
 
 export interface SparklineData {
@@ -219,30 +221,36 @@ export default function KpiGrid({ current, previous, loading, brand, sparklines 
   const c = current ?? {
     total_sales: 0, gross_profit: 0, net_profit: null,
     order_count: 0, marketing: 0, cogs: 0, fulfillment: 0, op_expenses: 0,
-    returns: 0, transaction_fees: 0, app_charges: 0,
+    returns: 0, transaction_fees: 0, app_charges: 0, gifting_count: 0, gifting_cogs: 0,
   }
   const p = previous ?? {
     total_sales: 0, gross_profit: 0, net_profit: null,
     order_count: 0, marketing: 0, cogs: 0, fulfillment: 0, op_expenses: 0,
-    returns: 0, transaction_fees: 0, app_charges: 0,
+    returns: 0, transaction_fees: 0, app_charges: 0, gifting_count: 0, gifting_cogs: 0,
   }
 
-  // For Bowa: Shopify stores TTC → convert to HT (× 5/6)
-  const tva            = brand === 'bowa' ? Math.round(c.total_sales / 6) : 0
-  const prevTva        = brand === 'bowa' ? Math.round(p.total_sales / 6) : 0
-  const shopifyHT      = c.total_sales - tva
-  const supplementaryHT = c.supplementary_ca ?? 0
-  const totalSalesHT   = shopifyHT + supplementaryHT
-  const grossProfitHT  = c.gross_profit - tva
-  const prevShopifyHT  = p.total_sales - prevTva
-  const prevSupplHT    = p.supplementary_ca ?? 0
-  const prevSalesHT    = prevShopifyHT + prevSupplHT
-  const prevGrossHT    = p.gross_profit - prevTva
-  const netProfit      = grossProfitHT  - c.marketing - c.fulfillment - c.transaction_fees - c.app_charges - c.op_expenses
-  const prevNetProfit  = prevGrossHT    - p.marketing - p.fulfillment - p.transaction_fees - p.app_charges - p.op_expenses
+  const totalSales      = c.total_sales + (c.supplementary_ca ?? 0)
+  const prevTotalSales  = p.total_sales + (p.supplementary_ca ?? 0)
+  const grossProfit     = c.gross_profit
+  const prevGrossProfit = p.gross_profit
+  const netProfit       = grossProfit - c.marketing - c.fulfillment - c.transaction_fees - c.app_charges - c.op_expenses
+  const prevNetProfit   = prevGrossProfit - p.marketing - p.fulfillment - p.transaction_fees - p.app_charges - p.op_expenses
 
-  const roasReel     = c.marketing > 0 ? totalSalesHT / c.marketing : 0
-  const prevRoasReel = p.marketing > 0 ? prevSalesHT  / p.marketing : 0
+  const roasReel     = c.marketing > 0 ? totalSales / c.marketing : 0
+  const prevRoasReel = p.marketing > 0 ? prevTotalSales / p.marketing : 0
+
+  const cpo     = c.order_count > 0 ? c.marketing / c.order_count : 0
+  const prevCpo = p.order_count > 0 ? p.marketing / p.order_count : 0
+
+  const returnRate = totalSales > 0 ? (c.returns / totalSales) * 100 : 0
+
+  const giftingCount    = c.gifting_count ?? 0
+  const giftingCogs     = c.gifting_cogs  ?? 0
+  const prevGiftingCount = p.gifting_count ?? 0
+  const paidOrders      = c.order_count - giftingCount
+  const prevPaidOrders  = p.order_count - prevGiftingCount
+  const panierMoyen     = paidOrders > 0 ? totalSales / paidOrders : 0
+  const prevPanierMoyen = prevPaidOrders > 0 ? prevTotalSales / prevPaidOrders : 0
 
   const tvaCollectee     = Math.round(c.total_sales / 6)
   const prevTvaCollectee = Math.round(p.total_sales / 6)
@@ -252,38 +260,26 @@ export default function KpiGrid({ current, previous, loading, brand, sparklines 
     ? `${(n / 1000).toFixed(1).replace(/\.0$/, '')}k€`
     : `${Math.round(n)}€`
   const suppBreakdown = c.supplementary_breakdown?.filter(i => i.amount > 0)
-  const salesDetailText = supplementaryHT > 0 && suppBreakdown?.length
-    ? `dont Shopify ${fmtShort(shopifyHT)}${suppBreakdown.map(i => ` + ${i.source} ${fmtShort(i.amount)}`).join('')}`
+  const salesDetailText = (c.supplementary_ca ?? 0) > 0 && suppBreakdown?.length
+    ? `dont Shopify ${fmtShort(c.total_sales)}${suppBreakdown.map(i => ` + ${i.source} ${fmtShort(i.amount)}`).join('')}`
     : undefined
 
   return (
     <div className="space-y-3">
 
-      {/* ── Top 3 cards ─────────────────────────────────────────────────────── */}
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+      {/* ── Top 2 cards ─────────────────────────────────────────────────────── */}
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
 
         {/* Total Sales — mesh radial gradient bg */}
         <KpiCard
           label="Total Sales"
-          value={totalSalesHT}
-          formatted={fmtEur(totalSalesHT)}
-          prevValue={prevSalesHT}
+          value={totalSales}
+          formatted={fmtEur(totalSales)}
+          prevValue={prevTotalSales}
           loading={loading}
           gradient="radial-gradient(ellipse at top left, #8a8db8 0%, transparent 60%), radial-gradient(ellipse at bottom right, #c4788a 0%, transparent 60%), radial-gradient(ellipse at top right, #c9a8b8 0%, transparent 50%), #3d3b5e"
           sparkline={sparklines?.sales}
           detail={salesDetailText}
-        />
-
-        {/* Gross Profit — white bg + gradient text */}
-        <KpiCard
-          label="Gross Profit"
-          value={grossProfitHT}
-          formatted={fmtEur(grossProfitHT)}
-          prevValue={prevGrossHT}
-          loading={loading}
-          gradientText
-          note={shopifyHT > 0 ? `${((grossProfitHT / shopifyHT) * 100).toFixed(1)}% marge` : undefined}
-          sparkline={sparklines?.gross}
         />
 
         {/* Net Profit — white bg + gradient text */}
@@ -294,19 +290,29 @@ export default function KpiGrid({ current, previous, loading, brand, sparklines 
           prevValue={prevNetProfit}
           loading={loading}
           gradientText
-          note={shopifyHT > 0 ? `${((netProfit / shopifyHT) * 100).toFixed(1)}% du CA` : undefined}
+          note={totalSales > 0 ? `${((netProfit / totalSales) * 100).toFixed(1)}% du CA` : undefined}
           sparkline={sparklines?.gross}
         />
       </div>
 
       {/* ── Secondary white cards ────────────────────────────────────────────── */}
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        <KpiCard label="Commandes"       value={c.order_count}      formatted={fmtNum(c.order_count)}   prevValue={p.order_count}      loading={loading} />
-        <KpiCard label="Marketing"       value={c.marketing}        formatted={fmtEur(c.marketing)}     prevValue={p.marketing}        loading={loading} inverse />
-        <KpiCard label="ROAS réel"       value={roasReel}           formatted={`${roasReel.toFixed(2)}x`}  prevValue={prevRoasReel}    loading={loading} note="CA Shopify / dépense pub" />
-        <KpiCard label="COGS"            value={c.cogs}             formatted={fmtEur(c.cogs)}          prevValue={p.cogs}             loading={loading} inverse />
-        <KpiCard label="Retours"         value={c.returns}          formatted={fmtEur(c.returns)}       prevValue={p.returns}          loading={loading} inverse />
-        <KpiCard label="Transaction Fees" value={c.transaction_fees} formatted={fmtEur(c.transaction_fees)} prevValue={p.transaction_fees} loading={loading} inverse note={totalSalesHT > 0 ? `${((c.transaction_fees / totalSalesHT) * 100).toFixed(1)}% du CA` : undefined} />
+        <KpiCard label="Commandes"    value={c.order_count}  formatted={fmtNum(c.order_count)}  prevValue={p.order_count}   loading={loading} />
+        <KpiCard label="Panier moyen" value={panierMoyen}    formatted={fmtEur(panierMoyen)}    prevValue={prevPanierMoyen} loading={loading} note={giftingCount > 0 ? 'hors gifting' : undefined} />
+        <KpiCard
+          label="Gifting"
+          value={giftingCount}
+          formatted={fmtNum(giftingCount)}
+          prevValue={prevGiftingCount}
+          loading={loading}
+          note={giftingCogs > 0 ? `${fmtEur(giftingCogs)} offerts` : undefined}
+        />
+        <KpiCard label="Marketing"    value={c.marketing}    formatted={fmtEur(c.marketing)}    prevValue={p.marketing}     loading={loading} inverse />
+        <KpiCard label="ROAS réel"  value={roasReel} formatted={`${roasReel.toFixed(2)}x`} prevValue={prevRoasReel} loading={loading} note="CA / dépense pub" />
+        <KpiCard label="CPA"        value={cpo}      formatted={cpo > 0 ? `${fmtEur(cpo)}` : '—'}    prevValue={prevCpo}     loading={loading} inverse note="coût par achat" />
+        <KpiCard label="COGS"       value={c.cogs}   formatted={fmtEur(c.cogs)}  prevValue={p.cogs}  loading={loading} inverse />
+        <KpiCard label="Retours"    value={c.returns} formatted={fmtEur(c.returns)} prevValue={p.returns} loading={loading} inverse note={returnRate > 0 ? `${returnRate.toFixed(1)}% du CA` : undefined} />
+        <KpiCard label="Transaction Fees" value={c.transaction_fees} formatted={fmtEur(c.transaction_fees)} prevValue={p.transaction_fees} loading={loading} inverse note={totalSales > 0 ? `${((c.transaction_fees / totalSales) * 100).toFixed(1)}% du CA` : undefined} />
         <KpiCard label="Fulfillment"     value={c.fulfillment}      formatted={fmtEur(c.fulfillment)}   prevValue={p.fulfillment}      loading={loading} inverse note={c.order_count > 0 ? `${fmtEur(Math.round(c.fulfillment / c.order_count))}/cmd` : undefined} />
         <KpiCard label="Apps Shopify"    value={c.app_charges}      formatted={fmtEur(c.app_charges)}   prevValue={p.app_charges}      loading={loading} inverse isEmpty />
         <KpiCard label="Op. Expenses"    value={c.op_expenses}      formatted={fmtEur(c.op_expenses)}   prevValue={p.op_expenses}      loading={loading} inverse isEmpty />

@@ -59,6 +59,7 @@ interface ShopifyVariant {
 export interface ShopifyProduct {
   id: number
   title: string
+  status: string
   image?: { src: string }
   images?: Array<{ src: string; variant_ids: number[] }>
   variants: ShopifyVariant[]
@@ -82,6 +83,8 @@ export interface DailyMetrics {
   fulfillment_cost: number
   returns: number
   discounts: number
+  gifting_count: number
+  gifting_cogs: number
 }
 
 export interface NormalizedProduct {
@@ -106,6 +109,7 @@ export interface NormalizedVariant {
   sell_price: number | null
   stock_quantity: number
   image_url: string | null
+  product_status: string
 }
 
 // ─── Pagination helper ────────────────────────────────────────────────────────
@@ -281,6 +285,8 @@ export async function computeMetrics(
       fulfillment_cost: number
       returns: number
       discounts: number
+      gifting_count: number
+      gifting_cogs: number
     }
   >()
 
@@ -306,6 +312,8 @@ export async function computeMetrics(
       fulfillment_cost: 0,
       returns: 0,
       discounts: 0,
+      gifting_count: 0,
+      gifting_cogs: 0,
     }
 
     const orderTotal = parseFloat(order.total_price)
@@ -333,12 +341,18 @@ export async function computeMetrics(
 
     // total_sales = total_price − returns, matching Shopify Analytics "Ventes totales"
     // total_price already includes shipping, taxes, and has discounts baked in
+    // 0€ orders are gifting/influencer sends — they contribute 0 to total_sales naturally
     entry.total_sales += orderTotal - orderReturns
     entry.order_count += 1
     entry.cogs += orderCogs
     entry.fulfillment_cost += shippingRatePerOrder > 0 ? shippingRatePerOrder : shipping
     entry.returns += orderReturns
     entry.discounts += discounts
+
+    if (orderTotal === 0) {
+      entry.gifting_count += 1
+      entry.gifting_cogs += orderCogs
+    }
 
     byDate.set(date, entry)
   }
@@ -361,6 +375,8 @@ export async function computeMetrics(
       fulfillment_cost: round(data.fulfillment_cost),
       returns: round(data.returns),
       discounts: round(data.discounts),
+      gifting_count: data.gifting_count,
+      gifting_cogs: round(data.gifting_cogs),
     })
   }
 
@@ -524,6 +540,7 @@ export async function normalizeVariants(
         sell_price:         round(parseFloat(variant.price)),
         stock_quantity:     variant.inventory_quantity,
         image_url,
+        product_status:     product.status,
       })
     }
   }

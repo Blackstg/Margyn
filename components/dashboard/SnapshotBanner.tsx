@@ -7,6 +7,7 @@ export interface SnapshotData {
   gross_profit: number
   cogs: number
   spend: number
+  fulfillment_cost: number
 }
 
 interface Props {
@@ -46,10 +47,10 @@ function items(d: SnapshotData, roasTarget: number): Item[] {
     },
     {
       icon: TrendingUp,
-      label: 'Profit brut',
-      value: fmt(d.gross_profit),
-      sub: 'Avant charges fixes',
-      valueColor: d.gross_profit > 0 ? 'text-[#1a7f4b]' : d.gross_profit < 0 ? 'text-[#c7293a]' : undefined,
+      label: 'Profit net',
+      value: fmt(d.gross_profit - d.spend - d.fulfillment_cost),
+      sub: 'Après pub + shipping',
+      valueColor: (d.gross_profit - d.spend - d.fulfillment_cost) > 0 ? 'text-[#1a7f4b]' : (d.gross_profit - d.spend - d.fulfillment_cost) < 0 ? 'text-[#c7293a]' : undefined,
     },
     {
       icon: ShoppingBag,

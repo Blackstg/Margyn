@@ -128,9 +128,24 @@ export default function AdPanel({ spendData, roasData, activePlatforms, loading,
                           <PlatformIcon platform={d.platform} size={18} />
                           <span className="text-xs font-medium text-[#1a1a2e] truncate">{label}</span>
                         </div>
-                        <span className="text-xs font-semibold text-[#1a1a2e] tabular-nums shrink-0">
-                          {fmtEur(d.spend)}
-                        </span>
+                        <div className="flex items-center gap-2.5 shrink-0">
+                          {(() => {
+                            const roas = d.spend > 0 ? d.revenue / d.spend : null
+                            return (
+                              <span className="text-[11px] tabular-nums font-medium" style={{
+                                color: roas == null ? '#9b9b93'
+                                     : roas >= 3   ? '#1a7f4b'
+                                     : roas >= 1.5 ? '#b45309'
+                                     :               '#c7293a'
+                              }}>
+                                {roas != null ? `ROAS ${roas.toFixed(2)}x` : '—'}
+                              </span>
+                            )
+                          })()}
+                          <span className="text-xs font-semibold text-[#1a1a2e] tabular-nums">
+                            {fmtEur(d.spend)}
+                          </span>
+                        </div>
                       </div>
                       <div className="h-1.5 w-full bg-[#f5f0f2] rounded-full overflow-hidden">
                         <div

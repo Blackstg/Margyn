@@ -267,9 +267,10 @@ export default function ReapproPage() {
   const [exclusions,       setExclusions]       = useState<Set<string>>(new Set())
 
   // 90-day window — computed once, stable across re-renders
-  const today90 = useMemo(() => new Date().toISOString().slice(0, 10), [])
+  const fmtLocal = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+  const today90 = useMemo(() => fmtLocal(new Date()), [])
   const from90  = useMemo(() => {
-    const d = new Date(); d.setDate(d.getDate() - 90); return d.toISOString().slice(0, 10)
+    const d = new Date(); d.setDate(d.getDate() - 90); return fmtLocal(d)
   }, [])
 
   useEffect(() => {

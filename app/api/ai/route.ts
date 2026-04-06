@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import Anthropic from '@anthropic-ai/sdk'
 
-const MODEL = 'claude-sonnet-4-20250514'
+const MODEL = 'claude-haiku-4-5-20251001'
 
 const SYSTEM_PROMPT = `Tu es Steero AI, un assistant analytique e-commerce expert. Tu analyses les données de performance de la marque [brand] et fournis des recommandations courtes, précises et actionnables en français.
 

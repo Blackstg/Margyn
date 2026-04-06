@@ -2,14 +2,17 @@
 
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
-import { LayoutDashboard, BarChart2, PackageOpen, Settings, LogOut } from 'lucide-react'
+import { LayoutDashboard, BarChart2, PackageOpen, Settings, LogOut, Boxes, FileText } from 'lucide-react'
 import { createBrowserClient } from '@supabase/auth-helpers-nextjs'
+import { useState, useEffect } from 'react'
 
 const NAV = [
-  { href: '/dashboard',           icon: LayoutDashboard, label: 'Dashboard'          },
-  { href: '/campaigns',           icon: BarChart2,        label: 'Campagnes'          },
-  { href: '/reapprovisionnement', icon: PackageOpen,      label: 'Réappro'            },
-  { href: '/settings',            icon: Settings,         label: 'Paramètres'         },
+  { href: '/dashboard',            icon: LayoutDashboard, label: 'Dashboard'      },
+  { href: '/campaigns',            icon: BarChart2,        label: 'Campagnes'      },
+  { href: '/reapprovisionnement',  icon: PackageOpen,      label: 'Réappro'        },
+  { href: '/reconciliation-stock',    icon: Boxes,     label: 'Réconciliation'  },
+  { href: '/factures-logisticien',    icon: FileText,  label: 'Factures logo'   },
+  { href: '/settings',                icon: Settings,  label: 'Paramètres'      },
 ]
 
 export default function Sidebar() {
@@ -19,6 +22,16 @@ export default function Sidebar() {
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
   )
+  const [pendingCount, setPendingCount] = useState(0)
+
+  useEffect(() => {
+    fetch('/api/reconciliation/history')
+      .then((r) => r.json())
+      .then(({ reconciliations }) => {
+        setPendingCount((reconciliations ?? []).filter((r: { status: string }) => r.status === 'pending').length)
+      })
+      .catch(() => {})
+  }, [pathname])
 
   async function handleLogout() {
     await supabase.auth.signOut()
@@ -45,6 +58,7 @@ export default function Sidebar() {
       <nav className="flex flex-col items-center gap-1.5 w-full px-2">
         {NAV.map(({ href, icon: Icon, label }) => {
           const active = pathname.startsWith(href)
+          const badge  = href === '/reconciliation-stock' && pendingCount > 0
           return (
             <Link
               key={href}
@@ -56,9 +70,11 @@ export default function Sidebar() {
               }`}
             >
               <Icon size={20} strokeWidth={1.8} />
-              {/* Tooltip */}
+              {badge && (
+                <span className="absolute top-1.5 right-1.5 w-2 h-2 rounded-full bg-[#c7293a]" />
+              )}
               <span className="pointer-events-none absolute left-full ml-3 px-2.5 py-1.5 bg-[#1a1a2e] border border-white/10 text-white text-xs font-medium rounded-lg opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap shadow-lg">
-                {label}
+                {label}{badge ? ` (${pendingCount})` : ''}
               </span>
             </Link>
           )

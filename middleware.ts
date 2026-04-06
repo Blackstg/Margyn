@@ -35,11 +35,23 @@ export async function middleware(req: NextRequest) {
 
   const { data: { session } } = await supabase.auth.getSession()
 
-  if (!session && !isLoginPage) {
-    return NextResponse.redirect(new URL('/login', req.url))
+  if (!session) {
+    if (!isLoginPage) return NextResponse.redirect(new URL('/login', req.url))
+    return response
   }
 
-  if (session && isLoginPage) {
+  const role = (session.user.user_metadata?.role as string | undefined) ?? 'admin'
+
+  // Logistician: restricted to /reconciliation only
+  if (role === 'logistician') {
+    if (!pathname.startsWith('/reconciliation')) {
+      return NextResponse.redirect(new URL('/reconciliation', req.url))
+    }
+    return response
+  }
+
+  // Admin: redirect away from login
+  if (isLoginPage) {
     return NextResponse.redirect(new URL('/dashboard', req.url))
   }
 
