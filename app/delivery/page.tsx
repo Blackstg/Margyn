@@ -148,7 +148,6 @@ function PlanificateurView() {
   const [loadingTours, setLoadingTours] = useState(true)
   const [targetTourId, setTargetTourId] = useState('')
   const [expandedTours, setExpandedTours] = useState<Set<string>>(new Set())
-  const [expandedStop, setExpandedStop] = useState<Set<string>>(new Set())
   const [expandedOrder, setExpandedOrder] = useState<Set<string>>(new Set())
   const [savingTour, setSavingTour] = useState(false)
   const [addingStops, setAddingStops] = useState(false)
@@ -312,15 +311,6 @@ function PlanificateurView() {
       const next = new Set(prev)
       if (next.has(tourId)) next.delete(tourId)
       else next.add(tourId)
-      return next
-    })
-  }
-
-  function toggleStop(stopId: string) {
-    setExpandedStop((prev) => {
-      const next = new Set(prev)
-      if (next.has(stopId)) next.delete(stopId)
-      else next.add(stopId)
       return next
     })
   }
