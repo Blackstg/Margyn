@@ -75,13 +75,6 @@ function formatDate(dateStr: string): string {
   return d.toLocaleDateString('fr-FR', { weekday: 'short', day: 'numeric', month: 'short' })
 }
 
-function todayString(): string {
-  const d = new Date()
-  const y = d.getFullYear()
-  const m = String(d.getMonth() + 1).padStart(2, '0')
-  const day = String(d.getDate()).padStart(2, '0')
-  return `${y}-${m}-${day}`
-}
 
 function getWeekNumber(dateStr: string): number {
   const d = new Date(dateStr + 'T00:00:00')
@@ -793,49 +786,48 @@ function PlanificateurView() {
 // ─── Livreur View ─────────────────────────────────────────────────────────────
 
 function LivreurView() {
-  const [selectedDate, setSelectedDate] = useState(todayString())
   const [tours, setTours] = useState<Tour[]>([])
   const [selectedTourId, setSelectedTourId] = useState('')
-  const [loadingList, setLoadingList] = useState(true)
+  const [loading, setLoading] = useState(true)
 
   const fetchTours = useCallback(async () => {
-    setLoadingList(true)
+    setLoading(true)
     try {
       const r = await fetch('/api/delivery/tours')
       const data = await r.json()
-      const filtered = (data.tours ?? []).filter(
-        (t: Tour) => t.planned_date === selectedDate
+      const list: Tour[] = (data.tours ?? []).filter(
+        (t: Tour) => t.status !== 'cancelled'
       )
-      setTours(filtered)
-      if (filtered.length > 0 && !filtered.find((t: Tour) => t.id === selectedTourId)) {
-        setSelectedTourId(filtered[0].id)
+      setTours(list)
+      if (list.length > 0 && !list.find((t: Tour) => t.id === selectedTourId)) {
+        setSelectedTourId(list[0].id)
       }
     } catch (e) {
       console.error(e)
     } finally {
-      setLoadingList(false)
+      setLoading(false)
     }
-  }, [selectedDate, selectedTourId])
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
-  useEffect(() => {
-    fetchTours()
-  }, [fetchTours])
+  useEffect(() => { fetchTours() }, [fetchTours])
 
   const tour = tours.find((t) => t.id === selectedTourId)
   const sortedStops = tour ? [...tour.stops].sort((a, b) => a.sequence - b.sequence) : []
 
-  // Aggregate panel_details by SKU for truck loading list
-  const loadingAgg: Record<string, { title: string; qty: number }> = {}
+  // Aggregate by SKU
+  const loadingAgg: Map<string, { sku: string; title: string; qty: number }> = new Map()
   if (tour) {
     for (const stop of tour.stops) {
-      for (const item of stop.panel_details) {
-        if (!loadingAgg[item.sku]) {
-          loadingAgg[item.sku] = { title: item.title, qty: 0 }
-        }
-        loadingAgg[item.sku].qty += item.qty
+      for (const item of stop.panel_details ?? []) {
+        const key = item.sku?.trim() || item.title
+        const existing = loadingAgg.get(key)
+        if (existing) existing.qty += item.qty
+        else loadingAgg.set(key, { sku: item.sku?.trim() ?? '', title: item.title, qty: item.qty })
       }
     }
   }
+  const loadingList = [...loadingAgg.values()].sort((a, b) => b.qty - a.qty)
 
   async function handleMarkDelivered(stopId: string) {
     await fetch(`/api/delivery/stops/${stopId}`, {
@@ -848,164 +840,187 @@ function LivreurView() {
 
   const mapsUrl = sortedStops.length > 0
     ? `https://www.google.com/maps/dir/${sortedStops
-        .map((s) => encodeURIComponent(`${s.address1} ${s.city} ${s.zip}`))
+        .map((s) => encodeURIComponent(`${s.address1}, ${s.city} ${s.zip}, France`))
         .join('/')}`
     : ''
 
+  if (loading) {
+    return <div className="text-center py-16 text-sm text-[#6b6b63]">Chargement...</div>
+  }
+
+  if (tours.length === 0) {
+    return (
+      <div className="rounded-[20px] shadow-[0_2px_16px_rgba(0,0,0,0.06)] bg-white p-12 text-center text-sm text-[#6b6b63]">
+        Aucune tournée disponible
+      </div>
+    )
+  }
+
   return (
-    <div className="max-w-2xl mx-auto space-y-4">
-      {/* Date picker */}
-      <div className="rounded-[20px] shadow-[0_2px_16px_rgba(0,0,0,0.06)] bg-white p-5">
-        <div className="flex items-center gap-4">
-          <label className="text-sm font-medium text-[#1a1a2e]">Date :</label>
-          <input
-            type="date"
-            value={selectedDate}
-            onChange={(e) => {
-              setSelectedDate(e.target.value)
-              setSelectedTourId('')
-            }}
-            className="px-3 py-2 text-sm border border-[#e8e8e4] rounded-[10px] outline-none focus:border-[#aeb0c9]"
-          />
+    <div className="grid grid-cols-[280px_1fr] gap-5 items-start">
+
+      {/* Left: tour list */}
+      <div className="rounded-[20px] shadow-[0_2px_16px_rgba(0,0,0,0.06)] bg-white p-4">
+        <h2 className="text-sm font-semibold text-[#1a1a2e] mb-3">Tournées</h2>
+        <div className="space-y-2">
+          {tours.map((t) => {
+            const active = t.id === selectedTourId
+            const statusInfo = TOUR_STATUS_LABELS[t.status] ?? TOUR_STATUS_LABELS.draft
+            const delivered = t.stops.filter((s) => s.status === 'delivered').length
+            return (
+              <button
+                key={t.id}
+                onClick={() => setSelectedTourId(t.id)}
+                className={`w-full text-left p-3 rounded-[12px] border transition-all ${
+                  active
+                    ? 'border-2 border-[#aeb0c9] bg-[#f0f0fa]'
+                    : 'border border-[#e8e8e4] hover:border-[#aeb0c9]/50'
+                }`}
+              >
+                <div className="flex items-center justify-between gap-2 mb-1">
+                  <span className="font-semibold text-sm text-[#1a1a2e] truncate">{t.name}</span>
+                  <span className={`shrink-0 px-1.5 py-0.5 rounded-full text-[10px] font-medium ${statusInfo.color}`}>
+                    {statusInfo.label}
+                  </span>
+                </div>
+                {t.planned_date && (
+                  <div className="text-xs text-[#6b6b63] capitalize">{formatDate(t.planned_date)}</div>
+                )}
+                <div className="text-xs text-[#6b6b63] mt-0.5">
+                  {t.total_panels} panneau{t.total_panels !== 1 ? 'x' : ''} · {t.stops.length} arrêt{t.stops.length !== 1 ? 's' : ''}
+                </div>
+                {t.stops.length > 0 && (
+                  <div className="mt-1.5 w-full h-1 bg-[#e8e8e4] rounded-full overflow-hidden">
+                    <div
+                      className="h-full bg-[#1a7f4b] rounded-full transition-all"
+                      style={{ width: `${(delivered / t.stops.length) * 100}%` }}
+                    />
+                  </div>
+                )}
+              </button>
+            )
+          })}
         </div>
       </div>
 
-      {loadingList ? (
-        <div className="text-center py-8 text-sm text-[#6b6b63]">Chargement...</div>
-      ) : tours.length === 0 ? (
-        <div className="rounded-[20px] shadow-[0_2px_16px_rgba(0,0,0,0.06)] bg-white p-8 text-center text-sm text-[#6b6b63]">
-          Aucune tournée pour cette date
-        </div>
-      ) : (
-        <>
-          {/* Tour selector if multiple */}
-          {tours.length > 1 && (
-            <div className="flex gap-2">
-              {tours.map((t) => (
-                <button
-                  key={t.id}
-                  onClick={() => setSelectedTourId(t.id)}
-                  className={`px-4 py-2 rounded-[12px] text-sm font-medium transition-all ${
-                    selectedTourId === t.id
-                      ? 'bg-[#1a1a2e] text-white'
-                      : 'bg-white text-[#6b6b63] shadow-[0_2px_8px_rgba(0,0,0,0.06)]'
-                  }`}
-                >
-                  {t.name}
-                </button>
-              ))}
+      {/* Right: tour detail */}
+      {tour ? (
+        <div className="space-y-4">
+          {/* Header */}
+          <div className="rounded-[20px] shadow-[0_2px_16px_rgba(0,0,0,0.06)] bg-white p-5 flex items-center justify-between">
+            <div>
+              <div className="font-semibold text-[#1a1a2e] text-lg">{tour.name}</div>
+              <div className="text-sm text-[#6b6b63] mt-0.5">
+                {tour.planned_date && <span className="capitalize">{formatDate(tour.planned_date)} · </span>}
+                {tour.driver_name && <span>{tour.driver_name} · </span>}
+                {tour.total_panels} panneau{tour.total_panels !== 1 ? 'x' : ''} · {sortedStops.length} arrêt{sortedStops.length !== 1 ? 's' : ''}
+              </div>
+            </div>
+            {mapsUrl && (
+              <a
+                href={mapsUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex items-center gap-2 px-4 py-2 rounded-[12px] bg-[#1a7f4b] text-white text-sm font-medium hover:bg-[#158a42] transition-colors shrink-0"
+              >
+                <MapPin size={16} />
+                Optimiser l&apos;itinéraire
+              </a>
+            )}
+          </div>
+
+          {/* Loading list */}
+          {loadingList.length > 0 && (
+            <div className="rounded-[20px] shadow-[0_2px_16px_rgba(0,0,0,0.06)] bg-white p-5">
+              <div className="flex items-center gap-2 mb-3">
+                <Package size={16} color="#1a1a2e" strokeWidth={1.8} />
+                <h3 className="font-semibold text-[#1a1a2e] text-sm">Liste de chargement</h3>
+              </div>
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="text-left text-xs text-[#6b6b63] border-b border-[#e8e8e4]">
+                    <th className="pb-2 font-medium">Réf</th>
+                    <th className="pb-2 font-medium">Produit</th>
+                    <th className="pb-2 font-medium text-right">Qté</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {loadingList.map((item, i) => (
+                    <tr key={i} className="border-b border-[#f5f5f3] last:border-0">
+                      <td className="py-2 font-mono text-xs text-[#6b6b63] pr-3 whitespace-nowrap">{item.sku || '—'}</td>
+                      <td className="py-2 font-medium text-[#1a1a2e]">{item.title}</td>
+                      <td className="py-2 text-right font-bold text-[#1a1a2e] text-base">{item.qty}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
           )}
 
-          {tour && (
-            <>
-              {/* Tour info + Maps button */}
-              <div className="rounded-[20px] shadow-[0_2px_16px_rgba(0,0,0,0.06)] bg-white p-5 flex items-center justify-between">
-                <div>
-                  <div className="font-semibold text-[#1a1a2e]">{tour.name}</div>
-                  <div className="text-sm text-[#6b6b63]">
-                    {tour.driver_name && <span>{tour.driver_name} · </span>}
-                    {tour.total_panels} panneau{tour.total_panels !== 1 ? 'x' : ''}
-                    {' · '}{sortedStops.length} arrêt{sortedStops.length !== 1 ? 's' : ''}
-                  </div>
-                </div>
-                {mapsUrl && (
-                  <a
-                    href={mapsUrl}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="flex items-center gap-2 px-4 py-2 rounded-[12px] bg-[#1a7f4b] text-white text-sm font-medium"
-                  >
-                    <MapPin size={16} />
-                    Google Maps
-                  </a>
-                )}
-              </div>
-
-              {/* Loading list */}
-              <div className="rounded-[20px] shadow-[0_2px_16px_rgba(0,0,0,0.06)] bg-white p-5">
-                <div className="flex items-center gap-2 mb-4">
-                  <Package size={18} color="#1a1a2e" strokeWidth={1.8} />
-                  <h3 className="font-semibold text-[#1a1a2e]">Chargement camion</h3>
-                </div>
-                {Object.keys(loadingAgg).length === 0 ? (
-                  <div className="text-sm text-[#6b6b63]">Aucun article</div>
-                ) : (
-                  <table className="w-full text-sm">
-                    <thead>
-                      <tr className="text-left text-xs text-[#6b6b63] border-b border-[#e8e8e4]">
-                        <th className="pb-2 font-medium">Réf</th>
-                        <th className="pb-2 font-medium">Produit</th>
-                        <th className="pb-2 font-medium text-right">Quantité totale</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {Object.entries(loadingAgg).map(([sku, item]) => (
-                        <tr key={sku} className="border-b border-[#f5f5f3] last:border-0">
-                          <td className="py-2 font-mono text-xs text-[#6b6b63]">{sku || '—'}</td>
-                          <td className="py-2 font-medium text-[#1a1a2e]">{item.title}</td>
-                          <td className="py-2 text-right font-bold text-[#1a1a2e] text-base">{item.qty}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                )}
-              </div>
-
-              {/* Stops */}
-              <div className="rounded-[20px] shadow-[0_2px_16px_rgba(0,0,0,0.06)] bg-white p-5">
-                <h3 className="font-semibold text-[#1a1a2e] mb-4">Arrêts</h3>
-                <div className="space-y-3">
-                  {sortedStops.map((stop, idx) => (
-                    <div
-                      key={stop.id}
-                      className={`flex items-center gap-3 p-3 rounded-[12px] border ${
-                        stop.status === 'delivered'
-                          ? 'border-[#d1fae5] bg-[#f0fdf4]'
-                          : 'border-[#e8e8e4] bg-white'
-                      }`}
-                    >
-                      <span className="w-8 h-8 rounded-full bg-[#1a1a2e] text-white flex items-center justify-center text-sm font-bold shrink-0">
-                        {idx + 1}
-                      </span>
-                      <div className="flex-1 min-w-0">
-                        <div className="font-semibold text-[#1a1a2e] text-sm">{stop.customer_name}</div>
-                        <div className="text-xs text-[#6b6b63]">{stop.address1}, {stop.city} {stop.zip}</div>
-                        <div className="text-xs text-[#6b6b63]">
-                          {stop.panel_count} panneau{stop.panel_count !== 1 ? 'x' : ''}
-                        </div>
-                      </div>
-                      <div className="shrink-0">
-                        {stop.status === 'delivered' ? (
-                          <div className="text-right">
-                            <span className="px-3 py-1.5 rounded-[8px] bg-[#d1fae5] text-[#1a7f4b] text-xs font-medium">
-                              Livré ✓
-                            </span>
-                            {stop.delivered_at && (
-                              <div className="text-[10px] text-[#6b6b63] mt-1">
-                                {new Date(stop.delivered_at).toLocaleTimeString('fr-FR', {
-                                  hour: '2-digit',
-                                  minute: '2-digit',
-                                })}
-                              </div>
-                            )}
+          {/* Stops */}
+          <div className="rounded-[20px] shadow-[0_2px_16px_rgba(0,0,0,0.06)] bg-white p-5">
+            <h3 className="font-semibold text-[#1a1a2e] text-sm mb-3">Arrêts</h3>
+            <div className="space-y-3">
+              {sortedStops.map((stop, idx) => (
+                <div
+                  key={stop.id}
+                  className={`flex items-start gap-3 p-3 rounded-[12px] border ${
+                    stop.status === 'delivered'
+                      ? 'border-[#d1fae5] bg-[#f0fdf4]'
+                      : 'border-[#e8e8e4]'
+                  }`}
+                >
+                  <span className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold shrink-0 ${
+                    stop.status === 'delivered' ? 'bg-[#1a7f4b] text-white' : 'bg-[#1a1a2e] text-white'
+                  }`}>
+                    {idx + 1}
+                  </span>
+                  <div className="flex-1 min-w-0">
+                    <div className="font-semibold text-[#1a1a2e] text-sm">{stop.customer_name}</div>
+                    <div className="text-xs text-[#6b6b63]">{stop.order_name} · {stop.panel_count} panneau{stop.panel_count !== 1 ? 'x' : ''}</div>
+                    <div className="text-xs text-[#6b6b63]">{stop.address1}, {stop.city} {stop.zip}</div>
+                    {stop.panel_details?.length > 0 && (
+                      <div className="mt-1.5 space-y-0.5">
+                        {stop.panel_details.map((item, i) => (
+                          <div key={i} className="flex items-center gap-1.5 text-[10px] text-[#6b6b63]">
+                            <span className="font-mono bg-white border border-[#e8e8e4] px-1 rounded">{item.sku || '—'}</span>
+                            <span className="truncate">{item.title}</span>
+                            <span className="font-semibold text-[#1a1a2e] shrink-0">×{item.qty}</span>
                           </div>
-                        ) : (
-                          <button
-                            onClick={() => handleMarkDelivered(stop.id)}
-                            className="px-3 py-1.5 rounded-[8px] bg-[#1a7f4b] text-white text-xs font-medium"
-                          >
-                            Livré ✓
-                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                  <div className="shrink-0 text-right">
+                    {stop.status === 'delivered' ? (
+                      <div>
+                        <span className="px-3 py-1.5 rounded-[8px] bg-[#d1fae5] text-[#1a7f4b] text-xs font-medium">
+                          Livré ✓
+                        </span>
+                        {stop.delivered_at && (
+                          <div className="text-[10px] text-[#6b6b63] mt-1">
+                            {new Date(stop.delivered_at).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}
+                          </div>
                         )}
                       </div>
-                    </div>
-                  ))}
+                    ) : (
+                      <button
+                        onClick={() => handleMarkDelivered(stop.id)}
+                        className="px-3 py-1.5 rounded-[8px] bg-[#6b21a8] text-white text-xs font-medium hover:bg-[#7c3aed] transition-colors"
+                      >
+                        Marquer comme livré
+                      </button>
+                    )}
+                  </div>
                 </div>
-              </div>
-            </>
-          )}
-        </>
+              ))}
+            </div>
+          </div>
+        </div>
+      ) : (
+        <div className="rounded-[20px] shadow-[0_2px_16px_rgba(0,0,0,0.06)] bg-white p-12 text-center text-sm text-[#6b6b63]">
+          Sélectionne une tournée
+        </div>
       )}
     </div>
   )
