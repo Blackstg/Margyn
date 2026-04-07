@@ -156,6 +156,74 @@ async function fetchSnapshotData(brand: Brand, date: string): Promise<SnapshotDa
   return { ...snap, spend }
 }
 
+// ─── Mōom fulfillment from logistician invoices ───────────────────────────────
+
+type InvoiceRowLite = { shipping_price?: number | null }
+
+async function getEurRate(periodMonth: string): Promise<number> {
+  try {
+    const res = await fetch(`https://api.frankfurter.app/${periodMonth}-15?from=USD&to=EUR`)
+    if (!res.ok) return 0.92
+    const d = await res.json()
+    return (d.rates?.EUR as number | undefined) ?? 0.92
+  } catch {
+    return 0.92
+  }
+}
+
+async function fetchMoomFulfillment(
+  periodMonth: string,
+  orderCount: number,
+): Promise<{ fulfillment: number; note?: string }> {
+  const prevMonthStr = (ym: string) => {
+    const [y, m] = ym.split('-').map(Number)
+    return m === 1 ? `${y - 1}-12` : `${y}-${String(m - 1).padStart(2, '0')}`
+  }
+
+  const calcFulfillment = async (rows: InvoiceRowLite[], month: string, count: number) => {
+    const totalUsd = rows.reduce((s, r) => s + (r.shipping_price ?? 0), 0)
+    const rate     = await getEurRate(month)
+    const cpOrder  = (totalUsd * rate) / (rows.length || 1)
+    return Math.round(cpOrder * count)
+  }
+
+  // Try current month
+  const { data: cur } = await supabase
+    .from('logistician_invoice_summaries')
+    .select('invoice_rows')
+    .eq('brand', 'moom')
+    .eq('month', periodMonth)
+    .maybeSingle()
+
+  const curRows = (cur as { invoice_rows?: InvoiceRowLite[] | null } | null)?.invoice_rows
+  if (curRows?.length) {
+    return { fulfillment: await calcFulfillment(curRows, periodMonth, orderCount) }
+  }
+
+  // No invoice — use previous month as estimate
+  const prevMonth = prevMonthStr(periodMonth)
+  const { data: prev } = await supabase
+    .from('logistician_invoice_summaries')
+    .select('invoice_rows')
+    .eq('brand', 'moom')
+    .eq('month', prevMonth)
+    .maybeSingle()
+
+  const prevRows = (prev as { invoice_rows?: InvoiceRowLite[] | null } | null)?.invoice_rows
+  if (prevRows?.length) {
+    const [py, pm] = prevMonth.split('-').map(Number)
+    const label = new Date(py, pm - 1, 15).toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' })
+    return {
+      fulfillment: await calcFulfillment(prevRows, prevMonth, orderCount),
+      note: `Estimé — basé sur ${label}`,
+    }
+  }
+
+  return { fulfillment: -1 } // signal: fall back to flat rate
+}
+
+// ─── KPI fetcher ──────────────────────────────────────────────────────────────
+
 async function fetchKpiData(brand: Brand, from: string, to: string, days: number): Promise<KpiData> {
   const brands = brandFilter(brand)
   const suppQuery = brand === 'bowa'
@@ -196,8 +264,17 @@ async function fetchKpiData(brand: Brand, from: string, to: string, days: number
   const settingsData = (settingsRes.data as { shipping_cost_per_order?: number; transaction_fee_rate?: number } | null)
   const shippingRate       = settingsData?.shipping_cost_per_order ?? 17
   const transactionFeeRate = settingsData?.transaction_fee_rate    ?? 0.017
-  const fulfillment        = Math.round(shippingRate * snaps.order_count)
   const transaction_fees   = Math.round(snaps.total_sales * transactionFeeRate)
+
+  let fulfillment      = Math.round(shippingRate * snaps.order_count)
+  let fulfillment_note: string | undefined
+  if (brand === 'moom') {
+    const mf = await fetchMoomFulfillment(from.slice(0, 7), snaps.order_count)
+    if (mf.fulfillment >= 0) {
+      fulfillment      = mf.fulfillment
+      fulfillment_note = mf.note
+    }
+  }
 
   // Supplementary revenue (Bowa only) — prorate same as fixed costs
   const avgOf = (map: Map<string, number>) => {
@@ -237,7 +314,7 @@ async function fetchKpiData(brand: Brand, from: string, to: string, days: number
 
   return {
     ...snaps, fulfillment, marketing, op_expenses, app_charges, transaction_fees, net_profit: null,
-    gifting_count, gifting_cogs,
+    gifting_count, gifting_cogs, fulfillment_note,
     ...(brand === 'bowa' && supplementary_ca > 0 ? { supplementary_ca, supplementary_breakdown } : {}),
   }
 }

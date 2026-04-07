@@ -21,6 +21,7 @@ export interface KpiData {
   supplementary_breakdown?: SupplementaryItem[]
   gifting_count?: number
   gifting_cogs?: number
+  fulfillment_note?: string
 }
 
 export interface SparklineData {
@@ -322,7 +323,7 @@ export default function KpiGrid({ current, previous, loading, brand, sparklines 
         <KpiCard label="COGS"       value={c.cogs}   formatted={fmtEur(c.cogs)}  prevValue={p.cogs}  loading={loading} inverse />
         <KpiCard label="Retours"    value={c.returns} formatted={fmtEur(c.returns)} prevValue={p.returns} loading={loading} inverse note={returnRate > 0 ? `${returnRate.toFixed(1)}% du CA` : undefined} />
         <KpiCard label="Transaction Fees" value={c.transaction_fees} formatted={fmtEur(c.transaction_fees)} prevValue={p.transaction_fees} loading={loading} inverse note={totalSales > 0 ? `${((c.transaction_fees / totalSales) * 100).toFixed(1)}% du CA` : undefined} />
-        <KpiCard label="Fulfillment"     value={c.fulfillment}      formatted={fmtEur(c.fulfillment)}   prevValue={p.fulfillment}      loading={loading} inverse note={c.order_count > 0 ? `${fmtEur(Math.round(c.fulfillment / c.order_count))}/cmd` : undefined} />
+        <KpiCard label="Fulfillment"     value={c.fulfillment}      formatted={fmtEur(c.fulfillment)}   prevValue={p.fulfillment}      loading={loading} inverse note={c.order_count > 0 ? `${fmtEur(Math.round(c.fulfillment / c.order_count))}/cmd` : undefined} detail={c.fulfillment_note} />
         <KpiCard label="Apps Shopify"    value={c.app_charges}      formatted={fmtEur(c.app_charges)}   prevValue={p.app_charges}      loading={loading} inverse isEmpty />
         <KpiCard label="Op. Expenses"    value={c.op_expenses}      formatted={fmtEur(c.op_expenses)}   prevValue={p.op_expenses}      loading={loading} inverse isEmpty />
         {brand === 'bowa' && (
