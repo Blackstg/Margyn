@@ -40,7 +40,9 @@ export async function middleware(req: NextRequest) {
     return response
   }
 
-  const role = (session.user.user_metadata?.role as string | undefined) ?? 'admin'
+  const role   = (session.user.user_metadata?.role   as string | undefined)   ?? 'admin'
+  // brands: undefined means full access (backwards compat for accounts set up before this check)
+  const brands = (session.user.user_metadata?.brands as string[] | undefined)
 
   // Logistician: restricted to /reconciliation only
   if (role === 'logistician') {
@@ -48,6 +50,21 @@ export async function middleware(req: NextRequest) {
       return NextResponse.redirect(new URL('/reconciliation', req.url))
     }
     return response
+  }
+
+  // Brand-specific route protection
+  // Add new entries here as more brand-specific pages are created
+  const BRAND_ROUTES: Record<string, string> = {
+    '/reconciliation-stock': 'moom',
+    '/factures-logisticien': 'moom',
+    '/produits':             'moom',
+  }
+  const requiredBrand = Object.entries(BRAND_ROUTES).find(([path]) =>
+    pathname === path || pathname.startsWith(path + '/')
+  )?.[1]
+
+  if (requiredBrand && brands && !brands.includes(requiredBrand)) {
+    return NextResponse.redirect(new URL('/dashboard?error=unauthorized', req.url))
   }
 
   // Admin: redirect away from login

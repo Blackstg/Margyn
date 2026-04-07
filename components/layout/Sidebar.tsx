@@ -7,13 +7,13 @@ import { createBrowserClient } from '@supabase/auth-helpers-nextjs'
 import { useState, useEffect } from 'react'
 
 const NAV = [
-  { href: '/dashboard',            icon: LayoutDashboard, label: 'Dashboard'      },
-  { href: '/campaigns',            icon: BarChart2,        label: 'Campagnes'      },
-  { href: '/reapprovisionnement',  icon: PackageOpen,      label: 'Réappro'        },
-  { href: '/reconciliation-stock',    icon: Boxes,     label: 'Réconciliation'  },
-  { href: '/factures-logisticien',    icon: FileText,  label: 'Factures logo'   },
-  { href: '/produits',                icon: Tag,       label: 'Produits'        },
-  { href: '/settings',                icon: Settings,  label: 'Paramètres'      },
+  { href: '/dashboard',           icon: LayoutDashboard, label: 'Dashboard',     brand: null   },
+  { href: '/campaigns',           icon: BarChart2,       label: 'Campagnes',     brand: null   },
+  { href: '/reapprovisionnement', icon: PackageOpen,     label: 'Réappro',       brand: null   },
+  { href: '/reconciliation-stock', icon: Boxes,    label: 'Réconciliation', brand: 'moom' },
+  { href: '/factures-logisticien', icon: FileText, label: 'Factures logo',  brand: 'moom' },
+  { href: '/produits',             icon: Tag,      label: 'Produits',       brand: 'moom' },
+  { href: '/settings',             icon: Settings, label: 'Paramètres',     brand: null   },
 ]
 
 export default function Sidebar() {
@@ -24,6 +24,14 @@ export default function Sidebar() {
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
   )
   const [pendingCount, setPendingCount] = useState(0)
+  const [allowedBrands, setAllowedBrands] = useState<string[] | null>(null)
+
+  useEffect(() => {
+    supabase.from('user_brands').select('brand').then(({ data }) => {
+      if (data) setAllowedBrands(data.map((r: { brand: string }) => r.brand))
+    })
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   useEffect(() => {
     fetch('/api/reconciliation/history')
@@ -57,7 +65,9 @@ export default function Sidebar() {
 
       {/* Nav */}
       <nav className="flex flex-col items-center gap-1.5 w-full px-2">
-        {NAV.map(({ href, icon: Icon, label }) => {
+        {NAV.filter(({ brand }) =>
+          brand === null || allowedBrands === null || allowedBrands.includes(brand)
+        ).map(({ href, icon: Icon, label }) => {
           const active = pathname.startsWith(href)
           const badge  = href === '/reconciliation-stock' && pendingCount > 0
           return (

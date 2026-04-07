@@ -748,9 +748,26 @@ Top produits: ${topSellers || 'Aucun'}
 Stock faible (<20 unités): ${lowStock || 'Aucun'}`
   }, [current, loading, spendBreakdown, bestSellers, inventory, exclusions, brand, periodLabel])
 
+  const unauthorizedError = searchParams.get('error') === 'unauthorized'
+
   return (
     <div className="min-h-screen bg-[#faf9f8]">
       <main className="max-w-[90rem] mx-auto px-4 sm:px-6 py-5 sm:py-8 space-y-4 sm:space-y-5">
+        {/* Unauthorized brand access */}
+        {unauthorizedError && (
+          <div className="flex items-center justify-between gap-3 px-4 py-3 bg-[#fce8ea] border border-[#f5c2c7] rounded-xl">
+            <p className="text-sm font-medium text-[#c7293a]">
+              Accès non autorisé — cette page n&apos;est pas disponible pour votre compte.
+            </p>
+            <button
+              onClick={() => router.replace('/dashboard')}
+              className="text-[#c7293a] hover:text-[#a01f2e] text-sm font-semibold shrink-0"
+            >
+              Fermer
+            </button>
+          </div>
+        )}
+
         {/* Sync indicator */}
         {syncing && (
           <div className="flex items-center gap-2 text-xs text-[#6b6b63]">
