@@ -58,6 +58,7 @@ export async function middleware(req: NextRequest) {
     '/stock':    'moom',
     '/invoices': 'moom',
     '/products': 'moom',
+    '/delivery': 'bowa',
   }
   const requiredBrand = Object.entries(BRAND_ROUTES).find(([path]) =>
     pathname === path || pathname.startsWith(path + '/')
