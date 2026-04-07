@@ -217,7 +217,8 @@ function PlanificateurView() {
       })
       if (!res.ok) {
         const err = await res.json().catch(() => ({}))
-        alert(`Erreur création tournée: ${err.error ?? res.statusText}`)
+        const msg = typeof err.error === 'string' ? err.error : JSON.stringify(err.error ?? err)
+        alert(`Erreur création tournée: ${msg}`)
         return
       }
       setShowNewTour(false)
