@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useCallback } from 'react'
 
 export interface AiRecommendation {
   icon: string
@@ -20,6 +20,7 @@ export default function AiInsights({ type, brand, context, className = '' }: Pro
   const [loading, setLoading]   = useState(false)
   const [error, setError]       = useState(false)
   const [freshAt, setFreshAt]   = useState<Date | null>(null)
+  const [triggered, setTriggered] = useState(false)
 
   const load = useCallback(async (ctx: string) => {
     setLoading(true)
@@ -41,9 +42,11 @@ export default function AiInsights({ type, brand, context, className = '' }: Pro
     }
   }, [type, brand])
 
-  useEffect(() => {
-    if (context) load(context)
-  }, [context, load])
+  function handleAnalyze() {
+    if (!context) return
+    setTriggered(true)
+    load(context)
+  }
 
   const freshLabel = freshAt
     ? freshAt.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })
@@ -61,19 +64,21 @@ export default function AiInsights({ type, brand, context, className = '' }: Pro
           {freshLabel && !loading && (
             <span className="text-[10px] text-white/40">Mis à jour {freshLabel}</span>
           )}
-          <button
-            onClick={() => context && load(context)}
-            disabled={loading || !context}
-            className="flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-medium text-white/70 hover:text-white hover:bg-white/10 transition-all disabled:opacity-40 disabled:cursor-not-allowed"
-          >
-            <svg
-              className={`w-3 h-3 ${loading ? 'animate-spin' : ''}`}
-              fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}
+          {triggered && (
+            <button
+              onClick={() => context && load(context)}
+              disabled={loading || !context}
+              className="flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-medium text-white/70 hover:text-white hover:bg-white/10 transition-all disabled:opacity-40 disabled:cursor-not-allowed"
             >
-              <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h5M20 20v-5h-5M4 9a9 9 0 0114.1-3.1M20 15a9 9 0 01-14.1 3.1" />
-            </svg>
-            Actualiser
-          </button>
+              <svg
+                className={`w-3 h-3 ${loading ? 'animate-spin' : ''}`}
+                fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}
+              >
+                <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h5M20 20v-5h-5M4 9a9 9 0 0114.1-3.1M20 15a9 9 0 01-14.1 3.1" />
+              </svg>
+              Actualiser
+            </button>
+          )}
         </div>
       </div>
 
@@ -82,7 +87,20 @@ export default function AiInsights({ type, brand, context, className = '' }: Pro
 
       {/* Body */}
       <div className="px-5 py-4 min-h-[80px]">
-        {loading && (
+        {!triggered && (
+          <div className="flex items-center justify-center py-2">
+            <button
+              onClick={handleAnalyze}
+              disabled={!context}
+              className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold text-white bg-white/10 hover:bg-white/20 transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              <span>✨</span>
+              Analyser
+            </button>
+          </div>
+        )}
+
+        {triggered && loading && (
           <div className="flex items-center gap-3 py-2">
             <div className="flex gap-1">
               <span className="w-1.5 h-1.5 rounded-full bg-[#aeb0c9] animate-bounce" style={{ animationDelay: '0ms' }} />
@@ -93,19 +111,15 @@ export default function AiInsights({ type, brand, context, className = '' }: Pro
           </div>
         )}
 
-        {!loading && error && (
+        {triggered && !loading && error && (
           <p className="text-xs text-white/40 py-2">Impossible de charger les recommandations.</p>
         )}
 
-        {!loading && !error && !recs && !context && (
-          <p className="text-xs text-white/40 py-2">Chargement des données…</p>
-        )}
-
-        {!loading && !error && recs && recs.length === 0 && (
+        {triggered && !loading && !error && recs && recs.length === 0 && (
           <p className="text-xs text-white/50 py-2">Aucune recommandation disponible pour le moment.</p>
         )}
 
-        {!loading && !error && recs && recs.length > 0 && (
+        {triggered && !loading && !error && recs && recs.length > 0 && (
           <ul className="space-y-3">
             {recs.map((rec, i) => (
               <li key={i}>
