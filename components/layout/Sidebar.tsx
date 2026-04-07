@@ -5,6 +5,7 @@ import { usePathname, useRouter } from 'next/navigation'
 import { LayoutDashboard, BarChart2, PackageOpen, Settings, LogOut, Boxes, FileText, Tag } from 'lucide-react'
 import { createBrowserClient } from '@supabase/auth-helpers-nextjs'
 import { useState, useEffect } from 'react'
+import DataFreshness from './DataFreshness'
 
 const NAV = [
   { href: '/dashboard',           icon: LayoutDashboard, label: 'Dashboard',     brand: null   },
@@ -91,6 +92,11 @@ export default function Sidebar() {
           )
         })}
       </nav>
+
+      {/* Data freshness indicator */}
+      <div className="mb-1">
+        <DataFreshness />
+      </div>
 
       {/* Logout */}
       <button
