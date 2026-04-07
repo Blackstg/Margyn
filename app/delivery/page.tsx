@@ -151,7 +151,6 @@ function PlanificateurView() {
   const [expandedOrder, setExpandedOrder] = useState<Set<string>>(new Set())
   const [savingTour, setSavingTour] = useState(false)
   const [addingStops, setAddingStops] = useState(false)
-  const [sendingEmails, setSendingEmails] = useState<string | null>(null)
 
   const fetchOrders = useCallback(async () => {
     setLoadingOrders(true)
@@ -276,18 +275,6 @@ function PlanificateurView() {
       }),
     ])
     await fetchTours()
-  }
-
-  async function handleSendEmails(tourId: string) {
-    setSendingEmails(tourId)
-    try {
-      const r = await fetch(`/api/delivery/tours/${tourId}/emails`, { method: 'POST' })
-      const data = await r.json()
-      alert(`Emails envoyés: ${data.sent}, Erreurs: ${data.errors}`)
-      await fetchTours()
-    } finally {
-      setSendingEmails(null)
-    }
   }
 
   async function handleUpdateTourStatus(tourId: string, status: TourStatus) {
@@ -547,7 +534,7 @@ function PlanificateurView() {
                   const isTarget = targetTourId === tour.id
                   const isExpanded = expandedTours.has(tour.id)
                   const sortedStops = [...tour.stops].sort((a, b) => a.sequence - b.sequence)
-                  const pendingEmails = tour.stops.filter((s) => !s.email_sent_at && s.email).length
+
                   const panelPct = Math.min((tour.total_panels / 100) * 100, 100)
                   const statusInfo = TOUR_STATUS_LABELS[tour.status] ?? TOUR_STATUS_LABELS.draft
 
@@ -636,14 +623,20 @@ function PlanificateurView() {
                               <option value="in_progress">En cours</option>
                               <option value="completed">Terminée</option>
                             </select>
-                            {pendingEmails > 0 && (
+                            {tour.stops.some((s) => s.email) && (
                               <button
-                                onClick={(e) => { e.stopPropagation(); handleSendEmails(tour.id) }}
-                                disabled={sendingEmails === tour.id}
-                                className="flex items-center gap-1 px-3 py-1 text-xs rounded-[8px] bg-[#1a1a2e] text-white disabled:opacity-50"
+                                onClick={(e) => {
+                                  e.stopPropagation()
+                                  const emails = tour.stops
+                                    .map((s) => s.email)
+                                    .filter(Boolean)
+                                    .join(', ')
+                                  navigator.clipboard.writeText(emails)
+                                }}
+                                className="flex items-center gap-1 px-3 py-1 text-xs rounded-[8px] bg-[#1a1a2e] text-white hover:bg-[#2a2a4e] transition-colors"
                               >
                                 <Mail size={12} />
-                                {sendingEmails === tour.id ? 'Envoi...' : `Emails (${pendingEmails})`}
+                                Copier les emails
                               </button>
                             )}
                             <button
