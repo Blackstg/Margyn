@@ -306,7 +306,7 @@ export default function ReconciliationStockPage() {
 
         <div>
           <p className="text-[10px] font-semibold uppercase tracking-[0.1em] text-[#aeb0c9]">Mōom</p>
-          <h1 className="text-xl font-bold text-[#1a1a2e] mt-0.5">Réconciliation stock</h1>
+          <h1 className="text-xl font-bold text-[#1a1a2e] mt-0.5">Stock</h1>
           {pendingCount > 0 && (
             <p className="text-sm text-[#b45309] mt-1">
               {pendingCount} nouvelle{pendingCount > 1 ? 's' : ''} saisie{pendingCount > 1 ? 's' : ''} à examiner

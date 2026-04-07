@@ -543,7 +543,7 @@ Stock faible:\n${lowLines || 'Aucun'}`
         {/* ── Page header ────────────────────────────────────────────────── */}
         <div className="flex items-start justify-between gap-4">
           <div>
-            <h1 className="text-xl font-bold text-[#1a1a2e]">Réapprovisionnement</h1>
+            <h1 className="text-xl font-bold text-[#1a1a2e]">Réappro</h1>
             <p className="text-sm text-[#6b6b63] mt-0.5">{BRAND_LABELS[brand]} — Calcul des commandes par variant</p>
           </div>
           <div className="flex items-center gap-2 shrink-0">

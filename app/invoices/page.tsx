@@ -426,7 +426,7 @@ Historique FW : ${history.map(h => `${h.month}: ${h.fw_count} FW ($${h.fw_total?
         {/* Header */}
         <div>
           <p className="text-[10px] font-semibold uppercase tracking-[0.1em] text-[#aeb0c9] mb-1">Mōom</p>
-          <h1 className="text-xl font-bold text-[#1a1a2e]">Logistician Invoice Analysis</h1>
+          <h1 className="text-xl font-bold text-[#1a1a2e]">Factures logisticien</h1>
         </div>
 
         {/* History chips */}
