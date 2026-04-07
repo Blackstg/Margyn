@@ -149,6 +149,7 @@ function PlanificateurView() {
   const [targetTourId, setTargetTourId] = useState('')
   const [expandedTours, setExpandedTours] = useState<Set<string>>(new Set())
   const [expandedStop, setExpandedStop] = useState<Set<string>>(new Set())
+  const [expandedOrder, setExpandedOrder] = useState<Set<string>>(new Set())
   const [savingTour, setSavingTour] = useState(false)
   const [addingStops, setAddingStops] = useState(false)
   const [sendingEmails, setSendingEmails] = useState<string | null>(null)
@@ -325,20 +326,30 @@ function PlanificateurView() {
   }
 
   function buildLoadingList(stops: TourStop[]) {
-    const map = new Map<string, { title: string; qty: number; orders: string[] }>()
+    // Group by SKU first, fall back to title if no SKU
+    const map = new Map<string, { sku: string; title: string; qty: number; orders: string[] }>()
     for (const stop of stops) {
       for (const item of stop.panel_details ?? []) {
-        const key = item.sku || item.title
+        const key = item.sku?.trim() || item.title
         const existing = map.get(key)
         if (existing) {
           existing.qty += item.qty
           if (!existing.orders.includes(stop.order_name)) existing.orders.push(stop.order_name)
         } else {
-          map.set(key, { title: item.title, qty: item.qty, orders: [stop.order_name] })
+          map.set(key, { sku: item.sku?.trim() ?? '', title: item.title, qty: item.qty, orders: [stop.order_name] })
         }
       }
     }
     return [...map.values()].sort((a, b) => b.qty - a.qty)
+  }
+
+  function toggleOrderExpand(orderName: string) {
+    setExpandedOrder((prev) => {
+      const next = new Set(prev)
+      if (next.has(orderName)) next.delete(orderName)
+      else next.add(orderName)
+      return next
+    })
   }
 
   return (
@@ -389,17 +400,20 @@ function PlanificateurView() {
               ) : (
                 filteredOrders.map((order) => {
                   const selected = selectedOrders.has(order.order_name)
+                  const orderExpanded = expandedOrder.has(order.order_name)
                   return (
                     <div
                       key={order.order_name}
-                      onClick={() => toggleOrder(order.order_name)}
-                      className={`relative p-3 rounded-[12px] border cursor-pointer transition-all ${
+                      className={`rounded-[12px] border transition-all overflow-hidden ${
                         selected
                           ? 'border-2 border-[#aeb0c9] bg-[#f0f0fa]'
-                          : 'border border-[#e8e8e4] hover:border-[#aeb0c9]/50'
+                          : 'border border-[#e8e8e4]'
                       }`}
                     >
-                      <div className="flex items-start justify-between gap-2">
+                      <div
+                        className="p-3 flex items-start justify-between gap-2 cursor-pointer"
+                        onClick={() => toggleOrder(order.order_name)}
+                      >
                         <div className="flex-1 min-w-0">
                           <div className="flex items-center gap-2 flex-wrap">
                             <span className="font-semibold text-sm text-[#1a1a2e]">{order.order_name}</span>
@@ -419,13 +433,32 @@ function PlanificateurView() {
                           <div className="text-xs text-[#6b6b63] mt-0.5">{order.customer_name}</div>
                           <div className="text-xs text-[#6b6b63]">{order.city} {order.zip}</div>
                         </div>
-                        <input
-                          type="checkbox"
-                          readOnly
-                          checked={selected}
-                          className="mt-1 accent-[#aeb0c9] cursor-pointer"
-                        />
+                        <div className="flex items-center gap-1.5 shrink-0 mt-0.5">
+                          <button
+                            onClick={(e) => { e.stopPropagation(); toggleOrderExpand(order.order_name) }}
+                            className="p-0.5 rounded text-[#6b6b63] hover:text-[#1a1a2e]"
+                          >
+                            {orderExpanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+                          </button>
+                          <input
+                            type="checkbox"
+                            readOnly
+                            checked={selected}
+                            className="accent-[#aeb0c9] cursor-pointer"
+                          />
+                        </div>
                       </div>
+                      {orderExpanded && order.panel_details?.length > 0 && (
+                        <div className="border-t border-[#e8e8e4] bg-white px-3 py-2 space-y-1.5">
+                          {order.panel_details.map((item, i) => (
+                            <div key={i} className="flex items-start gap-2 text-xs">
+                              <span className="shrink-0 font-mono text-[#6b6b63] bg-[#f5f5f3] px-1.5 py-0.5 rounded text-[10px]">{item.sku || '—'}</span>
+                              <span className="flex-1 text-[#1a1a2e]">{item.title}</span>
+                              <span className="shrink-0 font-semibold text-[#1a1a2e]">×{item.qty}</span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
                     </div>
                   )
                 })
@@ -637,72 +670,58 @@ function PlanificateurView() {
                             <div className="text-xs text-[#6b6b63] text-center py-3">Aucun arrêt</div>
                           ) : (
                             <div className="space-y-1.5">
-                              {sortedStops.map((stop, idx) => {
-                                const stopExpanded = expandedStop.has(stop.id)
-                                return (
-                                  <div
-                                    key={stop.id}
-                                    className="rounded-[8px] bg-[#f5f5f3] text-xs overflow-hidden"
-                                  >
-                                    <div className="flex items-center gap-2 p-2">
-                                      <span className="w-5 h-5 rounded-full bg-[#1a1a2e] text-white flex items-center justify-center text-[10px] font-bold shrink-0">
-                                        {idx + 1}
-                                      </span>
-                                      <div
-                                        className="flex-1 min-w-0 cursor-pointer"
-                                        onClick={() => toggleStop(stop.id)}
-                                      >
-                                        <div className="font-medium text-[#1a1a2e]">{stop.order_name}</div>
-                                        <div className="text-[#6b6b63] truncate">{stop.customer_name} · {stop.city} · {stop.panel_count} panneau{stop.panel_count !== 1 ? 'x' : ''}</div>
-                                      </div>
-                                      {stop.email_sent_at && (
-                                        <Mail size={12} className="text-[#1a7f4b] shrink-0" />
-                                      )}
-                                      <div className="flex items-center gap-1 shrink-0">
-                                        <button
-                                          onClick={() => toggleStop(stop.id)}
-                                          className="p-0.5 rounded text-[#6b6b63] hover:text-[#1a1a2e]"
-                                        >
-                                          {stopExpanded ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
-                                        </button>
-                                        <button
-                                          onClick={() => handleMoveStop(tour.id, stop.id, 'up')}
-                                          disabled={idx === 0}
-                                          className="p-0.5 rounded text-[#6b6b63] hover:text-[#1a1a2e] disabled:opacity-30"
-                                        >
-                                          <ChevronUp size={14} />
-                                        </button>
-                                        <button
-                                          onClick={() => handleMoveStop(tour.id, stop.id, 'down')}
-                                          disabled={idx === sortedStops.length - 1}
-                                          className="p-0.5 rounded text-[#6b6b63] hover:text-[#1a1a2e] disabled:opacity-30"
-                                        >
-                                          <ChevronDown size={14} />
-                                        </button>
-                                        <button
-                                          onClick={() => handleDeleteStop(stop.id)}
-                                          className="p-0.5 rounded text-[#c7293a] hover:bg-[#fee2e2]"
-                                        >
-                                          <Trash2 size={14} />
-                                        </button>
-                                      </div>
-                                    </div>
-                                    {stopExpanded && stop.panel_details?.length > 0 && (
-                                      <div className="border-t border-[#e8e8e4] px-3 py-2 bg-white space-y-1">
-                                        {stop.panel_details.map((item, i) => (
-                                          <div key={i} className="flex items-start justify-between gap-2">
-                                            <div className="flex-1 min-w-0">
-                                              <div className="text-[#1a1a2e] font-medium leading-tight">{item.title}</div>
-                                              {item.sku && <div className="text-[#6b6b63] text-[10px]">{item.sku}</div>}
+                              {sortedStops.map((stop, idx) => (
+                                <div
+                                  key={stop.id}
+                                  className="rounded-[8px] bg-[#f5f5f3] text-xs"
+                                >
+                                  <div className="flex items-start gap-2 p-2">
+                                    <span className="w-5 h-5 rounded-full bg-[#1a1a2e] text-white flex items-center justify-center text-[10px] font-bold shrink-0 mt-0.5">
+                                      {idx + 1}
+                                    </span>
+                                    <div className="flex-1 min-w-0">
+                                      <div className="font-medium text-[#1a1a2e]">{stop.order_name}</div>
+                                      <div className="text-[#6b6b63]">{stop.customer_name} · {stop.city}</div>
+                                      {stop.panel_details?.length > 0 && (
+                                        <div className="mt-1 text-[10px] text-[#6b6b63] space-y-0.5">
+                                          {stop.panel_details.map((item, i) => (
+                                            <div key={i} className="flex items-center gap-1">
+                                              <span className="font-mono bg-white border border-[#e8e8e4] px-1 rounded text-[9px] shrink-0">{item.sku || '—'}</span>
+                                              <span className="truncate">{item.title}</span>
+                                              <span className="shrink-0 font-semibold text-[#1a1a2e]">×{item.qty}</span>
                                             </div>
-                                            <span className="shrink-0 font-semibold text-[#1a1a2e]">×{item.qty}</span>
-                                          </div>
-                                        ))}
-                                      </div>
-                                    )}
+                                          ))}
+                                        </div>
+                                      )}
+                                    </div>
+                                    <div className="flex items-center gap-1 shrink-0">
+                                      {stop.email_sent_at && (
+                                        <Mail size={12} className="text-[#1a7f4b]" />
+                                      )}
+                                      <button
+                                        onClick={() => handleMoveStop(tour.id, stop.id, 'up')}
+                                        disabled={idx === 0}
+                                        className="p-0.5 rounded text-[#6b6b63] hover:text-[#1a1a2e] disabled:opacity-30"
+                                      >
+                                        <ChevronUp size={14} />
+                                      </button>
+                                      <button
+                                        onClick={() => handleMoveStop(tour.id, stop.id, 'down')}
+                                        disabled={idx === sortedStops.length - 1}
+                                        className="p-0.5 rounded text-[#6b6b63] hover:text-[#1a1a2e] disabled:opacity-30"
+                                      >
+                                        <ChevronDown size={14} />
+                                      </button>
+                                      <button
+                                        onClick={() => handleDeleteStop(stop.id)}
+                                        className="p-0.5 rounded text-[#c7293a] hover:bg-[#fee2e2]"
+                                      >
+                                        <Trash2 size={14} />
+                                      </button>
+                                    </div>
                                   </div>
-                                )
-                              })}
+                                </div>
+                              ))}
                             </div>
                           )}
 
@@ -720,8 +739,13 @@ function PlanificateurView() {
                                   {loadingList.map((item, i) => (
                                     <div key={i} className="rounded-[8px] bg-[#f5f5f3] px-3 py-2">
                                       <div className="flex items-start justify-between gap-2">
-                                        <span className="text-xs text-[#1a1a2e] font-medium flex-1 min-w-0">{item.title}</span>
-                                        <span className="text-xs font-bold text-[#1a1a2e] shrink-0">{item.qty} u.</span>
+                                        <div className="flex-1 min-w-0">
+                                          {item.sku && (
+                                            <span className="font-mono text-[10px] text-[#6b6b63] bg-white border border-[#e8e8e4] px-1.5 py-0.5 rounded mr-1.5">{item.sku}</span>
+                                          )}
+                                          <span className="text-xs text-[#1a1a2e] font-medium">{item.title}</span>
+                                        </div>
+                                        <span className="text-xs font-bold text-[#1a1a2e] shrink-0 ml-2">{item.qty} u.</span>
                                       </div>
                                       <div className="text-[10px] text-[#6b6b63] mt-0.5 truncate">
                                         {item.orders.join(', ')}
