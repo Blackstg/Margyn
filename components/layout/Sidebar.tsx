@@ -8,13 +8,13 @@ import { useState, useEffect } from 'react'
 import DataFreshness from './DataFreshness'
 
 const NAV = [
-  { href: '/dashboard',           icon: LayoutDashboard, label: 'Dashboard',     brand: null   },
-  { href: '/campaigns',           icon: BarChart2,       label: 'Campagnes',     brand: null   },
-  { href: '/reapprovisionnement', icon: PackageOpen,     label: 'Réappro',       brand: null   },
-  { href: '/reconciliation-stock', icon: Boxes,    label: 'Réconciliation', brand: 'moom' },
-  { href: '/factures-logisticien', icon: FileText, label: 'Factures logo',  brand: 'moom' },
-  { href: '/produits',             icon: Tag,      label: 'Produits',       brand: 'moom' },
-  { href: '/settings',             icon: Settings, label: 'Paramètres',     brand: null   },
+  { href: '/dashboard', icon: LayoutDashboard, label: 'Dashboard',   brand: null   },
+  { href: '/campaigns', icon: BarChart2,       label: 'Campagnes',   brand: null   },
+  { href: '/reorder',   icon: PackageOpen,     label: 'Réappro',     brand: null   },
+  { href: '/stock',     icon: Boxes,           label: 'Stock',       brand: 'moom' },
+  { href: '/invoices',  icon: FileText,        label: 'Factures',    brand: 'moom' },
+  { href: '/products',  icon: Tag,             label: 'Produits',    brand: 'moom' },
+  { href: '/settings',  icon: Settings,        label: 'Paramètres',  brand: null   },
 ]
 
 export default function Sidebar() {
@@ -70,7 +70,7 @@ export default function Sidebar() {
           brand === null || allowedBrands === null || allowedBrands.includes(brand)
         ).map(({ href, icon: Icon, label }) => {
           const active = pathname.startsWith(href)
-          const badge  = href === '/reconciliation-stock' && pendingCount > 0
+          const badge  = href === '/stock' && pendingCount > 0
           return (
             <Link
               key={href}

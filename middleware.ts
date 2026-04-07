@@ -55,9 +55,9 @@ export async function middleware(req: NextRequest) {
   // Brand-specific route protection
   // Add new entries here as more brand-specific pages are created
   const BRAND_ROUTES: Record<string, string> = {
-    '/reconciliation-stock': 'moom',
-    '/factures-logisticien': 'moom',
-    '/produits':             'moom',
+    '/stock':    'moom',
+    '/invoices': 'moom',
+    '/products': 'moom',
   }
   const requiredBrand = Object.entries(BRAND_ROUTES).find(([path]) =>
     pathname === path || pathname.startsWith(path + '/')
