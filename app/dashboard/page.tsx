@@ -158,7 +158,7 @@ async function fetchSnapshotData(brand: Brand, date: string): Promise<SnapshotDa
 
 // ─── Mōom fulfillment from logistician invoices ───────────────────────────────
 
-type InvoiceRowLite = { shipping_price?: number | null }
+type InvoiceRowLite = { total_price?: number | null }
 
 async function getEurRate(periodMonth: string): Promise<number> {
   try {
@@ -182,7 +182,7 @@ async function fetchMoomFulfillment(
   }
 
   const sumShipping = (rows: InvoiceRowLite[]) =>
-    rows.reduce((s, r) => s + (r.shipping_price ?? 0), 0)
+    rows.reduce((s, r) => s + (r.total_price ?? 0), 0)
 
   // Try current month — use direct sum (totalUSD × rate), no per-order division
   const { data: cur } = await supabase

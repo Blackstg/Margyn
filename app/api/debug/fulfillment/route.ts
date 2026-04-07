@@ -23,15 +23,17 @@ export async function GET(req: NextRequest) {
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
   if (!data)  return NextResponse.json({ error: `No invoice found for ${month}` }, { status: 404 })
 
-  type Row = { order_name?: string; shipping_price?: number; isFW?: boolean }
+  type Row = { order_name?: string; shipping_price?: number; service_price?: number; total_price?: number; isFW?: boolean }
   const rows = (data.invoice_rows ?? []) as Row[]
 
   const normalRows = rows.filter(r => !r.isFW)
   const fwRows     = rows.filter(r => r.isFW)
 
-  const totalShippingUsd        = rows.reduce((s, r) => s + (r.shipping_price ?? 0), 0)
-  const normalShippingUsd       = normalRows.reduce((s, r) => s + (r.shipping_price ?? 0), 0)
-  const fwShippingUsd           = fwRows.reduce((s, r) => s + (r.shipping_price ?? 0), 0)
+  const totalShippingUsd  = rows.reduce((s, r) => s + (r.shipping_price ?? 0), 0)
+  const totalServiceUsd   = rows.reduce((s, r) => s + (r.service_price  ?? 0), 0)
+  const totalShippingUsd2 = rows.reduce((s, r) => s + (r.total_price    ?? 0), 0)
+  const normalShippingUsd = normalRows.reduce((s, r) => s + (r.total_price ?? 0), 0)
+  const fwShippingUsd     = fwRows.reduce((s, r) => s + (r.total_price   ?? 0), 0)
 
   // 2. Fetch EUR rate from frankfurter.app
   // Rate = 1st of the following month
@@ -52,22 +54,20 @@ export async function GET(req: NextRequest) {
     rateSource = 'fallback — API unreachable'
   }
 
-  // 3. Current calculation (what Steero shows)
-  const invoiceOrderCount = rows.length
-  const costPerOrderEur   = (totalShippingUsd * eurRate) / (invoiceOrderCount || 1)
-
-  // 4. Direct sum (what it should be for months with a full invoice)
-  const directTotalEur = totalShippingUsd * eurRate
+  // 3. Direct sum using total_price (shipping + service fees)
+  const directTotalEur = totalShippingUsd2 * eurRate
 
   return NextResponse.json({
     month,
     invoice: {
-      total_rows:       rows.length,
-      normal_rows:      normalRows.length,
-      fw_rows:          fwRows.length,
-      total_usd:        +totalShippingUsd.toFixed(2),
-      normal_usd:       +normalShippingUsd.toFixed(2),
-      fw_usd:           +fwShippingUsd.toFixed(2),
+      total_rows:         rows.length,
+      normal_rows:        normalRows.length,
+      fw_rows:            fwRows.length,
+      shipping_price_usd: +totalShippingUsd.toFixed(2),
+      service_price_usd:  +totalServiceUsd.toFixed(2),
+      total_price_usd:    +totalShippingUsd2.toFixed(2),
+      normal_usd:         +normalShippingUsd.toFixed(2),
+      fw_usd:             +fwShippingUsd.toFixed(2),
     },
     rate: {
       requested_date:   rateDate,
@@ -76,9 +76,8 @@ export async function GET(req: NextRequest) {
       source:           rateSource,
     },
     calculation: {
-      current_steero_method: 'costPerOrder * snapshotOrderCount (may differ from direct sum)',
-      cost_per_order_eur:    +costPerOrderEur.toFixed(2),
-      direct_total_eur:      +directTotalEur.toFixed(2),
+      method:          'sum(total_price) × eur_rate',
+      direct_total_eur: +directTotalEur.toFixed(2),
     },
   })
 }
