@@ -6,7 +6,20 @@ function fmtDate(d: Date) {
   return d.toISOString().slice(0, 10)
 }
 
-// Called by the dashboard when data is stale — triggers all 3 syncs in parallel.
+// Vercel cron entry-point (GET) — syncs yesterday + today for all platforms.
+export async function GET(req: NextRequest) {
+  const today     = new Date()
+  const yesterday = new Date(today)
+  yesterday.setDate(yesterday.getDate() - 1)
+
+  const url = new URL(req.url)
+  url.searchParams.set('from', fmtDate(yesterday))
+  url.searchParams.set('to',   fmtDate(today))
+
+  return POST(new NextRequest(url, { headers: req.headers }))
+}
+
+// Called by the dashboard when data is stale — triggers all 4 syncs in parallel.
 // Accepts optional ?brand=bowa|moom to scope the sync to one brand.
 export async function POST(req: NextRequest) {
   const proto   = req.headers.get('x-forwarded-proto') ?? 'http'

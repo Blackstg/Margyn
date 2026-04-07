@@ -74,7 +74,7 @@ export default function SpendBreakdown({ data, loading }: Props) {
             const label  = PLATFORM_LABELS[d.platform] ?? d.platform
             const accent = PLATFORM_ACCENT[d.platform] ?? '#6b6b63'
             const pct    = totalSpend > 0 ? (d.spend / totalSpend) * 100 : 0
-            const roas   = d.spend > 0 ? d.revenue / d.spend : null
+            const roas   = d.spend > 0 && d.revenue > 0 ? d.revenue / d.spend : null
 
             return (
               <div key={d.platform} className="space-y-2">

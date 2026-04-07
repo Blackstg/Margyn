@@ -1,13 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 
-export const maxDuration = 60
+// Reports API polling can take up to ~60s per brand; allow headroom for 2 brands in parallel
+export const maxDuration = 300
 
 import {
   fetchPinterestCampaigns,
   fetchPinterestInsights,
   fetchPinterestAccountSpend,
-  normalizePinterestStats,
   type PinterestConfig,
 } from '@/lib/pinterest'
 
@@ -108,10 +108,9 @@ export async function POST(req: NextRequest) {
         if (error) throw new Error(`campaigns: ${error.message}`)
       }
 
-      // ── 2. Campaign stats ─────────────────────────────────────────────────
+      // ── 2. Campaign stats — Reports API (returns real conversion data) ─────
       const campaignIds = campaigns.map((c) => c.externalId)
-      const rawStats = await fetchPinterestInsights(store, campaignIds, dateFrom, dateTo)
-      const normalizedStats = normalizePinterestStats(rawStats)
+      const normalizedStats = await fetchPinterestInsights(store, campaignIds, dateFrom, dateTo)
 
       let campaignStatsCount = 0
       if (normalizedStats.length > 0) {
@@ -163,9 +162,8 @@ export async function POST(req: NextRequest) {
         }
       }
 
-      // ── 3. Ad spends — account-level for correct totals ───────────────────
-      // Campaign-level analytics misses many campaigns; account-level aggregates all.
-      const adSpends = await fetchPinterestAccountSpend(store, dateFrom, dateTo)
+      // ── 3. Ad spends — account-level spend + aggregated conversions ───────
+      const adSpends = await fetchPinterestAccountSpend(store, dateFrom, dateTo, normalizedStats)
       let adSpendsCount = 0
 
       if (adSpends.length > 0) {

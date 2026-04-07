@@ -28,12 +28,15 @@ interface SplitShipment {
 }
 
 interface ShippingDetail {
-  country:       string
-  country_code:  string
-  customer_paid: number
-  ecart:         number
-  verdict:       'Justifié' | 'À contester'
+  country:      string
+  country_code: string
 }
+
+const EU_COUNTRIES = new Set([
+  'FR','BE','DE','NL','ES','IT','PT','CH','AT','LU','GB','IE','DK',
+  'SE','NO','FI','PL','CZ','HU','RO','BG','HR','SK','SI','EE','LV',
+  'LT','GR','CY','MT','IS','LI','MC','AD','SM','RE','GP','MQ','GF',
+])
 
 interface ShippingContext {
   order_item_count:     number
@@ -152,12 +155,19 @@ function computeShippingContext(
   const result: Record<string, ShippingContext> = {}
 
   for (const orderName of Object.keys(highShippingOrders)) {
-    const n               = itemCounts[orderName] ?? 1
+    const n = itemCounts[orderName]
+    // Skip if item count unknown — avoids showing misleading "1 article" when API didn't return data
+    if (n === undefined || n === 0) continue
+
     const flaggedShipping = highShippingOrders[orderName]
 
-    // Similar orders: ±1 item count, positive shipping, excluding the flagged order
+    // Similar orders: exact same item count, positive shipping, excluding the flagged order
+    // Only include orders whose item count was actually fetched from Shopify
     const similarShippings = Object.keys(shippingPerOrder)
-      .filter(name => name !== orderName && Math.abs((itemCounts[name] ?? 1) - n) <= 1)
+      .filter(name => {
+        const count = itemCounts[name]
+        return name !== orderName && count !== undefined && count > 0 && count === n
+      })
       .map(name => shippingPerOrder[name])
       .filter(v => v > 0)
 
@@ -286,8 +296,12 @@ export default function FacturesLogisticienPage() {
     let itemCounts:         Record<string, number>         = {}
 
     const hasHighShipping  = Object.keys(highShippingOrders).length > 0
+    // Always include high-shipping orders in the item-count batch even if the list is otherwise empty
     const normalOrderNames = hasHighShipping
-      ? [...new Set(parsedNormal.map(r => r.order_name))]
+      ? [...new Set([
+          ...Object.keys(highShippingOrders),
+          ...parsedNormal.map(r => r.order_name),
+        ])]
       : []
 
     if (dbCandidates.length > 0 || hasHighShipping) {
@@ -304,15 +318,14 @@ export default function FacturesLogisticienPage() {
             ? fetch('/api/shopify/order-shipping', {
                 method: 'POST', headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
-                  order_names:           Object.keys(highShippingOrders),
-                  logistician_shippings: highShippingOrders,
+                  order_names: Object.keys(highShippingOrders),
                 }),
               }).then(r => r.json()).catch(() => ({ results: {} }))
             : Promise.resolve({ results: {} }),
           normalOrderNames.length > 0
             ? fetch('/api/shopify/order-item-count', {
                 method: 'POST', headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ order_names: normalOrderNames }),
+                body: JSON.stringify({ order_names: normalOrderNames, month }),
               }).then(r => r.json()).catch(() => ({ results: {} }))
             : Promise.resolve({ results: {} }),
         ])
@@ -562,29 +575,37 @@ Historique FW : ${history.map(h => `${h.month}: ${h.fw_count} FW ($${h.fw_total?
                             </div>
                             <p className="text-xs text-[#9b9b93]">{a.detail}</p>
 
-                            {/* Shopify shipping details */}
+                            {/* Country (from Shopify) */}
                             {sd && (
-                              <div className="flex items-center gap-2 mt-1.5 flex-wrap">
+                              <div className="flex items-center gap-2 mt-1.5">
                                 <span className="text-xs text-[#1a1a2e]">
                                   {countryFlag(sd.country_code)} {sd.country}
                                 </span>
-                                <span className="text-[#d0cec8]">·</span>
-                                <span className="text-xs text-[#6b6b63]">
-                                  Client: <span className="font-medium text-[#1a1a2e]">${sd.customer_paid.toFixed(2)}</span>
-                                </span>
-                                <span className="text-[#d0cec8]">·</span>
-                                <span className="text-xs text-[#6b6b63]">
-                                  Écart: <span className="font-semibold text-[#c7293a]">${sd.ecart.toFixed(2)}</span>
-                                </span>
-                                <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-md ${
-                                  sd.verdict === 'À contester'
-                                    ? 'bg-[#fce8ea] text-[#c7293a]'
-                                    : 'bg-[#e6f4ec] text-[#1a7f4b]'
-                                }`}>
-                                  {sd.verdict}
-                                </span>
                               </div>
                             )}
+
+                            {/* Écart vs moyenne — computed from invoice data, independent of Shopify country lookup */}
+                            {ctx && ctx.similar_orders_count > 0 && (() => {
+                              const ecart   = (a.logistician_shipping ?? 0) - ctx.similar_avg_shipping
+                              const verdict = sd && EU_COUNTRIES.has(sd.country_code) && ecart > 20
+                                ? 'À contester' : sd ? 'Justifié' : null
+                              return (
+                                <div className="flex items-center gap-2 mt-1 flex-wrap">
+                                  <span className="text-xs text-[#6b6b63]">
+                                    Écart: <span className="font-semibold text-[#c7293a]">${ecart.toFixed(2)}</span>
+                                  </span>
+                                  {verdict && (
+                                    <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-md ${
+                                      verdict === 'À contester'
+                                        ? 'bg-[#fce8ea] text-[#c7293a]'
+                                        : 'bg-[#e6f4ec] text-[#1a7f4b]'
+                                    }`}>
+                                      {verdict}
+                                    </span>
+                                  )}
+                                </div>
+                              )
+                            })()}
 
                             {/* Contextual shipping analysis */}
                             {ctx && ctx.similar_orders_count > 0 && (

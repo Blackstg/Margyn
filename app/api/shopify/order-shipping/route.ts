@@ -38,12 +38,11 @@ async function fetchOrderShipping(orderName: string): Promise<{
   }
 }
 
-// POST { order_names: string[], logistician_shippings: Record<string, number> }
-// Returns { results: Record<string, { country, country_code, customer_paid, ecart, verdict }> }
+// POST { order_names: string[] }
+// Returns { results: Record<string, { country, country_code }> }
 export async function POST(req: NextRequest) {
   const body = await req.json().catch(() => ({}))
-  const order_names: string[]                        = body.order_names ?? []
-  const logistician_shippings: Record<string, number> = body.logistician_shippings ?? {}
+  const order_names: string[] = body.order_names ?? []
 
   if (!order_names.length) return NextResponse.json({ results: {} })
 
@@ -51,23 +50,11 @@ export async function POST(req: NextRequest) {
     order_names.map(async (name) => ({ name, data: await fetchOrderShipping(name) }))
   )
 
-  const results: Record<string, {
-    country: string
-    country_code: string
-    customer_paid: number
-    ecart: number
-    verdict: 'Justifié' | 'À contester'
-  }> = {}
+  const results: Record<string, { country: string; country_code: string }> = {}
 
   for (const { name, data } of fetched) {
     if (!data) continue
-    const logistician = logistician_shippings[name] ?? 0
-    const ecart       = logistician - data.customer_paid
-    const isEurope    = EU_COUNTRIES.has(data.country_code)
-    const verdict: 'Justifié' | 'À contester' =
-      !isEurope ? 'Justifié' : ecart > 20 ? 'À contester' : 'Justifié'
-
-    results[name] = { ...data, ecart, verdict }
+    results[name] = { country: data.country, country_code: data.country_code }
   }
 
   return NextResponse.json({ results })
