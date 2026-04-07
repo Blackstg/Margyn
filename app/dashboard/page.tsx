@@ -162,10 +162,11 @@ type InvoiceRowLite = { shipping_price?: number | null }
 
 async function getEurRate(periodMonth: string): Promise<number> {
   try {
-    const res = await fetch(`https://api.frankfurter.app/${periodMonth}-15?from=USD&to=EUR`)
+    // Use server-side proxy to avoid client-side CORS/network issues with frankfurter.app
+    const res = await fetch(`/api/exchange-rate?month=${periodMonth}`)
     if (!res.ok) return 0.92
-    const d = await res.json()
-    return (d.rates?.EUR as number | undefined) ?? 0.92
+    const d = await res.json() as { eur_per_usd?: number }
+    return d.eur_per_usd ?? 0.92
   } catch {
     return 0.92
   }
