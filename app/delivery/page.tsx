@@ -8,7 +8,7 @@ import { ChevronDown, ChevronUp, Trash2, Mail, Plus, X, MapPin, Package, Truck }
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 type Zone = 'nord-est' | 'nord-ouest' | 'sud-est' | 'sud-ouest'
-type TourStatus = 'draft' | 'planned' | 'in_progress' | 'completed'
+type TourStatus = 'draft' | 'planned' | 'in_progress' | 'completed' | 'cancelled'
 type StopStatus = 'pending' | 'delivered'
 
 const ZONE_LABEL: Record<Zone, string> = {
@@ -88,6 +88,7 @@ const TOUR_STATUS_LABELS: Record<TourStatus, { label: string; color: string }> =
   planned:     { label: 'Planifiée',   color: 'bg-blue-100 text-blue-700' },
   in_progress: { label: 'En cours',    color: 'bg-yellow-100 text-yellow-700' },
   completed:   { label: 'Terminée',    color: 'bg-green-100 text-[#1a7f4b]' },
+  cancelled:   { label: 'Annulée',     color: 'bg-red-100 text-red-600' },
 }
 
 // ─── Main Page ────────────────────────────────────────────────────────────────
