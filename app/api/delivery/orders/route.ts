@@ -106,7 +106,7 @@ export async function GET() {
     )
 
     // Transform and filter orders
-    const orders = allOrders
+    const orders = (allOrders
       .filter((order) => !assignedOrderNames.has(order.name))
       .map((order) => {
         const addr = order.shipping_address
@@ -116,12 +116,20 @@ export async function GET() {
         const zip = addr?.zip ?? ''
         const zone = detectZone(zip)
 
-        const panel_details = order.line_items.map((li) => ({
-          sku: li.sku ?? '',
-          title: li.title,
-          qty: li.quantity,
-        }))
+        const isSample = (title: string) =>
+          /échantillon|echantillon|sample/i.test(title)
+
+        const panel_details = order.line_items
+          .filter((li) => !isSample(li.title))
+          .map((li) => ({
+            sku: li.sku ?? '',
+            title: li.title,
+            qty: li.quantity,
+          }))
         const panel_count = panel_details.reduce((sum, p) => sum + p.qty, 0)
+
+        // Skip orders that contain only samples
+        if (panel_count === 0) return null
 
         return {
           order_name: order.name,
@@ -137,6 +145,7 @@ export async function GET() {
           panel_details,
         }
       })
+      .filter(Boolean))
 
     return NextResponse.json({ orders })
   } catch (err) {

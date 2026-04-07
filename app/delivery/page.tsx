@@ -210,11 +210,16 @@ function PlanificateurView() {
     if (!newTourForm.name) return
     setSavingTour(true)
     try {
-      await fetch('/api/delivery/tours', {
+      const res = await fetch('/api/delivery/tours', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(newTourForm),
       })
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}))
+        alert(`Erreur création tournée: ${err.error ?? res.statusText}`)
+        return
+      }
       setShowNewTour(false)
       setNewTourForm({ name: '', zone: 'mixte', driver_name: '', planned_date: '' })
       await fetchTours()
