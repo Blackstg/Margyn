@@ -180,14 +180,10 @@ async function fetchMoomFulfillment(
     return m === 1 ? `${y - 1}-12` : `${y}-${String(m - 1).padStart(2, '0')}`
   }
 
-  const calcFulfillment = async (rows: InvoiceRowLite[], month: string, count: number) => {
-    const totalUsd = rows.reduce((s, r) => s + (r.shipping_price ?? 0), 0)
-    const rate     = await getEurRate(month)
-    const cpOrder  = (totalUsd * rate) / (rows.length || 1)
-    return Math.round(cpOrder * count)
-  }
+  const sumShipping = (rows: InvoiceRowLite[]) =>
+    rows.reduce((s, r) => s + (r.shipping_price ?? 0), 0)
 
-  // Try current month
+  // Try current month — use direct sum (totalUSD × rate), no per-order division
   const { data: cur } = await supabase
     .from('logistician_invoice_summaries')
     .select('invoice_rows')
@@ -197,10 +193,12 @@ async function fetchMoomFulfillment(
 
   const curRows = (cur as { invoice_rows?: InvoiceRowLite[] | null } | null)?.invoice_rows
   if (curRows?.length) {
-    return { fulfillment: await calcFulfillment(curRows, periodMonth, orderCount) }
+    const totalUsd = sumShipping(curRows)
+    const rate     = await getEurRate(periodMonth)
+    return { fulfillment: Math.round(totalUsd * rate) }
   }
 
-  // No invoice — use previous month as estimate
+  // No invoice — use previous month's cost-per-order as estimate
   const prevMonth = prevMonthStr(periodMonth)
   const { data: prev } = await supabase
     .from('logistician_invoice_summaries')
@@ -211,10 +209,13 @@ async function fetchMoomFulfillment(
 
   const prevRows = (prev as { invoice_rows?: InvoiceRowLite[] | null } | null)?.invoice_rows
   if (prevRows?.length) {
-    const [py, pm] = prevMonth.split('-').map(Number)
-    const label = new Date(py, pm - 1, 15).toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' })
+    const totalUsd    = sumShipping(prevRows)
+    const rate        = await getEurRate(prevMonth)
+    const cpOrder     = (totalUsd * rate) / (prevRows.length || 1)
+    const [py, pm]    = prevMonth.split('-').map(Number)
+    const label       = new Date(py, pm - 1, 15).toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' })
     return {
-      fulfillment: await calcFulfillment(prevRows, prevMonth, orderCount),
+      fulfillment: Math.round(cpOrder * orderCount),
       note: `Estimé — basé sur ${label}`,
     }
   }
