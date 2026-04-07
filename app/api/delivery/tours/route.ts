@@ -63,6 +63,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ tour: data })
   } catch (err) {
     console.error('[delivery/tours POST]', err)
-    return NextResponse.json({ error: String(err) }, { status: 500 })
+    const msg = err instanceof Error ? err.message : JSON.stringify(err)
+    return NextResponse.json({ error: msg }, { status: 500 })
   }
 }
