@@ -34,7 +34,11 @@ export async function GET(req: NextRequest) {
   const fwShippingUsd           = fwRows.reduce((s, r) => s + (r.shipping_price ?? 0), 0)
 
   // 2. Fetch EUR rate from frankfurter.app
-  const rateDate = `${month}-15`
+  // Rate = 1st of the following month
+  const [ry, rm] = month.split('-').map(Number)
+  const rateDate = rm === 12
+    ? `${ry + 1}-01-01`
+    : `${ry}-${String(rm + 1).padStart(2, '0')}-01`
   let eurRate = 0.92
   let rateSource = 'fallback (0.92)'
   let rateActualDate = rateDate

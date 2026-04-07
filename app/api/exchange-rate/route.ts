@@ -12,7 +12,12 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: 'Invalid month param (expected YYYY-MM)' }, { status: 400 })
   }
 
-  const date = `${month}-15`
+  // Use the 1st of the following month as the reference rate
+  const [y, m] = month.split('-').map(Number)
+  const nextMonth = m === 12
+    ? `${y + 1}-01-01`
+    : `${y}-${String(m + 1).padStart(2, '0')}-01`
+  const date = nextMonth
   try {
     const res = await fetch(`https://api.frankfurter.app/${date}?from=USD&to=EUR`, {
       next: { revalidate: 86400 }, // cache 24h — historical rates don't change
