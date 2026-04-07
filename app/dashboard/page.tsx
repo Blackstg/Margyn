@@ -173,33 +173,45 @@ async function getEurRate(periodMonth: string): Promise<number> {
 }
 
 async function fetchMoomFulfillment(
-  periodMonth: string,
+  from: string,
+  to: string,
   orderCount: number,
 ): Promise<{ fulfillment: number; note?: string }> {
+  const periodMonth = from.slice(0, 7)
+
   const prevMonthStr = (ym: string) => {
     const [y, m] = ym.split('-').map(Number)
     return m === 1 ? `${y - 1}-12` : `${y}-${String(m - 1).padStart(2, '0')}`
   }
 
-  const sumShipping = (rows: InvoiceRowLite[]) =>
+  const sumTotal = (rows: InvoiceRowLite[]) =>
     rows.reduce((s, r) => s + (r.total_price ?? 0), 0)
 
-  // Try current month — use direct sum (totalUSD × rate), no per-order division
-  const { data: cur } = await supabase
-    .from('logistician_invoice_summaries')
-    .select('invoice_rows')
-    .eq('brand', 'moom')
-    .eq('month', periodMonth)
-    .maybeSingle()
+  // Direct sum only for a complete calendar month (from = 1st, to = last day)
+  const [y, mo] = periodMonth.split('-').map(Number)
+  const lastDay = new Date(y, mo, 0).getDate()
+  const isFullMonth = from === `${periodMonth}-01` && to === `${periodMonth}-${String(lastDay).padStart(2, '0')}`
 
-  const curRows = (cur as { invoice_rows?: InvoiceRowLite[] | null } | null)?.invoice_rows
-  if (curRows?.length) {
-    const totalUsd = sumShipping(curRows)
-    const rate     = await getEurRate(periodMonth)
-    return { fulfillment: Math.round(totalUsd * rate) }
+  if (isFullMonth) {
+    const { data: cur } = await supabase
+      .from('logistician_invoice_summaries')
+      .select('invoice_rows')
+      .eq('brand', 'moom')
+      .eq('month', periodMonth)
+      .maybeSingle()
+
+    const curRows = (cur as { invoice_rows?: InvoiceRowLite[] | null } | null)?.invoice_rows
+    if (curRows?.length) {
+      const totalUsd = sumTotal(curRows)
+      const rate     = await getEurRate(periodMonth)
+      return { fulfillment: Math.round(totalUsd * rate) }
+    }
   }
 
-  // No invoice — use previous month's cost-per-order as estimate
+  // All other periods (7j, 30j, partial months, or full month without invoice):
+  // cost-per-order from the most recent invoice month
+
+  // Use previous month's cost-per-order as estimate
   const prevMonth = prevMonthStr(periodMonth)
 
   const [prevInvoiceRes, prevSnapshotRes] = await Promise.all([
@@ -219,7 +231,7 @@ async function fetchMoomFulfillment(
 
   const prevRows = (prevInvoiceRes.data as { invoice_rows?: InvoiceRowLite[] | null } | null)?.invoice_rows
   if (prevRows?.length) {
-    const totalUsd      = sumShipping(prevRows)
+    const totalUsd      = sumTotal(prevRows)
     const rate          = await getEurRate(prevMonth)
     const prevOrderCount = ((prevSnapshotRes.data ?? []) as { order_count?: number | null }[])
       .reduce((s, r) => s + (r.order_count ?? 0), 0) || prevRows.length
@@ -282,7 +294,7 @@ async function fetchKpiData(brand: Brand, from: string, to: string, days: number
   let fulfillment      = Math.round(shippingRate * snaps.order_count)
   let fulfillment_note: string | undefined
   if (brand === 'moom') {
-    const mf = await fetchMoomFulfillment(from.slice(0, 7), snaps.order_count)
+    const mf = await fetchMoomFulfillment(from, to, snaps.order_count)
     if (mf.fulfillment >= 0) {
       fulfillment      = mf.fulfillment
       fulfillment_note = mf.note
