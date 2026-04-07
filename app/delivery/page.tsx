@@ -7,9 +7,22 @@ import { ChevronDown, ChevronUp, Trash2, Mail, Plus, X, MapPin, Package, Truck }
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-type Zone = 'nord' | 'sud'
+type Zone = 'nord-est' | 'nord-ouest' | 'sud-est' | 'sud-ouest'
 type TourStatus = 'draft' | 'planned' | 'in_progress' | 'completed'
 type StopStatus = 'pending' | 'delivered'
+
+const ZONE_LABEL: Record<Zone, string> = {
+  'nord-est':   'Nord-Est',
+  'nord-ouest': 'Nord-Ouest',
+  'sud-est':    'Sud-Est',
+  'sud-ouest':  'Sud-Ouest',
+}
+const ZONE_COLOR: Record<Zone, { bg: string; text: string }> = {
+  'nord-est':   { bg: '#dbeafe', text: '#1d4ed8' },
+  'nord-ouest': { bg: '#dcfce7', text: '#15803d' },
+  'sud-est':    { bg: '#ffedd5', text: '#c2410c' },
+  'sud-ouest':  { bg: '#fee2e2', text: '#b91c1c' },
+}
 
 interface PanelItem { sku: string; title: string; qty: number }
 
@@ -127,7 +140,7 @@ function PlanificateurView() {
   const [shopifyOrders, setShopifyOrders] = useState<ShopifyOrder[]>([])
   const [tours, setTours] = useState<Tour[]>([])
   const [selectedOrders, setSelectedOrders] = useState<Set<string>>(new Set())
-  const [zoneFilter, setZoneFilter] = useState<'all' | 'nord' | 'sud'>('all')
+  const [zoneFilter, setZoneFilter] = useState<'all' | Zone>('all')
   const [search, setSearch] = useState('')
   const [showNewTour, setShowNewTour] = useState(false)
   const [newTourForm, setNewTourForm] = useState({ name: '', zone: 'mixte', driver_name: '', planned_date: '' })
@@ -310,7 +323,7 @@ function PlanificateurView() {
 
             {/* Zone filter */}
             <div className="flex gap-2 mb-3">
-              {(['all', 'nord', 'sud'] as const).map((z) => (
+              {(['all', 'nord-est', 'nord-ouest', 'sud-est', 'sud-ouest'] as const).map((z) => (
                 <button
                   key={z}
                   onClick={() => setZoneFilter(z)}
@@ -320,7 +333,7 @@ function PlanificateurView() {
                       : 'bg-[#f5f5f3] text-[#6b6b63] hover:bg-[#e8e8e4]'
                   }`}
                 >
-                  {z === 'all' ? 'Tous' : z === 'nord' ? 'Nord' : 'Sud'}
+                  {z === 'all' ? 'Toutes' : ZONE_LABEL[z]}
                 </button>
               ))}
             </div>
@@ -359,12 +372,12 @@ function PlanificateurView() {
                             <span className="font-semibold text-sm text-[#1a1a2e]">{order.order_name}</span>
                             <span
                               className="px-2 py-0.5 rounded-full text-xs font-medium"
-                              style={{
-                                background: order.zone === 'nord' ? '#dbeafe' : '#fef3c7',
-                                color: order.zone === 'nord' ? '#3b5bdb' : '#e67700',
-                              }}
+                              style={order.zone in ZONE_COLOR ? {
+                                background: ZONE_COLOR[order.zone as Zone].bg,
+                                color:      ZONE_COLOR[order.zone as Zone].text,
+                              } : {}}
                             >
-                              {order.zone === 'nord' ? 'Nord' : 'Sud'}
+                              {order.zone in ZONE_LABEL ? ZONE_LABEL[order.zone as Zone] : order.zone}
                             </span>
                             <span className="px-2 py-0.5 rounded-full bg-[#f5f5f3] text-[#6b6b63] text-xs">
                               {order.panel_count} panneau{order.panel_count !== 1 ? 'x' : ''}
@@ -436,8 +449,10 @@ function PlanificateurView() {
                     className="px-3 py-2 text-sm border border-[#e8e8e4] rounded-[10px] outline-none focus:border-[#aeb0c9] bg-white"
                   >
                     <option value="mixte">Mixte</option>
-                    <option value="nord">Nord</option>
-                    <option value="sud">Sud</option>
+                    <option value="nord-est">Nord-Est</option>
+                    <option value="nord-ouest">Nord-Ouest</option>
+                    <option value="sud-est">Sud-Est</option>
+                    <option value="sud-ouest">Sud-Ouest</option>
                   </select>
                   <input
                     type="text"
@@ -500,15 +515,15 @@ function PlanificateurView() {
                               <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${statusInfo.color}`}>
                                 {statusInfo.label}
                               </span>
-                              {tour.zone !== 'mixte' && (
+                              {tour.zone !== 'mixte' && tour.zone in ZONE_COLOR && (
                                 <span
                                   className="px-2 py-0.5 rounded-full text-xs font-medium"
                                   style={{
-                                    background: tour.zone === 'nord' ? '#dbeafe' : '#fef3c7',
-                                    color: tour.zone === 'nord' ? '#3b5bdb' : '#e67700',
+                                    background: ZONE_COLOR[tour.zone as Zone].bg,
+                                    color:      ZONE_COLOR[tour.zone as Zone].text,
                                   }}
                                 >
-                                  {tour.zone === 'nord' ? 'Nord' : 'Sud'}
+                                  {ZONE_LABEL[tour.zone as Zone]}
                                 </span>
                               )}
                             </div>
