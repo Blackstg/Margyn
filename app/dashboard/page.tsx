@@ -201,20 +201,31 @@ async function fetchMoomFulfillment(
 
   // No invoice — use previous month's cost-per-order as estimate
   const prevMonth = prevMonthStr(periodMonth)
-  const { data: prev } = await supabase
-    .from('logistician_invoice_summaries')
-    .select('invoice_rows')
-    .eq('brand', 'moom')
-    .eq('month', prevMonth)
-    .maybeSingle()
 
-  const prevRows = (prev as { invoice_rows?: InvoiceRowLite[] | null } | null)?.invoice_rows
+  const [prevInvoiceRes, prevSnapshotRes] = await Promise.all([
+    supabase
+      .from('logistician_invoice_summaries')
+      .select('invoice_rows')
+      .eq('brand', 'moom')
+      .eq('month', prevMonth)
+      .maybeSingle(),
+    supabase
+      .from('daily_snapshots')
+      .select('order_count')
+      .gte('date', `${prevMonth}-01`)
+      .lte('date', `${prevMonth}-31`)
+      .eq('brand', 'moom'),
+  ])
+
+  const prevRows = (prevInvoiceRes.data as { invoice_rows?: InvoiceRowLite[] | null } | null)?.invoice_rows
   if (prevRows?.length) {
-    const totalUsd    = sumShipping(prevRows)
-    const rate        = await getEurRate(prevMonth)
-    const cpOrder     = (totalUsd * rate) / (prevRows.length || 1)
-    const [py, pm]    = prevMonth.split('-').map(Number)
-    const label       = new Date(py, pm - 1, 15).toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' })
+    const totalUsd      = sumShipping(prevRows)
+    const rate          = await getEurRate(prevMonth)
+    const prevOrderCount = ((prevSnapshotRes.data ?? []) as { order_count?: number | null }[])
+      .reduce((s, r) => s + (r.order_count ?? 0), 0) || prevRows.length
+    const cpOrder       = (totalUsd * rate) / prevOrderCount
+    const [py, pm]      = prevMonth.split('-').map(Number)
+    const label         = new Date(py, pm - 1, 15).toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' })
     return {
       fulfillment: Math.round(cpOrder * orderCount),
       note: `Estimé — basé sur ${label}`,
