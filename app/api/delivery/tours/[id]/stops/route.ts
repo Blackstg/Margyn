@@ -30,17 +30,20 @@ export async function POST(
     const { stops } = (await req.json()) as { stops: ShopifyOrderSummary[] }
     const admin = getAdmin()
 
-    // Get current max sequence for this tour
+    // Get existing stops for this tour (sequence + order_name)
     const { data: existingStops } = await admin
       .from('delivery_stops')
-      .select('sequence')
+      .select('sequence, order_name')
       .eq('tour_id', params.id)
       .order('sequence', { ascending: false })
-      .limit(1)
 
+    const existingOrderNames = new Set((existingStops ?? []).map((s: { order_name: string }) => s.order_name))
     const maxSeq = existingStops?.[0]?.sequence ?? -1
 
-    const rows = stops.map((s, i) => ({
+    const newStops = stops.filter((s) => !existingOrderNames.has(s.order_name))
+    if (newStops.length === 0) return NextResponse.json({ added: 0 })
+
+    const rows = newStops.map((s, i) => ({
       tour_id: params.id,
       order_name: s.order_name,
       shopify_order_id: s.shopify_order_id,
@@ -59,7 +62,7 @@ export async function POST(
     const { error } = await admin.from('delivery_stops').insert(rows)
     if (error) throw error
 
-    return NextResponse.json({ added: rows.length })
+    return NextResponse.json({ added: rows.length, skipped: stops.length - rows.length })
   } catch (err) {
     console.error('[delivery/tours/:id/stops POST]', err)
     return NextResponse.json({ error: String(err) }, { status: 500 })
