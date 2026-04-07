@@ -3,12 +3,6 @@ import { NextRequest, NextResponse } from 'next/server'
 const MOOM_SHOP  = process.env.SHOPIFY_MOOM_SHOP!
 const MOOM_TOKEN = process.env.SHOPIFY_MOOM_ACCESS_TOKEN!
 
-// Countries considered "Europe" — destinations within this set are flagged if écart > $20
-const EU_COUNTRIES = new Set([
-  'FR','BE','DE','NL','ES','IT','PT','CH','AT','LU','GB','IE','DK',
-  'SE','NO','FI','PL','CZ','HU','RO','BG','HR','SK','SI','EE','LV',
-  'LT','GR','CY','MT','IS','LI','MC','AD','SM','RE','GP','MQ','GF',
-])
 
 async function fetchOrderShipping(orderName: string): Promise<{
   country: string
