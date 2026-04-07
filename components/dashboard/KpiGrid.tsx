@@ -267,8 +267,8 @@ export default function KpiGrid({ current, previous, loading, brand, sparklines 
   return (
     <div className="space-y-3">
 
-      {/* ── Top 2 cards ─────────────────────────────────────────────────────── */}
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+      {/* ── Top 3 cards ─────────────────────────────────────────────────────── */}
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
 
         {/* Total Sales — mesh radial gradient bg */}
         <KpiCard
@@ -293,6 +293,16 @@ export default function KpiGrid({ current, previous, loading, brand, sparklines 
           note={totalSales > 0 ? `${((netProfit / totalSales) * 100).toFixed(1)}% du CA` : undefined}
           sparkline={sparklines?.gross}
         />
+
+        {/* ROAS Réel — key metric alongside P&L */}
+        <KpiCard
+          label="ROAS réel"
+          value={roasReel}
+          formatted={`${roasReel.toFixed(2)}x`}
+          prevValue={prevRoasReel}
+          loading={loading}
+          note="CA / dépense pub"
+        />
       </div>
 
       {/* ── Secondary white cards ────────────────────────────────────────────── */}
@@ -308,7 +318,6 @@ export default function KpiGrid({ current, previous, loading, brand, sparklines 
           note={giftingCogs > 0 ? `${fmtEur(giftingCogs)} offerts` : undefined}
         />
         <KpiCard label="Marketing"    value={c.marketing}    formatted={fmtEur(c.marketing)}    prevValue={p.marketing}     loading={loading} inverse />
-        <KpiCard label="ROAS réel"  value={roasReel} formatted={`${roasReel.toFixed(2)}x`} prevValue={prevRoasReel} loading={loading} note="CA / dépense pub" />
         <KpiCard label="CPA"        value={cpo}      formatted={cpo > 0 ? `${fmtEur(cpo)}` : '—'}    prevValue={prevCpo}     loading={loading} inverse note="coût par achat" />
         <KpiCard label="COGS"       value={c.cogs}   formatted={fmtEur(c.cogs)}  prevValue={p.cogs}  loading={loading} inverse />
         <KpiCard label="Retours"    value={c.returns} formatted={fmtEur(c.returns)} prevValue={p.returns} loading={loading} inverse note={returnRate > 0 ? `${returnRate.toFixed(1)}% du CA` : undefined} />

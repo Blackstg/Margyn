@@ -463,12 +463,14 @@ export default function SettingsPage() {
 
   // ─── Load ───────────────────────────────────────────────────────────────
 
+  // Sentinel month for recurring (permanent) fixed costs — never a real calendar month
+  const SENTINEL = '1900-01-01'
+
   const loadCosts = useCallback(async () => {
     setLoading(true)
-    const month = currentMonthStart()
 
     const [{ data }, { data: shippingData }] = await Promise.all([
-      supabase.from('fixed_costs').select('id, label, amount, category, brand').eq('month', month),
+      supabase.from('fixed_costs').select('id, label, amount, category, brand').eq('month', SENTINEL),
       supabase.from('brand_settings').select('brand, shipping_cost_per_order'),
     ])
 
@@ -580,7 +582,7 @@ export default function SettingsPage() {
     const currentRows = rows[key]
 
     setSaveStates((prev) => ({ ...prev, [key]: 'saving' }))
-    const month = category === 'variable' ? variableMonth : currentMonthStart()
+    const month = category === 'variable' ? variableMonth : SENTINEL
     const valid = currentRows.filter((r) => r.label.trim() && parseFloat(r.amount) > 0)
 
     try {
@@ -697,7 +699,7 @@ export default function SettingsPage() {
         <div>
           <h1 className="text-xl font-bold text-[#1a1a18] tracking-tight">Paramètres</h1>
           <p className="text-sm text-[#6b6b63] mt-1">
-            Mois en cours — {new Date().toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' })}
+            Charges fixes — s&apos;appliquent automatiquement à tous les mois
           </p>
         </div>
 

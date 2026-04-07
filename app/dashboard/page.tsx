@@ -170,9 +170,8 @@ async function fetchKpiData(brand: Brand, from: string, to: string, days: number
       .gte('date', from).lte('date', to).in('brand', brands),
     supabase.from('ad_spends').select('spend')
       .gte('date', from).lte('date', to).in('brand', brands),
-    supabase.from('fixed_costs').select('amount, month, category')
-      .gte('month', from.slice(0, 7) + '-01')
-      .lte('month', new Date().toISOString().slice(0, 7) + '-01')  // always include current month
+    supabase.from('fixed_costs').select('amount, category')
+      .eq('month', '1900-01-01')
       .eq('brand', brand),
     supabase.from('brand_settings').select('shipping_cost_per_order, transaction_fee_rate').eq('brand', brand).single(),
     suppQuery,
@@ -183,25 +182,16 @@ async function fetchKpiData(brand: Brand, from: string, to: string, days: number
     (s: number, r: { spend?: number | null }) => s + (r.spend ?? 0), 0
   )
 
-  // Group fixed costs by month + category, then prorate
-  type FixedRow = { amount?: number | null; month: string; category?: string | null }
-  const byMonthApp = new Map<string, number>()
-  const byMonthOther = new Map<string, number>()
+  // Fixed costs: read from sentinel row (1900-01-01), prorate to the selected period
+  type FixedRow = { amount?: number | null; category?: string | null }
+  let totalFixedApp = 0, totalFixedOther = 0
   for (const r of (fixedCostsRes.data ?? []) as FixedRow[]) {
-    const month = r.month.slice(0, 7)
     const amount = r.amount ?? 0
-    if (r.category === 'app') {
-      byMonthApp.set(month, (byMonthApp.get(month) ?? 0) + amount)
-    } else {
-      byMonthOther.set(month, (byMonthOther.get(month) ?? 0) + amount)
-    }
+    if (r.category === 'app') totalFixedApp += amount
+    else                      totalFixedOther += amount
   }
-  const avgOf = (map: Map<string, number>) => {
-    const vals = Array.from(map.values())
-    return vals.length > 0 ? vals.reduce((a, b) => a + b, 0) / vals.length : 0
-  }
-  const app_charges  = Math.round(avgOf(byMonthApp)   * (days / 30.44))
-  const op_expenses  = Math.round(avgOf(byMonthOther)  * (days / 30.44))
+  const app_charges = Math.round(totalFixedApp   * (days / 30.44))
+  const op_expenses = Math.round(totalFixedOther * (days / 30.44))
 
   const settingsData = (settingsRes.data as { shipping_cost_per_order?: number; transaction_fee_rate?: number } | null)
   const shippingRate       = settingsData?.shipping_cost_per_order ?? 17
@@ -210,6 +200,10 @@ async function fetchKpiData(brand: Brand, from: string, to: string, days: number
   const transaction_fees   = Math.round(snaps.total_sales * transactionFeeRate)
 
   // Supplementary revenue (Bowa only) — prorate same as fixed costs
+  const avgOf = (map: Map<string, number>) => {
+    const vals = Array.from(map.values())
+    return vals.length > 0 ? vals.reduce((a, b) => a + b, 0) / vals.length : 0
+  }
   type SuppRow = { source: string; amount?: number | null; month: string }
   const bySourceByMonth = new Map<string, Map<string, number>>()
   for (const r of ((suppRes as { data: SuppRow[] | null }).data ?? []) as SuppRow[]) {
@@ -441,8 +435,8 @@ async function fetchAnnualData(brand: Brand, year: number): Promise<MonthPoint[]
       .select('date, spend')
       .gte('date', from).lte('date', to).in('brand', brands),
     supabase.from('fixed_costs')
-      .select('month, amount, category')
-      .gte('month', `${year}-01-01`).lte('month', `${year}-12-01`)
+      .select('amount, category')
+      .eq('month', '1900-01-01')
       .eq('brand', brand),
     supabase.from('brand_settings')
       .select('shipping_cost_per_order, transaction_fee_rate')
@@ -468,16 +462,15 @@ async function fetchAnnualData(brand: Brand, year: number): Promise<MonthPoint[]
     byMonth.set(m, { ...prev, marketing: prev.marketing + (r.spend ?? 0) })
   }
 
-  type FixedRow = { month: string; amount?: number | null; category?: string | null }
-  const fixedByMonth = new Map<number, { app: number; other: number }>()
+  // Fixed costs: sentinel template — same amount applied to every month
+  type FixedRow = { amount?: number | null; category?: string | null }
+  let fixedApp = 0, fixedOther = 0
   for (const r of (fixedCostsRes.data ?? []) as FixedRow[]) {
-    const m = new Date(r.month + 'T00:00:00').getMonth() + 1
-    const prev = fixedByMonth.get(m) ?? { app: 0, other: 0 }
     const amount = r.amount ?? 0
-    fixedByMonth.set(m, r.category === 'app'
-      ? { ...prev, app: prev.app + amount }
-      : { ...prev, other: prev.other + amount })
+    if (r.category === 'app') fixedApp += amount
+    else                      fixedOther += amount
   }
+  const fixedTemplate = { app: fixedApp, other: fixedOther }
 
   const settingsData = (settingsRes.data as { shipping_cost_per_order?: number; transaction_fee_rate?: number } | null)
   const shippingRate = settingsData?.shipping_cost_per_order ?? 17
@@ -492,7 +485,7 @@ async function fetchAnnualData(brand: Brand, year: number): Promise<MonthPoint[]
   return Array.from({ length: 12 }, (_, i) => {
     const month = i + 1
     const d     = byMonth.get(month) ?? { ca: 0, gross_profit: 0, order_count: 0, marketing: 0 }
-    const fixed = fixedByMonth.get(month) ?? { app: 0, other: 0 }
+    const fixed = fixedTemplate
 
     // Bowa: total_sales is TTC → convert to HT (× 5/6)
     const tva          = brand === 'bowa' ? Math.round(d.ca / 6) : 0
