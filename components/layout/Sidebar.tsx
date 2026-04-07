@@ -93,21 +93,20 @@ export default function Sidebar() {
         })}
       </nav>
 
-      {/* Data freshness indicator */}
-      <div className="mb-1">
+      {/* Bottom actions: freshness + logout */}
+      <div className="mt-auto flex flex-col items-center gap-1">
         <DataFreshness />
-      </div>
 
-      {/* Logout */}
-      <button
-        onClick={handleLogout}
-        className="group relative mt-auto w-11 h-11 rounded-xl flex items-center justify-center text-white/35 hover:text-[#c9c6e8] hover:bg-[#aeb0c9]/12 transition-all cursor-pointer"
-      >
-        <LogOut size={20} strokeWidth={1.8} />
-        <span className="pointer-events-none absolute left-full ml-3 px-2.5 py-1.5 bg-[#1a1a2e] border border-white/10 text-white text-xs font-medium rounded-lg opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap shadow-lg">
-          Déconnexion
-        </span>
-      </button>
+        <button
+          onClick={handleLogout}
+          className="group relative w-11 h-11 rounded-xl flex items-center justify-center text-white/35 hover:text-[#c9c6e8] hover:bg-[#aeb0c9]/12 transition-all cursor-pointer"
+        >
+          <LogOut size={20} strokeWidth={1.8} />
+          <span className="pointer-events-none absolute left-full ml-3 px-2.5 py-1.5 bg-[#1a1a2e] border border-white/10 text-white text-xs font-medium rounded-lg opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap shadow-lg">
+            Déconnexion
+          </span>
+        </button>
+      </div>
     </aside>
   )
 }
