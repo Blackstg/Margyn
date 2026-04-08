@@ -839,8 +839,9 @@ function LivreurView() {
     await fetchTours()
   }
 
+  const DEPOT = 'Rue Lamartine, Zone Industrielle des Distraits, 18390 Saint-Germain-du-Puy, France'
   const mapsUrl = sortedStops.length > 0
-    ? `https://www.google.com/maps/dir/${sortedStops
+    ? `https://www.google.com/maps/dir/${encodeURIComponent(DEPOT)}/${sortedStops
         .map((s) => encodeURIComponent(`${s.address1}, ${s.city} ${s.zip}, France`))
         .join('/')}`
     : ''
