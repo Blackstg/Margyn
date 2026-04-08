@@ -2,7 +2,7 @@
 
 export const dynamic = 'force-dynamic'
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, Suspense } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { ChevronDown, ChevronUp, ChevronLeft, ChevronRight, Trash2, Mail, Plus, X, MapPin, Package, Truck } from 'lucide-react'
 
@@ -95,6 +95,14 @@ const TOUR_STATUS_LABELS: Record<TourStatus, { label: string; color: string }> =
 // ─── Main Page ────────────────────────────────────────────────────────────────
 
 export default function DeliveryPage() {
+  return (
+    <Suspense>
+      <DeliveryPageInner />
+    </Suspense>
+  )
+}
+
+function DeliveryPageInner() {
   const router = useRouter()
   const searchParams = useSearchParams()
 
