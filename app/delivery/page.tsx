@@ -2,7 +2,7 @@
 
 export const dynamic = 'force-dynamic'
 
-import { useState, useEffect, useCallback, Suspense } from 'react'
+import { useState, useEffect, useCallback, useRef, Suspense } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { ChevronDown, ChevronUp, ChevronLeft, ChevronRight, Trash2, Mail, Plus, X, MapPin, Package, Truck } from 'lucide-react'
 
@@ -1407,12 +1407,80 @@ function buildSavEmail(entry: SavEntry): string {
   }
 }
 
+// Pure helper — builds SavEntry[] from raw API responses
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function buildSavEntries(toursRaw: any[], ordersRaw: ShopifyOrder[]): SavEntry[] {
+  const result: SavEntry[] = []
+
+  for (const tour of toursRaw) {
+    if (tour.status === 'cancelled') continue
+    const stops: TourStop[] = tour.stops ?? []
+    const tourTotal    = stops.length
+    const tourDelivered = stops.filter((s: TourStop) => s.status === 'delivered').length
+    const sortedStops  = [...stops].sort((a: TourStop, b: TourStop) => a.sequence - b.sequence)
+    const tourStopsSummary: SavStopSummary[] = sortedStops.map((s: TourStop) => ({
+      city: s.city, order_name: s.order_name, status: s.status, sequence: s.sequence,
+    }))
+
+    for (const stop of stops) {
+      let sav_status: SavStatus
+      if (stop.status === 'delivered')        sav_status = 'delivered'
+      else if (tour.status === 'in_progress') sav_status = 'in_progress'
+      else                                    sav_status = 'planned'
+
+      const stopsBefore = sortedStops.filter(
+        (s: TourStop) => s.sequence < stop.sequence && s.status !== 'delivered'
+      ).length
+
+      result.push({
+        id: stop.id, order_name: stop.order_name, customer_name: stop.customer_name,
+        email: stop.email, city: stop.city, zip: stop.zip, zone: stop.zone,
+        address1: stop.address1, panel_count: stop.panel_count,
+        panel_details: stop.panel_details ?? [],
+        tour_name: tour.name, tour_status: tour.status,
+        tour_planned_date: tour.planned_date, tour_zone: tour.zone ?? null,
+        tour_total_stops: tourTotal, tour_delivered_stops: tourDelivered,
+        stops_before: stopsBefore, tour_stops_summary: tourStopsSummary,
+        driver_name: tour.driver_name ?? null,
+        stop_status: stop.status, stop_sequence: stop.sequence,
+        delivered_at: stop.delivered_at ?? null, sav_status,
+      })
+    }
+  }
+
+  for (const order of ordersRaw) {
+    result.push({
+      id: `order-${order.order_name}`, order_name: order.order_name,
+      customer_name: order.customer_name, email: order.email,
+      city: order.city, zip: order.zip, zone: order.zone, address1: order.address1,
+      panel_count: order.panel_count, panel_details: order.panel_details ?? [],
+      tour_name: null, tour_status: null, tour_planned_date: null, tour_zone: null,
+      tour_total_stops: 0, tour_delivered_stops: 0, stops_before: 0,
+      tour_stops_summary: [], driver_name: null,
+      stop_status: null, stop_sequence: 0, delivered_at: null, sav_status: 'pending',
+    })
+  }
+
+  return result
+}
+
 function SavView() {
   const [search, setSearch]     = useState('')
   const [entries, setEntries]   = useState<SavEntry[]>([])
   const [loading, setLoading]   = useState(true)
   const [selected, setSelected] = useState<SavEntry | null>(null)
   const [copied, setCopied]     = useState(false)
+
+  // Refs for polling — avoid stale closures
+  const cachedOrdersRef = useRef<ShopifyOrder[]>([])
+  const entriesRef      = useRef<SavEntry[]>([])
+  const refreshingRef   = useRef(false)
+
+  function applyEntries(newEntries: SavEntry[]) {
+    entriesRef.current = newEntries
+    setEntries(newEntries)
+    setSelected(prev => prev ? newEntries.find(e => e.id === prev.id) ?? prev : prev)
+  }
 
   useEffect(() => {
     async function load() {
@@ -1422,89 +1490,8 @@ function SavView() {
           fetch('/api/delivery/tours').then(r => r.json()),
           fetch('/api/delivery/orders').then(r => r.json()),
         ])
-
-        const result: SavEntry[] = []
-
-        for (const tour of toursData.tours ?? []) {
-          if (tour.status === 'cancelled') continue
-          const stops: TourStop[] = tour.stops ?? []
-          const tourTotal = stops.length
-          const tourDelivered = stops.filter((s: TourStop) => s.status === 'delivered').length
-          const sortedStops = [...stops].sort((a: TourStop, b: TourStop) => a.sequence - b.sequence)
-          const tourStopsSummary: SavStopSummary[] = sortedStops.map((s: TourStop) => ({
-            city: s.city,
-            order_name: s.order_name,
-            status: s.status,
-            sequence: s.sequence,
-          }))
-
-          for (const stop of stops) {
-            let sav_status: SavStatus
-            if (stop.status === 'delivered')        sav_status = 'delivered'
-            else if (tour.status === 'in_progress') sav_status = 'in_progress'
-            else                                    sav_status = 'planned'
-
-            const stopsBefore = sortedStops.filter(
-              (s: TourStop) => s.sequence < stop.sequence && s.status !== 'delivered'
-            ).length
-
-            result.push({
-              id: stop.id,
-              order_name: stop.order_name,
-              customer_name: stop.customer_name,
-              email: stop.email,
-              city: stop.city,
-              zip: stop.zip,
-              zone: stop.zone,
-              address1: stop.address1,
-              panel_count: stop.panel_count,
-              panel_details: stop.panel_details ?? [],
-              tour_name: tour.name,
-              tour_status: tour.status,
-              tour_planned_date: tour.planned_date,
-              tour_zone: tour.zone ?? null,
-              tour_total_stops: tourTotal,
-              tour_delivered_stops: tourDelivered,
-              stops_before: stopsBefore,
-              tour_stops_summary: tourStopsSummary,
-              driver_name: tour.driver_name ?? null,
-              stop_status: stop.status,
-              stop_sequence: stop.sequence,
-              delivered_at: stop.delivered_at ?? null,
-              sav_status,
-            })
-          }
-        }
-
-        for (const order of ordersData.orders ?? []) {
-          result.push({
-            id: `order-${order.order_name}`,
-            order_name: order.order_name,
-            customer_name: order.customer_name,
-            email: order.email,
-            city: order.city,
-            zip: order.zip,
-            zone: order.zone,
-            address1: order.address1,
-            panel_count: order.panel_count,
-            panel_details: order.panel_details ?? [],
-            tour_name: null,
-            tour_status: null,
-            tour_planned_date: null,
-            tour_zone: null,
-            tour_total_stops: 0,
-            tour_delivered_stops: 0,
-            stops_before: 0,
-            tour_stops_summary: [],
-            driver_name: null,
-            stop_status: null,
-            stop_sequence: 0,
-            delivered_at: null,
-            sav_status: 'pending',
-          })
-        }
-
-        setEntries(result)
+        cachedOrdersRef.current = ordersData.orders ?? []
+        applyEntries(buildSavEntries(toursData.tours ?? [], cachedOrdersRef.current))
       } catch (e) {
         console.error(e)
       } finally {
@@ -1513,6 +1500,23 @@ function SavView() {
     }
     load()
   }, [])
+
+  // Real-time polling — refresh every 10s when any in_progress tour exists
+  useEffect(() => {
+    const interval = setInterval(async () => {
+      const hasInProgress = entriesRef.current.some(e => e.sav_status === 'in_progress')
+      if (!hasInProgress) return
+      if (refreshingRef.current) return
+      refreshingRef.current = true
+      try {
+        const toursData = await fetch('/api/delivery/tours').then(r => r.json())
+        applyEntries(buildSavEntries(toursData.tours ?? [], cachedOrdersRef.current))
+      } catch { /* silent */ } finally {
+        refreshingRef.current = false
+      }
+    }, 10_000)
+    return () => clearInterval(interval)
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   const [emailOpen, setEmailOpen] = useState(false)
 
@@ -1717,46 +1721,35 @@ function SavView() {
               {(selected.sav_status === 'planned' || selected.sav_status === 'in_progress') && selected.tour_total_stops > 0 && (() => {
                 if (selected.sav_status === 'planned') {
                   return (
-                    <div className="rounded-[14px] border border-[#f5e0a0] bg-[#fffbeb] p-3.5 space-y-2">
-                      <div className="flex items-center gap-2">
-                        <div className="w-2.5 h-2.5 rounded-full bg-[#d97706] flex-shrink-0" />
-                        <span className="text-xs font-semibold text-[#92400e]">Chargement non démarré</span>
-                      </div>
+                    <div className="rounded-[14px] bg-[#faf5ff] border border-[#e9d5ff] p-4 space-y-1.5">
+                      {range && (
+                        <p className="text-sm font-semibold text-[#1a1a2e]">
+                          Livraison prévue entre le {range.start} et le {range.end}
+                        </p>
+                      )}
                       {selected.stops_before > 0 && (
                         <p className="text-xs text-[#6b6b63]">
-                          <span className="font-semibold text-[#92400e]">{selected.stops_before}</span> livraison{selected.stops_before > 1 ? 's' : ''} avant la sienne dans la tournée
+                          {selected.stops_before} livraison{selected.stops_before > 1 ? 's' : ''} prévues avant la sienne
                         </p>
                       )}
                       {remainingCities.length > 0 && (
-                        <p className="text-xs text-[#6b6b63]">Villes de la tournée : <span className="text-[#1a1a2e]">{remainingCities.join(', ')}</span></p>
+                        <p className="text-xs text-[#6b6b63]">Villes : <span className="text-[#1a1a2e]">{remainingCities.join(', ')}</span></p>
                       )}
                     </div>
                   )
                 }
-                // in_progress
-                const notStarted = selected.tour_delivered_stops === 0
-                if (notStarted) {
-                  return (
-                    <div className="rounded-[14px] border border-[#a7f3d0] bg-[#f0fdf4] p-3.5 space-y-1.5">
-                      <div className="flex items-center gap-2">
-                        <div className="w-2.5 h-2.5 rounded-full bg-[#16a34a] flex-shrink-0" />
-                        <span className="text-xs font-semibold text-[#15803d]">Chargé · En route</span>
-                      </div>
-                      <p className="text-xs text-[#6b6b63]">{selected.driver_name ?? 'Le livreur'} démarre sa tournée de {selected.tour_total_stops} arrêts</p>
-                    </div>
-                  )
-                }
+                // in_progress — always show progress bar (even at 0 delivered)
                 return (
                   <div className="rounded-[14px] bg-[#f0f4ff] p-4 space-y-3">
                     <div className="flex items-center justify-between">
                       <span className="text-sm font-bold text-[#1a1a2e]">
-                        {selected.driver_name ?? 'Livreur'} · {selected.tour_delivered_stops} arrêt{selected.tour_delivered_stops > 1 ? 's' : ''} livré{selected.tour_delivered_stops > 1 ? 's' : ''} sur {selected.tour_total_stops}
+                        {selected.driver_name ?? 'Livreur'} · {selected.tour_delivered_stops} arrêt{selected.tour_delivered_stops !== 1 ? 's' : ''} livré{selected.tour_delivered_stops !== 1 ? 's' : ''} sur {selected.tour_total_stops}
                       </span>
                       <span className="text-lg font-extrabold text-[#1d4ed8]">{pct}%</span>
                     </div>
                     <div className="h-3 rounded-full bg-[#dbeafe] overflow-hidden">
                       <div
-                        className="h-full rounded-full bg-[#1d4ed8] transition-all"
+                        className="h-full rounded-full bg-[#1d4ed8] transition-all duration-500"
                         style={{ width: `${pct}%` }}
                       />
                     </div>
