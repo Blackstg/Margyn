@@ -32,6 +32,7 @@ interface ShopifyOrder {
   shopify_order_id: string
   customer_name: string
   email: string
+  created_at: string | null
   address1: string
   city: string
   zip: string
@@ -160,7 +161,6 @@ function PlanificateurView() {
   const [loadingTours, setLoadingTours] = useState(true)
   const [targetTourId, setTargetTourId] = useState('')
   const [expandedTours, setExpandedTours] = useState<Set<string>>(new Set())
-  const [expandedOrder, setExpandedOrder] = useState<Set<string>>(new Set())
   const [savingTour, setSavingTour] = useState(false)
   const [addingStops, setAddingStops] = useState(false)
 
@@ -332,13 +332,37 @@ function PlanificateurView() {
     return [...map.values()].sort((a, b) => b.qty - a.qty)
   }
 
-  function toggleOrderExpand(orderName: string) {
-    setExpandedOrder((prev) => {
-      const next = new Set(prev)
-      if (next.has(orderName)) next.delete(orderName)
-      else next.add(orderName)
-      return next
-    })
+  function handleAutoSuggest() {
+    const targetTour = tours.find((t) => t.id === targetTourId)
+    const currentPanels = targetTour ? targetTour.total_panels : 0
+    const remaining = 100 - currentPanels
+    if (remaining <= 0) return
+
+    // Filter to zone of target tour (if set and not mixte), sort oldest first
+    const zone = targetTour?.zone && targetTour.zone !== 'mixte' ? targetTour.zone : null
+    const candidates = filteredOrders
+      .filter((o) => !selectedOrders.has(o.order_name))
+      .filter((o) => !zone || o.zone === zone)
+      .slice()
+      .sort((a, b) => {
+        if (!a.created_at) return 1
+        if (!b.created_at) return -1
+        return a.created_at.localeCompare(b.created_at)
+      })
+
+    const newSelected = new Set(selectedOrders)
+    let filled = [...newSelected].reduce((sum, name) => {
+      const o = shopifyOrders.find((x) => x.order_name === name)
+      return sum + (o?.panel_count ?? 0)
+    }, 0)
+
+    for (const order of candidates) {
+      if (filled + order.panel_count > remaining) continue
+      newSelected.add(order.order_name)
+      filled += order.panel_count
+      if (filled >= remaining) break
+    }
+    setSelectedOrders(newSelected)
   }
 
   return (
@@ -347,12 +371,22 @@ function PlanificateurView() {
         {/* Left: Orders */}
         <div>
           <div className="rounded-[20px] shadow-[0_2px_16px_rgba(0,0,0,0.06)] bg-white p-5">
-            <h2 className="text-base font-semibold text-[#1a1a2e] mb-4">
-              Commandes à planifier
-              {!loadingOrders && (
-                <span className="ml-2 text-sm font-normal text-[#6b6b63]">({filteredOrders.length})</span>
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-base font-semibold text-[#1a1a2e]">
+                Commandes à planifier
+                {!loadingOrders && (
+                  <span className="ml-2 text-sm font-normal text-[#6b6b63]">({filteredOrders.length})</span>
+                )}
+              </h2>
+              {targetTourId && (
+                <button
+                  onClick={handleAutoSuggest}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-[10px] bg-[#f0f0fa] text-[#4338ca] text-xs font-medium hover:bg-[#e0e0fa] transition-colors"
+                >
+                  ✨ Suggestion
+                </button>
               )}
-            </h2>
+            </div>
 
             {/* Zone filter */}
             <div className="flex gap-2 mb-3">
@@ -389,65 +423,72 @@ function PlanificateurView() {
               ) : (
                 filteredOrders.map((order) => {
                   const selected = selectedOrders.has(order.order_name)
-                  const orderExpanded = expandedOrder.has(order.order_name)
+                  const daysWaiting = order.created_at
+                    ? Math.floor((Date.now() - new Date(order.created_at).getTime()) / 86_400_000)
+                    : null
+                  const isUrgent = daysWaiting !== null && daysWaiting > 14
                   return (
                     <div
                       key={order.order_name}
-                      className={`rounded-[12px] border transition-all overflow-hidden ${
+                      onClick={() => toggleOrder(order.order_name)}
+                      className={`rounded-[12px] border transition-all overflow-hidden cursor-pointer ${
                         selected
                           ? 'border-2 border-[#aeb0c9] bg-[#f0f0fa]'
                           : 'border border-[#e8e8e4]'
                       }`}
                     >
-                      <div
-                        className="p-3 flex items-start justify-between gap-2 cursor-pointer"
-                        onClick={() => toggleOrder(order.order_name)}
-                      >
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-center gap-2 flex-wrap">
-                            <span className="font-semibold text-sm text-[#1a1a2e]">{order.order_name}</span>
-                            <span
-                              className="px-2 py-0.5 rounded-full text-xs font-medium"
-                              style={order.zone in ZONE_COLOR ? {
-                                background: ZONE_COLOR[order.zone as Zone].bg,
-                                color:      ZONE_COLOR[order.zone as Zone].text,
-                              } : {}}
-                            >
-                              {order.zone in ZONE_LABEL ? ZONE_LABEL[order.zone as Zone] : order.zone}
-                            </span>
-                            <span className="px-2 py-0.5 rounded-full bg-[#f5f5f3] text-[#6b6b63] text-xs">
-                              {order.panel_count} panneau{order.panel_count !== 1 ? 'x' : ''}
-                            </span>
+                      <div className="p-3">
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-1.5 flex-wrap">
+                              <span className="font-semibold text-sm text-[#1a1a2e]">{order.order_name}</span>
+                              <span
+                                className="px-2 py-0.5 rounded-full text-xs font-medium"
+                                style={order.zone in ZONE_COLOR ? {
+                                  background: ZONE_COLOR[order.zone as Zone].bg,
+                                  color:      ZONE_COLOR[order.zone as Zone].text,
+                                } : {}}
+                              >
+                                {order.zone in ZONE_LABEL ? ZONE_LABEL[order.zone as Zone] : order.zone}
+                              </span>
+                              <span className="px-2 py-0.5 rounded-full bg-[#f5f5f3] text-[#6b6b63] text-xs">
+                                {order.panel_count} panneau{order.panel_count !== 1 ? 'x' : ''}
+                              </span>
+                              {isUrgent && (
+                                <span className="px-2 py-0.5 rounded-full bg-[#fee2e2] text-[#c7293a] text-xs font-medium">
+                                  {daysWaiting}j
+                                </span>
+                              )}
+                            </div>
+                            <div className="text-xs text-[#6b6b63] mt-0.5">{order.customer_name} · {order.city}</div>
+                            {order.created_at && (
+                              <div className="text-[10px] text-[#9b9b93] mt-0.5">
+                                {new Date(order.created_at).toLocaleDateString('fr-FR', { day: 'numeric', month: 'short', year: 'numeric' })}
+                                {daysWaiting !== null && !isUrgent && <span className="ml-1">({daysWaiting}j)</span>}
+                              </div>
+                            )}
                           </div>
-                          <div className="text-xs text-[#6b6b63] mt-0.5">{order.customer_name}</div>
-                          <div className="text-xs text-[#6b6b63]">{order.city} {order.zip}</div>
-                        </div>
-                        <div className="flex items-center gap-1.5 shrink-0 mt-0.5">
-                          <button
-                            onClick={(e) => { e.stopPropagation(); toggleOrderExpand(order.order_name) }}
-                            className="p-0.5 rounded text-[#6b6b63] hover:text-[#1a1a2e]"
-                          >
-                            {orderExpanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
-                          </button>
                           <input
                             type="checkbox"
                             readOnly
                             checked={selected}
-                            className="accent-[#aeb0c9] cursor-pointer"
+                            className="mt-1 accent-[#aeb0c9] cursor-pointer shrink-0"
+                            onClick={(e) => e.stopPropagation()}
                           />
                         </div>
+                        {/* Refs always visible */}
+                        {order.panel_details?.length > 0 && (
+                          <div className="mt-2 space-y-0.5">
+                            {order.panel_details.map((item, i) => (
+                              <div key={i} className="flex items-center gap-1.5 text-[10px]">
+                                <span className="font-mono text-[#6b6b63] bg-[#f5f5f3] px-1.5 py-0.5 rounded shrink-0">{item.sku || '—'}</span>
+                                <span className="text-[#6b6b63] truncate">{item.title}</span>
+                                <span className="font-semibold text-[#1a1a2e] shrink-0">×{item.qty}</span>
+                              </div>
+                            ))}
+                          </div>
+                        )}
                       </div>
-                      {orderExpanded && order.panel_details?.length > 0 && (
-                        <div className="border-t border-[#e8e8e4] bg-white px-3 py-2 space-y-1.5">
-                          {order.panel_details.map((item, i) => (
-                            <div key={i} className="flex items-start gap-2 text-xs">
-                              <span className="shrink-0 font-mono text-[#6b6b63] bg-[#f5f5f3] px-1.5 py-0.5 rounded text-[10px]">{item.sku || '—'}</span>
-                              <span className="flex-1 text-[#1a1a2e]">{item.title}</span>
-                              <span className="shrink-0 font-semibold text-[#1a1a2e]">×{item.qty}</span>
-                            </div>
-                          ))}
-                        </div>
-                      )}
                     </div>
                   )
                 })
@@ -457,7 +498,60 @@ function PlanificateurView() {
         </div>
 
         {/* Right: Tours */}
-        <div>
+        <div className="space-y-3">
+          {/* Panel capacity bar for selected tour */}
+          {(() => {
+            const t = tours.find((t) => t.id === targetTourId)
+            if (!t) return null
+            const pct = Math.min((t.total_panels / 100) * 100, 100)
+            const selectedPanels = [...selectedOrders].reduce((sum, name) => {
+              const o = shopifyOrders.find((x) => x.order_name === name)
+              return sum + (o?.panel_count ?? 0)
+            }, 0)
+            const projected = Math.min(((t.total_panels + selectedPanels) / 100) * 100, 100)
+            return (
+              <div className="rounded-[20px] shadow-[0_2px_16px_rgba(0,0,0,0.06)] bg-white p-5">
+                <div className="flex items-end justify-between mb-3">
+                  <div>
+                    <div className="text-xs text-[#6b6b63] mb-0.5">{t.name}</div>
+                    <div className="text-3xl font-bold text-[#1a1a2e]">
+                      {t.total_panels}
+                      {selectedPanels > 0 && (
+                        <span className="text-lg font-medium text-[#4338ca] ml-1.5">+{selectedPanels}</span>
+                      )}
+                      <span className="text-base font-normal text-[#6b6b63] ml-1">/ 100 panneaux</span>
+                    </div>
+                  </div>
+                  <div className="text-sm text-[#6b6b63]">{t.stops.length} arrêt{t.stops.length !== 1 ? 's' : ''}</div>
+                </div>
+                <div className="relative w-full h-4 bg-[#f5f5f3] rounded-full overflow-hidden">
+                  <div
+                    className="absolute top-0 left-0 h-full rounded-full transition-all"
+                    style={{
+                      width: `${pct}%`,
+                      background: t.total_panels > 90 ? '#c7293a' : '#1a7f4b',
+                    }}
+                  />
+                  {selectedPanels > 0 && (
+                    <div
+                      className="absolute top-0 h-full rounded-full bg-[#4338ca]/40 transition-all"
+                      style={{ left: `${pct}%`, width: `${Math.min(projected - pct, 100 - pct)}%` }}
+                    />
+                  )}
+                </div>
+                <div className="flex justify-between text-[10px] text-[#9b9b93] mt-1">
+                  <span>0</span>
+                  <span className={t.total_panels + selectedPanels > 90 ? 'text-[#c7293a] font-semibold' : ''}>
+                    {100 - t.total_panels - selectedPanels > 0
+                      ? `${100 - t.total_panels - selectedPanels} places restantes`
+                      : 'Tournée pleine'}
+                  </span>
+                  <span>100</span>
+                </div>
+              </div>
+            )
+          })()}
+
           <div className="rounded-[20px] shadow-[0_2px_16px_rgba(0,0,0,0.06)] bg-white p-5">
             <div className="flex items-center justify-between mb-4">
               <h2 className="text-base font-semibold text-[#1a1a2e]">
