@@ -70,7 +70,7 @@ export async function GET() {
     // Fetch unfulfilled orders with pagination
     const allOrders: ShopifyOrder[] = []
     let url: string | null =
-      `https://${shop}/admin/api/2024-01/orders.json?status=any&fulfillment_status=unfulfilled&limit=250&fields=id,name,email,shipping_address,line_items`
+      `https://${shop}/admin/api/2024-01/orders.json?status=open&fulfillment_status=unfulfilled&limit=250&fields=id,name,email,shipping_address,line_items`
 
     while (url) {
       const fetchRes: Response = await fetch(url, {
