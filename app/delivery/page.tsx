@@ -1559,66 +1559,72 @@ function SavView() {
       {liveTours.length > 0 && (
         <div className="space-y-3">
           {liveTours.map((rep) => {
-            const stops   = rep.tour_stops_summary
-            const total   = rep.tour_total_stops
-            const done    = rep.tour_delivered_stops
-            const pct     = total > 0 ? Math.round((done / total) * 100) : 0
-            const livCities = [...new Set(stops.filter(s => s.status === 'delivered').map(s => s.city))]
-            const remCities = [...new Set(stops.filter(s => s.status !== 'delivered').map(s => s.city))]
+            const stops  = rep.tour_stops_summary
+            const total  = rep.tour_total_stops
+            const done   = rep.tour_delivered_stops
+            const pct    = total > 0 ? Math.round((done / total) * 100) : 0
+            // First non-delivered stop = "current"
+            const currentSeq = stops.find(s => s.status !== 'delivered')?.sequence ?? -1
 
             return (
-              <div key={rep.tour_name} className="rounded-[20px] shadow-[0_2px_16px_rgba(0,0,0,0.06)] bg-white px-5 py-4">
-                {/* Header */}
-                <div className="flex items-start justify-between mb-3">
-                  <div>
-                    <div className="flex items-center gap-2">
-                      <span className="inline-block w-2 h-2 rounded-full bg-[#1d4ed8] animate-pulse" />
-                      <span className="text-xs font-semibold uppercase tracking-wide text-[#1d4ed8]">Tournée en cours</span>
-                    </div>
-                    <p className="text-sm font-bold text-[#1a1a2e] mt-0.5">
+              <div key={rep.tour_name} className="rounded-[20px] bg-[#f0f0fb] px-5 pt-4 pb-5">
+                {/* Header row */}
+                <div className="flex items-center justify-between mb-4">
+                  <div className="flex items-center gap-2">
+                    <span className="w-2 h-2 rounded-full bg-[#1d4ed8] animate-pulse flex-shrink-0" />
+                    <span className="text-sm font-bold text-[#1a1a2e]">
                       {rep.driver_name ?? 'Livreur'} · {rep.tour_name}
-                    </p>
-                  </div>
-                  <div className="text-right flex-shrink-0">
-                    <p className="text-2xl font-extrabold text-[#1d4ed8] leading-none">{pct}%</p>
-                    <p className="text-xs text-[#6b6b63] mt-0.5">{done}/{total} arrêts livrés</p>
-                  </div>
-                </div>
-
-                {/* Stop dots */}
-                <div className="flex flex-wrap gap-1.5 mb-3">
-                  {stops.map((s, i) => (
-                    <div
-                      key={i}
-                      title={s.city}
-                      className={`w-4 h-4 rounded-full border-2 flex-shrink-0 transition-all duration-500 ${
-                        s.status === 'delivered'
-                          ? 'bg-[#1a7f4b] border-[#1a7f4b]'
-                          : 'bg-white border-[#d1d5db]'
-                      }`}
-                    />
-                  ))}
-                </div>
-
-                {/* Progress bar */}
-                <div className="h-2 rounded-full bg-[#dbeafe] overflow-hidden mb-3">
-                  <div
-                    className="h-full rounded-full bg-[#1d4ed8] transition-all duration-500"
-                    style={{ width: `${pct}%` }}
-                  />
-                </div>
-
-                {/* Cities */}
-                <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs">
-                  {livCities.length > 0 && (
-                    <span>
-                      <span className="font-semibold text-[#1a7f4b]">✓ </span>
-                      <span className="text-[#1a7f4b]">{livCities.join(', ')}</span>
                     </span>
-                  )}
-                  {remCities.length > 0 && (
-                    <span className="text-[#9b9b93]">→ {remCities.join(', ')}</span>
-                  )}
+                  </div>
+                  <span className="text-xs font-semibold text-[#1a1a2e] flex-shrink-0 ml-3">
+                    {done}/{total} arrêts · {pct}%
+                  </span>
+                </div>
+
+                {/* Stepper */}
+                <div className="overflow-x-auto pb-1">
+                  <div className="relative flex items-start" style={{ minWidth: `${stops.length * 64}px` }}>
+                    {/* Connecting line — sits at the center of the circles (top 11px) */}
+                    <div className="absolute left-0 right-0 h-0.5 bg-[#d1d5db] top-[11px]" />
+                    {/* Delivered portion of the line */}
+                    <div
+                      className="absolute left-0 h-0.5 bg-[#1a7f4b] top-[11px] transition-all duration-500"
+                      style={{ width: total > 1 ? `${(done / (total - 1)) * 100}%` : done > 0 ? '100%' : '0%' }}
+                    />
+
+                    {stops.map((s, i) => {
+                      const isDelivered = s.status === 'delivered'
+                      const isCurrent   = !isDelivered && s.sequence === currentSeq
+                      return (
+                        <div key={i} className="relative flex flex-col items-center flex-1">
+                          {/* Circle */}
+                          <div
+                            className={`relative z-10 w-[22px] h-[22px] rounded-full border-2 flex items-center justify-center flex-shrink-0 transition-all duration-500 ${
+                              isDelivered
+                                ? 'bg-[#1a7f4b] border-[#1a7f4b]'
+                                : isCurrent
+                                ? 'bg-[#1d4ed8] border-[#1d4ed8] animate-pulse'
+                                : 'bg-white border-[#d1d5db]'
+                            }`}
+                          >
+                            {isDelivered && (
+                              <svg width="10" height="10" viewBox="0 0 10 10" fill="none">
+                                <path d="M1.5 5L4 7.5L8.5 2.5" stroke="white" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/>
+                              </svg>
+                            )}
+                          </div>
+                          {/* City label */}
+                          <span
+                            className={`mt-1.5 text-[9px] font-medium text-center leading-tight max-w-[56px] truncate ${
+                              isDelivered ? 'text-[#1a7f4b]' : isCurrent ? 'text-[#1d4ed8]' : 'text-[#9b9b93]'
+                            }`}
+                          >
+                            {s.city}
+                          </span>
+                        </div>
+                      )
+                    })}
+                  </div>
                 </div>
               </div>
             )
