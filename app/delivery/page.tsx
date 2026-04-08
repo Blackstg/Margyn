@@ -1543,7 +1543,89 @@ function SavView() {
     setEmailOpen(false)
   }
 
+  // Build live tour widgets from entries (updated by polling)
+  const liveToursMap = new Map<string, SavEntry>()
+  for (const e of entries) {
+    if (e.sav_status === 'in_progress' && e.tour_name && !liveToursMap.has(e.tour_name)) {
+      liveToursMap.set(e.tour_name, e)
+    }
+  }
+  const liveTours = [...liveToursMap.values()]
+
   return (
+    <div className="space-y-4">
+
+      {/* ── Live delivery widget ── */}
+      {liveTours.length > 0 && (
+        <div className="space-y-3">
+          {liveTours.map((rep) => {
+            const stops   = rep.tour_stops_summary
+            const total   = rep.tour_total_stops
+            const done    = rep.tour_delivered_stops
+            const pct     = total > 0 ? Math.round((done / total) * 100) : 0
+            const livCities = [...new Set(stops.filter(s => s.status === 'delivered').map(s => s.city))]
+            const remCities = [...new Set(stops.filter(s => s.status !== 'delivered').map(s => s.city))]
+
+            return (
+              <div key={rep.tour_name} className="rounded-[20px] shadow-[0_2px_16px_rgba(0,0,0,0.06)] bg-white px-5 py-4">
+                {/* Header */}
+                <div className="flex items-start justify-between mb-3">
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <span className="inline-block w-2 h-2 rounded-full bg-[#1d4ed8] animate-pulse" />
+                      <span className="text-xs font-semibold uppercase tracking-wide text-[#1d4ed8]">Tournée en cours</span>
+                    </div>
+                    <p className="text-sm font-bold text-[#1a1a2e] mt-0.5">
+                      {rep.driver_name ?? 'Livreur'} · {rep.tour_name}
+                    </p>
+                  </div>
+                  <div className="text-right flex-shrink-0">
+                    <p className="text-2xl font-extrabold text-[#1d4ed8] leading-none">{pct}%</p>
+                    <p className="text-xs text-[#6b6b63] mt-0.5">{done}/{total} arrêts livrés</p>
+                  </div>
+                </div>
+
+                {/* Stop dots */}
+                <div className="flex flex-wrap gap-1.5 mb-3">
+                  {stops.map((s, i) => (
+                    <div
+                      key={i}
+                      title={s.city}
+                      className={`w-4 h-4 rounded-full border-2 flex-shrink-0 transition-all duration-500 ${
+                        s.status === 'delivered'
+                          ? 'bg-[#1a7f4b] border-[#1a7f4b]'
+                          : 'bg-white border-[#d1d5db]'
+                      }`}
+                    />
+                  ))}
+                </div>
+
+                {/* Progress bar */}
+                <div className="h-2 rounded-full bg-[#dbeafe] overflow-hidden mb-3">
+                  <div
+                    className="h-full rounded-full bg-[#1d4ed8] transition-all duration-500"
+                    style={{ width: `${pct}%` }}
+                  />
+                </div>
+
+                {/* Cities */}
+                <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs">
+                  {livCities.length > 0 && (
+                    <span>
+                      <span className="font-semibold text-[#1a7f4b]">✓ </span>
+                      <span className="text-[#1a7f4b]">{livCities.join(', ')}</span>
+                    </span>
+                  )}
+                  {remCities.length > 0 && (
+                    <span className="text-[#9b9b93]">→ {remCities.join(', ')}</span>
+                  )}
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      )}
+
     <div className="flex gap-4 items-start">
       {/* ── Left: search + list ── */}
       <div className={`flex-shrink-0 ${selected ? 'w-[300px]' : 'flex-1 max-w-xl'}`}>
@@ -1828,6 +1910,7 @@ function SavView() {
           </div>
         )
       })()}
+    </div>
     </div>
   )
 }
