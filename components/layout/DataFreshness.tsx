@@ -84,7 +84,8 @@ export default function DataFreshness() {
     hoursAgo(status.marketing.meta),
     hoursAgo(status.marketing.google),
     hoursAgo(status.marketing.pinterest),
-    hoursAgo(status.shopify.orders_sync),
+    // Use last live Shopify order date for icon color — not the analytics batch job
+    hoursAgo(status.shopify.last_order?.created_at ?? null),
   ] : []
 
   const worst  = worstHours(allHours)
@@ -160,7 +161,7 @@ export default function DataFreshness() {
                   <div className="flex items-center justify-between gap-2">
                     <div className="flex items-center gap-2">
                       <Dot h={hoursAgo(status.shopify.orders_sync)} />
-                      <span className="text-xs text-[#1a1a2e]">Commandes Shopify</span>
+                      <span className="text-xs text-[#1a1a2e]">Sync analytics</span>
                     </div>
                     <span className="text-xs text-[#9b9b93]">{formatAgo(status.shopify.orders_sync)}</span>
                   </div>
