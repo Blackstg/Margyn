@@ -1578,8 +1578,6 @@ function SavView() {
             const lineWidth = done > 0 && total > 0
               ? `${(2 * done - 1) / (2 * total) * 100}%`
               : '0%'
-            // Truck x: midpoint between last delivered and current
-            const truckLeft = total > 0 ? `calc(${done / total * 100}% - 12px)` : '0px'
 
             return (
               <div key={rep.tour_name} className="rounded-[20px] bg-white shadow-[0_2px_16px_rgba(0,0,0,0.07)] border border-[#ebebeb] px-5 pt-5 pb-6">
@@ -1617,16 +1615,6 @@ function SavView() {
                         className="absolute left-0 h-[2px] bg-[#1a7f4b] top-[16px] transition-[width] duration-700 ease-in-out"
                         style={{ width: lineWidth }}
                       />
-
-                      {/* Truck 🚚 — moves between last delivered and current stop */}
-                      {done > 0 && done < total && (
-                        <div
-                          className="absolute top-0 z-30 transition-[left] duration-700 ease-in-out pointer-events-none select-none"
-                          style={{ left: truckLeft }}
-                        >
-                          <span className="text-base leading-none">🚚</span>
-                        </div>
-                      )}
 
                       {/* Stop circles */}
                       {stops.map((s, i) => {
