@@ -1318,6 +1318,11 @@ function LivreurView() {
 
 type SavStatus = 'pending' | 'planned' | 'in_progress' | 'delivered'
 
+// Phone numbers visible to SAV only — never included in email templates
+const DRIVER_PHONES: Record<string, string> = {
+  'Khalid': '06 62 89 30 14',
+}
+
 interface SavEntry {
   id: string
   order_name: string
@@ -1332,8 +1337,12 @@ interface SavEntry {
   tour_name: string | null
   tour_status: TourStatus | null
   tour_planned_date: string | null
+  tour_zone: string | null
   tour_total_stops: number
   tour_delivered_stops: number
+  stops_before: number          // undelivered stops with lower sequence (planned)
+  tour_cities: string[]         // all cities in the tour
+  driver_name: string | null
   stop_status: StopStatus | null
   delivered_at: string | null
   sav_status: SavStatus
@@ -1346,13 +1355,19 @@ const SAV_STATUS_CONFIG: Record<SavStatus, { label: string; bg: string; text: st
   delivered:   { label: 'Livrée',                      bg: '#d1fae5', text: '#1a7f4b' },
 }
 
-function getWeekStart(dateStr: string): string {
+function getWeekRange(dateStr: string): { start: string; end: string } {
   const d = new Date(dateStr + 'T00:00:00')
   const day = d.getDay()
-  const diff = d.getDate() - day + (day === 0 ? -6 : 1)
+  const diffToMonday = day === 0 ? -6 : 1 - day
   const monday = new Date(d)
-  monday.setDate(diff)
-  return monday.toLocaleDateString('fr-FR', { day: 'numeric', month: 'long' })
+  monday.setDate(d.getDate() + diffToMonday)
+  const friday = new Date(monday)
+  friday.setDate(monday.getDate() + 4)
+  const opts: Intl.DateTimeFormatOptions = { weekday: 'long', day: 'numeric', month: 'long' }
+  return {
+    start: monday.toLocaleDateString('fr-FR', opts),
+    end:   friday.toLocaleDateString('fr-FR', opts),
+  }
 }
 
 function buildSavEmail(entry: SavEntry): string {
@@ -1362,8 +1377,9 @@ function buildSavEmail(entry: SavEntry): string {
     case 'pending':
       return `Bonjour ${prenom},\n\nJe reviens vers vous concernant votre commande ${ref}. Votre commande est bien enregistrée et sera intégrée à notre prochaine tournée de livraison dans votre région. Nous vous tiendrons informé(e) dès qu'une date sera confirmée.\n\nCordialement,\nL'équipe Bowa`
     case 'planned': {
-      const weekDate = entry.tour_planned_date ? getWeekStart(entry.tour_planned_date) : '?'
-      return `Bonjour ${prenom},\n\nBonne nouvelle ! Je vois que votre commande ${ref} est d'ores et déjà programmée pour la semaine du ${weekDate}. Notre livreur vous contactera par téléphone avant de passer. Merci de votre patience.\n\nCordialement,\nL'équipe Bowa`
+      const range = entry.tour_planned_date ? getWeekRange(entry.tour_planned_date) : null
+      const rangeStr = range ? ` Notre livreur sera dans votre secteur entre le ${range.start} et le ${range.end}.` : ''
+      return `Bonjour ${prenom},\n\nBonne nouvelle ! Je vois que votre commande ${ref} est d'ores et déjà programmée.${rangeStr} Notre livreur vous contactera par téléphone avant de passer. Merci de votre patience.\n\nCordialement,\nL'équipe Bowa`
     }
     case 'in_progress':
       return `Bonjour ${prenom},\n\nJe vois que notre livreur est actuellement en tournée dans votre région. Votre commande ${ref} devrait vous être livrée très prochainement. Il vous contactera par téléphone avant de passer.\n\nCordialement,\nL'équipe Bowa`
@@ -1399,12 +1415,18 @@ function SavView() {
           const stops: TourStop[] = tour.stops ?? []
           const tourTotal = stops.length
           const tourDelivered = stops.filter((s: TourStop) => s.status === 'delivered').length
+          const tourCities = [...new Set(stops.map((s: TourStop) => s.city))]
+          const sortedStops = [...stops].sort((a: TourStop, b: TourStop) => a.sequence - b.sequence)
 
           for (const stop of stops) {
             let sav_status: SavStatus
             if (stop.status === 'delivered')       sav_status = 'delivered'
             else if (tour.status === 'in_progress') sav_status = 'in_progress'
             else                                    sav_status = 'planned'
+
+            const stopsBefore = sortedStops.filter(
+              (s: TourStop) => s.sequence < stop.sequence && s.status !== 'delivered'
+            ).length
 
             result.push({
               id: stop.id,
@@ -1420,8 +1442,12 @@ function SavView() {
               tour_name: tour.name,
               tour_status: tour.status,
               tour_planned_date: tour.planned_date,
+              tour_zone: tour.zone ?? null,
               tour_total_stops: tourTotal,
               tour_delivered_stops: tourDelivered,
+              stops_before: stopsBefore,
+              tour_cities: tourCities,
+              driver_name: tour.driver_name ?? null,
               stop_status: stop.status,
               delivered_at: stop.delivered_at ?? null,
               sav_status,
@@ -1444,8 +1470,12 @@ function SavView() {
             tour_name: null,
             tour_status: null,
             tour_planned_date: null,
+            tour_zone: null,
             tour_total_stops: 0,
             tour_delivered_stops: 0,
+            stops_before: 0,
+            tour_cities: [],
+            driver_name: null,
             stop_status: null,
             delivered_at: null,
             sav_status: 'pending',
@@ -1561,33 +1591,74 @@ function SavView() {
               </button>
             </div>
 
-            {/* Progress bar — in_progress only */}
-            {selected.sav_status === 'in_progress' && selected.tour_total_stops > 0 && (
-              <div className="mb-5 p-3.5 rounded-[12px] bg-[#f0f4ff]">
-                <div className="flex items-center justify-between text-xs mb-2">
-                  <span className="font-medium text-[#1d4ed8]">Tournée · {selected.tour_name}</span>
-                  <span className="font-semibold text-[#1a1a2e]">
-                    {selected.tour_delivered_stops}/{selected.tour_total_stops} arrêts livrés
-                  </span>
+            {/* Progress bar — in_progress */}
+            {selected.sav_status === 'in_progress' && selected.tour_total_stops > 0 && (() => {
+              const pct = Math.round((selected.tour_delivered_stops / selected.tour_total_stops) * 100)
+              const driverPhone = selected.driver_name ? DRIVER_PHONES[selected.driver_name] : undefined
+              return (
+                <div className="mb-5 p-3.5 rounded-[12px] bg-[#f0f4ff]">
+                  <div className="flex items-center justify-between text-xs mb-1">
+                    <span className="font-semibold text-[#1d4ed8]">
+                      {selected.driver_name ?? 'Livreur'} · Arrêt {selected.tour_delivered_stops}/{selected.tour_total_stops} livré
+                    </span>
+                    <span className="font-bold text-[#1a1a2e]">{pct}%</span>
+                  </div>
+                  <div className="h-2.5 rounded-full bg-[#dbeafe] overflow-hidden mb-2">
+                    <div
+                      className="h-full rounded-full bg-[#1d4ed8] transition-all"
+                      style={{ width: `${pct}%` }}
+                    />
+                  </div>
+                  {driverPhone && (
+                    <p className="text-[11px] text-[#6b6b63]">
+                      📞 <span className="font-medium text-[#1a1a2e]">{driverPhone}</span>
+                      <span className="text-[#9b9b93] ml-1">(SAV uniquement)</span>
+                    </p>
+                  )}
                 </div>
-                <div className="h-2 rounded-full bg-[#dbeafe] overflow-hidden">
-                  <div
-                    className="h-full rounded-full bg-[#1d4ed8] transition-all"
-                    style={{ width: `${Math.round((selected.tour_delivered_stops / selected.tour_total_stops) * 100)}%` }}
-                  />
-                </div>
-              </div>
-            )}
+              )
+            })()}
 
             {/* Tour info — planned */}
-            {selected.sav_status === 'planned' && selected.tour_name && (
-              <div className="mb-4 text-xs text-[#6b6b63]">
-                Tournée · <span className="font-medium text-[#1a1a2e]">{selected.tour_name}</span>
-                {selected.tour_planned_date && (
-                  <> · semaine du <span className="font-medium text-[#1a1a2e]">{getWeekStart(selected.tour_planned_date)}</span></>
-                )}
-              </div>
-            )}
+            {selected.sav_status === 'planned' && selected.tour_name && (() => {
+              const range = selected.tour_planned_date ? getWeekRange(selected.tour_planned_date) : null
+              const driverPhone = selected.driver_name ? DRIVER_PHONES[selected.driver_name] : undefined
+              const otherCities = selected.tour_cities.filter(c => c !== selected.city)
+              return (
+                <div className="mb-4 p-3.5 rounded-[12px] bg-[#faf5ff] space-y-2">
+                  <div className="text-xs text-[#6b6b63]">
+                    Tournée · <span className="font-medium text-[#1a1a2e]">{selected.tour_name}</span>
+                    {selected.tour_zone && (
+                      <> · <span className="font-medium text-[#1a1a2e]">{selected.tour_zone}</span></>
+                    )}
+                  </div>
+                  {range && (
+                    <div className="text-xs text-[#6b6b63]">
+                      Livraisons prévues du{' '}
+                      <span className="font-medium text-[#1a1a2e]">{range.start}</span>
+                      {' '}au{' '}
+                      <span className="font-medium text-[#1a1a2e]">{range.end}</span>
+                    </div>
+                  )}
+                  {selected.stops_before > 0 && (
+                    <div className="text-xs text-[#6b6b63]">
+                      <span className="font-semibold text-[#6d28d9]">{selected.stops_before} livraison{selected.stops_before > 1 ? 's' : ''} avant la sienne</span>
+                    </div>
+                  )}
+                  {otherCities.length > 0 && (
+                    <div className="text-xs text-[#6b6b63]">
+                      Autres villes : <span className="text-[#1a1a2e]">{otherCities.join(', ')}</span>
+                    </div>
+                  )}
+                  {driverPhone && (
+                    <div className="text-xs border-t border-[#e9d5ff] pt-2">
+                      📞 <span className="font-medium text-[#1a1a2e]">{driverPhone}</span>
+                      <span className="text-[#9b9b93] ml-1">(SAV uniquement)</span>
+                    </div>
+                  )}
+                </div>
+              )
+            })()}
 
             {/* Products */}
             <div className="mb-4">
