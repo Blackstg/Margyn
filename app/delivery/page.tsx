@@ -19,10 +19,10 @@ const ZONE_LABEL: Record<Zone, string> = {
   'sud-ouest':  'Sud-Ouest',
 }
 const ZONE_COLOR: Record<Zone, { bg: string; text: string }> = {
-  'nord-est':   { bg: '#dbeafe', text: '#1d4ed8' },
-  'nord-ouest': { bg: '#dcfce7', text: '#15803d' },
-  'sud-est':    { bg: '#ffedd5', text: '#c2410c' },
-  'sud-ouest':  { bg: '#fee2e2', text: '#b91c1c' },
+  'nord-est':   { bg: '#dbeafe', text: '#1d4ed8' },  // bleu
+  'nord-ouest': { bg: '#dcfce7', text: '#15803d' },  // vert
+  'sud-est':    { bg: '#fff7ed', text: '#c2680a' },  // orange
+  'sud-ouest':  { bg: '#f3e8ff', text: '#7c3aed' },  // violet
 }
 
 interface PanelItem { sku: string; title: string; qty: number }
@@ -200,14 +200,20 @@ function PlanificateurView() {
     fetchTours()
   }, [fetchOrders, fetchTours])
 
-  const filteredOrders = shopifyOrders.filter((o) => {
-    if (zoneFilter !== 'all' && o.zone !== zoneFilter) return false
-    if (search) {
-      const q = search.toLowerCase()
-      if (!o.order_name.toLowerCase().includes(q) && !o.city.toLowerCase().includes(q)) return false
-    }
-    return true
-  })
+  const filteredOrders = shopifyOrders
+    .filter((o) => {
+      if (zoneFilter !== 'all' && o.zone !== zoneFilter) return false
+      if (search) {
+        const q = search.toLowerCase()
+        if (!o.order_name.toLowerCase().includes(q) && !o.city.toLowerCase().includes(q)) return false
+      }
+      return true
+    })
+    .sort((a, b) => {
+      if (!a.created_at) return 1
+      if (!b.created_at) return -1
+      return a.created_at.localeCompare(b.created_at)
+    })
 
   function toggleOrder(orderName: string) {
     setSelectedOrders((prev) => {
@@ -426,7 +432,9 @@ function PlanificateurView() {
                   const daysWaiting = order.created_at
                     ? Math.floor((Date.now() - new Date(order.created_at).getTime()) / 86_400_000)
                     : null
-                  const isUrgent = daysWaiting !== null && daysWaiting > 14
+                  const isOrange = daysWaiting !== null && daysWaiting >= 14 && daysWaiting < 21
+                  const isRed    = daysWaiting !== null && daysWaiting >= 21
+                  const isUrgent = isOrange || isRed
                   return (
                     <div
                       key={order.order_name}
@@ -455,8 +463,14 @@ function PlanificateurView() {
                                 {order.panel_count} panneau{order.panel_count !== 1 ? 'x' : ''}
                               </span>
                               {isUrgent && (
-                                <span className="px-2 py-0.5 rounded-full bg-[#fee2e2] text-[#c7293a] text-xs font-medium">
-                                  {daysWaiting}j
+                                <span
+                                  className="px-2 py-0.5 rounded-full text-xs font-medium"
+                                  style={isRed
+                                    ? { background: '#fee2e2', color: '#b91c1c' }
+                                    : { background: '#fff7ed', color: '#c2680a' }
+                                  }
+                                >
+                                  En attente depuis {daysWaiting}j
                                 </span>
                               )}
                             </div>
