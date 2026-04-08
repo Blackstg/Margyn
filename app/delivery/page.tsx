@@ -1574,9 +1574,9 @@ function SavView() {
             const currentSeq = stops.find(s => s.status !== 'delivered')?.sequence ?? -1
             const weekNum = rep.tour_planned_date ? getISOWeekNum(rep.tour_planned_date) : null
 
-            // Progress line width: from left edge to center of last delivered stop
+            // Progress line width: from left edge to midpoint between last delivered and next stop
             const lineWidth = done > 0 && total > 0
-              ? `${(2 * done - 1) / (2 * total) * 100}%`
+              ? `${done / total * 100}%`
               : '0%'
 
             return (
