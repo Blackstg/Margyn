@@ -34,6 +34,7 @@ interface ShopifyOrder {
   email: string
   created_at: string | null
   is_preorder: boolean
+  preorder_ready?: boolean
   address1: string
   city: string
   zip: string
@@ -429,7 +430,9 @@ function PlanificateurView() {
                 <div className="text-center py-8 text-sm text-[#6b6b63]">Aucune commande</div>
               ) : (() => {
                 const normal    = filteredOrders.filter((o) => !o.is_preorder)
-                const preorders = filteredOrders.filter((o) =>  o.is_preorder)
+                const preorders = filteredOrders
+                  .filter((o) => o.is_preorder)
+                  .sort((a, b) => (b.preorder_ready ? 1 : 0) - (a.preorder_ready ? 1 : 0))
 
                 function renderCard(order: ShopifyOrder) {
                   const selected = selectedOrders.has(order.order_name)
@@ -465,8 +468,8 @@ function PlanificateurView() {
                                 {order.panel_count} panneau{order.panel_count !== 1 ? 'x' : ''}
                               </span>
                               {order.is_preorder && (
-                                <span className="px-2 py-0.5 rounded-full bg-[#fef9c3] text-[#92400e] text-xs font-medium">
-                                  Précommande
+                                <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${order.preorder_ready ? 'bg-[#dcfce7] text-[#15803d]' : 'bg-[#fef9c3] text-[#92400e]'}`}>
+                                  {order.preorder_ready ? 'Précommande prête à livrer' : 'Précommande'}
                                 </span>
                               )}
                               {isUrgent && (

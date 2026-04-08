@@ -43,6 +43,7 @@ interface ShopifyLineItem {
   title: string
   quantity: number
   sku: string
+  variant_id: number | null
 }
 
 interface ShopifyShippingAddress {
@@ -64,9 +65,39 @@ interface ShopifyOrder {
   line_items: ShopifyLineItem[]
 }
 
+// Fetch inventory_quantity for a batch of variant IDs (max 250)
+async function fetchVariantStock(
+  shop: string,
+  token: string,
+  variantIds: number[]
+): Promise<Map<number, number>> {
+  const map = new Map<number, number>()
+  if (variantIds.length === 0) return map
+
+  // Shopify allows up to 250 IDs per request
+  const chunks: number[][] = []
+  for (let i = 0; i < variantIds.length; i += 250) {
+    chunks.push(variantIds.slice(i, i + 250))
+  }
+
+  await Promise.all(chunks.map(async (chunk) => {
+    const res = await fetch(
+      `https://${shop}/admin/api/2024-01/variants.json?ids=${chunk.join(',')}&fields=id,inventory_quantity`,
+      { headers: { 'X-Shopify-Access-Token': token } }
+    )
+    if (!res.ok) return
+    const { variants } = await res.json() as { variants?: { id: number; inventory_quantity: number }[] }
+    for (const v of variants ?? []) {
+      map.set(v.id, v.inventory_quantity)
+    }
+  }))
+
+  return map
+}
+
 export async function GET() {
   try {
-    const shop = process.env.SHOPIFY_BOWA_SHOP!
+    const shop  = process.env.SHOPIFY_BOWA_SHOP!
     const token = process.env.SHOPIFY_BOWA_ACCESS_TOKEN!
 
     // Fetch unfulfilled orders with pagination
@@ -79,17 +110,14 @@ export async function GET() {
         headers: { 'X-Shopify-Access-Token': token },
       })
 
-      if (!fetchRes.ok) {
-        throw new Error(`Shopify API error: ${fetchRes.status}`)
-      }
+      if (!fetchRes.ok) throw new Error(`Shopify API error: ${fetchRes.status}`)
 
       const data = await fetchRes.json()
       allOrders.push(...(data.orders ?? []))
 
-      // Parse Link header for pagination
       const linkHeader: string | null = fetchRes.headers.get('Link')
       if (linkHeader) {
-        const nextMatch: RegExpMatchArray | null = linkHeader.match(/<([^>]+)>;\s*rel="next"/)
+        const nextMatch = linkHeader.match(/<([^>]+)>;\s*rel="next"/)
         url = nextMatch ? nextMatch[1] : null
       } else {
         url = null
@@ -107,51 +135,89 @@ export async function GET() {
       (assignedStops ?? []).map((s: { order_name: string }) => s.order_name)
     )
 
-    // Transform and filter orders
-    const orders = (allOrders
-      .filter((order) => !assignedOrderNames.has(order.name))
-      .map((order) => {
-        const addr = order.shipping_address
-        const customer_name = addr
-          ? `${addr.first_name ?? ''} ${addr.last_name ?? ''}`.trim()
-          : order.email ?? ''
-        const zip = addr?.zip ?? ''
-        const zone = detectZone(zip)
+    const isSample = (title: string) => /échantillon|echantillon|sample/i.test(title)
 
-        const isSample = (title: string) =>
-          /échantillon|echantillon|sample/i.test(title)
+    // First pass: build order objects and identify pre-orders + their variant IDs
+    type OrderDraft = {
+      order_name: string
+      shopify_order_id: string
+      customer_name: string
+      email: string
+      created_at: string | null
+      is_preorder: boolean
+      address1: string
+      address2: string
+      city: string
+      zip: string
+      zone: Zone
+      panel_count: number
+      panel_details: { sku: string; title: string; qty: number }[]
+      _variantIds: number[]  // temp, removed before response
+    }
 
-        const panel_details = order.line_items
-          .filter((li) => !isSample(li.title))
-          .map((li) => ({
-            sku: li.sku ?? '',
-            title: li.title,
-            qty: li.quantity,
-          }))
-        const panel_count = panel_details.reduce((sum, p) => sum + p.qty, 0)
+    const drafts: OrderDraft[] = []
+    for (const order of allOrders) {
+      if (assignedOrderNames.has(order.name)) continue
 
-        // Skip orders that contain only samples
-        if (panel_count === 0) return null
+      const addr = order.shipping_address
+      const customer_name = addr
+        ? `${addr.first_name ?? ''} ${addr.last_name ?? ''}`.trim()
+        : order.email ?? ''
+      const zip  = addr?.zip ?? ''
+      const zone = detectZone(zip)
 
-        const is_preorder = /pre.?order/i.test(order.tags ?? '')
+      const panel_details = order.line_items
+        .filter((li) => !isSample(li.title))
+        .map((li) => ({ sku: li.sku ?? '', title: li.title, qty: li.quantity }))
+      const panel_count = panel_details.reduce((sum, p) => sum + p.qty, 0)
+      if (panel_count === 0) continue
 
-        return {
-          order_name: order.name,
-          shopify_order_id: String(order.id),
-          customer_name,
-          email: order.email ?? '',
-          created_at: order.created_at ?? null,
-          is_preorder,
-          address1: addr?.address1 ?? '',
-          address2: addr?.address2 ?? '',
-          city: addr?.city ?? '',
-          zip,
-          zone,
-          panel_count,
-          panel_details,
-        }
+      const is_preorder = /pre.?order/i.test(order.tags ?? '')
+      const _variantIds = is_preorder
+        ? order.line_items
+            .map((li) => li.variant_id)
+            .filter((id): id is number => id != null && id > 0)
+        : []
+
+      drafts.push({
+        order_name: order.name,
+        shopify_order_id: String(order.id),
+        customer_name,
+        email: order.email ?? '',
+        created_at: order.created_at ?? null,
+        is_preorder,
+        address1: addr?.address1 ?? '',
+        address2: addr?.address2 ?? '',
+        city: addr?.city ?? '',
+        zip,
+        zone,
+        panel_count,
+        panel_details,
+        _variantIds,
       })
-      .filter(Boolean))
+    }
+
+    // Batch-fetch inventory for all pre-order variants
+    const allPreorderVariantIds = [...new Set(
+      drafts.flatMap((d) => d._variantIds)
+    )]
+    const stockMap = await fetchVariantStock(shop, token, allPreorderVariantIds)
+
+    // Build final response
+    const orders = drafts.map(({ _variantIds, ...order }) => {
+      if (!order.is_preorder) return { ...order, preorder_ready: false }
+
+      // Ready = all variants with known stock have qty >= 0
+      // Variants with no variant_id (custom items) are ignored
+      const ready = _variantIds.length === 0
+        ? false
+        : _variantIds.every((id) => {
+            const qty = stockMap.get(id)
+            return qty === undefined || qty >= 0  // unknown = don't block
+          })
+
+      return { ...order, preorder_ready: ready }
+    })
 
     return NextResponse.json({ orders })
   } catch (err) {
