@@ -1318,9 +1318,16 @@ function LivreurView() {
 
 type SavStatus = 'pending' | 'planned' | 'in_progress' | 'delivered'
 
-// Phone numbers visible to SAV only — never included in email templates
+// SAV-only info — never included in email templates
 const DRIVER_PHONES: Record<string, string> = {
   'Khalid': '06 62 89 30 14',
+}
+
+interface SavStopSummary {
+  city: string
+  order_name: string
+  status: StopStatus
+  sequence: number
 }
 
 interface SavEntry {
@@ -1340,20 +1347,28 @@ interface SavEntry {
   tour_zone: string | null
   tour_total_stops: number
   tour_delivered_stops: number
-  stops_before: number          // undelivered stops with lower sequence (planned)
-  tour_cities: string[]         // all cities in the tour
+  stops_before: number
+  tour_stops_summary: SavStopSummary[]
   driver_name: string | null
   stop_status: StopStatus | null
+  stop_sequence: number
   delivered_at: string | null
   sav_status: SavStatus
 }
 
 const SAV_STATUS_CONFIG: Record<SavStatus, { label: string; bg: string; text: string }> = {
-  pending:     { label: 'En attente de planification', bg: '#f5f5f3', text: '#6b6b63' },
-  planned:     { label: 'Planifiée',                   bg: '#ede9fe', text: '#6d28d9' },
-  in_progress: { label: 'En cours de livraison',       bg: '#dbeafe', text: '#1d4ed8' },
-  delivered:   { label: 'Livrée',                      bg: '#d1fae5', text: '#1a7f4b' },
+  pending:     { label: 'En attente',        bg: '#f5f5f3', text: '#6b6b63' },
+  planned:     { label: 'Planifiée',         bg: '#ede9fe', text: '#6d28d9' },
+  in_progress: { label: 'En livraison',      bg: '#dbeafe', text: '#1d4ed8' },
+  delivered:   { label: 'Livrée',            bg: '#d1fae5', text: '#1a7f4b' },
 }
+
+const TIMELINE_STEPS: { label: string; statuses: SavStatus[] }[] = [
+  { label: 'Commande reçue', statuses: ['pending', 'planned', 'in_progress', 'delivered'] },
+  { label: 'Planifiée',      statuses: ['planned', 'in_progress', 'delivered'] },
+  { label: 'En livraison',   statuses: ['in_progress', 'delivered'] },
+  { label: 'Livrée',         statuses: ['delivered'] },
+]
 
 function getWeekRange(dateStr: string): { start: string; end: string } {
   const d = new Date(dateStr + 'T00:00:00')
@@ -1415,12 +1430,17 @@ function SavView() {
           const stops: TourStop[] = tour.stops ?? []
           const tourTotal = stops.length
           const tourDelivered = stops.filter((s: TourStop) => s.status === 'delivered').length
-          const tourCities = [...new Set(stops.map((s: TourStop) => s.city))]
           const sortedStops = [...stops].sort((a: TourStop, b: TourStop) => a.sequence - b.sequence)
+          const tourStopsSummary: SavStopSummary[] = sortedStops.map((s: TourStop) => ({
+            city: s.city,
+            order_name: s.order_name,
+            status: s.status,
+            sequence: s.sequence,
+          }))
 
           for (const stop of stops) {
             let sav_status: SavStatus
-            if (stop.status === 'delivered')       sav_status = 'delivered'
+            if (stop.status === 'delivered')        sav_status = 'delivered'
             else if (tour.status === 'in_progress') sav_status = 'in_progress'
             else                                    sav_status = 'planned'
 
@@ -1446,9 +1466,10 @@ function SavView() {
               tour_total_stops: tourTotal,
               tour_delivered_stops: tourDelivered,
               stops_before: stopsBefore,
-              tour_cities: tourCities,
+              tour_stops_summary: tourStopsSummary,
               driver_name: tour.driver_name ?? null,
               stop_status: stop.status,
+              stop_sequence: stop.sequence,
               delivered_at: stop.delivered_at ?? null,
               sav_status,
             })
@@ -1474,9 +1495,10 @@ function SavView() {
             tour_total_stops: 0,
             tour_delivered_stops: 0,
             stops_before: 0,
-            tour_cities: [],
+            tour_stops_summary: [],
             driver_name: null,
             stop_status: null,
+            stop_sequence: 0,
             delivered_at: null,
             sav_status: 'pending',
           })
@@ -1491,6 +1513,8 @@ function SavView() {
     }
     load()
   }, [])
+
+  const [emailOpen, setEmailOpen] = useState(false)
 
   const filtered = entries.filter((e) => {
     if (!search.trim()) return true
@@ -1509,15 +1533,21 @@ function SavView() {
     setTimeout(() => setCopied(false), 2000)
   }
 
+  function selectEntry(entry: SavEntry) {
+    setSelected(entry)
+    setCopied(false)
+    setEmailOpen(false)
+  }
+
   return (
     <div className="flex gap-4 items-start">
-      {/* Left: search + results */}
-      <div className={`flex flex-col gap-3 ${selected ? 'w-80 flex-shrink-0' : 'flex-1'}`}>
+      {/* ── Left: search + list ── */}
+      <div className={`flex-shrink-0 ${selected ? 'w-[300px]' : 'flex-1 max-w-xl'}`}>
         <div className="rounded-[20px] shadow-[0_2px_16px_rgba(0,0,0,0.06)] bg-white p-5">
-          <h2 className="text-base font-semibold text-[#1a1a2e] mb-4">SAV — Suivi livraisons</h2>
+          <h2 className="text-base font-semibold text-[#1a1a2e] mb-3">SAV — Suivi livraisons</h2>
           <input
             type="text"
-            placeholder="Rechercher (commande, client, ville...)"
+            placeholder="Commande, client, ville..."
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             className="w-full px-3 py-2 text-sm border border-[#e8e8e4] rounded-[10px] mb-3 outline-none focus:border-[#aeb0c9]"
@@ -1529,30 +1559,38 @@ function SavView() {
               {search.trim() ? 'Aucun résultat' : 'Aucune commande'}
             </div>
           ) : (
-            <div className="space-y-1.5 max-h-[calc(100vh-280px)] overflow-y-auto pr-1">
+            <div className="space-y-1.5 max-h-[calc(100vh-260px)] overflow-y-auto pr-0.5">
               {filtered.map((entry) => {
                 const cfg = SAV_STATUS_CONFIG[entry.sav_status]
                 const isSelected = selected?.id === entry.id
+                const weekInfo = entry.tour_planned_date
+                  ? getWeekRange(entry.tour_planned_date).start
+                  : null
                 return (
                   <button
                     key={entry.id}
-                    onClick={() => { setSelected(entry); setCopied(false) }}
-                    className={`w-full text-left px-3.5 py-3 rounded-[12px] border transition-all ${
+                    onClick={() => selectEntry(entry)}
+                    className={`w-full text-left px-3.5 py-2.5 rounded-[12px] border transition-all ${
                       isSelected
                         ? 'border-[#aeb0c9] bg-[#f0f0fb]'
                         : 'border-[#f0f0ee] bg-[#fafaf8] hover:bg-[#f5f5f3]'
                     }`}
                   >
-                    <div className="flex items-center justify-between gap-2 mb-1">
-                      <span className="font-mono text-xs font-semibold text-[#1a1a2e]">{entry.order_name}</span>
+                    <div className="flex items-center justify-between gap-1.5 mb-0.5">
+                      <span className="font-mono text-xs font-bold text-[#1a1a2e]">{entry.order_name}</span>
                       <span
-                        className="px-2 py-0.5 rounded-full text-[10px] font-medium whitespace-nowrap"
+                        className="px-1.5 py-0.5 rounded-full text-[10px] font-medium whitespace-nowrap flex-shrink-0"
                         style={{ backgroundColor: cfg.bg, color: cfg.text }}
                       >
                         {cfg.label}
                       </span>
                     </div>
-                    <div className="text-xs text-[#6b6b63]">{entry.customer_name} · {entry.city}</div>
+                    <div className="text-xs text-[#6b6b63] truncate">{entry.customer_name} · {entry.city}</div>
+                    {entry.tour_name && (
+                      <div className="text-[10px] text-[#9b9b93] mt-0.5 truncate">
+                        {entry.tour_name}{weekInfo ? ` · ${weekInfo}` : ''}
+                      </div>
+                    )}
                   </button>
                 )
               })}
@@ -1561,153 +1599,238 @@ function SavView() {
         </div>
       </div>
 
-      {/* Right: detail panel */}
+      {/* ── Right: detail panel ── */}
       {selected && (() => {
-        const cfg = SAV_STATUS_CONFIG[selected.sav_status]
-        const zc  = ZONE_COLOR[selected.zone] ?? { bg: '#f5f5f3', text: '#6b6b63' }
+        const zc = ZONE_COLOR[selected.zone] ?? { bg: '#f5f5f3', text: '#6b6b63' }
         const emailText = buildSavEmail(selected)
+        const driverPhone = selected.driver_name ? DRIVER_PHONES[selected.driver_name] : undefined
+
+        // Timeline
+        const stepIndex = ['pending', 'planned', 'in_progress', 'delivered'].indexOf(selected.sav_status)
+
+        // Driver progress (in_progress)
+        const pct = selected.tour_total_stops > 0
+          ? Math.round((selected.tour_delivered_stops / selected.tour_total_stops) * 100)
+          : 0
+        const deliveredCities = [...new Set(
+          selected.tour_stops_summary.filter(s => s.status === 'delivered').map(s => s.city)
+        )]
+        const remainingCities = [...new Set(
+          selected.tour_stops_summary.filter(s => s.status !== 'delivered').map(s => s.city)
+        )]
+
+        // Week range for planned
+        const range = selected.tour_planned_date ? getWeekRange(selected.tour_planned_date) : null
+
         return (
-          <div className="flex-1 rounded-[20px] shadow-[0_2px_16px_rgba(0,0,0,0.06)] bg-white p-5">
-            {/* Header */}
-            <div className="flex items-start justify-between gap-3 mb-5">
-              <div>
-                <div className="flex items-center gap-2 mb-1">
-                  <span className="font-mono text-sm font-bold text-[#1a1a2e]">{selected.order_name}</span>
-                  <span
-                    className="px-2.5 py-1 rounded-full text-xs font-semibold"
-                    style={{ backgroundColor: cfg.bg, color: cfg.text }}
-                  >
-                    {cfg.label}
-                  </span>
+          <div className="flex-1 min-w-0 rounded-[20px] shadow-[0_2px_16px_rgba(0,0,0,0.06)] bg-white overflow-hidden">
+            {/* ── Header ── */}
+            <div className="px-5 pt-5 pb-4 border-b border-[#f0f0ee]">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="font-mono text-base font-bold text-[#1a1a2e]">{selected.order_name}</span>
+                    <span
+                      className="px-2.5 py-0.5 rounded-full text-xs font-semibold"
+                      style={{ backgroundColor: SAV_STATUS_CONFIG[selected.sav_status].bg, color: SAV_STATUS_CONFIG[selected.sav_status].text }}
+                    >
+                      {SAV_STATUS_CONFIG[selected.sav_status].label}
+                    </span>
+                    <span
+                      className="px-2 py-0.5 rounded-full text-[10px] font-medium"
+                      style={{ backgroundColor: zc.bg, color: zc.text }}
+                    >
+                      {ZONE_LABEL[selected.zone]}
+                    </span>
+                  </div>
+                  <p className="text-sm font-medium text-[#1a1a2e] mt-1">{selected.customer_name}</p>
+                  {selected.email && <p className="text-xs text-[#9b9b93]">{selected.email}</p>}
                 </div>
-                <p className="text-sm font-medium text-[#1a1a2e]">{selected.customer_name}</p>
-                {selected.email && <p className="text-xs text-[#9b9b93] mt-0.5">{selected.email}</p>}
+                <button onClick={() => setSelected(null)} className="text-[#9b9b93] hover:text-[#1a1a2e] transition-colors mt-0.5 flex-shrink-0">
+                  <X size={16} />
+                </button>
               </div>
-              <button
-                onClick={() => setSelected(null)}
-                className="text-[#9b9b93] hover:text-[#1a1a2e] transition-colors mt-0.5"
-              >
-                <X size={16} />
-              </button>
             </div>
 
-            {/* Progress bar — in_progress */}
-            {selected.sav_status === 'in_progress' && selected.tour_total_stops > 0 && (() => {
-              const pct = Math.round((selected.tour_delivered_stops / selected.tour_total_stops) * 100)
-              const driverPhone = selected.driver_name ? DRIVER_PHONES[selected.driver_name] : undefined
-              return (
-                <div className="mb-5 p-3.5 rounded-[12px] bg-[#f0f4ff]">
-                  <div className="flex items-center justify-between text-xs mb-1">
-                    <span className="font-semibold text-[#1d4ed8]">
-                      {selected.driver_name ?? 'Livreur'} · Arrêt {selected.tour_delivered_stops}/{selected.tour_total_stops} livré
-                    </span>
-                    <span className="font-bold text-[#1a1a2e]">{pct}%</span>
-                  </div>
-                  <div className="h-2.5 rounded-full bg-[#dbeafe] overflow-hidden mb-2">
-                    <div
-                      className="h-full rounded-full bg-[#1d4ed8] transition-all"
-                      style={{ width: `${pct}%` }}
-                    />
-                  </div>
-                  {driverPhone && (
-                    <p className="text-[11px] text-[#6b6b63]">
-                      📞 <span className="font-medium text-[#1a1a2e]">{driverPhone}</span>
-                      <span className="text-[#9b9b93] ml-1">(SAV uniquement)</span>
-                    </p>
-                  )}
-                </div>
-              )
-            })()}
+            <div className="px-5 py-4 space-y-4 overflow-y-auto max-h-[calc(100vh-200px)]">
 
-            {/* Tour info — planned */}
-            {selected.sav_status === 'planned' && selected.tour_name && (() => {
-              const range = selected.tour_planned_date ? getWeekRange(selected.tour_planned_date) : null
-              const driverPhone = selected.driver_name ? DRIVER_PHONES[selected.driver_name] : undefined
-              const otherCities = selected.tour_cities.filter(c => c !== selected.city)
-              return (
-                <div className="mb-4 p-3.5 rounded-[12px] bg-[#faf5ff] space-y-2">
-                  <div className="text-xs text-[#6b6b63]">
-                    Tournée · <span className="font-medium text-[#1a1a2e]">{selected.tour_name}</span>
-                    {selected.tour_zone && (
-                      <> · <span className="font-medium text-[#1a1a2e]">{selected.tour_zone}</span></>
+              {/* ── Timeline ── */}
+              <div className="flex items-center gap-0">
+                {TIMELINE_STEPS.map((step, i) => {
+                  const done    = stepIndex >= i
+                  const current = stepIndex === i
+                  return (
+                    <div key={i} className="flex items-center flex-1 last:flex-none">
+                      <div className="flex flex-col items-center gap-1 min-w-0">
+                        <div
+                          className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold flex-shrink-0 ${
+                            done
+                              ? 'bg-[#1a7f4b] text-white'
+                              : current
+                              ? 'bg-[#1d4ed8] text-white'
+                              : 'bg-[#f0f0ee] text-[#9b9b93]'
+                          }`}
+                        >
+                          {done ? '✓' : i + 1}
+                        </div>
+                        <span className={`text-[9px] font-medium text-center leading-tight max-w-[60px] ${done ? 'text-[#1a7f4b]' : current ? 'text-[#1d4ed8]' : 'text-[#9b9b93]'}`}>
+                          {step.label}
+                        </span>
+                      </div>
+                      {i < TIMELINE_STEPS.length - 1 && (
+                        <div className={`flex-1 h-0.5 mx-1 mb-4 rounded-full ${stepIndex > i ? 'bg-[#1a7f4b]' : 'bg-[#e8e8e4]'}`} />
+                      )}
+                    </div>
+                  )
+                })}
+              </div>
+
+              {/* ── Tour block ── */}
+              {selected.tour_name && (
+                <div className={`rounded-[14px] p-4 ${selected.sav_status === 'in_progress' ? 'bg-[#f0f4ff]' : 'bg-[#faf5ff]'}`}>
+                  <div className="flex items-start justify-between gap-2 mb-2">
+                    <div>
+                      <p className="text-sm font-bold text-[#1a1a2e]">{selected.tour_name}</p>
+                      {selected.tour_zone && (
+                        <p className="text-xs text-[#6b6b63]">{selected.tour_zone}</p>
+                      )}
+                    </div>
+                    {driverPhone && (
+                      <div className="text-right">
+                        <p className="text-[10px] text-[#9b9b93]">SAV uniquement</p>
+                        <p className="text-xs font-semibold text-[#1a1a2e]">📞 {driverPhone}</p>
+                      </div>
                     )}
                   </div>
                   {range && (
-                    <div className="text-xs text-[#6b6b63]">
-                      Livraisons prévues du{' '}
-                      <span className="font-medium text-[#1a1a2e]">{range.start}</span>
-                      {' '}au{' '}
-                      <span className="font-medium text-[#1a1a2e]">{range.end}</span>
-                    </div>
+                    <p className="text-sm font-medium text-[#1a1a2e]">
+                      {range.start} → {range.end}
+                    </p>
                   )}
-                  {selected.stops_before > 0 && (
-                    <div className="text-xs text-[#6b6b63]">
-                      <span className="font-semibold text-[#6d28d9]">{selected.stops_before} livraison{selected.stops_before > 1 ? 's' : ''} avant la sienne</span>
-                    </div>
-                  )}
-                  {otherCities.length > 0 && (
-                    <div className="text-xs text-[#6b6b63]">
-                      Autres villes : <span className="text-[#1a1a2e]">{otherCities.join(', ')}</span>
-                    </div>
-                  )}
-                  {driverPhone && (
-                    <div className="text-xs border-t border-[#e9d5ff] pt-2">
-                      📞 <span className="font-medium text-[#1a1a2e]">{driverPhone}</span>
-                      <span className="text-[#9b9b93] ml-1">(SAV uniquement)</span>
-                    </div>
+                  {selected.driver_name && (
+                    <p className="text-xs text-[#6b6b63] mt-1">Livreur · <span className="font-medium text-[#1a1a2e]">{selected.driver_name}</span></p>
                   )}
                 </div>
-              )
-            })()}
-
-            {/* Products */}
-            <div className="mb-4">
-              <p className="text-[10px] font-semibold uppercase tracking-[0.08em] text-[#9b9b93] mb-2">Produits</p>
-              {selected.panel_details.length > 0 ? (
-                <div className="space-y-1">
-                  {selected.panel_details.map((p, i) => (
-                    <div key={i} className="flex items-center justify-between text-xs">
-                      <span className="text-[#1a1a2e]">{p.title}</span>
-                      <span className="text-[#6b6b63] font-medium ml-4">×{p.qty}</span>
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <p className="text-xs text-[#9b9b93]">—</p>
               )}
-            </div>
 
-            {/* Address + zone */}
-            <div className="mb-5 flex items-start gap-2">
-              <MapPin size={13} className="text-[#9b9b93] mt-0.5 flex-shrink-0" />
+              {/* ── Driver progress ── */}
+              {(selected.sav_status === 'planned' || selected.sav_status === 'in_progress') && selected.tour_total_stops > 0 && (() => {
+                if (selected.sav_status === 'planned') {
+                  return (
+                    <div className="rounded-[14px] border border-[#f5e0a0] bg-[#fffbeb] p-3.5 space-y-2">
+                      <div className="flex items-center gap-2">
+                        <div className="w-2.5 h-2.5 rounded-full bg-[#d97706] flex-shrink-0" />
+                        <span className="text-xs font-semibold text-[#92400e]">Chargement non démarré</span>
+                      </div>
+                      {selected.stops_before > 0 && (
+                        <p className="text-xs text-[#6b6b63]">
+                          <span className="font-semibold text-[#92400e]">{selected.stops_before}</span> livraison{selected.stops_before > 1 ? 's' : ''} avant la sienne dans la tournée
+                        </p>
+                      )}
+                      {remainingCities.length > 0 && (
+                        <p className="text-xs text-[#6b6b63]">Villes de la tournée : <span className="text-[#1a1a2e]">{remainingCities.join(', ')}</span></p>
+                      )}
+                    </div>
+                  )
+                }
+                // in_progress
+                const notStarted = selected.tour_delivered_stops === 0
+                if (notStarted) {
+                  return (
+                    <div className="rounded-[14px] border border-[#a7f3d0] bg-[#f0fdf4] p-3.5 space-y-1.5">
+                      <div className="flex items-center gap-2">
+                        <div className="w-2.5 h-2.5 rounded-full bg-[#16a34a] flex-shrink-0" />
+                        <span className="text-xs font-semibold text-[#15803d]">Chargé · En route</span>
+                      </div>
+                      <p className="text-xs text-[#6b6b63]">{selected.driver_name ?? 'Le livreur'} démarre sa tournée de {selected.tour_total_stops} arrêts</p>
+                    </div>
+                  )
+                }
+                return (
+                  <div className="rounded-[14px] bg-[#f0f4ff] p-4 space-y-3">
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm font-bold text-[#1a1a2e]">
+                        {selected.driver_name ?? 'Livreur'} · {selected.tour_delivered_stops} arrêt{selected.tour_delivered_stops > 1 ? 's' : ''} livré{selected.tour_delivered_stops > 1 ? 's' : ''} sur {selected.tour_total_stops}
+                      </span>
+                      <span className="text-lg font-extrabold text-[#1d4ed8]">{pct}%</span>
+                    </div>
+                    <div className="h-3 rounded-full bg-[#dbeafe] overflow-hidden">
+                      <div
+                        className="h-full rounded-full bg-[#1d4ed8] transition-all"
+                        style={{ width: `${pct}%` }}
+                      />
+                    </div>
+                    {deliveredCities.length > 0 && (
+                      <div className="text-xs">
+                        <span className="text-[#1a7f4b] font-medium">✓ Déjà livrés : </span>
+                        <span className="text-[#6b6b63]">{deliveredCities.join(', ')}</span>
+                      </div>
+                    )}
+                    {remainingCities.length > 0 && (
+                      <div className="text-xs">
+                        <span className="text-[#1d4ed8] font-medium">→ Restant : </span>
+                        <span className="text-[#6b6b63]">{remainingCities.join(', ')}</span>
+                      </div>
+                    )}
+                  </div>
+                )
+              })()}
+
+              {/* ── Products ── */}
               <div>
-                <p className="text-xs text-[#1a1a2e]">{selected.address1}</p>
-                <p className="text-xs text-[#6b6b63]">{selected.zip} {selected.city}</p>
+                <p className="text-[10px] font-semibold uppercase tracking-[0.08em] text-[#9b9b93] mb-2">Produits commandés</p>
+                {selected.panel_details.length > 0 ? (
+                  <div className="rounded-[12px] border border-[#f0f0ee] overflow-hidden">
+                    {selected.panel_details.map((p, i) => (
+                      <div key={i} className={`flex items-center justify-between px-3 py-2 text-xs ${i > 0 ? 'border-t border-[#f5f5f3]' : ''}`}>
+                        <div className="min-w-0">
+                          <span className="font-mono text-[#9b9b93] mr-2">{p.sku || '—'}</span>
+                          <span className="text-[#1a1a2e] truncate">{p.title}</span>
+                        </div>
+                        <span className="font-semibold text-[#1a1a2e] ml-4 flex-shrink-0">×{p.qty}</span>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-xs text-[#9b9b93]">—</p>
+                )}
               </div>
-              <span
-                className="ml-auto px-2 py-0.5 rounded-full text-[10px] font-medium flex-shrink-0"
-                style={{ backgroundColor: zc.bg, color: zc.text }}
-              >
-                {ZONE_LABEL[selected.zone]}
-              </span>
-            </div>
 
-            {/* Email */}
-            <div className="border-t border-[#f0f0ee] pt-4">
-              <p className="text-[10px] font-semibold uppercase tracking-[0.08em] text-[#9b9b93] mb-2">Email client</p>
-              <pre className="whitespace-pre-wrap text-xs text-[#1a1a2e] bg-[#fafaf8] border border-[#f0f0ee] rounded-[10px] p-3 leading-relaxed font-sans mb-3">
-                {emailText}
-              </pre>
-              <button
-                onClick={handleCopy}
-                className={`w-full py-2 rounded-[10px] text-xs font-semibold transition-all ${
-                  copied
-                    ? 'bg-[#d1fae5] text-[#1a7f4b]'
-                    : 'bg-[#1a1a2e] text-white hover:bg-[#2d2d4a]'
-                }`}
-              >
-                {copied ? 'Copié !' : 'Copier l\'email'}
-              </button>
+              {/* ── Address ── */}
+              <div className="flex items-start gap-2">
+                <MapPin size={13} className="text-[#9b9b93] mt-0.5 flex-shrink-0" />
+                <div>
+                  <p className="text-xs text-[#1a1a2e]">{selected.address1}</p>
+                  <p className="text-xs text-[#6b6b63]">{selected.zip} {selected.city}</p>
+                </div>
+              </div>
+
+              {/* ── Email (collapsible) ── */}
+              <div className="border-t border-[#f0f0ee] pt-3">
+                <button
+                  onClick={() => setEmailOpen(v => !v)}
+                  className="w-full flex items-center justify-between text-xs font-semibold text-[#1a1a2e] hover:text-[#6d28d9] transition-colors"
+                >
+                  <span>✉️ Envoyer un email au client</span>
+                  <span className="text-[#9b9b93]">{emailOpen ? '▲' : '▼'}</span>
+                </button>
+                {emailOpen && (
+                  <div className="mt-3 space-y-2">
+                    <pre className="whitespace-pre-wrap text-xs text-[#1a1a2e] bg-[#fafaf8] border border-[#f0f0ee] rounded-[10px] p-3 leading-relaxed font-sans">
+                      {emailText}
+                    </pre>
+                    <button
+                      onClick={handleCopy}
+                      className={`w-full py-2 rounded-[10px] text-xs font-semibold transition-all ${
+                        copied ? 'bg-[#d1fae5] text-[#1a7f4b]' : 'bg-[#1a1a2e] text-white hover:bg-[#2d2d4a]'
+                      }`}
+                    >
+                      {copied ? 'Copié !' : 'Copier l\'email'}
+                    </button>
+                  </div>
+                )}
+              </div>
+
             </div>
           </div>
         )
