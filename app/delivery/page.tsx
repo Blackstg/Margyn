@@ -797,6 +797,7 @@ function LivreurView() {
   const [screen, setScreen] = useState<LivreurScreen>('home')
   const [stopIdx, setStopIdx] = useState(0)
   const [marking, setMarking] = useState(false)
+  const [checkedItems, setCheckedItems] = useState<Set<string>>(new Set())
 
   const fetchTours = useCallback(async () => {
     setLoading(true)
@@ -947,8 +948,19 @@ function LivreurView() {
 
   // ── Screen: loading list ──
   if (screen === 'loading') {
+    const allChecked = loadingList.length > 0 && loadingList.every((item) => checkedItems.has(item.sku || item.title))
+
+    function toggleItem(key: string) {
+      setCheckedItems((prev) => {
+        const next = new Set(prev)
+        if (next.has(key)) next.delete(key)
+        else next.add(key)
+        return next
+      })
+    }
+
     return (
-      <div className="max-w-md mx-auto px-2">
+      <div className="max-w-md mx-auto px-2 pb-28">
         <div className="flex items-center gap-3 mb-5">
           <button
             onClick={() => setScreen('home')}
@@ -957,28 +969,65 @@ function LivreurView() {
             <ChevronLeft size={20} />
           </button>
           <h2 className="text-lg font-bold text-[#1a1a2e]">Chargement camion</h2>
+          <span className="ml-auto text-sm text-[#6b6b63]">{checkedItems.size} / {loadingList.length}</span>
         </div>
         <div className="rounded-[20px] bg-white shadow-[0_4px_24px_rgba(0,0,0,0.08)] overflow-hidden">
           {loadingList.length === 0 ? (
             <div className="p-8 text-center text-sm text-[#6b6b63]">Aucun produit</div>
           ) : (
             <div className="divide-y divide-[#f0f0f0]">
-              {loadingList.map((item, i) => (
-                <div key={i} className="flex items-center gap-4 px-5 py-4">
-                  <div className="flex-1 min-w-0">
-                    {item.sku && (
-                      <div className="font-mono text-xs text-[#6b6b63] mb-0.5">{item.sku}</div>
-                    )}
-                    <div className="font-semibold text-[#1a1a2e] text-base leading-tight">{item.title}</div>
+              {loadingList.map((item, i) => {
+                const key = item.sku || item.title
+                const checked = checkedItems.has(key)
+                return (
+                  <div
+                    key={i}
+                    onClick={() => toggleItem(key)}
+                    className={`flex items-center gap-4 px-5 py-4 cursor-pointer transition-colors ${
+                      checked ? 'bg-[#f0fdf4]' : 'bg-white active:bg-[#f5f5f3]'
+                    }`}
+                  >
+                    {/* Checkbox */}
+                    <div className={`shrink-0 w-7 h-7 rounded-full border-2 flex items-center justify-center transition-all ${
+                      checked ? 'bg-[#1a7f4b] border-[#1a7f4b]' : 'border-[#d1d5db]'
+                    }`}>
+                      {checked && (
+                        <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+                          <path d="M2.5 7L5.5 10L11.5 4" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                        </svg>
+                      )}
+                    </div>
+                    <div className={`flex-1 min-w-0 transition-all ${checked ? 'opacity-50' : ''}`}>
+                      {item.sku && (
+                        <div className={`font-mono text-xs text-[#6b6b63] mb-0.5 ${checked ? 'line-through' : ''}`}>{item.sku}</div>
+                      )}
+                      <div className={`font-semibold text-base leading-tight ${checked ? 'line-through text-[#6b6b63]' : 'text-[#1a1a2e]'}`}>
+                        {item.title}
+                      </div>
+                    </div>
+                    <div className={`shrink-0 w-14 h-14 rounded-[14px] flex items-center justify-center font-bold text-2xl transition-all ${
+                      checked ? 'bg-[#1a7f4b] text-white' : 'bg-[#1a1a2e] text-white'
+                    }`}>
+                      {item.qty}
+                    </div>
                   </div>
-                  <div className="shrink-0 w-14 h-14 rounded-[14px] bg-[#1a1a2e] text-white flex items-center justify-center font-bold text-2xl">
-                    {item.qty}
-                  </div>
-                </div>
-              ))}
+                )
+              })}
             </div>
           )}
         </div>
+
+        {/* Validate button — fixed bottom */}
+        {allChecked && (
+          <div className="fixed bottom-6 left-0 right-0 flex justify-center px-6">
+            <button
+              onClick={() => { setStopIdx(0); setScreen('tour') }}
+              className="w-full max-w-md py-5 rounded-[16px] bg-[#1a7f4b] text-white font-bold text-lg shadow-[0_8px_32px_rgba(26,127,75,0.35)]"
+            >
+              Camion chargé ✓
+            </button>
+          </div>
+        )}
       </div>
     )
   }
