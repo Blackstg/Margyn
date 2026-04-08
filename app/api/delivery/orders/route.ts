@@ -59,6 +59,7 @@ interface ShopifyOrder {
   name: string
   email: string
   created_at: string
+  tags: string
   shipping_address: ShopifyShippingAddress | null
   line_items: ShopifyLineItem[]
 }
@@ -71,7 +72,7 @@ export async function GET() {
     // Fetch unfulfilled orders with pagination
     const allOrders: ShopifyOrder[] = []
     let url: string | null =
-      `https://${shop}/admin/api/2024-01/orders.json?status=open&fulfillment_status=unfulfilled&limit=250&fields=id,name,email,created_at,shipping_address,line_items`
+      `https://${shop}/admin/api/2024-01/orders.json?status=open&fulfillment_status=unfulfilled&limit=250&fields=id,name,email,created_at,tags,shipping_address,line_items`
 
     while (url) {
       const fetchRes: Response = await fetch(url, {
@@ -132,12 +133,15 @@ export async function GET() {
         // Skip orders that contain only samples
         if (panel_count === 0) return null
 
+        const is_preorder = /pre.?order/i.test(order.tags ?? '')
+
         return {
           order_name: order.name,
           shopify_order_id: String(order.id),
           customer_name,
           email: order.email ?? '',
           created_at: order.created_at ?? null,
+          is_preorder,
           address1: addr?.address1 ?? '',
           address2: addr?.address2 ?? '',
           city: addr?.city ?? '',

@@ -33,6 +33,7 @@ interface ShopifyOrder {
   customer_name: string
   email: string
   created_at: string | null
+  is_preorder: boolean
   address1: string
   city: string
   zip: string
@@ -426,8 +427,11 @@ function PlanificateurView() {
                 <div className="text-center py-8 text-sm text-[#6b6b63]">Chargement...</div>
               ) : filteredOrders.length === 0 ? (
                 <div className="text-center py-8 text-sm text-[#6b6b63]">Aucune commande</div>
-              ) : (
-                filteredOrders.map((order) => {
+              ) : (() => {
+                const normal    = filteredOrders.filter((o) => !o.is_preorder)
+                const preorders = filteredOrders.filter((o) =>  o.is_preorder)
+
+                function renderCard(order: ShopifyOrder) {
                   const selected = selectedOrders.has(order.order_name)
                   const daysWaiting = order.created_at
                     ? Math.floor((Date.now() - new Date(order.created_at).getTime()) / 86_400_000)
@@ -440,9 +444,7 @@ function PlanificateurView() {
                       key={order.order_name}
                       onClick={() => toggleOrder(order.order_name)}
                       className={`rounded-[12px] border transition-all overflow-hidden cursor-pointer ${
-                        selected
-                          ? 'border-2 border-[#aeb0c9] bg-[#f0f0fa]'
-                          : 'border border-[#e8e8e4]'
+                        selected ? 'border-2 border-[#aeb0c9] bg-[#f0f0fa]' : 'border border-[#e8e8e4]'
                       }`}
                     >
                       <div className="p-3">
@@ -462,13 +464,17 @@ function PlanificateurView() {
                               <span className="px-2 py-0.5 rounded-full bg-[#f5f5f3] text-[#6b6b63] text-xs">
                                 {order.panel_count} panneau{order.panel_count !== 1 ? 'x' : ''}
                               </span>
+                              {order.is_preorder && (
+                                <span className="px-2 py-0.5 rounded-full bg-[#fef9c3] text-[#92400e] text-xs font-medium">
+                                  Précommande
+                                </span>
+                              )}
                               {isUrgent && (
                                 <span
                                   className="px-2 py-0.5 rounded-full text-xs font-medium"
                                   style={isRed
                                     ? { background: '#fee2e2', color: '#b91c1c' }
-                                    : { background: '#fff7ed', color: '#c2680a' }
-                                  }
+                                    : { background: '#fff7ed', color: '#c2680a' }}
                                 >
                                   En attente depuis {daysWaiting}j
                                 </span>
@@ -490,7 +496,6 @@ function PlanificateurView() {
                             onClick={(e) => e.stopPropagation()}
                           />
                         </div>
-                        {/* Refs always visible */}
                         {order.panel_details?.length > 0 && (
                           <div className="mt-2 space-y-0.5">
                             {order.panel_details.map((item, i) => (
@@ -505,8 +510,26 @@ function PlanificateurView() {
                       </div>
                     </div>
                   )
-                })
-              )}
+                }
+
+                return (
+                  <>
+                    {normal.map(renderCard)}
+                    {preorders.length > 0 && (
+                      <>
+                        <div className="flex items-center gap-2 pt-2">
+                          <div className="flex-1 h-px bg-[#e8e8e4]" />
+                          <span className="text-[10px] font-semibold uppercase tracking-widest text-[#9b9b93] px-1">
+                            Précommandes ({preorders.length})
+                          </span>
+                          <div className="flex-1 h-px bg-[#e8e8e4]" />
+                        </div>
+                        {preorders.map(renderCard)}
+                      </>
+                    )}
+                  </>
+                )
+              })()}
             </div>
           </div>
         </div>
