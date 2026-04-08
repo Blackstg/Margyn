@@ -112,19 +112,19 @@ function DeliveryPageInner() {
   }
 
   return (
-    <div className="pl-[88px] p-6 bg-[#f5f5f3] min-h-screen">
+    <div className="pl-0 md:pl-[88px] px-3 py-4 md:p-6 bg-[#f5f5f3] min-h-screen">
       {/* Header */}
-      <div className="flex items-center justify-between mb-6">
-        <div className="flex items-center gap-3">
-          <Truck size={24} color="#1a1a2e" strokeWidth={1.8} />
-          <h1 className="text-2xl font-bold text-[#1a1a2e]">Delivery</h1>
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-4 md:mb-6">
+        <div className="flex items-center gap-2.5">
+          <Truck size={20} color="#1a1a2e" strokeWidth={1.8} />
+          <h1 className="text-xl md:text-2xl font-bold text-[#1a1a2e]">Delivery</h1>
         </div>
-        <div className="flex gap-1 bg-white rounded-[14px] p-1 shadow-[0_2px_8px_rgba(0,0,0,0.06)]">
+        <div className="flex gap-1 bg-white rounded-[14px] p-1 shadow-[0_2px_8px_rgba(0,0,0,0.06)] w-full sm:w-auto">
           {(['planificateur', 'livreur', 'sav'] as const).map((tab) => (
             <button
               key={tab}
               onClick={() => setActiveTab(tab)}
-              className={`px-4 py-1.5 rounded-[10px] text-sm font-medium transition-all capitalize ${
+              className={`flex-1 sm:flex-none px-3 md:px-4 py-2 rounded-[10px] text-sm font-medium transition-all text-center ${
                 activeTab === tab
                   ? 'bg-[#1a1a2e] text-white'
                   : 'text-[#6b6b63] hover:text-[#1a1a2e]'
@@ -369,7 +369,7 @@ function PlanificateurView() {
 
   return (
     <div className="relative pb-24">
-      <div className="grid grid-cols-2 gap-5">
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 lg:gap-5">
         {/* Left: Orders */}
         <div>
           <div className="rounded-[20px] shadow-[0_2px_16px_rgba(0,0,0,0.06)] bg-white p-5">
@@ -391,7 +391,7 @@ function PlanificateurView() {
             </div>
 
             {/* Zone filter */}
-            <div className="flex gap-2 mb-3">
+            <div className="flex flex-wrap gap-1.5 mb-3">
               {(['all', 'nord-est', 'nord-ouest', 'sud-est', 'sud-ouest'] as const).map((z) => (
                 <button
                   key={z}
@@ -417,7 +417,7 @@ function PlanificateurView() {
             />
 
             {/* Orders list */}
-            <div className="space-y-2 max-h-[calc(100vh-320px)] overflow-y-auto pr-1">
+            <div className="space-y-2 max-h-80 lg:max-h-[calc(100vh-320px)] overflow-y-auto pr-1">
               {loadingOrders ? (
                 <div className="text-center py-8 text-sm text-[#6b6b63]">Chargement...</div>
               ) : filteredOrders.length === 0 ? (
@@ -1113,7 +1113,7 @@ function LivreurView() {
     }
 
     return (
-      <div className="max-w-md mx-auto px-2 pb-28">
+      <div className="w-full pb-28">
         <div className="flex items-center gap-3 mb-5">
           <button
             onClick={() => setScreen('home')}
@@ -1188,7 +1188,7 @@ function LivreurView() {
   // ── Screen: tour (stop-by-stop) ──
   if (!currentStop) {
     return (
-      <div className="max-w-md mx-auto px-2 text-center space-y-4 py-12">
+      <div className="w-full text-center space-y-4 py-12">
         <div className="text-5xl">🎉</div>
         <div className="text-xl font-bold text-[#1a1a2e]">Tournée terminée !</div>
         <div className="text-sm text-[#6b6b63]">{deliveredCount} arrêt{deliveredCount !== 1 ? 's' : ''} livrés</div>
@@ -1203,7 +1203,7 @@ function LivreurView() {
   }
 
   return (
-    <div className="max-w-md mx-auto px-2 flex flex-col" style={{ minHeight: 'calc(100vh - 140px)' }}>
+    <div className="w-full flex flex-col" style={{ minHeight: 'calc(100vh - 110px)' }}>
       {/* Top bar: back + Maps */}
       <div className="flex items-center justify-between mb-4">
         <button
@@ -1691,9 +1691,9 @@ function SavView() {
         </div>
       )}
 
-    <div className="flex gap-4 items-start">
+    <div className="flex flex-col md:flex-row gap-4 items-start">
       {/* ── Left: search + list ── */}
-      <div className={`flex-shrink-0 ${selected ? 'w-[300px]' : 'flex-1 max-w-xl'}`}>
+      <div className={`flex-shrink-0 ${selected ? 'hidden md:block md:w-[300px]' : 'w-full md:flex-1 md:max-w-xl'}`}>
         <div className="rounded-[20px] shadow-[0_2px_16px_rgba(0,0,0,0.06)] bg-white p-5">
           <h2 className="text-base font-semibold text-[#1a1a2e] mb-3">SAV — Suivi livraisons</h2>
           <input
@@ -1710,7 +1710,7 @@ function SavView() {
               {search.trim() ? 'Aucun résultat' : 'Aucune commande'}
             </div>
           ) : (
-            <div className="space-y-1.5 max-h-[calc(100vh-260px)] overflow-y-auto pr-0.5">
+            <div className="space-y-1.5 max-h-80 md:max-h-[calc(100vh-260px)] overflow-y-auto pr-0.5">
               {filtered.map((entry) => {
                 const cfg = SAV_STATUS_CONFIG[entry.sav_status]
                 const isSelected = selected?.id === entry.id
@@ -1774,9 +1774,17 @@ function SavView() {
         const range = selected.tour_planned_date ? getWeekRange(selected.tour_planned_date) : null
 
         return (
-          <div className="flex-1 min-w-0 rounded-[20px] shadow-[0_2px_16px_rgba(0,0,0,0.06)] bg-white overflow-hidden">
+          <div className="w-full md:flex-1 min-w-0 rounded-[20px] shadow-[0_2px_16px_rgba(0,0,0,0.06)] bg-white overflow-hidden">
             {/* ── Header ── */}
             <div className="px-5 pt-5 pb-4 border-b border-[#f0f0ee]">
+              {/* Mobile back button */}
+              <button
+                className="md:hidden flex items-center gap-1 text-xs text-[#6b6b63] mb-3"
+                onClick={() => setSelected(null)}
+              >
+                <ChevronLeft size={14} />
+                Retour aux résultats
+              </button>
               <div className="flex items-start justify-between gap-3">
                 <div>
                   <div className="flex items-center gap-2 flex-wrap">
