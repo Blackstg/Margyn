@@ -1327,7 +1327,7 @@ interface SavStopSummary {
   city: string
   order_name: string
   status: StopStatus
-  sequence: number
+  delivered_at: string | null
 }
 
 interface SavEntry {
@@ -1426,8 +1426,17 @@ function buildSavEntries(toursRaw: any[], ordersRaw: ShopifyOrder[]): SavEntry[]
     const tourTotal    = stops.length
     const tourDelivered = stops.filter((s: TourStop) => s.status === 'delivered').length
     const sortedStops  = [...stops].sort((a: TourStop, b: TourStop) => a.sequence - b.sequence)
-    const tourStopsSummary: SavStopSummary[] = sortedStops.map((s: TourStop) => ({
-      city: s.city, order_name: s.order_name, status: s.status, sequence: s.sequence,
+    // Build summary in actual delivery order: delivered (by delivered_at ASC) then remaining (by sequence)
+    const tourStopsSummary: SavStopSummary[] = [
+      ...stops
+        .filter((s: TourStop) => s.status === 'delivered')
+        .sort((a: TourStop, b: TourStop) =>
+          (a.delivered_at ?? '').localeCompare(b.delivered_at ?? '')),
+      ...stops
+        .filter((s: TourStop) => s.status !== 'delivered')
+        .sort((a: TourStop, b: TourStop) => a.sequence - b.sequence),
+    ].map((s: TourStop) => ({
+      city: s.city, order_name: s.order_name, status: s.status, delivered_at: s.delivered_at ?? null,
     }))
 
     for (const stop of stops) {
@@ -1567,11 +1576,11 @@ function SavView() {
       {liveTours.length > 0 && (
         <div className="space-y-3">
           {liveTours.map((rep) => {
-            const stops  = rep.tour_stops_summary
-            const total  = rep.tour_total_stops
-            const done   = rep.tour_delivered_stops
-            const pct    = total > 0 ? Math.round((done / total) * 100) : 0
-            const currentSeq = stops.find(s => s.status !== 'delivered')?.sequence ?? -1
+            const stops      = rep.tour_stops_summary
+            const total      = rep.tour_total_stops
+            const done       = rep.tour_delivered_stops
+            const pct        = total > 0 ? Math.round((done / total) * 100) : 0
+            const currentIdx = stops.findIndex(s => s.status !== 'delivered')
             const weekNum = rep.tour_planned_date ? getISOWeekNum(rep.tour_planned_date) : null
 
             // Progress line width: from left edge to midpoint between last delivered and next stop
@@ -1616,25 +1625,36 @@ function SavView() {
                         style={{ width: lineWidth }}
                       />
 
+                      {/* Pulsing dot at the tip of the green bar (driver position) */}
+                      {done > 0 && done < total && (
+                        <div
+                          className="absolute top-[16px] z-20 -translate-y-1/2 -translate-x-1/2 transition-[left] duration-700 ease-in-out"
+                          style={{ left: lineWidth }}
+                        >
+                          <div className="relative flex items-center justify-center">
+                            <div className="absolute w-4 h-4 rounded-full bg-[#1a7f4b] animate-ping opacity-40" />
+                            <div className="w-2.5 h-2.5 rounded-full bg-[#1a7f4b]" />
+                          </div>
+                        </div>
+                      )}
+
                       {/* Stop circles */}
                       {stops.map((s, i) => {
                         const isDelivered = s.status === 'delivered'
-                        const isCurrent   = !isDelivered && s.sequence === currentSeq
+                        const isCurrent   = i === currentIdx
                         return (
                           <div key={i} className="relative flex flex-col items-center flex-1 pt-0">
-                            {/* Pulsing ring around current stop (border animates, fill stays green) */}
                             <div className="relative flex items-center justify-center">
-                              {isCurrent && (
-                                <div className="absolute w-10 h-10 rounded-full border-2 border-[#1a7f4b] animate-ping opacity-30" />
-                              )}
                               <div
                                 className={`relative z-10 w-8 h-8 rounded-full border-2 flex items-center justify-center transition-all duration-500 ${
-                                  isDelivered || isCurrent
+                                  isDelivered
                                     ? 'bg-[#1a7f4b] border-[#1a7f4b]'
+                                    : isCurrent
+                                    ? 'bg-[#4b5563] border-[#4b5563]'
                                     : 'bg-white border-[#d1d5db]'
                                 }`}
                               >
-                                {(isDelivered || isCurrent) && (
+                                {isDelivered && (
                                   <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
                                     <path d="M2 6L5 9L10 3" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
                                   </svg>
@@ -1643,7 +1663,7 @@ function SavView() {
                             </div>
                             {/* City */}
                             <span className={`mt-2 text-[10px] font-semibold text-center leading-tight max-w-[68px] truncate ${
-                              isDelivered || isCurrent ? 'text-[#1a7f4b]' : 'text-[#6b6b63]'
+                              isDelivered ? 'text-[#1a7f4b]' : isCurrent ? 'text-[#1a1a2e]' : 'text-[#6b6b63]'
                             }`}>
                               {s.city}
                             </span>
