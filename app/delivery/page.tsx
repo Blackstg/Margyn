@@ -3,6 +3,7 @@
 export const dynamic = 'force-dynamic'
 
 import { useState, useEffect, useCallback } from 'react'
+import { useRouter, useSearchParams } from 'next/navigation'
 import { ChevronDown, ChevronUp, ChevronLeft, ChevronRight, Trash2, Mail, Plus, X, MapPin, Package, Truck } from 'lucide-react'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -94,7 +95,16 @@ const TOUR_STATUS_LABELS: Record<TourStatus, { label: string; color: string }> =
 // ─── Main Page ────────────────────────────────────────────────────────────────
 
 export default function DeliveryPage() {
-  const [activeTab, setActiveTab] = useState<'planificateur' | 'livreur' | 'sav'>('planificateur')
+  const router = useRouter()
+  const searchParams = useSearchParams()
+
+  const rawView = searchParams.get('view')
+  const activeTab: 'planificateur' | 'livreur' | 'sav' =
+    rawView === 'livreur' || rawView === 'sav' ? rawView : 'planificateur'
+
+  function setActiveTab(tab: 'planificateur' | 'livreur' | 'sav') {
+    router.replace(`/delivery?view=${tab}`)
+  }
 
   return (
     <div className="pl-[88px] p-6 bg-[#f5f5f3] min-h-screen">
