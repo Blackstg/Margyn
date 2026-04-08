@@ -1012,13 +1012,13 @@ function LivreurView() {
   // ── Screen: home ──
   if (screen === 'home') {
     return (
-      <div className="max-w-md mx-auto space-y-4 px-2">
-        {/* Tour selector if multiple */}
+      <div className="w-full space-y-4">
+        {/* Tour selector — full width, no truncation */}
         {tours.length > 1 && (
           <select
             value={selectedTourId}
             onChange={(e) => setSelectedTourId(e.target.value)}
-            className="w-full px-4 py-3 text-sm border border-[#e8e8e4] rounded-[14px] outline-none bg-white"
+            className="w-full px-4 py-4 text-base font-medium border border-[#e8e8e4] rounded-[14px] outline-none bg-white"
           >
             {tours.map((t) => (
               <option key={t.id} value={t.id}>{t.name} — {t.planned_date ? formatDate(t.planned_date) : 'sans date'}</option>
@@ -1027,64 +1027,71 @@ function LivreurView() {
         )}
 
         {tour ? (
-          <div className="rounded-[24px] shadow-[0_4px_24px_rgba(0,0,0,0.08)] bg-white overflow-hidden">
-            {/* Tour header */}
-            <div className="bg-[#1a1a2e] px-6 py-8 text-white text-center">
-              <div className="text-xl font-bold mb-1">{tour.name}</div>
+          <div className="w-full rounded-[20px] bg-[#1a1a2e] overflow-hidden">
+            {/* Header */}
+            <div className="px-6 pt-8 pb-6 text-white">
+              <div className="text-2xl font-bold leading-tight">{tour.name}</div>
               {tour.planned_date && (
-                <div className="text-white/60 text-sm capitalize">{formatDate(tour.planned_date)}</div>
+                <div className="text-white/50 text-base mt-1 capitalize">{formatDate(tour.planned_date)}</div>
               )}
-              <div className="flex items-center justify-center gap-6 mt-5">
-                <div className="text-center">
-                  <div className="text-3xl font-bold">{sortedStops.length}</div>
-                  <div className="text-white/60 text-xs mt-0.5">arrêts</div>
-                </div>
-                <div className="w-px h-10 bg-white/20" />
-                <div className="text-center">
-                  <div className="text-3xl font-bold">{tour.total_panels}</div>
-                  <div className="text-white/60 text-xs mt-0.5">panneaux</div>
-                </div>
-                {deliveredCount > 0 && (
-                  <>
-                    <div className="w-px h-10 bg-white/20" />
-                    <div className="text-center">
-                      <div className="text-3xl font-bold text-[#4ade80]">{deliveredCount}</div>
-                      <div className="text-white/60 text-xs mt-0.5">livrés</div>
-                    </div>
-                  </>
-                )}
+            </div>
+
+            {/* Stats — 3 equal columns, full width */}
+            <div className="grid grid-cols-3 border-t border-white/10">
+              <div className="text-center py-6 border-r border-white/10">
+                <div className="text-5xl font-bold text-white">{sortedStops.length}</div>
+                <div className="text-white/50 text-sm mt-2 uppercase tracking-wide">Arrêts</div>
               </div>
-              {sortedStops.length > 0 && (
-                <div className="mt-4 w-full h-1.5 bg-white/20 rounded-full overflow-hidden">
+              <div className="text-center py-6 border-r border-white/10">
+                <div className="text-5xl font-bold text-white">{tour.total_panels}</div>
+                <div className="text-white/50 text-sm mt-2 uppercase tracking-wide">Panneaux</div>
+              </div>
+              <div className="text-center py-6">
+                <div className={`text-5xl font-bold ${deliveredCount > 0 ? 'text-[#4ade80]' : 'text-white/30'}`}>
+                  {deliveredCount}
+                </div>
+                <div className="text-white/50 text-sm mt-2 uppercase tracking-wide">Livrés</div>
+              </div>
+            </div>
+
+            {/* Progress bar */}
+            {sortedStops.length > 0 && (
+              <div className="px-6 pb-2">
+                <div className="w-full h-2.5 bg-white/15 rounded-full overflow-hidden">
                   <div
                     className="h-full bg-[#4ade80] rounded-full transition-all"
                     style={{ width: `${(deliveredCount / sortedStops.length) * 100}%` }}
                   />
                 </div>
-              )}
-            </div>
+                {deliveredCount > 0 && (
+                  <div className="text-right text-white/40 text-sm mt-1.5">
+                    {Math.round((deliveredCount / sortedStops.length) * 100)}%
+                  </div>
+                )}
+              </div>
+            )}
 
             {/* Actions */}
-            <div className="p-5 space-y-3">
+            <div className="px-6 pt-4 pb-6 space-y-3">
               <button
                 onClick={() => setScreen('loading')}
-                className="w-full flex items-center justify-center gap-3 py-4 rounded-[16px] bg-[#f5f5f3] text-[#1a1a2e] font-semibold text-base active:bg-[#e8e8e4] transition-colors"
+                className="w-full flex items-center justify-center gap-3 py-5 rounded-[16px] bg-white/10 text-white font-semibold text-lg active:bg-white/20 transition-colors"
               >
-                <Package size={22} strokeWidth={1.8} />
+                <Package size={24} strokeWidth={1.8} />
                 Préparer le camion
               </button>
               <button
                 onClick={() => { setStopIdx(0); setScreen('tour') }}
                 disabled={sortedStops.length === 0}
-                className="w-full flex items-center justify-center gap-3 py-4 rounded-[16px] bg-[#1a1a2e] text-white font-semibold text-base disabled:opacity-40 active:bg-[#2a2a4e] transition-colors"
+                className="w-full flex items-center justify-center gap-3 py-5 rounded-[16px] bg-[#4ade80] text-[#1a1a2e] font-bold text-lg disabled:opacity-30 active:bg-[#22c55e] transition-colors"
               >
-                <Truck size={22} strokeWidth={1.8} />
+                <Truck size={24} strokeWidth={1.8} />
                 Démarrer la tournée
               </button>
             </div>
           </div>
         ) : (
-          <div className="rounded-[20px] bg-white p-12 text-center text-sm text-[#6b6b63]">
+          <div className="w-full rounded-[20px] bg-white py-16 text-center text-base text-[#6b6b63]">
             Aucune tournée disponible
           </div>
         )}
