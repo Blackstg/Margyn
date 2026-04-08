@@ -1322,35 +1322,143 @@ function LivreurView() {
 
 // ─── SAV View ─────────────────────────────────────────────────────────────────
 
-interface FlatStop extends TourStop {
-  tour_name: string
-  tour_status: TourStatus
-  tour_planned_date: string
+type SavStatus = 'pending' | 'planned' | 'in_progress' | 'delivered'
+
+interface SavEntry {
+  id: string
+  order_name: string
+  customer_name: string
+  email: string
+  city: string
+  zip: string
+  zone: Zone
+  address1: string
+  panel_count: number
+  panel_details: PanelItem[]
+  tour_name: string | null
+  tour_status: TourStatus | null
+  tour_planned_date: string | null
+  tour_total_stops: number
+  tour_delivered_stops: number
+  stop_status: StopStatus | null
+  delivered_at: string | null
+  sav_status: SavStatus
+}
+
+const SAV_STATUS_CONFIG: Record<SavStatus, { label: string; bg: string; text: string }> = {
+  pending:     { label: 'En attente de planification', bg: '#f5f5f3', text: '#6b6b63' },
+  planned:     { label: 'Planifiée',                   bg: '#ede9fe', text: '#6d28d9' },
+  in_progress: { label: 'En cours de livraison',       bg: '#dbeafe', text: '#1d4ed8' },
+  delivered:   { label: 'Livrée',                      bg: '#d1fae5', text: '#1a7f4b' },
+}
+
+function getWeekStart(dateStr: string): string {
+  const d = new Date(dateStr + 'T00:00:00')
+  const day = d.getDay()
+  const diff = d.getDate() - day + (day === 0 ? -6 : 1)
+  const monday = new Date(d)
+  monday.setDate(diff)
+  return monday.toLocaleDateString('fr-FR', { day: 'numeric', month: 'long' })
+}
+
+function buildSavEmail(entry: SavEntry): string {
+  const prenom = entry.customer_name.split(' ')[0] || entry.customer_name
+  const ref = entry.order_name
+  switch (entry.sav_status) {
+    case 'pending':
+      return `Bonjour ${prenom},\n\nJe reviens vers vous concernant votre commande ${ref}. Votre commande est bien enregistrée et sera intégrée à notre prochaine tournée de livraison dans votre région. Nous vous tiendrons informé(e) dès qu'une date sera confirmée.\n\nCordialement,\nL'équipe Bowa`
+    case 'planned': {
+      const weekDate = entry.tour_planned_date ? getWeekStart(entry.tour_planned_date) : '?'
+      return `Bonjour ${prenom},\n\nBonne nouvelle ! Je vois que votre commande ${ref} est d'ores et déjà programmée pour la semaine du ${weekDate}. Notre livreur vous contactera par téléphone avant de passer. Merci de votre patience.\n\nCordialement,\nL'équipe Bowa`
+    }
+    case 'in_progress':
+      return `Bonjour ${prenom},\n\nJe vois que notre livreur est actuellement en tournée dans votre région. Votre commande ${ref} devrait vous être livrée très prochainement. Il vous contactera par téléphone avant de passer.\n\nCordialement,\nL'équipe Bowa`
+    case 'delivered': {
+      const dateStr = entry.delivered_at
+        ? new Date(entry.delivered_at).toLocaleDateString('fr-FR', { day: 'numeric', month: 'long', year: 'numeric' })
+        : '?'
+      return `Bonjour ${prenom},\n\nVotre commande ${ref} a bien été livrée le ${dateStr}. Nous espérons que vous êtes satisfait(e) de votre achat. N'hésitez pas à nous contacter pour toute question.\n\nCordialement,\nL'équipe Bowa`
+    }
+  }
 }
 
 function SavView() {
-  const [search, setSearch] = useState('')
-  const [allStops, setAllStops] = useState<FlatStop[]>([])
-  const [loading, setLoading] = useState(true)
+  const [search, setSearch]     = useState('')
+  const [entries, setEntries]   = useState<SavEntry[]>([])
+  const [loading, setLoading]   = useState(true)
+  const [selected, setSelected] = useState<SavEntry | null>(null)
+  const [copied, setCopied]     = useState(false)
 
   useEffect(() => {
     async function load() {
       setLoading(true)
       try {
-        const r = await fetch('/api/delivery/tours')
-        const data = await r.json()
-        const flat: FlatStop[] = []
-        for (const tour of data.tours ?? []) {
-          for (const stop of tour.stops ?? []) {
-            flat.push({
-              ...stop,
+        const [toursData, ordersData] = await Promise.all([
+          fetch('/api/delivery/tours').then(r => r.json()),
+          fetch('/api/delivery/orders').then(r => r.json()),
+        ])
+
+        const result: SavEntry[] = []
+
+        for (const tour of toursData.tours ?? []) {
+          if (tour.status === 'cancelled') continue
+          const stops: TourStop[] = tour.stops ?? []
+          const tourTotal = stops.length
+          const tourDelivered = stops.filter((s: TourStop) => s.status === 'delivered').length
+
+          for (const stop of stops) {
+            let sav_status: SavStatus
+            if (stop.status === 'delivered')       sav_status = 'delivered'
+            else if (tour.status === 'in_progress') sav_status = 'in_progress'
+            else                                    sav_status = 'planned'
+
+            result.push({
+              id: stop.id,
+              order_name: stop.order_name,
+              customer_name: stop.customer_name,
+              email: stop.email,
+              city: stop.city,
+              zip: stop.zip,
+              zone: stop.zone,
+              address1: stop.address1,
+              panel_count: stop.panel_count,
+              panel_details: stop.panel_details ?? [],
               tour_name: tour.name,
               tour_status: tour.status,
               tour_planned_date: tour.planned_date,
+              tour_total_stops: tourTotal,
+              tour_delivered_stops: tourDelivered,
+              stop_status: stop.status,
+              delivered_at: stop.delivered_at ?? null,
+              sav_status,
             })
           }
         }
-        setAllStops(flat)
+
+        for (const order of ordersData.orders ?? []) {
+          result.push({
+            id: `order-${order.order_name}`,
+            order_name: order.order_name,
+            customer_name: order.customer_name,
+            email: order.email,
+            city: order.city,
+            zip: order.zip,
+            zone: order.zone,
+            address1: order.address1,
+            panel_count: order.panel_count,
+            panel_details: order.panel_details ?? [],
+            tour_name: null,
+            tour_status: null,
+            tour_planned_date: null,
+            tour_total_stops: 0,
+            tour_delivered_stops: 0,
+            stop_status: null,
+            delivered_at: null,
+            sav_status: 'pending',
+          })
+        }
+
+        setEntries(result)
       } catch (e) {
         console.error(e)
       } finally {
@@ -1360,82 +1468,185 @@ function SavView() {
     load()
   }, [])
 
-  const filtered = allStops.filter((s) => {
-    if (!search) return true
+  const filtered = entries.filter((e) => {
+    if (!search.trim()) return true
     const q = search.toLowerCase()
     return (
-      s.order_name.toLowerCase().includes(q) ||
-      (s.customer_name ?? '').toLowerCase().includes(q)
+      e.order_name.toLowerCase().includes(q) ||
+      e.customer_name.toLowerCase().includes(q) ||
+      e.city.toLowerCase().includes(q)
     )
   })
 
-  function getStatusBadge(stop: FlatStop) {
-    if (stop.status === 'delivered') {
-      return { label: 'Livrée', color: 'bg-[#d1fae5] text-[#1a7f4b]' }
-    }
-    if (stop.tour_status === 'in_progress') {
-      return { label: 'En cours de livraison', color: 'bg-blue-100 text-blue-700' }
-    }
-    if (stop.tour_status === 'planned' || stop.tour_status === 'draft') {
-      const week = stop.tour_planned_date ? getWeekNumber(stop.tour_planned_date) : '?'
-      return { label: `Planifiée sem. ${week}`, color: 'bg-purple-100 text-purple-700' }
-    }
-    return { label: 'En attente de planification', color: 'bg-gray-100 text-gray-500' }
+  function handleCopy() {
+    if (!selected) return
+    navigator.clipboard.writeText(buildSavEmail(selected))
+    setCopied(true)
+    setTimeout(() => setCopied(false), 2000)
   }
 
   return (
-    <div className="rounded-[20px] shadow-[0_2px_16px_rgba(0,0,0,0.06)] bg-white p-5">
-      <h2 className="text-base font-semibold text-[#1a1a2e] mb-4">SAV — Suivi livraisons</h2>
-
-      <input
-        type="text"
-        placeholder="Rechercher (commande, client...)"
-        value={search}
-        onChange={(e) => setSearch(e.target.value)}
-        className="w-full max-w-sm px-3 py-2 text-sm border border-[#e8e8e4] rounded-[10px] mb-4 outline-none focus:border-[#aeb0c9]"
-      />
-
-      {loading ? (
-        <div className="text-center py-8 text-sm text-[#6b6b63]">Chargement...</div>
-      ) : filtered.length === 0 ? (
-        <div className="text-center py-8 text-sm text-[#6b6b63]">Aucun résultat</div>
-      ) : (
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="text-left text-xs text-[#6b6b63] border-b border-[#e8e8e4]">
-                <th className="pb-3 font-medium pr-4">Commande</th>
-                <th className="pb-3 font-medium pr-4">Client</th>
-                <th className="pb-3 font-medium pr-4">Ville</th>
-                <th className="pb-3 font-medium pr-4">Statut</th>
-                <th className="pb-3 font-medium pr-4">Tournée</th>
-                <th className="pb-3 font-medium">Date planifiée</th>
-              </tr>
-            </thead>
-            <tbody>
-              {filtered.map((stop) => {
-                const badge = getStatusBadge(stop)
+    <div className="flex gap-4 items-start">
+      {/* Left: search + results */}
+      <div className={`flex flex-col gap-3 ${selected ? 'w-80 flex-shrink-0' : 'flex-1'}`}>
+        <div className="rounded-[20px] shadow-[0_2px_16px_rgba(0,0,0,0.06)] bg-white p-5">
+          <h2 className="text-base font-semibold text-[#1a1a2e] mb-4">SAV — Suivi livraisons</h2>
+          <input
+            type="text"
+            placeholder="Rechercher (commande, client, ville...)"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            className="w-full px-3 py-2 text-sm border border-[#e8e8e4] rounded-[10px] mb-3 outline-none focus:border-[#aeb0c9]"
+          />
+          {loading ? (
+            <div className="text-center py-8 text-sm text-[#6b6b63]">Chargement...</div>
+          ) : filtered.length === 0 ? (
+            <div className="text-center py-8 text-sm text-[#6b6b63]">
+              {search.trim() ? 'Aucun résultat' : 'Aucune commande'}
+            </div>
+          ) : (
+            <div className="space-y-1.5 max-h-[calc(100vh-280px)] overflow-y-auto pr-1">
+              {filtered.map((entry) => {
+                const cfg = SAV_STATUS_CONFIG[entry.sav_status]
+                const isSelected = selected?.id === entry.id
                 return (
-                  <tr key={stop.id} className="border-b border-[#f5f5f3] last:border-0 hover:bg-[#f9f9f7]">
-                    <td className="py-3 pr-4 font-medium text-[#1a1a2e]">{stop.order_name}</td>
-                    <td className="py-3 pr-4 text-[#6b6b63]">{stop.customer_name}</td>
-                    <td className="py-3 pr-4 text-[#6b6b63]">{stop.city}</td>
-                    <td className="py-3 pr-4">
-                      <span className={`px-2.5 py-1 rounded-full text-xs font-medium whitespace-nowrap ${badge.color}`}>
-                        {badge.label}
+                  <button
+                    key={entry.id}
+                    onClick={() => { setSelected(entry); setCopied(false) }}
+                    className={`w-full text-left px-3.5 py-3 rounded-[12px] border transition-all ${
+                      isSelected
+                        ? 'border-[#aeb0c9] bg-[#f0f0fb]'
+                        : 'border-[#f0f0ee] bg-[#fafaf8] hover:bg-[#f5f5f3]'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between gap-2 mb-1">
+                      <span className="font-mono text-xs font-semibold text-[#1a1a2e]">{entry.order_name}</span>
+                      <span
+                        className="px-2 py-0.5 rounded-full text-[10px] font-medium whitespace-nowrap"
+                        style={{ backgroundColor: cfg.bg, color: cfg.text }}
+                      >
+                        {cfg.label}
                       </span>
-                    </td>
-                    <td className="py-3 pr-4 text-[#6b6b63]">{stop.tour_name}</td>
-                    <td className="py-3 text-[#6b6b63]">
-                      {stop.tour_planned_date ? formatDate(stop.tour_planned_date) : '—'}
-                    </td>
-                  </tr>
+                    </div>
+                    <div className="text-xs text-[#6b6b63]">{entry.customer_name} · {entry.city}</div>
+                  </button>
                 )
               })}
-            </tbody>
-          </table>
+            </div>
+          )}
         </div>
-      )}
+      </div>
+
+      {/* Right: detail panel */}
+      {selected && (() => {
+        const cfg = SAV_STATUS_CONFIG[selected.sav_status]
+        const zc  = ZONE_COLOR[selected.zone] ?? { bg: '#f5f5f3', text: '#6b6b63' }
+        const emailText = buildSavEmail(selected)
+        return (
+          <div className="flex-1 rounded-[20px] shadow-[0_2px_16px_rgba(0,0,0,0.06)] bg-white p-5">
+            {/* Header */}
+            <div className="flex items-start justify-between gap-3 mb-5">
+              <div>
+                <div className="flex items-center gap-2 mb-1">
+                  <span className="font-mono text-sm font-bold text-[#1a1a2e]">{selected.order_name}</span>
+                  <span
+                    className="px-2.5 py-1 rounded-full text-xs font-semibold"
+                    style={{ backgroundColor: cfg.bg, color: cfg.text }}
+                  >
+                    {cfg.label}
+                  </span>
+                </div>
+                <p className="text-sm font-medium text-[#1a1a2e]">{selected.customer_name}</p>
+                {selected.email && <p className="text-xs text-[#9b9b93] mt-0.5">{selected.email}</p>}
+              </div>
+              <button
+                onClick={() => setSelected(null)}
+                className="text-[#9b9b93] hover:text-[#1a1a2e] transition-colors mt-0.5"
+              >
+                <X size={16} />
+              </button>
+            </div>
+
+            {/* Progress bar — in_progress only */}
+            {selected.sav_status === 'in_progress' && selected.tour_total_stops > 0 && (
+              <div className="mb-5 p-3.5 rounded-[12px] bg-[#f0f4ff]">
+                <div className="flex items-center justify-between text-xs mb-2">
+                  <span className="font-medium text-[#1d4ed8]">Tournée · {selected.tour_name}</span>
+                  <span className="font-semibold text-[#1a1a2e]">
+                    {selected.tour_delivered_stops}/{selected.tour_total_stops} arrêts livrés
+                  </span>
+                </div>
+                <div className="h-2 rounded-full bg-[#dbeafe] overflow-hidden">
+                  <div
+                    className="h-full rounded-full bg-[#1d4ed8] transition-all"
+                    style={{ width: `${Math.round((selected.tour_delivered_stops / selected.tour_total_stops) * 100)}%` }}
+                  />
+                </div>
+              </div>
+            )}
+
+            {/* Tour info — planned */}
+            {selected.sav_status === 'planned' && selected.tour_name && (
+              <div className="mb-4 text-xs text-[#6b6b63]">
+                Tournée · <span className="font-medium text-[#1a1a2e]">{selected.tour_name}</span>
+                {selected.tour_planned_date && (
+                  <> · semaine du <span className="font-medium text-[#1a1a2e]">{getWeekStart(selected.tour_planned_date)}</span></>
+                )}
+              </div>
+            )}
+
+            {/* Products */}
+            <div className="mb-4">
+              <p className="text-[10px] font-semibold uppercase tracking-[0.08em] text-[#9b9b93] mb-2">Produits</p>
+              {selected.panel_details.length > 0 ? (
+                <div className="space-y-1">
+                  {selected.panel_details.map((p, i) => (
+                    <div key={i} className="flex items-center justify-between text-xs">
+                      <span className="text-[#1a1a2e]">{p.title}</span>
+                      <span className="text-[#6b6b63] font-medium ml-4">×{p.qty}</span>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <p className="text-xs text-[#9b9b93]">—</p>
+              )}
+            </div>
+
+            {/* Address + zone */}
+            <div className="mb-5 flex items-start gap-2">
+              <MapPin size={13} className="text-[#9b9b93] mt-0.5 flex-shrink-0" />
+              <div>
+                <p className="text-xs text-[#1a1a2e]">{selected.address1}</p>
+                <p className="text-xs text-[#6b6b63]">{selected.zip} {selected.city}</p>
+              </div>
+              <span
+                className="ml-auto px-2 py-0.5 rounded-full text-[10px] font-medium flex-shrink-0"
+                style={{ backgroundColor: zc.bg, color: zc.text }}
+              >
+                {ZONE_LABEL[selected.zone]}
+              </span>
+            </div>
+
+            {/* Email */}
+            <div className="border-t border-[#f0f0ee] pt-4">
+              <p className="text-[10px] font-semibold uppercase tracking-[0.08em] text-[#9b9b93] mb-2">Email client</p>
+              <pre className="whitespace-pre-wrap text-xs text-[#1a1a2e] bg-[#fafaf8] border border-[#f0f0ee] rounded-[10px] p-3 leading-relaxed font-sans mb-3">
+                {emailText}
+              </pre>
+              <button
+                onClick={handleCopy}
+                className={`w-full py-2 rounded-[10px] text-xs font-semibold transition-all ${
+                  copied
+                    ? 'bg-[#d1fae5] text-[#1a7f4b]'
+                    : 'bg-[#1a1a2e] text-white hover:bg-[#2d2d4a]'
+                }`}
+              >
+                {copied ? 'Copié !' : 'Copier l\'email'}
+              </button>
+            </div>
+          </div>
+        )
+      })()}
     </div>
   )
 }
