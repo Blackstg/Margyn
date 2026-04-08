@@ -213,7 +213,7 @@ export async function GET() {
         ? false
         : _variantIds.every((id) => {
             const qty = stockMap.get(id)
-            return qty === undefined || qty >= 0  // unknown = don't block
+            return qty === undefined || qty > 0  // unknown = don't block
           })
 
       return { ...order, preorder_ready: ready }
