@@ -80,12 +80,6 @@ function formatDate(dateStr: string): string {
 }
 
 
-function getWeekNumber(dateStr: string): number {
-  const d = new Date(dateStr + 'T00:00:00')
-  const startOfYear = new Date(d.getFullYear(), 0, 1)
-  const diff = d.getTime() - startOfYear.getTime()
-  return Math.ceil((diff / 86400000 + startOfYear.getDay() + 1) / 7)
-}
 
 const TOUR_STATUS_LABELS: Record<TourStatus, { label: string; color: string }> = {
   draft:       { label: 'Brouillon',   color: 'bg-gray-100 text-gray-600' },
