@@ -1370,6 +1370,14 @@ const TIMELINE_STEPS: { label: string; statuses: SavStatus[] }[] = [
   { label: 'Livrée',         statuses: ['delivered'] },
 ]
 
+function getISOWeekNum(dateStr: string): number {
+  const d = new Date(dateStr + 'T00:00:00')
+  const utc = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()))
+  utc.setUTCDate(utc.getUTCDate() + 4 - (utc.getUTCDay() || 7))
+  const yearStart = new Date(Date.UTC(utc.getUTCFullYear(), 0, 1))
+  return Math.ceil((((utc.getTime() - yearStart.getTime()) / 86400000) + 1) / 7)
+}
+
 function getWeekRange(dateStr: string): { start: string; end: string } {
   const d = new Date(dateStr + 'T00:00:00')
   const day = d.getDay()
@@ -1563,69 +1571,105 @@ function SavView() {
             const total  = rep.tour_total_stops
             const done   = rep.tour_delivered_stops
             const pct    = total > 0 ? Math.round((done / total) * 100) : 0
-            // First non-delivered stop = "current"
             const currentSeq = stops.find(s => s.status !== 'delivered')?.sequence ?? -1
+            const weekNum = rep.tour_planned_date ? getISOWeekNum(rep.tour_planned_date) : null
+
+            // Progress line width: from left edge to center of last delivered stop
+            const lineWidth = done > 0 && total > 0
+              ? `${(2 * done - 1) / (2 * total) * 100}%`
+              : '0%'
+            // Truck x: midpoint between last delivered and current
+            const truckLeft = total > 0 ? `calc(${done / total * 100}% - 12px)` : '0px'
 
             return (
-              <div key={rep.tour_name} className="rounded-[20px] bg-[#f0f0fb] px-5 pt-4 pb-5">
-                {/* Header row */}
-                <div className="flex items-center justify-between mb-4">
-                  <div className="flex items-center gap-2">
-                    <span className="w-2 h-2 rounded-full bg-[#1d4ed8] animate-pulse flex-shrink-0" />
-                    <span className="text-sm font-bold text-[#1a1a2e]">
-                      {rep.driver_name ?? 'Livreur'} · {rep.tour_name}
-                    </span>
+              <div key={rep.tour_name} className="rounded-[20px] bg-white shadow-[0_2px_16px_rgba(0,0,0,0.07)] border border-[#ebebeb] px-5 pt-5 pb-6">
+
+                {/* Header */}
+                <div className="flex items-center justify-between mb-5">
+                  <div className="flex items-center gap-2.5">
+                    <span className="w-2.5 h-2.5 rounded-full bg-[#1a7f4b] animate-pulse flex-shrink-0" />
+                    <div>
+                      <p className="text-base font-bold text-[#1a1a2e] leading-snug">
+                        {rep.driver_name ?? 'Livreur'} · {rep.tour_name}
+                        {weekNum && <span className="font-normal text-[#6b6b63]"> · Semaine {weekNum}</span>}
+                      </p>
+                      <p className="text-xs text-[#9b9b93]">Tournée en cours</p>
+                    </div>
                   </div>
-                  <span className="text-xs font-semibold text-[#1a1a2e] flex-shrink-0 ml-3">
-                    {done}/{total} arrêts · {pct}%
-                  </span>
+                  <div className="text-right flex-shrink-0 ml-4">
+                    <p className="text-xl font-extrabold text-[#1a1a2e] leading-none">{pct}%</p>
+                    <p className="text-xs text-[#6b6b63] mt-0.5">{done}/{total} arrêts livrés</p>
+                  </div>
                 </div>
 
                 {/* Stepper */}
-                <div className="overflow-x-auto pb-1">
-                  <div className="relative flex items-start" style={{ minWidth: `${stops.length * 64}px` }}>
-                    {/* Connecting line — sits at the center of the circles (top 11px) */}
-                    <div className="absolute left-0 right-0 h-0.5 bg-[#d1d5db] top-[11px]" />
-                    {/* Delivered portion of the line */}
-                    <div
-                      className="absolute left-0 h-0.5 bg-[#1a7f4b] top-[11px] transition-all duration-500"
-                      style={{ width: total > 1 ? `${(done / (total - 1)) * 100}%` : done > 0 ? '100%' : '0%' }}
-                    />
+                <div className="overflow-x-auto">
+                  <div className="relative" style={{ minWidth: `${Math.max(stops.length * 72, 300)}px` }}>
 
-                    {stops.map((s, i) => {
-                      const isDelivered = s.status === 'delivered'
-                      const isCurrent   = !isDelivered && s.sequence === currentSeq
-                      return (
-                        <div key={i} className="relative flex flex-col items-center flex-1">
-                          {/* Circle */}
-                          <div
-                            className={`relative z-10 w-[22px] h-[22px] rounded-full border-2 flex items-center justify-center flex-shrink-0 transition-all duration-500 ${
-                              isDelivered
-                                ? 'bg-[#1a7f4b] border-[#1a7f4b]'
-                                : isCurrent
-                                ? 'bg-[#1d4ed8] border-[#1d4ed8] animate-pulse'
-                                : 'bg-white border-[#d1d5db]'
-                            }`}
-                          >
-                            {isDelivered && (
-                              <svg width="10" height="10" viewBox="0 0 10 10" fill="none">
-                                <path d="M1.5 5L4 7.5L8.5 2.5" stroke="white" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/>
-                              </svg>
-                            )}
-                          </div>
-                          {/* City label */}
-                          <span
-                            className={`mt-1.5 text-[9px] font-medium text-center leading-tight max-w-[56px] truncate ${
-                              isDelivered ? 'text-[#1a7f4b]' : isCurrent ? 'text-[#1d4ed8]' : 'text-[#9b9b93]'
-                            }`}
-                          >
-                            {s.city}
-                          </span>
+                    {/* Flex row for stops (defines the coordinate space) */}
+                    <div className="relative flex items-start">
+
+                      {/* Grey base line (centered on circles at top-[16px]) */}
+                      <div className="absolute left-0 right-0 h-[2px] bg-[#e8e8e4] top-[16px]" />
+
+                      {/* Green progress line */}
+                      <div
+                        className="absolute left-0 h-[2px] bg-[#1a7f4b] top-[16px] transition-[width] duration-700 ease-in-out"
+                        style={{ width: lineWidth }}
+                      />
+
+                      {/* Truck 🚚 — moves between last delivered and current stop */}
+                      {done > 0 && done < total && (
+                        <div
+                          className="absolute top-0 z-30 transition-[left] duration-700 ease-in-out pointer-events-none select-none"
+                          style={{ left: truckLeft }}
+                        >
+                          <span className="text-base leading-none">🚚</span>
                         </div>
-                      )
-                    })}
+                      )}
+
+                      {/* Stop circles */}
+                      {stops.map((s, i) => {
+                        const isDelivered = s.status === 'delivered'
+                        const isCurrent   = !isDelivered && s.sequence === currentSeq
+                        return (
+                          <div key={i} className="relative flex flex-col items-center flex-1 pt-0">
+                            {/* Pulsing ring around current stop (border animates, fill stays green) */}
+                            <div className="relative flex items-center justify-center">
+                              {isCurrent && (
+                                <div className="absolute w-10 h-10 rounded-full border-2 border-[#1a7f4b] animate-ping opacity-30" />
+                              )}
+                              <div
+                                className={`relative z-10 w-8 h-8 rounded-full border-2 flex items-center justify-center transition-all duration-500 ${
+                                  isDelivered || isCurrent
+                                    ? 'bg-[#1a7f4b] border-[#1a7f4b]'
+                                    : 'bg-white border-[#d1d5db]'
+                                }`}
+                              >
+                                {(isDelivered || isCurrent) && (
+                                  <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+                                    <path d="M2 6L5 9L10 3" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                                  </svg>
+                                )}
+                              </div>
+                            </div>
+                            {/* City */}
+                            <span className={`mt-2 text-[10px] font-semibold text-center leading-tight max-w-[68px] truncate ${
+                              isDelivered || isCurrent ? 'text-[#1a7f4b]' : 'text-[#6b6b63]'
+                            }`}>
+                              {s.city}
+                            </span>
+                            {/* Order ref */}
+                            <span className="text-[8px] text-[#bdbdb7] text-center truncate max-w-[68px]">
+                              {s.order_name}
+                            </span>
+                          </div>
+                        )
+                      })}
+                    </div>
                   </div>
                 </div>
+
               </div>
             )
           })}
