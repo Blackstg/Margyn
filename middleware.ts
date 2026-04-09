@@ -33,21 +33,29 @@ export async function middleware(req: NextRequest) {
     }
   )
 
-  const { data: { session } } = await supabase.auth.getSession()
+  const { data: { user } } = await supabase.auth.getUser()
 
-  if (!session) {
+  if (!user) {
     if (!isLoginPage) return NextResponse.redirect(new URL('/login', req.url))
     return response
   }
 
-  const role   = (session.user.user_metadata?.role   as string | undefined)   ?? 'admin'
+  const role   = (user.user_metadata?.role   as string | undefined)   ?? 'admin'
   // brands: undefined means full access (backwards compat for accounts set up before this check)
-  const brands = (session.user.user_metadata?.brands as string[] | undefined)
+  const brands = (user.user_metadata?.brands as string[] | undefined)
 
   // Logistician: restricted to /reconciliation only
   if (role === 'logistician') {
     if (!pathname.startsWith('/reconciliation')) {
       return NextResponse.redirect(new URL('/reconciliation', req.url))
+    }
+    return response
+  }
+
+  // Delivery-only users: restricted to /delivery
+  if (role === 'delivery') {
+    if (!pathname.startsWith('/delivery')) {
+      return NextResponse.redirect(new URL('/delivery', req.url))
     }
     return response
   }
