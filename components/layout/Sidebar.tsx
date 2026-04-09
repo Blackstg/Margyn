@@ -56,7 +56,7 @@ export default function Sidebar() {
   }
 
   return (
-    <aside className="fixed top-0 left-0 h-screen w-[72px] bg-[#1a1a2e] flex flex-col items-center py-5 z-30">
+    <aside className={`fixed top-0 left-0 h-screen w-[72px] bg-[#1a1a2e] flex-col items-center py-5 z-30 ${role === 'delivery' ? 'hidden' : 'flex'}`}>
       {/* Logo */}
       <div className="mb-8 flex items-center justify-center w-full">
         <span

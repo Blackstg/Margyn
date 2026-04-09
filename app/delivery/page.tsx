@@ -4,6 +4,7 @@ export const dynamic = 'force-dynamic'
 
 import { useState, useEffect, useCallback, useRef, Suspense } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
+import { createBrowserClient } from '@supabase/auth-helpers-nextjs'
 import { ChevronDown, ChevronUp, ChevronLeft, ChevronRight, Trash2, Mail, Plus, X, MapPin, Package, Truck } from 'lucide-react'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -99,17 +100,50 @@ export default function DeliveryPage() {
   )
 }
 
+type DeliveryView = 'planificateur' | 'livreur' | 'sav'
+const ALL_VIEWS: DeliveryView[] = ['planificateur', 'livreur', 'sav']
+
 function DeliveryPageInner() {
   const router = useRouter()
   const searchParams = useSearchParams()
+  const [allowedViews, setAllowedViews] = useState<DeliveryView[] | null>(null)
+
+  useEffect(() => {
+    const supabase = createBrowserClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+    )
+    supabase.auth.getUser().then(({ data }) => {
+      const meta = data.user?.user_metadata
+      const views = meta?.delivery_views as string[] | undefined
+      setAllowedViews(
+        views ? views.filter((v): v is DeliveryView => ALL_VIEWS.includes(v as DeliveryView)) : ALL_VIEWS
+      )
+    })
+  }, [])
 
   const rawView = searchParams.get('view')
-  const activeTab: 'planificateur' | 'livreur' | 'sav' =
-    rawView === 'livreur' || rawView === 'sav' ? rawView : 'planificateur'
+  const activeTab: DeliveryView =
+    rawView === 'livreur' || rawView === 'sav' || rawView === 'planificateur'
+      ? rawView
+      : 'planificateur'
 
-  function setActiveTab(tab: 'planificateur' | 'livreur' | 'sav') {
+  // Redirect to first allowed tab if current tab is not permitted
+  useEffect(() => {
+    if (!allowedViews) return
+    if (!allowedViews.includes(activeTab)) {
+      router.replace(`/delivery?view=${allowedViews[0]}`)
+    }
+  }, [allowedViews, activeTab, router])
+
+  function setActiveTab(tab: DeliveryView) {
     router.replace(`/delivery?view=${tab}`)
   }
+
+  // Don't render until we know which views are allowed
+  if (!allowedViews) return null
+
+  const effectiveTab = allowedViews.includes(activeTab) ? activeTab : allowedViews[0]
 
   return (
     <div className="pl-0 md:pl-[88px] px-3 py-4 md:p-6 bg-[#f5f5f3] min-h-screen">
@@ -119,26 +153,28 @@ function DeliveryPageInner() {
           <Truck size={20} color="#1a1a2e" strokeWidth={1.8} />
           <h1 className="text-xl md:text-2xl font-bold text-[#1a1a2e]">Delivery</h1>
         </div>
-        <div className="flex gap-1 bg-white rounded-[14px] p-1 shadow-[0_2px_8px_rgba(0,0,0,0.06)] w-full sm:w-auto">
-          {(['planificateur', 'livreur', 'sav'] as const).map((tab) => (
-            <button
-              key={tab}
-              onClick={() => setActiveTab(tab)}
-              className={`flex-1 sm:flex-none px-3 md:px-4 py-2 rounded-[10px] text-sm font-medium transition-all text-center ${
-                activeTab === tab
-                  ? 'bg-[#1a1a2e] text-white'
-                  : 'text-[#6b6b63] hover:text-[#1a1a2e]'
-              }`}
-            >
-              {tab === 'planificateur' ? 'Planificateur' : tab === 'livreur' ? 'Livreur' : 'SAV'}
-            </button>
-          ))}
-        </div>
+        {allowedViews.length > 1 && (
+          <div className="flex gap-1 bg-white rounded-[14px] p-1 shadow-[0_2px_8px_rgba(0,0,0,0.06)] w-full sm:w-auto">
+            {allowedViews.map((tab) => (
+              <button
+                key={tab}
+                onClick={() => setActiveTab(tab)}
+                className={`flex-1 sm:flex-none px-3 md:px-4 py-2 rounded-[10px] text-sm font-medium transition-all text-center ${
+                  effectiveTab === tab
+                    ? 'bg-[#1a1a2e] text-white'
+                    : 'text-[#6b6b63] hover:text-[#1a1a2e]'
+                }`}
+              >
+                {tab === 'planificateur' ? 'Planificateur' : tab === 'livreur' ? 'Livreur' : 'SAV'}
+              </button>
+            ))}
+          </div>
+        )}
       </div>
 
-      {activeTab === 'planificateur' && <PlanificateurView />}
-      {activeTab === 'livreur' && <LivreurView />}
-      {activeTab === 'sav' && <SavView />}
+      {effectiveTab === 'planificateur' && <PlanificateurView />}
+      {effectiveTab === 'livreur' && <LivreurView />}
+      {effectiveTab === 'sav' && <SavView />}
     </div>
   )
 }
@@ -1013,17 +1049,20 @@ function LivreurView() {
   if (screen === 'home') {
     return (
       <div className="w-full space-y-4">
-        {/* Tour selector — full width, no truncation */}
+        {/* Tour selector */}
         {tours.length > 1 && (
-          <select
-            value={selectedTourId}
-            onChange={(e) => setSelectedTourId(e.target.value)}
-            className="w-full px-4 py-4 text-base font-medium border border-[#e8e8e4] rounded-[14px] outline-none bg-white"
-          >
-            {tours.map((t) => (
-              <option key={t.id} value={t.id}>{t.name} — {t.planned_date ? formatDate(t.planned_date) : 'sans date'}</option>
-            ))}
-          </select>
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-widest text-[#6b6b63] mb-2 px-1">Ma tournée</p>
+            <select
+              value={selectedTourId}
+              onChange={(e) => setSelectedTourId(e.target.value)}
+              className="w-full px-4 py-4 text-base font-medium border border-[#e8e8e4] rounded-[14px] outline-none bg-white"
+            >
+              {tours.map((t) => (
+                <option key={t.id} value={t.id}>{t.name} — {t.planned_date ? formatDate(t.planned_date) : 'sans date'}</option>
+              ))}
+            </select>
+          </div>
         )}
 
         {tour ? (
@@ -1054,20 +1093,18 @@ function LivreurView() {
               </div>
             </div>
 
-            {/* Progress bar */}
+            {/* Progress bar with inline percentage */}
             {sortedStops.length > 0 && (
               <div className="px-6 pb-2">
-                <div className="w-full h-2.5 bg-white/15 rounded-full overflow-hidden">
+                <div className="relative w-full h-6 bg-white/15 rounded-full overflow-hidden">
                   <div
                     className="h-full bg-[#4ade80] rounded-full transition-all"
                     style={{ width: `${(deliveredCount / sortedStops.length) * 100}%` }}
                   />
-                </div>
-                {deliveredCount > 0 && (
-                  <div className="text-right text-white/40 text-sm mt-1.5">
+                  <span className="absolute inset-0 flex items-center justify-center text-xs font-semibold text-white mix-blend-difference">
                     {Math.round((deliveredCount / sortedStops.length) * 100)}%
-                  </div>
-                )}
+                  </span>
+                </div>
               </div>
             )}
 
@@ -1075,7 +1112,7 @@ function LivreurView() {
             <div className="px-6 pt-4 pb-6 space-y-3">
               <button
                 onClick={() => setScreen('loading')}
-                className="w-full flex items-center justify-center gap-3 py-5 rounded-[16px] bg-white/10 text-white font-semibold text-lg active:bg-white/20 transition-colors"
+                className="w-full flex items-center justify-center gap-3 py-5 rounded-[16px] border border-white/25 text-white font-semibold text-lg active:bg-white/10 transition-colors"
               >
                 <Package size={24} strokeWidth={1.8} />
                 Préparer le camion
@@ -1086,7 +1123,7 @@ function LivreurView() {
                 className="w-full flex items-center justify-center gap-3 py-5 rounded-[16px] bg-[#4ade80] text-[#1a1a2e] font-bold text-lg disabled:opacity-30 active:bg-[#22c55e] transition-colors"
               >
                 <Truck size={24} strokeWidth={1.8} />
-                Démarrer la tournée
+                {deliveredCount > 0 ? 'Continuer la tournée' : 'Démarrer la tournée'}
               </button>
             </div>
           </div>
