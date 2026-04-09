@@ -8,7 +8,10 @@ import { createBrowserClient } from '@supabase/auth-helpers-nextjs'
 export default function ConditionalLayout({ children }: { children: React.ReactNode }) {
   const pathname   = usePathname()
   const isAuthPage = pathname === '/login' || pathname === '/reconciliation'
-  const [role, setRole] = useState<string | null>(null)
+  const [role, setRole] = useState<string | null>(() => {
+    if (typeof window !== 'undefined') return localStorage.getItem('bowa_role')
+    return null
+  })
 
   useEffect(() => {
     if (isAuthPage) return
@@ -17,7 +20,9 @@ export default function ConditionalLayout({ children }: { children: React.ReactN
       process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
     )
     supabase.auth.getUser().then(({ data }) => {
-      setRole((data.user?.user_metadata?.role as string | undefined) ?? 'admin')
+      const r = (data.user?.user_metadata?.role as string | undefined) ?? 'admin'
+      setRole(r)
+      localStorage.setItem('bowa_role', r)
     })
   }, [isAuthPage])
 

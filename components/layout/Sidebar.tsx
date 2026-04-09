@@ -27,12 +27,17 @@ export default function Sidebar() {
   )
   const [pendingCount, setPendingCount] = useState(0)
   const [allowedBrands, setAllowedBrands] = useState<string[] | null>(null)
-  const [role, setRole] = useState<string | null>(null)
+  const [role, setRole] = useState<string | null>(() => {
+    if (typeof window !== 'undefined') return localStorage.getItem('bowa_role')
+    return null
+  })
 
   useEffect(() => {
     supabase.auth.getUser().then(({ data }) => {
       const meta = data.user?.user_metadata
-      setRole((meta?.role as string | undefined) ?? 'admin')
+      const r = (meta?.role as string | undefined) ?? 'admin'
+      setRole(r)
+      localStorage.setItem('bowa_role', r)
     })
     supabase.from('user_brands').select('brand').then(({ data }) => {
       if (data) setAllowedBrands(data.map((r: { brand: string }) => r.brand))
