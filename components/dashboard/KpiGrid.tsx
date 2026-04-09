@@ -1,5 +1,7 @@
 'use client'
 
+import Link from 'next/link'
+
 export interface SupplementaryItem {
   source: string
   amount: number
@@ -22,6 +24,7 @@ export interface KpiData {
   gifting_count?: number
   gifting_cogs?: number
   fulfillment_note?: string
+  fulfillment_configured?: boolean
 }
 
 export interface SparklineData {
@@ -110,7 +113,7 @@ function Badge({ current, previous, inverse = false, onGradient = false }: {
 function KpiCard({
   label, value, formatted, prevValue, loading,
   inverse = false, note, gradient, gradientText = false,
-  isEmpty = false, sparkline, detail,
+  isEmpty = false, sparkline, detail, tooltip, unconfiguredHref,
 }: {
   label: string
   value: number
@@ -119,16 +122,24 @@ function KpiCard({
   loading: boolean
   inverse?: boolean
   note?: string
-  gradient?: string        // gradient bg (Total Sales)
-  gradientText?: boolean   // gradient text on white bg (Gross Profit, Net Profit)
+  gradient?: string
+  gradientText?: boolean
   isEmpty?: boolean
   sparkline?: number[]
-  detail?: string          // breakdown sub-line (e.g. "dont Shopify X€ + LM X€")
+  detail?: string
+  tooltip?: string
+  unconfiguredHref?: string
 }) {
   const isGradient = !!gradient
 
   const valueEl = isEmpty && value === 0 ? (
-    <p className="text-base font-medium text-[#6b6b63]">À configurer</p>
+    unconfiguredHref ? (
+      <Link href={unconfiguredHref} className="text-base font-medium text-[#6b6b63] hover:text-[#1a1a2e] underline decoration-dotted transition-colors">
+        À configurer →
+      </Link>
+    ) : (
+      <p className="text-base font-medium text-[#6b6b63]">À configurer</p>
+    )
   ) : gradientText ? (
     <p
       className="text-2xl sm:text-[1.75rem] font-bold tracking-tight leading-none"
@@ -151,9 +162,14 @@ function KpiCard({
 
   return (
     <div
-      className="rounded-[20px] shadow-[0_2px_16px_rgba(0,0,0,0.06)] p-5 flex flex-col gap-3"
+      className="group relative rounded-[20px] shadow-[0_2px_16px_rgba(0,0,0,0.06)] p-5 flex flex-col gap-3"
       style={isGradient ? { background: gradient } : { background: '#ffffff' }}
     >
+      {tooltip && !loading && (
+        <div className="pointer-events-none absolute bottom-full left-0 mb-2 w-[22rem] max-w-[90vw] bg-[#1a1a2e] text-white/90 text-[11px] leading-relaxed px-3.5 py-2.5 rounded-xl shadow-xl opacity-0 group-hover:opacity-100 transition-opacity z-50 whitespace-pre-wrap">
+          {tooltip}
+        </div>
+      )}
       {/* Label */}
       <p className={`text-[10px] font-semibold uppercase tracking-[0.1em] ${
         isGradient   ? 'text-white/75'
@@ -256,6 +272,26 @@ export default function KpiGrid({ current, previous, loading, brand, sparklines 
   const tvaCollectee     = Math.round(c.total_sales / 6)
   const prevTvaCollectee = Math.round(p.total_sales / 6)
 
+  // Net Profit tooltip — formula with real values
+  const netProfitTooltip = [
+    `Net Profit = Total Sales (${fmtEur(totalSales)})`,
+    `− COGS (${fmtEur(c.cogs)})`,
+    `− Marketing (${fmtEur(c.marketing)})`,
+    `− Fulfillment (${fmtEur(c.fulfillment)})`,
+    `− Transaction Fees (${fmtEur(c.transaction_fees)})`,
+    `− Apps Shopify (${fmtEur(c.app_charges)})`,
+    `− Op. Expenses (${fmtEur(c.op_expenses)})`,
+    `= ${fmtEur(netProfit)}`,
+  ].join('\n')
+
+  // Fulfillment tooltip
+  const fulfillmentPerOrder = c.order_count > 0 ? Math.round(c.fulfillment / c.order_count) : 0
+  const fulfillmentTooltip = c.fulfillment_configured === false
+    ? undefined
+    : `Fulfillment = ${fmtEur(fulfillmentPerOrder)}/cmd × ${c.order_count} commandes = ${fmtEur(c.fulfillment)}${c.fulfillment_note ? `\n${c.fulfillment_note}` : ''}`
+
+  const fulfillmentIsUnconfigured = brand === 'bowa' && c.fulfillment_configured === false
+
   // Breakdown detail line for Total Sales card
   const fmtShort = (n: number) => n >= 1000
     ? `${(n / 1000).toFixed(1).replace(/\.0$/, '')}k€`
@@ -293,6 +329,7 @@ export default function KpiGrid({ current, previous, loading, brand, sparklines 
           gradientText
           note={totalSales > 0 ? `${((netProfit / totalSales) * 100).toFixed(1)}% du CA` : undefined}
           sparkline={sparklines?.gross}
+          tooltip={netProfitTooltip}
         />
 
         {/* ROAS Réel — key metric alongside P&L */}
@@ -323,7 +360,19 @@ export default function KpiGrid({ current, previous, loading, brand, sparklines 
         <KpiCard label="COGS"       value={c.cogs}   formatted={fmtEur(c.cogs)}  prevValue={p.cogs}  loading={loading} inverse />
         <KpiCard label="Retours"    value={c.returns} formatted={fmtEur(c.returns)} prevValue={p.returns} loading={loading} inverse note={returnRate > 0 ? `${returnRate.toFixed(1)}% du CA` : undefined} />
         <KpiCard label="Transaction Fees" value={c.transaction_fees} formatted={fmtEur(c.transaction_fees)} prevValue={p.transaction_fees} loading={loading} inverse note={totalSales > 0 ? `${((c.transaction_fees / totalSales) * 100).toFixed(1)}% du CA` : undefined} />
-        <KpiCard label="Fulfillment"     value={c.fulfillment}      formatted={fmtEur(c.fulfillment)}   prevValue={p.fulfillment}      loading={loading} inverse note={c.order_count > 0 ? `${fmtEur(Math.round(c.fulfillment / c.order_count))}/cmd` : undefined} detail={c.fulfillment_note} />
+        <KpiCard
+          label="Fulfillment"
+          value={c.fulfillment}
+          formatted={fmtEur(c.fulfillment)}
+          prevValue={p.fulfillment}
+          loading={loading}
+          inverse
+          note={!fulfillmentIsUnconfigured && c.order_count > 0 ? `${fmtEur(fulfillmentPerOrder)}/cmd` : undefined}
+          detail={c.fulfillment_note}
+          isEmpty={fulfillmentIsUnconfigured}
+          unconfiguredHref={fulfillmentIsUnconfigured ? '/settings' : undefined}
+          tooltip={fulfillmentTooltip}
+        />
         <KpiCard label="Apps Shopify"    value={c.app_charges}      formatted={fmtEur(c.app_charges)}   prevValue={p.app_charges}      loading={loading} inverse isEmpty />
         <KpiCard label="Op. Expenses"    value={c.op_expenses}      formatted={fmtEur(c.op_expenses)}   prevValue={p.op_expenses}      loading={loading} inverse isEmpty />
         {brand === 'bowa' && (

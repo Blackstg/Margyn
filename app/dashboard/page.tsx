@@ -287,9 +287,13 @@ async function fetchKpiData(brand: Brand, from: string, to: string, days: number
   const op_expenses = Math.round(totalFixedOther * (days / 30.44))
 
   const settingsData = (settingsRes.data as { shipping_cost_per_order?: number; transaction_fee_rate?: number } | null)
-  const shippingRate       = settingsData?.shipping_cost_per_order ?? 17
-  const transactionFeeRate = settingsData?.transaction_fee_rate    ?? 0.017
+  const shippingRateRaw    = settingsData?.shipping_cost_per_order
+  const shippingRate       = shippingRateRaw ?? 17
+  const transactionFeeRate = settingsData?.transaction_fee_rate ?? 0.017
   const transaction_fees   = Math.round(snaps.total_sales * transactionFeeRate)
+
+  // For Bowa: fulfillment is "unconfigured" if shipping_cost_per_order is not explicitly set
+  const fulfillment_configured = brand !== 'bowa' || shippingRateRaw != null
 
   let fulfillment      = Math.round(shippingRate * snaps.order_count)
   let fulfillment_note: string | undefined
@@ -339,7 +343,7 @@ async function fetchKpiData(brand: Brand, from: string, to: string, days: number
 
   return {
     ...snaps, fulfillment, marketing, op_expenses, app_charges, transaction_fees, net_profit: null,
-    gifting_count, gifting_cogs, fulfillment_note,
+    gifting_count, gifting_cogs, fulfillment_note, fulfillment_configured,
     ...(brand === 'bowa' && supplementary_ca > 0 ? { supplementary_ca, supplementary_breakdown } : {}),
   }
 }
