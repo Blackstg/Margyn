@@ -53,6 +53,7 @@ export default function DataFreshness() {
   const [status, setStatus]   = useState<SyncStatus | null>(null)
   const [open, setOpen]       = useState(false)
   const [loading, setLoading] = useState(false)
+  const [syncing, setSyncing] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
 
   // Close on outside click
@@ -184,13 +185,30 @@ export default function DataFreshness() {
                 </div>
               </div>
 
-              {/* Refresh */}
-              <div className="px-4 py-2 border-t border-[#f0f0ee]">
+              {/* Actions */}
+              <div className="px-4 py-2 border-t border-[#f0f0ee] flex items-center justify-between gap-2">
                 <button
                   onClick={load}
-                  className="text-[11px] text-[#6b6b63] hover:text-[#1a1a2e] transition-colors"
+                  disabled={loading}
+                  className="text-[11px] text-[#6b6b63] hover:text-[#1a1a2e] transition-colors disabled:opacity-40"
                 >
                   Actualiser
+                </button>
+                <button
+                  onClick={async () => {
+                    if (syncing) return
+                    setSyncing(true)
+                    try {
+                      await fetch('/api/sync-all', { method: 'POST' })
+                      await load()
+                    } catch { /* ignore */ } finally {
+                      setSyncing(false)
+                    }
+                  }}
+                  disabled={syncing}
+                  className="text-[11px] font-semibold text-[#1a1a2e] bg-[#f0f0ee] hover:bg-[#e4e4e0] px-2.5 py-1 rounded-lg transition-colors disabled:opacity-40"
+                >
+                  {syncing ? 'Sync en cours…' : 'Sync maintenant'}
                 </button>
               </div>
             </>
