@@ -62,7 +62,7 @@ export default function Sidebar({ isOpen, onToggle }: { isOpen: boolean; onToggl
 
   return (
     <aside className={`fixed top-0 left-0 h-screen w-[72px] bg-[#1a1a2e] flex-col items-center py-5 z-30 ${isOpen ? 'flex' : 'hidden'}`}>
-      {/* Logo + toggle */}
+      {/* Logo + toggle (toggle hidden for delivery role) */}
       <div className="mb-2 flex flex-col items-center w-full gap-2">
         <span
           className="select-none text-white"
@@ -70,12 +70,14 @@ export default function Sidebar({ isOpen, onToggle }: { isOpen: boolean; onToggl
         >
           S
         </span>
-        <button
-          onClick={onToggle}
-          className="w-9 h-9 rounded-xl flex items-center justify-center text-white/30 hover:text-white/70 hover:bg-white/8 transition-colors"
-        >
-          <PanelLeftClose size={16} strokeWidth={1.8} />
-        </button>
+        {role !== 'delivery' && (
+          <button
+            onClick={onToggle}
+            className="w-9 h-9 rounded-xl flex items-center justify-center text-white/30 hover:text-white/70 hover:bg-white/8 transition-colors"
+          >
+            <PanelLeftClose size={16} strokeWidth={1.8} />
+          </button>
+        )}
       </div>
 
       {/* Divider */}

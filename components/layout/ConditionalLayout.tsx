@@ -49,14 +49,14 @@ export default function ConditionalLayout({ children }: { children: React.ReactN
   }
 
   const isDelivery = role === 'delivery'
-  const showSidebar = !isDelivery && sidebarOpen
+  const showSidebar = isDelivery || sidebarOpen
 
   return (
     <>
       <Sidebar isOpen={showSidebar} onToggle={toggleSidebar} />
 
-      {/* Floating burger when sidebar is closed */}
-      {!isDelivery && !showSidebar && (
+      {/* Floating burger when sidebar is closed (never for delivery role) */}
+      {!isDelivery && !sidebarOpen && (
         <button
           onClick={toggleSidebar}
           className="fixed top-4 left-4 z-40 w-9 h-9 bg-[#1a1a2e] rounded-xl flex items-center justify-center text-white/60 hover:text-white transition-colors shadow-lg"
@@ -65,7 +65,7 @@ export default function ConditionalLayout({ children }: { children: React.ReactN
         </button>
       )}
 
-      <div className={`${showSidebar ? 'pl-[72px]' : ''} min-h-screen transition-[padding] duration-200`}>
+      <div className={`${showSidebar ? 'pl-[72px]' : ''} min-h-screen`}>
         {children}
       </div>
     </>
