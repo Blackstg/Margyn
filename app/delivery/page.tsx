@@ -146,7 +146,7 @@ function DeliveryPageInner() {
   const effectiveTab = allowedViews.includes(activeTab) ? activeTab : allowedViews[0]
 
   return (
-    <div className="pl-0 md:pl-[88px] px-3 py-4 md:p-6 bg-[#f5f5f3] min-h-screen">
+    <div className="px-3 md:pl-[88px] py-4 md:p-6 bg-[#f5f5f3] min-h-screen">
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-4 md:mb-6">
         <div className="flex items-center gap-2.5">
