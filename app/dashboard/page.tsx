@@ -292,8 +292,8 @@ async function fetchKpiData(brand: Brand, from: string, to: string, days: number
   const transactionFeeRate = settingsData?.transaction_fee_rate ?? 0.017
   const transaction_fees   = Math.round(snaps.total_sales * transactionFeeRate)
 
-  // For Bowa: fulfillment is "unconfigured" if not set or set to 0
-  const fulfillment_configured = brand !== 'bowa' || (shippingRateRaw != null && shippingRateRaw > 0)
+  // For Bowa: fulfillment is "unconfigured" only if the row doesn't exist yet
+  const fulfillment_configured = brand !== 'bowa' || shippingRateRaw != null
 
   let fulfillment      = Math.round(shippingRate * snaps.order_count)
   let fulfillment_note: string | undefined
