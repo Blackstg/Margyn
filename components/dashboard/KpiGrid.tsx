@@ -1,6 +1,7 @@
 'use client'
 
 import Link from 'next/link'
+import { useState } from 'react'
 
 export interface SupplementaryItem {
   source: string
@@ -131,6 +132,7 @@ function KpiCard({
   unconfiguredHref?: string
 }) {
   const isGradient = !!gradient
+  const [hovered, setHovered] = useState(false)
 
   const valueEl = isEmpty && value === 0 ? (
     unconfiguredHref ? (
@@ -162,11 +164,13 @@ function KpiCard({
 
   return (
     <div
-      className="group relative rounded-[20px] shadow-[0_2px_16px_rgba(0,0,0,0.06)] p-5 flex flex-col gap-3"
+      className="relative rounded-[20px] shadow-[0_2px_16px_rgba(0,0,0,0.06)] p-5 flex flex-col gap-3"
       style={isGradient ? { background: gradient } : { background: '#ffffff' }}
+      onMouseEnter={() => tooltip && setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
     >
-      {tooltip && !loading && (
-        <div className="pointer-events-none absolute bottom-full left-0 mb-2 w-[22rem] max-w-[90vw] bg-[#1a1a2e] text-white/90 text-[11px] leading-relaxed px-3.5 py-2.5 rounded-xl shadow-xl opacity-0 group-hover:opacity-100 transition-opacity z-50 whitespace-pre-wrap">
+      {tooltip && hovered && !loading && (
+        <div className="pointer-events-none absolute bottom-full left-0 mb-2 w-[22rem] max-w-[90vw] bg-[#1a1a2e] text-white/90 text-[11px] leading-relaxed px-3.5 py-2.5 rounded-xl shadow-xl z-50 whitespace-pre-wrap">
           {tooltip}
         </div>
       )}
