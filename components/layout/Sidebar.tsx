@@ -27,8 +27,13 @@ export default function Sidebar() {
   )
   const [pendingCount, setPendingCount] = useState(0)
   const [allowedBrands, setAllowedBrands] = useState<string[] | null>(null)
+  const [role, setRole] = useState<string | null>(null)
 
   useEffect(() => {
+    supabase.auth.getUser().then(({ data }) => {
+      const meta = data.user?.user_metadata
+      setRole((meta?.role as string | undefined) ?? 'admin')
+    })
     supabase.from('user_brands').select('brand').then(({ data }) => {
       if (data) setAllowedBrands(data.map((r: { brand: string }) => r.brand))
     })
@@ -67,9 +72,10 @@ export default function Sidebar() {
 
       {/* Nav */}
       <nav className="flex flex-col items-center gap-1.5 w-full px-2">
-        {NAV.filter(({ brand }) =>
-          brand === null || allowedBrands === null || allowedBrands.includes(brand)
-        ).map(({ href, icon: Icon, label }) => {
+        {role === null ? null : NAV.filter(({ href, brand }) => {
+          if (role === 'delivery') return href === '/delivery'
+          return brand === null || allowedBrands === null || allowedBrands.includes(brand)
+        }).map(({ href, icon: Icon, label }) => {
           const active = pathname.startsWith(href)
           const badge  = href === '/stock' && pendingCount > 0
           return (
