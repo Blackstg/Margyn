@@ -38,39 +38,126 @@ function detectZone(zip: string): Zone {
   return ZONE_MAP[dept] ?? 'nord-ouest'
 }
 
-interface ShopifyLineItem {
+// ─── Orders to log for diagnostic purposes ───────────────────────────────────
+const DEBUG_ORDER_NAMES = new Set(['#9997', '#9917', '#9767', '#9759', '#9740', '#9728', '#9718'])
+
+// ─── Internal / sample order detection ───────────────────────────────────────
+// Bug 1 fix: filter orders tagged "echantillons"/"interne" or belonging to Bowa/Steero staff
+const INTERNAL_TAGS   = /[eé]chantillons?|interne/i
+const INTERNAL_NAMES  = /m[oō]om|mooom|steero/i
+
+function isInternalOrder(tags: string, customerName: string, email: string): boolean {
+  if (INTERNAL_TAGS.test(tags))        return true
+  if (INTERNAL_NAMES.test(customerName)) return true
+  if (INTERNAL_NAMES.test(email))      return true
+  return false
+}
+
+// ─── Line-item filters ────────────────────────────────────────────────────────
+const isSample = (title: string) => /échantillon|echantillon|sample/i.test(title)
+
+// ─── Shopify types ─────────────────────────────────────────────────────────────
+
+interface ShopifyFulfillmentLineItem {
   id: string
-  title: string
-  variant_title: string | null
   quantity: number
-  sku: string
-  variant_id: number | null
+}
+
+interface ShopifyFulfillment {
+  id:         string
+  status:     string
+  line_items: ShopifyFulfillmentLineItem[]
+}
+
+interface ShopifyLineItem {
+  id:            string
+  title:         string
+  variant_title: string | null
+  quantity:      number
+  sku:           string
+  variant_id:    number | null
 }
 
 interface ShopifyShippingAddress {
   first_name: string
-  last_name: string
-  address1: string
-  address2: string
-  city: string
-  zip: string
+  last_name:  string
+  address1:   string
+  address2:   string
+  city:       string
+  zip:        string
 }
 
 interface ShopifyOrder {
-  id: string
-  name: string
-  email: string
-  created_at: string
-  tags: string
+  id:               string
+  name:             string
+  email:            string
+  created_at:       string
+  tags:             string
   shipping_address: ShopifyShippingAddress | null
-  line_items: ShopifyLineItem[]
+  line_items:       ShopifyLineItem[]
+  fulfillments:     ShopifyFulfillment[]
 }
 
-// Fetch inventory_quantity AND sku for a batch of variant IDs (max 250)
+// ─── Shopify fetch (unfulfilled + partial in parallel) ────────────────────────
+// Bug 3 fix: include fulfillment_status=partial so preorders with one shipped
+// accessory don't disappear from the list.
+
+async function fetchShopifyOrders(shop: string, token: string): Promise<ShopifyOrder[]> {
+  const fields =
+    'id,name,email,created_at,tags,shipping_address,line_items,fulfillments'
+
+  async function paginate(fulfillmentStatus: string): Promise<ShopifyOrder[]> {
+    const result: ShopifyOrder[] = []
+    let url: string | null =
+      `https://${shop}/admin/api/2024-01/orders.json` +
+      `?status=open&fulfillment_status=${fulfillmentStatus}&limit=250&fields=${fields}`
+
+    while (url) {
+      const fetchRes: Response = await fetch(url, {
+        headers: { 'X-Shopify-Access-Token': token },
+        cache: 'no-store',
+      })
+      if (!fetchRes.ok) throw new Error(`Shopify ${fulfillmentStatus} ${fetchRes.status}`)
+      const data = await fetchRes.json() as { orders?: ShopifyOrder[] }
+      result.push(...(data.orders ?? []))
+      const linkHeader: string | null = fetchRes.headers.get('Link')
+      url = linkHeader ? linkHeader.match(/<([^>]+)>;\s*rel="next"/)?.[1] ?? null : null
+    }
+    return result
+  }
+
+  const [unfulfilled, partial] = await Promise.all([
+    paginate('unfulfilled'),
+    paginate('partial'),
+  ])
+
+  // Deduplicate (an order can't appear in both, but be safe)
+  const seen = new Set<string>()
+  return [...unfulfilled, ...partial].filter((o) =>
+    seen.has(o.id) ? false : (seen.add(o.id), true)
+  )
+}
+
+// ─── Remaining quantities after Shopify fulfillments ─────────────────────────
+// Bug 2 fix (Shopify side): for partially-shipped orders, compute which
+// line-item quantities haven't been fulfilled yet.
+
+function remainingLineItems(order: ShopifyOrder): ShopifyLineItem[] {
+  const fulfilledQty = new Map<string, number>()
+  for (const f of (order.fulfillments ?? [])) {
+    for (const li of (f.line_items ?? [])) {
+      fulfilledQty.set(li.id, (fulfilledQty.get(li.id) ?? 0) + li.quantity)
+    }
+  }
+  return order.line_items
+    .map((li) => ({ ...li, quantity: li.quantity - (fulfilledQty.get(li.id) ?? 0) }))
+    .filter((li) => li.quantity > 0)
+}
+
+// ─── Variant data batch fetch ─────────────────────────────────────────────────
+
 async function fetchVariantData(
-  shop: string,
-  token: string,
-  variantIds: number[]
+  shop: string, token: string, variantIds: number[]
 ): Promise<{ stock: Map<number, number>; skus: Map<number, string> }> {
   const stock = new Map<number, number>()
   const skus  = new Map<number, string>()
@@ -85,7 +172,9 @@ async function fetchVariantData(
       { headers: { 'X-Shopify-Access-Token': token } }
     )
     if (!res.ok) return
-    const { variants } = await res.json() as { variants?: { id: number; sku: string; inventory_quantity: number }[] }
+    const { variants } = await res.json() as {
+      variants?: { id: number; sku: string; inventory_quantity: number }[]
+    }
     for (const v of variants ?? []) {
       stock.set(v.id, v.inventory_quantity)
       if (v.sku?.trim()) skus.set(v.id, v.sku.trim())
@@ -95,48 +184,42 @@ async function fetchVariantData(
   return { stock, skus }
 }
 
+// ─── Main handler ─────────────────────────────────────────────────────────────
+
 export async function GET() {
   try {
     const shop  = process.env.SHOPIFY_BOWA_SHOP!
     const token = process.env.SHOPIFY_BOWA_ACCESS_TOKEN!
 
-    // Fetch unfulfilled orders with pagination
-    const allOrders: ShopifyOrder[] = []
-    let url: string | null =
-      `https://${shop}/admin/api/2024-01/orders.json?status=open&fulfillment_status=unfulfilled&limit=250&fields=id,name,email,created_at,tags,shipping_address,line_items`
-
-    while (url) {
-      const fetchRes: Response = await fetch(url, {
-        headers: { 'X-Shopify-Access-Token': token },
-      })
-
-      if (!fetchRes.ok) throw new Error(`Shopify API error: ${fetchRes.status}`)
-
-      const data = await fetchRes.json()
-      allOrders.push(...(data.orders ?? []))
-
-      const linkHeader: string | null = fetchRes.headers.get('Link')
-      if (linkHeader) {
-        const nextMatch = linkHeader.match(/<([^>]+)>;\s*rel="next"/)
-        url = nextMatch ? nextMatch[1] : null
-      } else {
-        url = null
-      }
-    }
-
-    // Get already-assigned order_names from Supabase
-    // A stop is "assigned" if it's in a non-cancelled tour AND its status is not 'failed'
+    // Parallel: Shopify orders + Supabase stop data
     const admin = getAdmin()
-    const [{ data: assignedStops }, { data: failedStops }] = await Promise.all([
-      admin.from('delivery_stops')
-        .select('order_name, delivery_tours!inner(status)')
-        .neq('delivery_tours.status', 'cancelled')
-        .neq('status', 'failed'),
-      admin.from('delivery_stops')
-        .select('order_name')
-        .eq('status', 'failed'),
-    ])
+    const [allOrders, { data: assignedStops }, { data: failedStops }, { data: deliveredStops }] =
+      await Promise.all([
+        fetchShopifyOrders(shop, token),
 
+        // Non-failed stops in non-cancelled tours → order is already being handled
+        admin.from('delivery_stops')
+          .select('order_name, delivery_tours!inner(status)')
+          .neq('delivery_tours.status', 'cancelled')
+          .neq('status', 'failed'),
+
+        // Failed stops → needs replan
+        admin.from('delivery_stops')
+          .select('order_name')
+          .eq('status', 'failed'),
+
+        // Bug 2 fix (Supabase side): delivered stops with their panel_details so we
+        // can subtract already-delivered quantities from the Shopify order total.
+        // Includes stops in cancelled tours — if the driver delivered the goods,
+        // the items should not reappear in "à planifier".
+        admin.from('delivery_stops')
+          .select('order_name, panel_details')
+          .eq('status', 'delivered'),
+      ])
+
+    console.log(`[delivery/orders] Shopify: ${allOrders.length} orders fetched`)
+
+    // Build sets for quick lookup
     const assignedOrderNames = new Set(
       (assignedStops ?? []).map((s: { order_name: string }) => s.order_name)
     )
@@ -144,66 +227,127 @@ export async function GET() {
       (failedStops ?? []).map((s: { order_name: string }) => s.order_name)
     )
 
-    const isSample = (title: string) => /échantillon|echantillon|sample/i.test(title)
-
-    // First pass: build order objects and identify pre-orders + their variant IDs
-    type OrderDraft = {
-      order_name: string
-      shopify_order_id: string
-      customer_name: string
-      email: string
-      created_at: string | null
-      is_preorder: boolean
-      needs_replan: boolean
-      address1: string
-      address2: string
-      city: string
-      zip: string
-      zone: Zone
-      panel_count: number
-      panel_details: { sku: string; title: string; qty: number }[]
-      _variantIds: number[]  // temp, removed before response
+    // Bug 2 fix: map of order_name → { item_key → delivered_qty }
+    // item_key = sku if available, else title
+    const deliveredQtyMap = new Map<string, Map<string, number>>()
+    for (const stop of (deliveredStops ?? [])) {
+      const details = (stop.panel_details ?? []) as { sku?: string; title?: string; qty?: number }[]
+      const byKey = deliveredQtyMap.get(stop.order_name) ?? new Map<string, number>()
+      for (const item of details) {
+        const key = item.sku?.trim() || item.title?.trim() || ''
+        if (!key) continue
+        byKey.set(key, (byKey.get(key) ?? 0) + (item.qty ?? 0))
+      }
+      deliveredQtyMap.set(stop.order_name, byKey)
     }
+
+    // First pass: build drafts
+    type OrderDraft = {
+      order_name:       string
+      shopify_order_id: string
+      customer_name:    string
+      email:            string
+      created_at:       string | null
+      is_preorder:      boolean
+      needs_replan:     boolean
+      address1:         string
+      address2:         string
+      city:             string
+      zip:              string
+      zone:             Zone
+      panel_count:      number
+      panel_details:    { sku: string; variant_title: string; title: string; qty: number }[]
+      _variantIds:      number[]
+    }
+
+    // Bug 3 diagnostic: log the specific debug orders as soon as we see them
+    const debugSeen = new Set<string>()
 
     const drafts: OrderDraft[] = []
     for (const order of allOrders) {
-      if (assignedOrderNames.has(order.name)) continue
+      const isDebug = DEBUG_ORDER_NAMES.has(order.name)
+      if (isDebug) debugSeen.add(order.name)
 
-      const addr = order.shipping_address
+      const addr          = order.shipping_address
       const customer_name = addr
         ? `${addr.first_name ?? ''} ${addr.last_name ?? ''}`.trim()
         : order.email ?? ''
+
+      // Bug 1 fix: skip internal/sample orders
+      if (isInternalOrder(order.tags ?? '', customer_name, order.email ?? '')) {
+        if (isDebug) console.log(`[delivery/orders] ${order.name} → SKIPPED (internal/sample) tags="${order.tags}"`)
+        continue
+      }
+
+      if (assignedOrderNames.has(order.name)) {
+        if (isDebug) console.log(`[delivery/orders] ${order.name} → SKIPPED (already assigned to active tour)`)
+        continue
+      }
+
       const zip  = addr?.zip ?? ''
       const zone = detectZone(zip)
 
-      const panelLineItems = order.line_items.filter((li) => !isSample(li.title))
+      // Bug 2 fix: start from remaining (unshipped) Shopify line items
+      const unfulfilled   = remainingLineItems(order)
+      const panelUnfulfilled = unfulfilled.filter((li) => !isSample(li.title))
+
+      // Bug 2 fix (Supabase): subtract quantities already delivered in Steero
+      const deliveredByKey = deliveredQtyMap.get(order.name)
+      const panelLineItems = panelUnfulfilled
+        .map((li) => {
+          const key        = li.sku?.trim() || li.title
+          const alreadyQty = deliveredByKey?.get(key) ?? 0
+          return { ...li, quantity: Math.max(0, li.quantity - alreadyQty) }
+        })
+        .filter((li) => li.quantity > 0)
+
       const panel_details = panelLineItems.map((li) => ({
-        sku: li.sku?.trim() ?? '',
+        sku:           li.sku?.trim() ?? '',
         variant_title: li.variant_title?.trim() ?? '',
-        title: li.title,
-        qty: li.quantity,
-        _variant_id: li.variant_id,  // temp, for SKU resolution
+        title:         li.title,
+        qty:           li.quantity,
+        _variant_id:   li.variant_id,
       }))
       const panel_count = panel_details.reduce((sum, p) => sum + p.qty, 0)
-      if (panel_count === 0) continue
 
-      const is_preorder = /pr[eé].?(order|commande)/i.test(order.tags ?? '')
-      // Collect all variant_ids (preorder check + SKU resolution for empty-SKU items)
+      if (panel_count === 0) {
+        if (isDebug) console.log(`[delivery/orders] ${order.name} → SKIPPED (panel_count=0 after subtraction)`)
+        continue
+      }
+
+      // Bug 3 fix: broader preorder tag detection + logging
+      const tagList   = (order.tags ?? '').split(',').map((t) => t.trim())
+      const is_preorder = tagList.some((tag) =>
+        /pr[eé][_\-\s]?commande|pre[_\-\s]?order|préco|preco/i.test(tag)
+      )
+
+      if (isDebug) {
+        console.log(
+          `[delivery/orders] ${order.name} → INCLUDED` +
+          ` | tags="${order.tags}"` +
+          ` | is_preorder=${is_preorder}` +
+          ` | panel_count=${panel_count}` +
+          ` | needs_replan=${replanOrderNames.has(order.name)}` +
+          ` | fulfillments=${order.fulfillments?.length ?? 0}` +
+          ` | delivered_qty_map=${deliveredByKey ? JSON.stringify(Object.fromEntries(deliveredByKey)) : 'none'}`
+        )
+      }
+
       const _variantIds = order.line_items
         .map((li) => li.variant_id)
         .filter((id): id is number => id != null && id > 0)
 
       drafts.push({
-        order_name: order.name,
+        order_name:       order.name,
         shopify_order_id: String(order.id),
         customer_name,
-        email: order.email ?? '',
-        created_at: order.created_at ?? null,
+        email:            order.email ?? '',
+        created_at:       order.created_at ?? null,
         is_preorder,
-        needs_replan: replanOrderNames.has(order.name),
-        address1: addr?.address1 ?? '',
-        address2: addr?.address2 ?? '',
-        city: addr?.city ?? '',
+        needs_replan:     replanOrderNames.has(order.name),
+        address1:         addr?.address1 ?? '',
+        address2:         addr?.address2 ?? '',
+        city:             addr?.city ?? '',
         zip,
         zone,
         panel_count,
@@ -212,11 +356,18 @@ export async function GET() {
       })
     }
 
-    // Batch-fetch inventory + SKU from variant catalog for all variant IDs
+    // Log any debug orders that weren't found in Shopify at all
+    for (const name of DEBUG_ORDER_NAMES) {
+      if (!debugSeen.has(name)) {
+        console.log(`[delivery/orders] ${name} → NOT FOUND in Shopify response (may be closed/fulfilled/archived)`)
+      }
+    }
+
+    // Batch-fetch inventory + SKU
     const allVariantIds = [...new Set(drafts.flatMap((d) => d._variantIds))]
     const { stock: stockMap, skus: variantSkuMap } = await fetchVariantData(shop, token, allVariantIds)
 
-    // Build final response — resolve missing SKUs from variant catalog
+    // Final response
     const orders = drafts.map(({ _variantIds, ...order }) => {
       const resolvedDetails = (order.panel_details as (typeof order.panel_details[0] & { _variant_id?: number | null })[])
         .map(({ _variant_id, ...d }) => {
@@ -239,7 +390,9 @@ export async function GET() {
       return { ...order, panel_details: resolvedDetails, preorder_ready: ready }
     })
 
+    console.log(`[delivery/orders] Returning ${orders.length} orders (${orders.filter(o => o.is_preorder).length} preorders)`)
     return NextResponse.json({ orders })
+
   } catch (err) {
     console.error('[delivery/orders]', err)
     return NextResponse.json({ orders: [], error: String(err) }, { status: 500 })
