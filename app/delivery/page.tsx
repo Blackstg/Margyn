@@ -209,6 +209,8 @@ function PlanificateurView() {
   const [addingStops, setAddingStops] = useState(false)
   const [optimizingTourId, setOptimizingTourId] = useState<string | null>(null)
   const [tourSearch, setTourSearch] = useState('')
+  const [renamingTourId, setRenamingTourId] = useState<string | null>(null)
+  const [renameValue, setRenameValue] = useState('')
   const [showHistory, setShowHistory] = useState(false)
   const [ordersViewMode, setOrdersViewMode] = useState<'list' | 'map'>('list')
 
@@ -392,6 +394,18 @@ function PlanificateurView() {
         body: JSON.stringify({ sequence: sorted[idx].sequence }),
       }),
     ])
+    await fetchTours()
+  }
+
+  async function handleRenameTour(tourId: string) {
+    const name = renameValue.trim()
+    if (!name) { setRenamingTourId(null); return }
+    await fetch(`/api/delivery/tours/${tourId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name }),
+    })
+    setRenamingTourId(null)
     await fetchTours()
   }
 
@@ -991,7 +1005,30 @@ function PlanificateurView() {
                         <div className="flex items-start justify-between gap-2">
                           <div className="flex-1 min-w-0">
                             <div className="flex items-center gap-2 flex-wrap">
-                              <span className="font-semibold text-sm text-[#1a1a2e]">{tour.name}</span>
+                              {renamingTourId === tour.id ? (
+                                <input
+                                  autoFocus
+                                  value={renameValue}
+                                  onChange={(e) => setRenameValue(e.target.value)}
+                                  onBlur={() => handleRenameTour(tour.id)}
+                                  onKeyDown={(e) => {
+                                    if (e.key === 'Enter') handleRenameTour(tour.id)
+                                    if (e.key === 'Escape') setRenamingTourId(null)
+                                  }}
+                                  onClick={(e) => e.stopPropagation()}
+                                  className="font-semibold text-sm text-[#1a1a2e] border-b border-[#aeb0c9] bg-transparent outline-none w-full max-w-[200px]"
+                                />
+                              ) : (
+                                <span
+                                  className="font-semibold text-sm text-[#1a1a2e] cursor-text"
+                                  onDoubleClick={(e) => {
+                                    e.stopPropagation()
+                                    setRenamingTourId(tour.id)
+                                    setRenameValue(tour.name)
+                                  }}
+                                  title="Double-cliquer pour renommer"
+                                >{tour.name}</span>
+                              )}
                               <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${statusInfo.color}`}>
                                 {statusInfo.label}
                               </span>
