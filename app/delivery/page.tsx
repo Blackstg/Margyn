@@ -6,7 +6,7 @@ import { useState, useEffect, useCallback, useRef, Suspense } from 'react'
 import nextDynamic from 'next/dynamic'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { createBrowserClient } from '@supabase/auth-helpers-nextjs'
-import { ChevronDown, ChevronUp, ChevronLeft, ChevronRight, Trash2, Mail, Plus, X, MapPin, Package, Truck, Map as MapIcon, Search } from 'lucide-react'
+import { ChevronDown, ChevronUp, ChevronLeft, ChevronRight, Trash2, Mail, Plus, X, MapPin, Package, Truck, Map as MapIcon, Search, Pencil, Check } from 'lucide-react'
 
 const TourMap        = nextDynamic(() => import('@/components/delivery/TourMap'),        { ssr: false })
 const OrdersMap      = nextDynamic(() => import('@/components/delivery/OrdersMap'),      { ssr: false })
@@ -1006,28 +1006,45 @@ function PlanificateurView() {
                           <div className="flex-1 min-w-0">
                             <div className="flex items-center gap-2 flex-wrap">
                               {renamingTourId === tour.id ? (
-                                <input
-                                  autoFocus
-                                  value={renameValue}
-                                  onChange={(e) => setRenameValue(e.target.value)}
-                                  onBlur={() => handleRenameTour(tour.id)}
-                                  onKeyDown={(e) => {
-                                    if (e.key === 'Enter') handleRenameTour(tour.id)
-                                    if (e.key === 'Escape') setRenamingTourId(null)
-                                  }}
-                                  onClick={(e) => e.stopPropagation()}
-                                  className="font-semibold text-sm text-[#1a1a2e] border-b border-[#aeb0c9] bg-transparent outline-none w-full max-w-[200px]"
-                                />
+                                <>
+                                  <input
+                                    autoFocus
+                                    value={renameValue}
+                                    onChange={(e) => setRenameValue(e.target.value)}
+                                    onKeyDown={(e) => {
+                                      if (e.key === 'Enter') handleRenameTour(tour.id)
+                                      if (e.key === 'Escape') setRenamingTourId(null)
+                                    }}
+                                    onClick={(e) => e.stopPropagation()}
+                                    className="font-semibold text-sm text-[#1a1a2e] border-b border-[#aeb0c9] bg-transparent outline-none min-w-0 flex-1"
+                                  />
+                                  <button
+                                    onClick={(e) => { e.stopPropagation(); handleRenameTour(tour.id) }}
+                                    className="p-1 rounded-md bg-[#1a1a2e] text-white shrink-0"
+                                  >
+                                    <Check size={12} />
+                                  </button>
+                                  <button
+                                    onClick={(e) => { e.stopPropagation(); setRenamingTourId(null) }}
+                                    className="p-1 rounded-md text-[#6b6b63] hover:bg-[#f5f5f3] shrink-0"
+                                  >
+                                    <X size={12} />
+                                  </button>
+                                </>
                               ) : (
-                                <span
-                                  className="font-semibold text-sm text-[#1a1a2e] cursor-text"
-                                  onDoubleClick={(e) => {
-                                    e.stopPropagation()
-                                    setRenamingTourId(tour.id)
-                                    setRenameValue(tour.name)
-                                  }}
-                                  title="Double-cliquer pour renommer"
-                                >{tour.name}</span>
+                                <>
+                                  <span className="font-semibold text-sm text-[#1a1a2e]">{tour.name}</span>
+                                  <button
+                                    onClick={(e) => {
+                                      e.stopPropagation()
+                                      setRenamingTourId(tour.id)
+                                      setRenameValue(tour.name)
+                                    }}
+                                    className="p-1 rounded-md text-[#6b6b63] hover:bg-[#f5f5f3] shrink-0 opacity-50 hover:opacity-100"
+                                  >
+                                    <Pencil size={12} />
+                                  </button>
+                                </>
                               )}
                               <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${statusInfo.color}`}>
                                 {statusInfo.label}
