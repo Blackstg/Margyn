@@ -134,6 +134,7 @@ export default function TourMap({ stops, onBack, precomputedCoords, etaMap }: To
             .setPopup(
               new mgl.Popup({ offset: 18 }).setHTML(
                 `<div style="font-size:13px;line-height:1.5">
+                  <span style="font-family:monospace;font-size:11px;background:#f5f5f3;padding:1px 5px;border-radius:4px;color:#1a1a2e">${stop.order_name}</span><br>
                   <strong>${stop.customer_name}</strong><br>
                   <span style="color:#555">${stop.address1}, ${stop.city}</span>${eta
                     ? `<br><span style="color:#1a7f4b;font-weight:600">⏱ ${stop.status === 'delivered' ? 'Livré à' : 'Arrivée'} : ${eta}</span>`
