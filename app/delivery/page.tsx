@@ -207,6 +207,7 @@ function PlanificateurView() {
   const [expandedTours, setExpandedTours] = useState<Set<string>>(new Set())
   const [savingTour, setSavingTour] = useState(false)
   const [addingStops, setAddingStops] = useState(false)
+  const [optimizingTourId, setOptimizingTourId] = useState<string | null>(null)
   const [showHistory, setShowHistory] = useState(false)
   const [ordersViewMode, setOrdersViewMode] = useState<'list' | 'map'>('list')
 
@@ -398,6 +399,79 @@ function PlanificateurView() {
     await fetch(`/api/delivery/tours/${tourId}`, { method: 'DELETE' })
     await fetchTours()
     await fetchOrders()
+  }
+
+  async function handleOptimizeRoute(tourId: string) {
+    const tour = tours.find((t) => t.id === tourId)
+    if (!tour || tour.stops.length < 2) return
+    setOptimizingTourId(tourId)
+    try {
+      const token = process.env.NEXT_PUBLIC_MAPBOX_TOKEN ?? ''
+      const stops = [...tour.stops].sort((a, b) => a.sequence - b.sequence)
+
+      // 1. Geocode all stop addresses
+      const coords: ([number, number] | null)[] = await Promise.all(
+        stops.map((s) => geocodeForMap(`${s.address1}, ${s.city} ${s.zip}, France`, token))
+      )
+
+      // Filter out stops that failed geocoding
+      const validIndices = stops.map((_, i) => i).filter((i) => coords[i] !== null)
+      if (validIndices.length < 2) return
+
+      let optimizedIndices: number[]
+
+      if (validIndices.length <= 11) {
+        // 2a. Mapbox Optimization API (TSP, depot + up to 11 waypoints = 12 total)
+        const depotCoord = DEPOT_COORDS
+        const waypointCoords = validIndices.map((i) => coords[i] as [number, number])
+        const coordStr = [depotCoord, ...waypointCoords, depotCoord]
+          .map(([lng, lat]) => `${lng},${lat}`)
+          .join(';')
+
+        const optRes = await fetch(
+          `https://api.mapbox.com/optimized-trips/v1/mapbox/driving/${coordStr}?roundtrip=true&source=first&destination=last&access_token=${token}`
+        )
+        if (optRes.ok) {
+          const optData = await optRes.json()
+          // Mapbox response: waypoints[] is parallel to input coords (depot, stop0, stop1..., depot)
+          // Each entry has waypoint_index = position in the optimized trip (0 = first visit)
+          const allWps: { waypoint_index: number }[] = optData.waypoints ?? []
+          // Skip depot (index 0 and last) — take only the stop waypoints
+          const stopWps = allWps.slice(1, validIndices.length + 1)
+          // Sort by waypoint_index to get optimized visit order; inputPos maps to validIndices[inputPos]
+          const sorted = stopWps
+            .map((wp, inputPos) => ({ inputPos, tripPos: wp.waypoint_index }))
+            .sort((a, b) => a.tripPos - b.tripPos)
+          optimizedIndices = sorted.map((x) => validIndices[x.inputPos])
+        } else {
+          // Fallback to nearest-neighbor
+          optimizedIndices = nearestNeighborTSP(DEPOT_COORDS, validIndices, coords as ([number, number] | null)[])
+        }
+      } else {
+        // 2b. Nearest-neighbor heuristic for >11 stops
+        optimizedIndices = nearestNeighborTSP(DEPOT_COORDS, validIndices, coords as ([number, number] | null)[])
+      }
+
+      // 3. Assign new sequences to all stops (keep non-geocoded stops at end in original order)
+      const nonValidIndices = stops.map((_, i) => i).filter((i) => coords[i] === null)
+      const finalOrder = [...optimizedIndices, ...nonValidIndices]
+
+      await Promise.all(
+        finalOrder.map((stopIdx, newSeq) =>
+          fetch(`/api/delivery/stops/${stops[stopIdx].id}`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ sequence: newSeq + 1 }),
+          })
+        )
+      )
+
+      await fetchTours()
+    } catch (e) {
+      console.error('Route optimization failed', e)
+    } finally {
+      setOptimizingTourId(null)
+    }
   }
 
   function toggleExpand(tourId: string) {
@@ -953,6 +1027,30 @@ function PlanificateurView() {
                                 Copier les emails
                               </button>
                             )}
+                            {tour.stops.length >= 2 && (
+                              <button
+                                onClick={(e) => { e.stopPropagation(); handleOptimizeRoute(tour.id) }}
+                                disabled={optimizingTourId === tour.id}
+                                className="flex items-center gap-1 px-3 py-1 text-xs rounded-[8px] bg-[#eff6ff] text-[#1d4ed8] hover:bg-[#dbeafe] disabled:opacity-50"
+                              >
+                                {optimizingTourId === tour.id ? (
+                                  <>
+                                    <svg className="animate-spin h-3 w-3" viewBox="0 0 24 24" fill="none">
+                                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" />
+                                    </svg>
+                                    Optimisation…
+                                  </>
+                                ) : (
+                                  <>
+                                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                      <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
+                                    </svg>
+                                    Optimiser le trajet
+                                  </>
+                                )}
+                              </button>
+                            )}
                             <button
                               onClick={(e) => { e.stopPropagation(); handleDeleteTour(tour.id) }}
                               className="flex items-center gap-1 px-3 py-1 text-xs rounded-[8px] bg-[#fef2f2] text-[#c7293a] hover:bg-[#fee2e2]"
@@ -1143,6 +1241,44 @@ function fmtETA(date: Date): string {
   const h = date.getHours().toString().padStart(2, '0')
   const m = date.getMinutes().toString().padStart(2, '0')
   return `${h}h${m}`
+}
+
+function haversineKm(a: [number, number], b: [number, number]): number {
+  const [lng1, lat1] = a
+  const [lng2, lat2] = b
+  const R = 6371
+  const dLat = ((lat2 - lat1) * Math.PI) / 180
+  const dLng = ((lng2 - lng1) * Math.PI) / 180
+  const sin1 = Math.sin(dLat / 2)
+  const sin2 = Math.sin(dLng / 2)
+  const aVal = sin1 * sin1 + Math.cos((lat1 * Math.PI) / 180) * Math.cos((lat2 * Math.PI) / 180) * sin2 * sin2
+  return R * 2 * Math.atan2(Math.sqrt(aVal), Math.sqrt(1 - aVal))
+}
+
+// Returns indices into the `validIndices` slice, sorted by nearest-neighbor from depot
+function nearestNeighborTSP(
+  depot: [number, number],
+  validIndices: number[],
+  coords: ([number, number] | null)[]
+): number[] {
+  const remaining = new Set(validIndices)
+  const result: number[] = []
+  let current = depot
+  while (remaining.size > 0) {
+    let best: number | null = null
+    let bestDist = Infinity
+    for (const idx of remaining) {
+      const c = coords[idx]
+      if (!c) continue
+      const d = haversineKm(current, c)
+      if (d < bestDist) { bestDist = d; best = idx }
+    }
+    if (best === null) break
+    result.push(best)
+    current = coords[best] as [number, number]
+    remaining.delete(best)
+  }
+  return result
 }
 
 async function geocodeForMap(address: string, token: string): Promise<[number, number] | null> {
