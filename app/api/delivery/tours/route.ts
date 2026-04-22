@@ -8,6 +8,24 @@ function getAdmin() {
   )
 }
 
+// Only advertising panels count toward the 100-slot tour capacity.
+// Re-computed from panel_details each time so historical stops with wrong
+// panel_count values are corrected without a DB migration.
+const isPanel = (title: string) => /panneau/i.test(title)
+
+function computePanelCount(
+  stop: { panel_count: number; panel_details?: { title?: string; qty?: number }[] }
+): number {
+  const details = stop.panel_details ?? []
+  if (details.length > 0) {
+    return details
+      .filter((d) => isPanel(d.title ?? ''))
+      .reduce((sum, d) => sum + (d.qty ?? 0), 0)
+  }
+  // Fallback: no panel_details stored (very old stops) — use raw panel_count
+  return stop.panel_count ?? 0
+}
+
 export async function GET() {
   try {
     const admin = getAdmin()
@@ -23,7 +41,8 @@ export async function GET() {
     const result = (tours ?? []).map((tour) => {
       const stops = tour.delivery_stops ?? []
       const total_panels = stops.reduce(
-        (sum: number, s: { panel_count: number }) => sum + (s.panel_count ?? 0),
+        (sum: number, s: { panel_count: number; panel_details?: { title?: string; qty?: number }[] }) =>
+          sum + computePanelCount(s),
         0
       )
       return {

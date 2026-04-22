@@ -55,6 +55,10 @@ function isInternalOrder(tags: string, customerName: string, email: string): boo
 
 // ─── Line-item filters ────────────────────────────────────────────────────────
 const isSample = (title: string) => /échantillon|echantillon|sample/i.test(title)
+// Only actual advertising panels count toward the 100-slot tour capacity.
+// Colles, accessories and other consumables are in panel_details for the
+// loading list but must not inflate the panel_count.
+const isPanel  = (title: string) => /panneau/i.test(title)
 
 // ─── Shopify types ─────────────────────────────────────────────────────────────
 
@@ -308,7 +312,12 @@ export async function GET() {
         qty:           li.quantity,
         _variant_id:   li.variant_id,
       }))
-      const panel_count = panel_details.reduce((sum, p) => sum + p.qty, 0)
+
+      // panel_count = only actual panneau items (excludes colles, accessories, etc.)
+      // panel_details keeps ALL non-sample items for the loading list
+      const panel_count = panel_details
+        .filter((p) => isPanel(p.title))
+        .reduce((sum, p) => sum + p.qty, 0)
 
       if (panel_count === 0) {
         if (isDebug) console.log(`[delivery/orders] ${order.name} → SKIPPED (panel_count=0 after subtraction)`)
