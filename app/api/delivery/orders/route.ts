@@ -59,10 +59,15 @@ const isSample = (title: string) => /échantillon|echantillon|sample/i.test(titl
 // Colles, accessories and other consumables are in panel_details for the
 // loading list but must not inflate the panel_count.
 const isPanel    = (title: string) => /panneau/i.test(title)
-// Exterior panels are packaged 4 per box → count 1 slot per 4 units (rounded up)
+// Exterior panels: packaged 4/box → ceil(qty/4) slots
 const isExtPanel = (title: string) => /extpanel|ext[_\s-]?panel/i.test(title)
-const panelSlots = (title: string, qty: number) =>
-  isExtPanel(title) ? Math.ceil(qty / 4) : qty
+// Akupanel 60 (60×60 cm): 2 panels = 1 slot → ceil(qty/2) slots
+const isAkupanel60 = (title: string) => /akupanel.{0,10}60/i.test(title)
+const panelSlots = (title: string, qty: number) => {
+  if (isExtPanel(title))   return Math.ceil(qty / 4)
+  if (isAkupanel60(title)) return Math.ceil(qty / 2)
+  return qty
+}
 
 // ─── Shopify types ─────────────────────────────────────────────────────────────
 

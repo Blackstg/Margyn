@@ -11,10 +11,14 @@ function getAdmin() {
 // Only advertising panels count toward the 100-slot tour capacity.
 // Re-computed from panel_details each time so historical stops with wrong
 // panel_count values are corrected without a DB migration.
-const isPanel    = (title: string) => /panneau/i.test(title)
-const isExtPanel = (title: string) => /extpanel|ext[_\s-]?panel/i.test(title)
-const panelSlots = (title: string, qty: number) =>
-  isExtPanel(title) ? Math.ceil(qty / 4) : qty
+const isPanel      = (title: string) => /panneau/i.test(title)
+const isExtPanel   = (title: string) => /extpanel|ext[_\s-]?panel/i.test(title)
+const isAkupanel60 = (title: string) => /akupanel.{0,10}60/i.test(title)
+const panelSlots   = (title: string, qty: number) => {
+  if (isExtPanel(title))   return Math.ceil(qty / 4)
+  if (isAkupanel60(title)) return Math.ceil(qty / 2)
+  return qty
+}
 
 function computePanelCount(
   stop: { panel_count: number; panel_details?: { title?: string; qty?: number }[] }
