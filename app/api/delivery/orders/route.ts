@@ -58,7 +58,11 @@ const isSample = (title: string) => /échantillon|echantillon|sample/i.test(titl
 // Only actual advertising panels count toward the 100-slot tour capacity.
 // Colles, accessories and other consumables are in panel_details for the
 // loading list but must not inflate the panel_count.
-const isPanel  = (title: string) => /panneau/i.test(title)
+const isPanel    = (title: string) => /panneau/i.test(title)
+// Exterior panels are packaged 4 per box → count 1 slot per 4 units (rounded up)
+const isExtPanel = (title: string) => /extpanel|ext[_\s-]?panel/i.test(title)
+const panelSlots = (title: string, qty: number) =>
+  isExtPanel(title) ? Math.ceil(qty / 4) : qty
 
 // ─── Shopify types ─────────────────────────────────────────────────────────────
 
@@ -316,10 +320,11 @@ export async function GET() {
       }))
 
       // panel_count = only actual panneau items (excludes colles, accessories, etc.)
+      // Extpanels are packaged 4/box → count ceil(qty/4) slots instead of qty
       // panel_details keeps ALL non-sample items for the loading list
       const panel_count = panel_details
         .filter((p) => isPanel(p.title))
-        .reduce((sum, p) => sum + p.qty, 0)
+        .reduce((sum, p) => sum + panelSlots(p.title, p.qty), 0)
 
       if (panel_count === 0) {
         if (isDebug) console.log(`[delivery/orders] ${order.name} → SKIPPED (panel_count=0 after subtraction)`)
