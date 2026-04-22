@@ -1116,7 +1116,7 @@ function PlanificateurView() {
                             <div className="text-xs text-[#6b6b63] text-center py-3">Aucun résultat</div>
                           ) : (
                             <div className="space-y-1.5">
-                              {filteredStops.map((stop, idx) => {
+                              {filteredStops.map((stop) => {
                                 const realIdx = sortedStops.findIndex((s) => s.id === stop.id)
                                 return (
                                 <div
