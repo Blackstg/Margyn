@@ -253,6 +253,8 @@ export async function GET() {
       email:            string
       created_at:       string | null
       is_preorder:      boolean
+      is_b2b:           boolean
+      is_leroy:         boolean
       needs_replan:     boolean
       address1:         string
       address2:         string
@@ -324,11 +326,16 @@ export async function GET() {
         continue
       }
 
-      // Bug 3 fix: broader preorder tag detection + logging
-      const tagList   = (order.tags ?? '').split(',').map((t) => t.trim())
+      const tagList = (order.tags ?? '').split(',').map((t) => t.trim())
+
+      // Preorder detection (broader regex)
       const is_preorder = tagList.some((tag) =>
         /pr[eé][_\-\s]?commande|pre[_\-\s]?order|préco|preco/i.test(tag)
       )
+
+      // B2B / Leroy Merlin detection
+      const is_b2b   = tagList.some((tag) => /^b2b$/i.test(tag))
+      const is_leroy = tagList.some((tag) => /leroy/i.test(tag))
 
       if (isDebug) {
         console.log(
@@ -353,6 +360,8 @@ export async function GET() {
         email:            order.email ?? '',
         created_at:       order.created_at ?? null,
         is_preorder,
+        is_b2b,
+        is_leroy,
         needs_replan:     replanOrderNames.has(order.name),
         address1:         addr?.address1 ?? '',
         address2:         addr?.address2 ?? '',

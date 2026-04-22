@@ -41,6 +41,8 @@ interface ShopifyOrder {
   created_at: string | null
   is_preorder: boolean
   preorder_ready?: boolean
+  is_b2b?: boolean
+  is_leroy?: boolean
   needs_replan?: boolean
   address1: string
   city: string
@@ -596,6 +598,16 @@ function PlanificateurView() {
                               {order.is_preorder && (
                                 <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${order.preorder_ready ? 'bg-[#dcfce7] text-[#15803d]' : 'bg-[#fef9c3] text-[#92400e]'}`}>
                                   {order.preorder_ready ? 'Précommande prête à livrer' : 'Précommande'}
+                                </span>
+                              )}
+                              {order.is_b2b && (
+                                <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-[#dbeafe] text-[#1d4ed8]">
+                                  B2B
+                                </span>
+                              )}
+                              {order.is_leroy && (
+                                <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-[#dcfce7] text-[#15803d]">
+                                  Leroy
                                 </span>
                               )}
                               {order.needs_replan && (
