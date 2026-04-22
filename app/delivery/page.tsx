@@ -275,6 +275,15 @@ function PlanificateurView() {
       return a.created_at.localeCompare(b.created_at)
     })
 
+  // Panels per zone across all unfiltered orders (for the zone badges)
+  const panelsByZone = (['nord-est', 'nord-ouest', 'sud-est', 'sud-ouest'] as Zone[]).reduce<Record<Zone, number>>(
+    (acc, z) => {
+      acc[z] = shopifyOrders.filter((o) => o.zone === z).reduce((sum, o) => sum + (o.panel_count ?? 0), 0)
+      return acc
+    },
+    {} as Record<Zone, number>
+  )
+
   function toggleOrder(orderName: string) {
     setSelectedOrders((prev) => {
       const next = new Set(prev)
@@ -575,19 +584,37 @@ function PlanificateurView() {
 
             {/* Zone + preorder filters */}
             <div className="flex flex-wrap gap-1.5 mb-3">
-              {(['all', 'nord-est', 'nord-ouest', 'sud-est', 'sud-ouest'] as const).map((z) => (
-                <button
-                  key={z}
-                  onClick={() => setZoneFilter(z)}
-                  className={`px-3 py-1 rounded-full text-xs font-medium transition-all ${
-                    zoneFilter === z
-                      ? 'bg-[#1a1a2e] text-white'
-                      : 'bg-[#f5f5f3] text-[#6b6b63] hover:bg-[#e8e8e4]'
-                  }`}
-                >
-                  {z === 'all' ? 'Toutes' : ZONE_LABEL[z]}
-                </button>
-              ))}
+              {(['all', 'nord-est', 'nord-ouest', 'sud-est', 'sud-ouest'] as const).map((z) => {
+                const count = z !== 'all' ? (panelsByZone[z] ?? 0) : null
+                const color = z !== 'all' ? ZONE_COLOR[z] : null
+                return (
+                  <button
+                    key={z}
+                    onClick={() => setZoneFilter(z)}
+                    className={`flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium transition-all ${
+                      zoneFilter === z
+                        ? 'bg-[#1a1a2e] text-white'
+                        : 'bg-[#f5f5f3] text-[#6b6b63] hover:bg-[#e8e8e4]'
+                    }`}
+                  >
+                    {z === 'all' ? 'Toutes' : ZONE_LABEL[z]}
+                    {count !== null && count > 0 && (
+                      <span
+                        className="inline-flex items-center justify-center rounded-full text-white font-bold leading-none"
+                        style={{
+                          background: zoneFilter === z ? 'rgba(255,255,255,0.25)' : color!.text,
+                          minWidth: '16px',
+                          height: '16px',
+                          fontSize: '10px',
+                          padding: '0 4px',
+                        }}
+                      >
+                        {count}
+                      </span>
+                    )}
+                  </button>
+                )
+              })}
               <button
                 onClick={() => setPreorderFilter((v) => !v)}
                 className={`px-3 py-1 rounded-full text-xs font-medium transition-all ${
