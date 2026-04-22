@@ -1528,21 +1528,15 @@ function LivreurView() {
   const sortedStops = sortedStopsForETA  // alias — même tableau
   const deliveredCount = sortedStops.filter((s) => s.status === 'delivered').length
 
-  // Build loading list by SKU (or title+variant_title when SKU absent)
-  const loadingAgg: Map<string, { ref: string; title: string; variant_title: string; qty: number }> = new Map()
-  if (tour) {
-    for (const stop of tour.stops) {
-      for (const item of stop.panel_details ?? []) {
-        const ref = item.sku?.trim() || ''
-        const vt  = item.variant_title?.trim() || ''
-        const key = ref || (item.title + '::' + vt)
-        const existing = loadingAgg.get(key)
-        if (existing) existing.qty += item.qty
-        else loadingAgg.set(key, { ref, title: item.title, variant_title: vt, qty: item.qty })
-      }
-    }
-  }
-  const loadingList = [...loadingAgg.values()].sort((a, b) => b.qty - a.qty)
+  // Loading order: stops in REVERSE delivery order (last stop loaded first = goes deepest in truck)
+  // Each stop shows its own items so the driver knows what to load for each destination
+  const loadingStops = tour
+    ? [...sortedStops].reverse().map((stop) => ({
+        stop,
+        items: (stop.panel_details ?? []).filter((p) => p.qty > 0),
+      })).filter((s) => s.items.length > 0)
+    : []
+  const totalLoadingItems = loadingStops.reduce((sum, s) => sum + s.items.length, 0)
 
 
   const currentStop = sortedStops[stopIdx]
@@ -1702,7 +1696,7 @@ function LivreurView() {
 
   // ── Screen: loading list ──
   if (screen === 'loading') {
-    const allChecked = loadingList.length > 0 && loadingList.every((item) => checkedItems.has(item.ref || item.title))
+    const allChecked = totalLoadingItems > 0 && checkedItems.size >= totalLoadingItems
 
     function toggleItem(key: string) {
       setCheckedItems((prev) => {
@@ -1715,7 +1709,7 @@ function LivreurView() {
 
     return (
       <div className="w-full pb-28">
-        <div className="flex items-center gap-3 mb-5">
+        <div className="flex items-center gap-3 mb-2">
           <button
             onClick={() => setScreen('home')}
             className="w-10 h-10 rounded-full bg-white shadow flex items-center justify-center"
@@ -1723,55 +1717,84 @@ function LivreurView() {
             <ChevronLeft size={20} />
           </button>
           <h2 className="text-lg font-bold text-[#1a1a2e]">Chargement camion</h2>
-          <span className="ml-auto text-sm text-[#6b6b63]">{checkedItems.size} / {loadingList.length}</span>
+          <span className="ml-auto text-sm text-[#6b6b63]">{checkedItems.size} / {totalLoadingItems}</span>
         </div>
-        <div className="rounded-[20px] bg-white shadow-[0_4px_24px_rgba(0,0,0,0.08)] overflow-hidden">
-          {loadingList.length === 0 ? (
-            <div className="p-8 text-center text-sm text-[#6b6b63]">Aucun produit</div>
-          ) : (
-            <div className="divide-y divide-[#f0f0f0]">
-              {loadingList.map((item, i) => {
-                const key = item.ref || item.title
-                const checked = checkedItems.has(key)
-                return (
-                  <div
-                    key={i}
-                    onClick={() => toggleItem(key)}
-                    className={`flex items-center gap-4 px-5 py-4 cursor-pointer transition-colors ${
-                      checked ? 'bg-[#f0fdf4]' : 'bg-white active:bg-[#f5f5f3]'
-                    }`}
-                  >
-                    {/* Checkbox */}
-                    <div className={`shrink-0 w-7 h-7 rounded-full border-2 flex items-center justify-center transition-all ${
-                      checked ? 'bg-[#1a7f4b] border-[#1a7f4b]' : 'border-[#d1d5db]'
+        <p className="text-xs text-[#6b6b63] mb-5 pl-1">Charger du dernier arrêt au premier — le premier arrêt doit être accessible en premier.</p>
+
+        {loadingStops.length === 0 ? (
+          <div className="rounded-[20px] bg-white shadow-[0_4px_24px_rgba(0,0,0,0.08)] p-8 text-center text-sm text-[#6b6b63]">Aucun produit</div>
+        ) : (
+          <div className="space-y-3">
+            {loadingStops.map(({ stop, items }, stopI) => {
+              const totalStops = sortedStops.length
+              const deliveryIdx = totalStops - stopI  // position in delivery order (last = 1st loaded)
+              const stopAllChecked = items.every((item) => {
+                const key = stop.id + '::' + (item.sku?.trim() || item.title)
+                return checkedItems.has(key)
+              })
+              return (
+                <div key={stop.id} className="rounded-[16px] bg-white shadow-[0_2px_12px_rgba(0,0,0,0.06)] overflow-hidden">
+                  {/* Stop header */}
+                  <div className={`flex items-center gap-3 px-4 py-3 ${stopAllChecked ? 'bg-[#f0fdf4]' : 'bg-[#f8f8f6]'}`}>
+                    <span className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold shrink-0 ${
+                      stopAllChecked ? 'bg-[#1a7f4b] text-white' : 'bg-[#1a1a2e] text-white'
                     }`}>
-                      {checked && (
-                        <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
-                          <path d="M2.5 7L5.5 10L11.5 4" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-                        </svg>
-                      )}
+                      {deliveryIdx}
+                    </span>
+                    <div className="flex-1 min-w-0">
+                      <div className="font-semibold text-sm text-[#1a1a2e] truncate">{stop.customer_name}</div>
+                      <div className="text-xs text-[#6b6b63]">{stop.city} {stop.zip}</div>
                     </div>
-                    <div className={`flex-1 min-w-0 transition-all ${checked ? 'opacity-50' : ''}`}>
-                      {item.ref ? (
-                        <div className={`font-mono text-xs text-[#6b6b63] mb-0.5 ${checked ? 'line-through' : ''}`}>{item.ref}</div>
-                      ) : item.variant_title ? (
-                        <div className={`font-mono text-xs text-[#6b6b63] mb-0.5 ${checked ? 'line-through' : ''}`}>{item.variant_title}</div>
-                      ) : null}
-                      <div className={`font-semibold text-base leading-tight ${checked ? 'line-through text-[#6b6b63]' : 'text-[#1a1a2e]'}`}>
-                        {item.title}
-                      </div>
-                    </div>
-                    <div className={`shrink-0 w-14 h-14 rounded-[14px] flex items-center justify-center font-bold text-2xl transition-all ${
-                      checked ? 'bg-[#1a7f4b] text-white' : 'bg-[#1a1a2e] text-white'
-                    }`}>
-                      {item.qty}
-                    </div>
+                    {stopI === 0 && (
+                      <span className="text-[10px] font-semibold uppercase tracking-wide text-[#c2680a] bg-[#fff7ed] px-2 py-0.5 rounded-full shrink-0">Charger en 1er</span>
+                    )}
                   </div>
-                )
-              })}
-            </div>
-          )}
-        </div>
+                  {/* Items */}
+                  <div className="divide-y divide-[#f0f0f0]">
+                    {items.map((item, i) => {
+                      const key = stop.id + '::' + (item.sku?.trim() || item.title)
+                      const checked = checkedItems.has(key)
+                      return (
+                        <div
+                          key={i}
+                          onClick={() => toggleItem(key)}
+                          className={`flex items-center gap-4 px-4 py-3 cursor-pointer transition-colors ${
+                            checked ? 'bg-[#f0fdf4]' : 'bg-white active:bg-[#f5f5f3]'
+                          }`}
+                        >
+                          <div className={`shrink-0 w-6 h-6 rounded-full border-2 flex items-center justify-center transition-all ${
+                            checked ? 'bg-[#1a7f4b] border-[#1a7f4b]' : 'border-[#d1d5db]'
+                          }`}>
+                            {checked && (
+                              <svg width="12" height="12" viewBox="0 0 14 14" fill="none">
+                                <path d="M2.5 7L5.5 10L11.5 4" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                              </svg>
+                            )}
+                          </div>
+                          <div className={`flex-1 min-w-0 ${checked ? 'opacity-50' : ''}`}>
+                            {(item.sku?.trim() || item.variant_title) && (
+                              <div className={`font-mono text-xs text-[#6b6b63] mb-0.5 ${checked ? 'line-through' : ''}`}>
+                                {item.sku?.trim() || item.variant_title}
+                              </div>
+                            )}
+                            <div className={`font-medium text-sm leading-tight ${checked ? 'line-through text-[#6b6b63]' : 'text-[#1a1a2e]'}`}>
+                              {item.title}
+                            </div>
+                          </div>
+                          <div className={`shrink-0 w-12 h-12 rounded-[12px] flex items-center justify-center font-bold text-xl transition-all ${
+                            checked ? 'bg-[#1a7f4b] text-white' : 'bg-[#1a1a2e] text-white'
+                          }`}>
+                            {item.qty}
+                          </div>
+                        </div>
+                      )
+                    })}
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        )}
 
         {/* Validate button — fixed bottom */}
         {allChecked && (
