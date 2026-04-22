@@ -3,15 +3,20 @@
 export const dynamic = 'force-dynamic'
 
 import { useState, useEffect, useCallback, useRef, Suspense } from 'react'
+import nextDynamic from 'next/dynamic'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { createBrowserClient } from '@supabase/auth-helpers-nextjs'
-import { ChevronDown, ChevronUp, ChevronLeft, ChevronRight, Trash2, Mail, Plus, X, MapPin, Package, Truck } from 'lucide-react'
+import { ChevronDown, ChevronUp, ChevronLeft, ChevronRight, Trash2, Mail, Plus, X, MapPin, Package, Truck, Map as MapIcon } from 'lucide-react'
+
+const TourMap        = nextDynamic(() => import('@/components/delivery/TourMap'),        { ssr: false })
+const OrdersMap      = nextDynamic(() => import('@/components/delivery/OrdersMap'),      { ssr: false })
+const SavPositionMap = nextDynamic(() => import('@/components/delivery/SavPositionMap'), { ssr: false })
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 type Zone = 'nord-est' | 'nord-ouest' | 'sud-est' | 'sud-ouest'
 type TourStatus = 'draft' | 'planned' | 'in_progress' | 'completed' | 'cancelled'
-type StopStatus = 'pending' | 'delivered'
+type StopStatus = 'pending' | 'delivered' | 'failed'
 
 const ZONE_LABEL: Record<Zone, string> = {
   'nord-est':   'Nord-Est',
@@ -26,7 +31,7 @@ const ZONE_COLOR: Record<Zone, { bg: string; text: string }> = {
   'sud-ouest':  { bg: '#f3e8ff', text: '#7c3aed' },  // violet
 }
 
-interface PanelItem { sku: string; title: string; qty: number }
+interface PanelItem { sku: string; variant_title?: string; title: string; qty: number }
 
 interface ShopifyOrder {
   order_name: string
@@ -36,6 +41,7 @@ interface ShopifyOrder {
   created_at: string | null
   is_preorder: boolean
   preorder_ready?: boolean
+  needs_replan?: boolean
   address1: string
   city: string
   zip: string
@@ -47,6 +53,7 @@ interface ShopifyOrder {
 interface TourStop {
   id: string
   order_name: string
+  shopify_order_id?: string
   customer_name: string
   email: string
   address1: string
@@ -186,20 +193,25 @@ function PlanificateurView() {
   const [tours, setTours] = useState<Tour[]>([])
   const [selectedOrders, setSelectedOrders] = useState<Set<string>>(new Set())
   const [zoneFilter, setZoneFilter] = useState<'all' | Zone>('all')
+  const [preorderFilter, setPreorderFilter] = useState(false)
   const [search, setSearch] = useState('')
   const [showNewTour, setShowNewTour] = useState(false)
   const [newTourForm, setNewTourForm] = useState({ name: '', zone: 'mixte', driver_name: '', planned_date: '' })
   const [loadingOrders, setLoadingOrders] = useState(true)
   const [loadingTours, setLoadingTours] = useState(true)
   const [targetTourId, setTargetTourId] = useState('')
+  const [tourDropdownOpen, setTourDropdownOpen] = useState(false)
+  const tourDropdownRef = useRef<HTMLDivElement>(null)
   const [expandedTours, setExpandedTours] = useState<Set<string>>(new Set())
   const [savingTour, setSavingTour] = useState(false)
   const [addingStops, setAddingStops] = useState(false)
+  const [showHistory, setShowHistory] = useState(false)
+  const [ordersViewMode, setOrdersViewMode] = useState<'list' | 'map'>('list')
 
   const fetchOrders = useCallback(async () => {
     setLoadingOrders(true)
     try {
-      const r = await fetch('/api/delivery/orders')
+      const r = await fetch('/api/delivery/orders', { cache: 'no-store' })
       const data = await r.json()
       setShopifyOrders(data.orders ?? [])
     } catch (e) {
@@ -232,9 +244,21 @@ function PlanificateurView() {
     fetchTours()
   }, [fetchOrders, fetchTours])
 
+  useEffect(() => {
+    if (!tourDropdownOpen) return
+    function handleClickOutside(e: MouseEvent) {
+      if (tourDropdownRef.current && !tourDropdownRef.current.contains(e.target as Node)) {
+        setTourDropdownOpen(false)
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside)
+    return () => document.removeEventListener('mousedown', handleClickOutside)
+  }, [tourDropdownOpen])
+
   const filteredOrders = shopifyOrders
     .filter((o) => {
       if (zoneFilter !== 'all' && o.zone !== zoneFilter) return false
+      if (preorderFilter && !o.is_preorder) return false
       if (search) {
         const q = search.toLowerCase()
         if (!o.order_name.toLowerCase().includes(q) && !o.city.toLowerCase().includes(q)) return false
@@ -284,13 +308,15 @@ function PlanificateurView() {
     setAddingStops(true)
     try {
       const stops = shopifyOrders.filter((o) => selectedOrders.has(o.order_name))
-      await fetch(`/api/delivery/tours/${targetTourId}/stops`, {
+      const res = await fetch(`/api/delivery/tours/${targetTourId}/stops`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ stops }),
       })
+      if (res.ok) {
+        setShopifyOrders((prev) => prev.filter((o) => !selectedOrders.has(o.order_name)))
+      }
       setSelectedOrders(new Set())
-      await fetchOrders()
       await fetchTours()
     } finally {
       setAddingStops(false)
@@ -298,9 +324,38 @@ function PlanificateurView() {
   }
 
   async function handleDeleteStop(stopId: string) {
-    await fetch(`/api/delivery/stops/${stopId}`, { method: 'DELETE' })
+    // Find stop data before deleting so we can restore the order to the list
+    const stop = tours.flatMap((t) => t.stops).find((s) => s.id === stopId)
+
+    const res = await fetch(`/api/delivery/stops/${stopId}`, { method: 'DELETE' })
+    if (!res.ok) return
+
+    // Optimistic: immediately restore the order to "Commandes à planifier"
+    if (stop) {
+      setShopifyOrders((prev) => {
+        if (prev.some((o) => o.order_name === stop.order_name)) return prev
+        return [...prev, {
+          order_name:       stop.order_name,
+          shopify_order_id: stop.shopify_order_id ?? '',
+          customer_name:    stop.customer_name,
+          email:            stop.email,
+          created_at:       null,
+          is_preorder:      false,
+          preorder_ready:   false,
+          needs_replan:     false,
+          address1:         stop.address1,
+          city:             stop.city,
+          zip:              stop.zip,
+          zone:             stop.zone,
+          panel_count:      stop.panel_count,
+          panel_details:    stop.panel_details,
+        }]
+      })
+    }
+
     await fetchTours()
-    await fetchOrders()
+    // Background sync to confirm server state (doesn't override optimistic if server is slow)
+    fetchOrders()
   }
 
   async function handleMoveStop(tourId: string, stopId: string, direction: 'up' | 'down') {
@@ -353,17 +408,19 @@ function PlanificateurView() {
   }
 
   function buildLoadingList(stops: TourStop[]) {
-    // Group by SKU first, fall back to title if no SKU
-    const map = new Map<string, { sku: string; title: string; qty: number; orders: string[] }>()
+    // Group by SKU first, fall back to title+variant_title if no SKU
+    const map = new Map<string, { ref: string; title: string; variant_title: string; qty: number; orders: string[] }>()
     for (const stop of stops) {
       for (const item of stop.panel_details ?? []) {
-        const key = item.sku?.trim() || item.title
+        const ref = item.sku?.trim() || ''
+        const vt  = item.variant_title?.trim() || ''
+        const key = ref || (item.title + '::' + vt)
         const existing = map.get(key)
         if (existing) {
           existing.qty += item.qty
           if (!existing.orders.includes(stop.order_name)) existing.orders.push(stop.order_name)
         } else {
-          map.set(key, { sku: item.sku?.trim() ?? '', title: item.title, qty: item.qty, orders: [stop.order_name] })
+          map.set(key, { ref, title: item.title, variant_title: vt, qty: item.qty, orders: [stop.order_name] })
         }
       }
     }
@@ -416,17 +473,30 @@ function PlanificateurView() {
                   <span className="ml-2 text-sm font-normal text-[#6b6b63]">({filteredOrders.length})</span>
                 )}
               </h2>
-              {targetTourId && (
+              <div className="flex items-center gap-2">
+                {targetTourId && ordersViewMode === 'list' && (
+                  <button
+                    onClick={handleAutoSuggest}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-[10px] bg-[#f0f0fa] text-[#4338ca] text-xs font-medium hover:bg-[#e0e0fa] transition-colors"
+                  >
+                    ✨ Suggestion
+                  </button>
+                )}
                 <button
-                  onClick={handleAutoSuggest}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-[10px] bg-[#f0f0fa] text-[#4338ca] text-xs font-medium hover:bg-[#e0e0fa] transition-colors"
+                  onClick={() => setOrdersViewMode(m => m === 'list' ? 'map' : 'list')}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-[10px] text-xs font-medium transition-colors ${
+                    ordersViewMode === 'map'
+                      ? 'bg-[#1a1a2e] text-white'
+                      : 'bg-[#f5f5f3] text-[#6b6b63] hover:bg-[#e8e8e4]'
+                  }`}
                 >
-                  ✨ Suggestion
+                  <MapPin size={12} />
+                  {ordersViewMode === 'map' ? 'Liste' : 'Carte'}
                 </button>
-              )}
+              </div>
             </div>
 
-            {/* Zone filter */}
+            {/* Zone + preorder filters */}
             <div className="flex flex-wrap gap-1.5 mb-3">
               {(['all', 'nord-est', 'nord-ouest', 'sud-est', 'sud-ouest'] as const).map((z) => (
                 <button
@@ -441,6 +511,16 @@ function PlanificateurView() {
                   {z === 'all' ? 'Toutes' : ZONE_LABEL[z]}
                 </button>
               ))}
+              <button
+                onClick={() => setPreorderFilter((v) => !v)}
+                className={`px-3 py-1 rounded-full text-xs font-medium transition-all ${
+                  preorderFilter
+                    ? 'bg-[#fef9c3] text-[#92400e] ring-1 ring-[#fbbf24]'
+                    : 'bg-[#f5f5f3] text-[#6b6b63] hover:bg-[#e8e8e4]'
+                }`}
+              >
+                Précommandes
+              </button>
             </div>
 
             {/* Search */}
@@ -452,7 +532,23 @@ function PlanificateurView() {
               className="w-full px-3 py-2 text-sm border border-[#e8e8e4] rounded-[10px] mb-3 outline-none focus:border-[#aeb0c9] transition-colors"
             />
 
-            {/* Orders list */}
+            {/* Orders — liste ou carte */}
+            {ordersViewMode === 'map' ? (
+              <OrdersMap
+                orders={filteredOrders.map(o => ({
+                  order_name: o.order_name,
+                  customer_name: o.customer_name,
+                  address1: o.address1,
+                  city: o.city,
+                  zip: o.zip,
+                  zone: o.zone as 'nord-est' | 'nord-ouest' | 'sud-est' | 'sud-ouest',
+                  panel_count: o.panel_count,
+                }))}
+                selectedOrders={selectedOrders}
+                onToggle={toggleOrder}
+                height={420}
+              />
+            ) : (
             <div className="space-y-2 max-h-80 lg:max-h-[calc(100vh-320px)] overflow-y-auto pr-1">
               {loadingOrders ? (
                 <div className="text-center py-8 text-sm text-[#6b6b63]">Chargement...</div>
@@ -500,6 +596,11 @@ function PlanificateurView() {
                               {order.is_preorder && (
                                 <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${order.preorder_ready ? 'bg-[#dcfce7] text-[#15803d]' : 'bg-[#fef9c3] text-[#92400e]'}`}>
                                   {order.preorder_ready ? 'Précommande prête à livrer' : 'Précommande'}
+                                </span>
+                              )}
+                              {order.needs_replan && (
+                                <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-[#fee2e2] text-[#b91c1c] font-semibold">
+                                  ⚠ À replanifier
                                 </span>
                               )}
                               {isUrgent && (
@@ -564,6 +665,7 @@ function PlanificateurView() {
                 )
               })()}
             </div>
+            )}
           </div>
         </div>
 
@@ -599,7 +701,7 @@ function PlanificateurView() {
                     className="absolute top-0 left-0 h-full rounded-full transition-all"
                     style={{
                       width: `${pct}%`,
-                      background: t.total_panels > 90 ? '#c7293a' : '#1a7f4b',
+                      background: t.total_panels >= 80 ? '#1a7f4b' : t.total_panels >= 50 ? '#d97706' : '#c7293a',
                     }}
                   />
                   {selectedPanels > 0 && (
@@ -611,7 +713,7 @@ function PlanificateurView() {
                 </div>
                 <div className="flex justify-between text-[10px] text-[#9b9b93] mt-1">
                   <span>0</span>
-                  <span className={t.total_panels + selectedPanels > 90 ? 'text-[#c7293a] font-semibold' : ''}>
+                  <span className={t.total_panels + selectedPanels < 50 ? 'text-[#c7293a] font-semibold' : t.total_panels + selectedPanels >= 80 ? 'text-[#1a7f4b] font-semibold' : ''}>
                     {100 - t.total_panels - selectedPanels > 0
                       ? `${100 - t.total_panels - selectedPanels} places restantes`
                       : 'Tournée pleine'}
@@ -623,20 +725,37 @@ function PlanificateurView() {
           })()}
 
           <div className="rounded-[20px] shadow-[0_2px_16px_rgba(0,0,0,0.06)] bg-white p-5">
-            <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center justify-between mb-4 gap-2 flex-wrap">
               <h2 className="text-base font-semibold text-[#1a1a2e]">
-                Tournées
-                {!loadingTours && (
-                  <span className="ml-2 text-sm font-normal text-[#6b6b63]">({tours.length})</span>
-                )}
+                {showHistory ? 'Historique' : 'Tournées'}
+                {!loadingTours && (() => {
+                  const activeTours = tours.filter(t => t.status !== 'completed' && t.status !== 'cancelled')
+                  const historyTours = tours.filter(t => t.status === 'completed' || t.status === 'cancelled')
+                  const count = showHistory ? historyTours.length : activeTours.length
+                  return <span className="ml-2 text-sm font-normal text-[#6b6b63]">({count})</span>
+                })()}
               </h2>
-              <button
-                onClick={() => setShowNewTour(true)}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-[10px] bg-[#1a1a2e] text-white text-xs font-medium hover:bg-[#2a2a4e] transition-colors"
-              >
-                <Plus size={14} />
-                Nouvelle tournée
-              </button>
+              <div className="flex items-center gap-1.5">
+                <button
+                  onClick={() => setShowHistory(v => !v)}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-[10px] text-xs font-medium transition-colors ${
+                    showHistory
+                      ? 'bg-[#1a1a2e] text-white'
+                      : 'bg-[#f5f5f3] text-[#6b6b63] hover:bg-[#e8e8e4]'
+                  }`}
+                >
+                  Historique
+                </button>
+                {!showHistory && (
+                  <button
+                    onClick={() => setShowNewTour(true)}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-[10px] bg-[#1a1a2e] text-white text-xs font-medium hover:bg-[#2a2a4e] transition-colors"
+                  >
+                    <Plus size={14} />
+                    Nouvelle tournée
+                  </button>
+                )}
+              </div>
             </div>
 
             {/* New tour form */}
@@ -700,13 +819,20 @@ function PlanificateurView() {
             )}
 
             {/* Tours list */}
+            {(() => {
+              const activeTours  = tours.filter(t => t.status !== 'completed' && t.status !== 'cancelled')
+              const historyTours = tours.filter(t => t.status === 'completed' || t.status === 'cancelled')
+              const displayTours = showHistory ? historyTours : activeTours
+              return (
             <div className="space-y-3 max-h-[calc(100vh-300px)] overflow-y-auto pr-1">
               {loadingTours ? (
                 <div className="text-center py-8 text-sm text-[#6b6b63]">Chargement...</div>
-              ) : tours.length === 0 ? (
-                <div className="text-center py-8 text-sm text-[#6b6b63]">Aucune tournée</div>
+              ) : displayTours.length === 0 ? (
+                <div className="text-center py-8 text-sm text-[#6b6b63]">
+                  {showHistory ? 'Aucune tournée dans l\'historique' : 'Aucune tournée en cours'}
+                </div>
               ) : (
-                tours.map((tour) => {
+                displayTours.map((tour) => {
                   const isTarget = targetTourId === tour.id
                   const isExpanded = expandedTours.has(tour.id)
                   const sortedStops = [...tour.stops].sort((a, b) => a.sequence - b.sequence)
@@ -776,7 +902,7 @@ function PlanificateurView() {
                               className="h-full rounded-full transition-all"
                               style={{
                                 width: `${panelPct}%`,
-                                background: tour.total_panels > 90 ? '#c7293a' : '#1a7f4b',
+                                background: tour.total_panels >= 80 ? '#1a7f4b' : tour.total_panels >= 50 ? '#d97706' : '#c7293a',
                               }}
                             />
                           </div>
@@ -845,7 +971,7 @@ function PlanificateurView() {
                                         <div className="mt-1 text-[10px] text-[#6b6b63] space-y-0.5">
                                           {stop.panel_details.map((item, i) => (
                                             <div key={i} className="flex items-center gap-1">
-                                              <span className="font-mono bg-white border border-[#e8e8e4] px-1 rounded text-[9px] shrink-0">{item.sku || '—'}</span>
+                                              <span className="font-mono bg-white border border-[#e8e8e4] px-1 rounded text-[9px] shrink-0">{item.sku?.trim() || '—'}</span>
                                               <span className="truncate">{item.title}</span>
                                               <span className="shrink-0 font-semibold text-[#1a1a2e]">×{item.qty}</span>
                                             </div>
@@ -899,8 +1025,8 @@ function PlanificateurView() {
                                     <div key={i} className="rounded-[8px] bg-[#f5f5f3] px-3 py-2">
                                       <div className="flex items-start justify-between gap-2">
                                         <div className="flex-1 min-w-0">
-                                          {item.sku && (
-                                            <span className="font-mono text-[10px] text-[#6b6b63] bg-white border border-[#e8e8e4] px-1.5 py-0.5 rounded mr-1.5">{item.sku}</span>
+                                          {(item.ref || item.variant_title) && (
+                                            <span className="font-mono text-[10px] text-[#6b6b63] bg-white border border-[#e8e8e4] px-1.5 py-0.5 rounded mr-1.5">{item.ref || item.variant_title}</span>
                                           )}
                                           <span className="text-xs text-[#1a1a2e] font-medium">{item.title}</span>
                                         </div>
@@ -922,6 +1048,7 @@ function PlanificateurView() {
                 })
               )}
             </div>
+            ) })()}
           </div>
         </div>
       </div>
@@ -934,18 +1061,44 @@ function PlanificateurView() {
           </span>
           <div className="flex items-center gap-2">
             <span className="text-sm text-white/60">Ajouter à :</span>
-            <select
-              value={targetTourId}
-              onChange={(e) => setTargetTourId(e.target.value)}
-              className="px-3 py-1.5 text-sm rounded-[10px] bg-white/10 border border-white/20 text-white outline-none"
-            >
-              <option value="">Choisir une tournée</option>
-              {tours.map((t) => (
-                <option key={t.id} value={t.id}>
-                  {t.name} {t.planned_date ? `· ${formatDate(t.planned_date)}` : ''}
-                </option>
-              ))}
-            </select>
+            <div ref={tourDropdownRef} className="relative">
+              <button
+                type="button"
+                onClick={() => setTourDropdownOpen((v) => !v)}
+                className="flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-[10px] bg-white/10 border border-white/20 text-white outline-none min-w-[160px] text-left"
+              >
+                <span className="flex-1 truncate">
+                  {targetTourId
+                    ? (() => {
+                        const t = tours.find((t) => t.id === targetTourId)
+                        return t ? `${t.name}${t.planned_date ? ` · ${formatDate(t.planned_date)}` : ''}` : 'Choisir une tournée'
+                      })()
+                    : 'Choisir une tournée'}
+                </span>
+                {tourDropdownOpen ? <ChevronUp size={14} className="shrink-0" /> : <ChevronDown size={14} className="shrink-0" />}
+              </button>
+              {tourDropdownOpen && (
+                <div className="absolute bottom-full mb-1 left-0 min-w-full bg-[#1a1a2e] border border-white/20 rounded-[10px] shadow-[0_-4px_20px_rgba(0,0,0,0.4)] overflow-hidden z-50">
+                  <button
+                    type="button"
+                    onClick={() => { setTargetTourId(''); setTourDropdownOpen(false) }}
+                    className={`w-full text-left px-3 py-2 text-sm hover:bg-white/10 ${!targetTourId ? 'text-white/40' : 'text-white/60'}`}
+                  >
+                    Choisir une tournée
+                  </button>
+                  {tours.filter(t => t.status !== 'completed' && t.status !== 'cancelled').map((t) => (
+                    <button
+                      key={t.id}
+                      type="button"
+                      onClick={() => { setTargetTourId(t.id); setTourDropdownOpen(false) }}
+                      className={`w-full text-left px-3 py-2 text-sm hover:bg-white/10 whitespace-nowrap ${targetTourId === t.id ? 'text-white font-medium' : 'text-white/80'}`}
+                    >
+                      {t.name}{t.planned_date ? ` · ${formatDate(t.planned_date)}` : ''}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
           </div>
           <button
             onClick={handleAddStops}
@@ -968,9 +1121,85 @@ function PlanificateurView() {
 
 // ─── Livreur View ─────────────────────────────────────────────────────────────
 
-type LivreurScreen = 'home' | 'loading' | 'tour'
+type LivreurScreen = 'home' | 'loading' | 'tour' | 'map'
 
 const DEPOT = 'Rue Lamartine, Zone Industrielle des Distraits, 18390 Saint-Germain-du-Puy, France'
+const DEPOT_COORDS: [number, number] = [2.4524, 47.0873]  // Saint-Germain-du-Puy
+const SERVICE_SECONDS = 10 * 60  // 10 min par arrêt pour déchargement
+
+function fmtETA(date: Date): string {
+  const h = date.getHours().toString().padStart(2, '0')
+  const m = date.getMinutes().toString().padStart(2, '0')
+  return `${h}h${m}`
+}
+
+async function geocodeForMap(address: string, token: string): Promise<[number, number] | null> {
+  try {
+    const res = await fetch(
+      `https://api.mapbox.com/geocoding/v5/mapbox.places/${encodeURIComponent(address)}.json?access_token=${token}&country=fr&limit=1&types=address`
+    )
+    if (!res.ok) return null
+    const data = await res.json()
+    const c = data.features?.[0]?.center
+    return c ? (c as [number, number]) : null
+  } catch { return null }
+}
+
+async function buildETAMap(
+  sortedStops: TourStop[],
+  coordsCache: Map<string, [number, number]>,
+  token: string
+): Promise<Map<string, string>> {
+  const result = new Map<string, string>()
+
+  // Delivered stops → affiche l'heure réelle
+  for (const s of sortedStops) {
+    if (s.status === 'delivered' && s.delivered_at) {
+      result.set(s.id, fmtETA(new Date(s.delivered_at)))
+    }
+  }
+
+  const pending = sortedStops.filter((s) => s.status === 'pending')
+  if (pending.length === 0) return result
+
+  // Point de départ : dernier arrêt livré (coord + heure réelle), sinon dépôt maintenant
+  const lastDelivered = [...sortedStops].reverse().find((s) => s.status === 'delivered')
+  let depCoord: [number, number] = DEPOT_COORDS
+  let depTime = Date.now()
+  if (lastDelivered) {
+    const c = coordsCache.get(lastDelivered.id)
+    if (c) depCoord = c
+    if (lastDelivered.delivered_at) depTime = new Date(lastDelivered.delivered_at).getTime()
+  }
+
+  // Waypoints : départ + arrêts pending qui ont des coords
+  const withCoords = pending
+    .map((s) => ({ s, coord: coordsCache.get(s.id) }))
+    .filter((x): x is { s: TourStop; coord: [number, number] } => !!x.coord)
+  if (withCoords.length === 0) return result
+
+  const wps: [number, number][] = [depCoord, ...withCoords.map((x) => x.coord)]
+  const capped = wps.slice(0, 25)
+
+  try {
+    const coordStr = capped.map((c) => c.join(',')).join(';')
+    const res = await fetch(
+      `https://api.mapbox.com/directions/v5/mapbox/driving/${coordStr}?overview=false&access_token=${token}`
+    )
+    if (!res.ok) return result
+    const data = await res.json()
+    const legs: { duration: number }[] = data.routes?.[0]?.legs ?? []
+
+    let t = depTime
+    for (let i = 0; i < withCoords.length && i < legs.length; i++) {
+      t += legs[i].duration * 1000
+      result.set(withCoords[i].s.id, fmtETA(new Date(t)))
+      t += SERVICE_SECONDS * 1000
+    }
+  } catch { /* best-effort */ }
+
+  return result
+}
 
 function LivreurView() {
   const [tours, setTours] = useState<Tour[]>([])
@@ -980,6 +1209,9 @@ function LivreurView() {
   const [stopIdx, setStopIdx] = useState(0)
   const [marking, setMarking] = useState(false)
   const [checkedItems, setCheckedItems] = useState<Set<string>>(new Set())
+  const [etaMap, setEtaMap] = useState<Map<string, string>>(new Map())
+  const coordsCache = useRef<Map<string, [number, number]>>(new Map())
+  const [navSheet, setNavSheet] = useState(false)
 
   const fetchTours = useCallback(async () => {
     setLoading(true)
@@ -1003,18 +1235,54 @@ function LivreurView() {
   useEffect(() => { fetchTours() }, [fetchTours])
 
   const tour = tours.find((t) => t.id === selectedTourId)
-  const sortedStops = tour ? [...tour.stops].sort((a, b) => a.sequence - b.sequence) : []
+  const sortedStopsForETA = tour ? [...tour.stops].sort((a, b) => a.sequence - b.sequence) : []
+
+  // Signature qui change à chaque livraison/échec pour déclencher le recalcul
+  const stopsSignature = sortedStopsForETA
+    .map((s) => `${s.id}:${s.status}:${s.delivered_at ?? ''}`)
+    .join('|')
+
+  useEffect(() => {
+    const token = process.env.NEXT_PUBLIC_MAPBOX_TOKEN ?? ''
+    if (!token || sortedStopsForETA.length === 0) return
+    let cancelled = false
+
+    async function run() {
+      // Géocode les arrêts manquants
+      await Promise.all(
+        sortedStopsForETA.map(async (stop) => {
+          if (coordsCache.current.has(stop.id)) return
+          const coord = await geocodeForMap(
+            `${stop.address1}, ${stop.city} ${stop.zip}, France`,
+            token
+          )
+          if (coord) coordsCache.current.set(stop.id, coord)
+        })
+      )
+      if (cancelled) return
+      const etas = await buildETAMap(sortedStopsForETA, coordsCache.current, token)
+      if (!cancelled) setEtaMap(etas)
+    }
+
+    run()
+    return () => { cancelled = true }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [stopsSignature])
+
+  const sortedStops = sortedStopsForETA  // alias — même tableau
   const deliveredCount = sortedStops.filter((s) => s.status === 'delivered').length
 
-  // Build loading list by SKU
-  const loadingAgg: Map<string, { sku: string; title: string; qty: number }> = new Map()
+  // Build loading list by SKU (or title+variant_title when SKU absent)
+  const loadingAgg: Map<string, { ref: string; title: string; variant_title: string; qty: number }> = new Map()
   if (tour) {
     for (const stop of tour.stops) {
       for (const item of stop.panel_details ?? []) {
-        const key = item.sku?.trim() || item.title
+        const ref = item.sku?.trim() || ''
+        const vt  = item.variant_title?.trim() || ''
+        const key = ref || (item.title + '::' + vt)
         const existing = loadingAgg.get(key)
         if (existing) existing.qty += item.qty
-        else loadingAgg.set(key, { sku: item.sku?.trim() ?? '', title: item.title, qty: item.qty })
+        else loadingAgg.set(key, { ref, title: item.title, variant_title: vt, qty: item.qty })
       }
     }
   }
@@ -1022,9 +1290,14 @@ function LivreurView() {
 
 
   const currentStop = sortedStops[stopIdx]
-  const stopMapsUrl = currentStop
-    ? `https://www.google.com/maps/dir/${encodeURIComponent(DEPOT)}/${encodeURIComponent(`${currentStop.address1}, ${currentStop.city} ${currentStop.zip}, France`)}`
-    : ''
+
+  // Full-tour Maps URL: depot → all pending stops in order
+  const tourMapsUrl = (() => {
+    const pending = sortedStops.filter((s) => s.status !== 'delivered' && s.status !== 'failed')
+    if (pending.length === 0) return ''
+    const waypoints = pending.map((s) => encodeURIComponent(`${s.address1}, ${s.city} ${s.zip}, France`))
+    return `https://www.google.com/maps/dir/${encodeURIComponent(DEPOT)}/${waypoints.join('/')}`
+  })()
 
   async function handleMarkDelivered() {
     if (!currentStop) return
@@ -1036,8 +1309,23 @@ function LivreurView() {
     })
     await fetchTours()
     setMarking(false)
-    // Auto-advance to next undelivered stop
-    const nextIdx = sortedStops.findIndex((s, i) => i > stopIdx && s.status !== 'delivered')
+    // Auto-advance to next actionable stop (skip delivered and failed)
+    const nextIdx = sortedStops.findIndex((s, i) => i > stopIdx && s.status !== 'delivered' && s.status !== 'failed')
+    if (nextIdx !== -1) setStopIdx(nextIdx)
+  }
+
+  async function handleMarkFailed() {
+    if (!currentStop) return
+    setMarking(true)
+    await fetch(`/api/delivery/stops/${currentStop.id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ status: 'failed' }),
+    })
+    await fetchTours()
+    setMarking(false)
+    // Auto-advance to next actionable stop
+    const nextIdx = sortedStops.findIndex((s, i) => i > stopIdx && s.status !== 'delivered' && s.status !== 'failed')
     if (nextIdx !== -1) setStopIdx(nextIdx)
   }
 
@@ -1125,6 +1413,14 @@ function LivreurView() {
                 <Truck size={24} strokeWidth={1.8} />
                 {deliveredCount > 0 ? 'Continuer la tournée' : 'Démarrer la tournée'}
               </button>
+              <button
+                onClick={() => setScreen('map')}
+                disabled={sortedStops.length === 0}
+                className="w-full flex items-center justify-center gap-3 py-4 rounded-[16px] border border-white/25 text-white font-semibold text-base disabled:opacity-30 active:bg-white/10 transition-colors"
+              >
+                <MapIcon size={20} strokeWidth={1.8} />
+                Voir l&apos;itinéraire
+              </button>
             </div>
           </div>
         ) : (
@@ -1136,9 +1432,21 @@ function LivreurView() {
     )
   }
 
+  // ── Screen: map ──
+  if (screen === 'map') {
+    return (
+      <TourMap
+        stops={sortedStops}
+        onBack={() => setScreen('home')}
+        precomputedCoords={coordsCache.current}
+        etaMap={etaMap}
+      />
+    )
+  }
+
   // ── Screen: loading list ──
   if (screen === 'loading') {
-    const allChecked = loadingList.length > 0 && loadingList.every((item) => checkedItems.has(item.sku || item.title))
+    const allChecked = loadingList.length > 0 && loadingList.every((item) => checkedItems.has(item.ref || item.title))
 
     function toggleItem(key: string) {
       setCheckedItems((prev) => {
@@ -1167,7 +1475,7 @@ function LivreurView() {
           ) : (
             <div className="divide-y divide-[#f0f0f0]">
               {loadingList.map((item, i) => {
-                const key = item.sku || item.title
+                const key = item.ref || item.title
                 const checked = checkedItems.has(key)
                 return (
                   <div
@@ -1188,9 +1496,11 @@ function LivreurView() {
                       )}
                     </div>
                     <div className={`flex-1 min-w-0 transition-all ${checked ? 'opacity-50' : ''}`}>
-                      {item.sku && (
-                        <div className={`font-mono text-xs text-[#6b6b63] mb-0.5 ${checked ? 'line-through' : ''}`}>{item.sku}</div>
-                      )}
+                      {item.ref ? (
+                        <div className={`font-mono text-xs text-[#6b6b63] mb-0.5 ${checked ? 'line-through' : ''}`}>{item.ref}</div>
+                      ) : item.variant_title ? (
+                        <div className={`font-mono text-xs text-[#6b6b63] mb-0.5 ${checked ? 'line-through' : ''}`}>{item.variant_title}</div>
+                      ) : null}
                       <div className={`font-semibold text-base leading-tight ${checked ? 'line-through text-[#6b6b63]' : 'text-[#1a1a2e]'}`}>
                         {item.title}
                       </div>
@@ -1239,7 +1549,66 @@ function LivreurView() {
     )
   }
 
+  const navMapsUrl = currentStop
+    ? `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(`${currentStop.address1}, ${currentStop.city} ${currentStop.zip}, France`)}&travelmode=driving`
+    : ''
+  const navWazeUrl = currentStop
+    ? `https://waze.com/ul?q=${encodeURIComponent(`${currentStop.address1}, ${currentStop.city}, France`)}&navigate=yes`
+    : ''
+
   return (
+    <>
+    {/* Nav bottom sheet */}
+    {navSheet && (
+      <div
+        className="fixed inset-0 z-50 bg-black/40"
+        onClick={() => setNavSheet(false)}
+      >
+        <div
+          className="absolute bottom-0 left-0 right-0 bg-white rounded-t-[24px] px-6 pt-5 pb-10 shadow-[0_-8px_32px_rgba(0,0,0,0.15)]"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <div className="w-10 h-1 bg-[#e8e8e4] rounded-full mx-auto mb-5" />
+          <p className="text-sm font-semibold text-[#1a1a2e] mb-1">Naviguer vers</p>
+          <p className="text-sm text-[#6b6b63] mb-5">
+            {currentStop?.address1}, {currentStop?.city}
+          </p>
+          <div className="grid grid-cols-2 gap-3">
+            <a
+              href={navMapsUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex flex-col items-center gap-2 py-4 rounded-[16px] bg-[#f5f5f3] active:bg-[#e8e8e4] transition-colors"
+              onClick={() => setNavSheet(false)}
+            >
+              <svg width="32" height="32" viewBox="0 0 48 48" fill="none">
+                <rect width="48" height="48" rx="12" fill="#4285F4"/>
+                <path d="M24 12C18.48 12 14 16.48 14 22c0 7.5 10 20 10 20s10-12.5 10-20c0-5.52-4.48-10-10-10zm0 13.5c-1.93 0-3.5-1.57-3.5-3.5s1.57-3.5 3.5-3.5 3.5 1.57 3.5 3.5-1.57 3.5-3.5 3.5z" fill="white"/>
+              </svg>
+              <span className="text-sm font-semibold text-[#1a1a2e]">Google Maps</span>
+            </a>
+            <a
+              href={navWazeUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex flex-col items-center gap-2 py-4 rounded-[16px] bg-[#f5f5f3] active:bg-[#e8e8e4] transition-colors"
+              onClick={() => setNavSheet(false)}
+            >
+              <svg width="32" height="32" viewBox="0 0 48 48" fill="none">
+                <rect width="48" height="48" rx="12" fill="#05C8F7"/>
+                <ellipse cx="24" cy="22" rx="12" ry="11" fill="white"/>
+                <circle cx="19" cy="25" r="2" fill="#1a1a2e"/>
+                <circle cx="29" cy="25" r="2" fill="#1a1a2e"/>
+                <path d="M20 29c1.1 1.2 6.9 1.2 8 0" stroke="#1a1a2e" strokeWidth="1.5" strokeLinecap="round"/>
+                <circle cx="30" cy="34" r="2.5" fill="white" stroke="#1a1a2e" strokeWidth="1.5"/>
+                <circle cx="20" cy="34" r="2.5" fill="white" stroke="#1a1a2e" strokeWidth="1.5"/>
+              </svg>
+              <span className="text-sm font-semibold text-[#1a1a2e]">Waze</span>
+            </a>
+          </div>
+        </div>
+      </div>
+    )}
     <div className="w-full flex flex-col" style={{ minHeight: 'calc(100vh - 110px)' }}>
       {/* Top bar: back + Maps */}
       <div className="flex items-center justify-between mb-4">
@@ -1252,9 +1621,9 @@ function LivreurView() {
         <div className="text-sm font-medium text-[#6b6b63]">
           {stopIdx + 1} / {sortedStops.length}
         </div>
-        {stopMapsUrl && (
+        {tourMapsUrl && (
           <a
-            href={stopMapsUrl}
+            href={tourMapsUrl}
             target="_blank"
             rel="noopener noreferrer"
             className="flex items-center gap-1.5 px-3 py-2 rounded-[12px] bg-[#1a7f4b] text-white text-sm font-medium"
@@ -1276,7 +1645,10 @@ function LivreurView() {
               key={s.id}
               onClick={() => setStopIdx(i)}
               className={`h-1 flex-1 rounded-full cursor-pointer transition-all ${
-                i === stopIdx ? 'bg-[#1a1a2e]' : s.status === 'delivered' ? 'bg-[#4ade80]' : 'bg-[#e8e8e4]'
+                i === stopIdx ? 'bg-[#1a1a2e]'
+                : s.status === 'delivered' ? 'bg-[#4ade80]'
+                : s.status === 'failed' ? 'bg-[#f97316]'
+                : 'bg-[#e8e8e4]'
               }`}
             />
           ))}
@@ -1291,6 +1663,19 @@ function LivreurView() {
             </div>
             <div className="text-lg text-[#1a1a2e] mb-1">{currentStop.address1}</div>
             <div className="text-lg text-[#6b6b63]">{currentStop.city} {currentStop.zip}</div>
+            {etaMap.get(currentStop.id) && (
+              <div className="mt-2 inline-flex items-center gap-1.5 text-sm font-medium text-[#1a7f4b]">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
+                Arrivée estimée : {etaMap.get(currentStop.id)}
+              </div>
+            )}
+            <button
+              onClick={() => setNavSheet(true)}
+              className="mt-3 flex items-center gap-2 px-4 py-2.5 rounded-[12px] bg-[#1a1a2e] text-white text-sm font-semibold active:bg-[#2d2d4e] transition-colors"
+            >
+              <MapPin size={15} />
+              M&apos;y rendre
+            </button>
 
             {/* Products */}
             {currentStop.panel_details?.length > 0 && (
@@ -1299,7 +1684,9 @@ function LivreurView() {
                 {currentStop.panel_details.map((item, i) => (
                   <div key={i} className="flex items-center gap-3 bg-[#f5f5f3] rounded-[12px] px-4 py-3">
                     <div className="flex-1 min-w-0">
-                      {item.sku && <div className="font-mono text-xs text-[#6b6b63]">{item.sku}</div>}
+                      {item.sku?.trim() && (
+                        <div className="font-mono text-xs text-[#6b6b63]">{item.sku.trim()}</div>
+                      )}
                       <div className="font-medium text-[#1a1a2e] text-sm leading-tight">{item.title}</div>
                     </div>
                     <div className="w-10 h-10 rounded-[10px] bg-[#1a1a2e] text-white flex items-center justify-center font-bold text-lg shrink-0">
@@ -1333,7 +1720,7 @@ function LivreurView() {
         </div>
 
         {/* Delivery button — full width, pinned to bottom */}
-        <div className="px-5 pb-5">
+        <div className="px-5 pb-5 space-y-2">
           {currentStop.status === 'delivered' ? (
             <div className="w-full py-4 rounded-[16px] bg-[#d1fae5] text-[#1a7f4b] font-bold text-center text-lg">
               Livré ✓
@@ -1343,18 +1730,32 @@ function LivreurView() {
                 </span>
               )}
             </div>
+          ) : currentStop.status === 'failed' ? (
+            <div className="w-full py-4 rounded-[16px] bg-[#fff7ed] text-[#c2680a] font-bold text-center text-lg">
+              Non livré — à replanifier
+            </div>
           ) : (
-            <button
-              onClick={handleMarkDelivered}
-              disabled={marking}
-              className="w-full py-5 rounded-[16px] bg-[#6b21a8] text-white font-bold text-lg disabled:opacity-60 active:bg-[#7c3aed] transition-colors"
-            >
-              {marking ? 'Enregistrement...' : 'Marquer comme livré'}
-            </button>
+            <>
+              <button
+                onClick={handleMarkDelivered}
+                disabled={marking}
+                className="w-full py-5 rounded-[16px] bg-[#6b21a8] text-white font-bold text-lg disabled:opacity-60 active:bg-[#7c3aed] transition-colors"
+              >
+                {marking ? 'Enregistrement...' : 'Marquer comme livré'}
+              </button>
+              <button
+                onClick={handleMarkFailed}
+                disabled={marking}
+                className="w-full py-3 rounded-[16px] border border-[#e8e8e4] bg-white text-[#c2680a] font-semibold text-sm disabled:opacity-60 active:bg-[#fff7ed] transition-colors"
+              >
+                Non livré — reporter
+              </button>
+            </>
           )}
         </div>
       </div>
     </div>
+    </>
   )
 }
 
@@ -1721,6 +2122,25 @@ function SavView() {
                     </div>
                   </div>
                 </div>
+
+                {/* Mini-carte position Khalid */}
+                {(() => {
+                  const tourStops = entries
+                    .filter(e => e.tour_name === rep.tour_name && e.stop_status !== null)
+                    .sort((a, b) => a.stop_sequence - b.stop_sequence)
+                    .map(e => ({
+                      id: e.id,
+                      address1: e.address1,
+                      city: e.city,
+                      zip: e.zip,
+                      customer_name: e.customer_name,
+                      status: e.stop_status!,
+                      delivered_at: e.delivered_at,
+                    }))
+                  const hasDelivered = tourStops.some(s => s.status === 'delivered')
+                  if (!hasDelivered) return null
+                  return <SavPositionMap stops={tourStops} />
+                })()}
 
               </div>
             )

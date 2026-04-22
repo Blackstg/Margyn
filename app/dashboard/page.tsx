@@ -121,12 +121,34 @@ async function fetchSnapshotData(brand: Brand, date: string): Promise<SnapshotDa
     .from('campaigns').select('id').eq('brand', brand)
   const campaignIds = (campaignMeta ?? []).map((c) => c.id)
 
-  const [snapshotsRes, spendRes, campaignStatsRes] = await Promise.all([
+  // Previous month for Bowa CPO fulfillment estimate
+  const dateObj    = new Date(date)
+  const prevMonthStart = new Date(dateObj.getFullYear(), dateObj.getMonth() - 1, 1)
+  const prevMonthEnd   = new Date(dateObj.getFullYear(), dateObj.getMonth(), 0)
+  const fmtD = (d: Date) => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`
+  const prevMonthStr = `${prevMonthStart.getFullYear()}-${String(prevMonthStart.getMonth()+1).padStart(2,'0')}-01`
+
+  const [snapshotsRes, spendRes, campaignStatsRes, fixedCostsRaw, , sampleTodayRes, samplePrevRes] = await Promise.all([
     supabase.from('daily_snapshots').select('total_sales, order_count, gross_profit, cogs, fulfillment_cost')
       .eq('date', date).in('brand', brands),
     supabase.from('ad_spends').select('spend').eq('date', date).in('brand', brands),
     campaignIds.length > 0
       ? supabase.from('campaign_stats').select('spend').eq('date', date).in('campaign_id', campaignIds)
+      : Promise.resolve({ data: [] }),
+    brand === 'bowa'
+      ? fetch(`/api/fixed-costs?brand=bowa`).then(r => r.json()).catch(() => [])
+      : Promise.resolve([]),
+    Promise.resolve({ data: [] }), // unused slot — panel orders computed via product_sales below
+    // Distinct panel order_ids for today (orders with ≥1 non-échantillon product)
+    brand === 'bowa'
+      ? supabase.from('product_sales').select('order_id')
+          .eq('date', date).eq('brand', 'bowa').not('product_title', 'ilike', '%chantillon%')
+      : Promise.resolve({ data: [] }),
+    // Distinct panel order_ids for previous month
+    brand === 'bowa'
+      ? supabase.from('product_sales').select('order_id')
+          .gte('date', fmtD(prevMonthStart)).lte('date', fmtD(prevMonthEnd))
+          .eq('brand', 'bowa').not('product_title', 'ilike', '%chantillon%')
       : Promise.resolve({ data: [] }),
   ])
 
@@ -136,11 +158,39 @@ async function fetchSnapshotData(brand: Brand, date: string): Promise<SnapshotDa
       order_count:      acc.order_count      + (r.order_count      ?? 0),
       cogs:             acc.cogs             + (r.cogs             ?? 0),
       fulfillment_cost: acc.fulfillment_cost + (r.fulfillment_cost ?? 0),
-      gross_profit: 0, // computed below
+      gross_profit: 0,
     }),
     { total_sales: 0, order_count: 0, gross_profit: 0, cogs: 0, fulfillment_cost: 0 }
   )
-  snap.gross_profit = snap.total_sales - snap.cogs
+
+  // TVA correction for Bowa
+  snap.gross_profit = brand === 'bowa'
+    ? Math.round(snap.total_sales * (5 / 6)) - snap.cogs
+    : snap.total_sales - snap.cogs
+
+  // Bowa fulfillment: CPO from previous month × non-sample orders today
+  if (brand === 'bowa') {
+    type FC = { amount?: number | null; category?: string | null; month?: string | null }
+    const allFC: FC[] = Array.isArray(fixedCostsRaw) ? fixedCostsRaw : []
+    const sentinelFulfillment = allFC
+      .filter(r => r.month === '1900-01-01' && r.category === 'fulfillment')
+      .reduce((s, r) => s + (r.amount ?? 0), 0)
+    const prevMonthlyFulfillment = allFC
+      .filter(r => r.month === prevMonthStr && r.category === 'fulfillment')
+      .reduce((s, r) => s + (r.amount ?? 0), 0)
+    const prevTotalFulfillment = sentinelFulfillment + prevMonthlyFulfillment
+
+    // Count distinct order_ids with at least 1 panel product (non-échantillon)
+    type OrderIdRow = { order_id: string | null }
+    const todayRows = ((sampleTodayRes as { data: OrderIdRow[] | null }).data ?? []) as OrderIdRow[]
+    const prevRows  = ((samplePrevRes  as { data: OrderIdRow[] | null }).data ?? []) as OrderIdRow[]
+    const todayPanelOrders = new Set(todayRows.map(r => r.order_id).filter(Boolean)).size
+    const prevPanelOrders  = new Set(prevRows.map(r => r.order_id).filter(Boolean)).size
+
+    if (prevPanelOrders > 0 && prevTotalFulfillment > 0) {
+      snap.fulfillment_cost = Math.round((prevTotalFulfillment / prevPanelOrders) * todayPanelOrders)
+    }
+  }
 
   // Use campaign_stats as source of truth for spend (more granular than ad_spends)
   const spendFromCampaigns = ((campaignStatsRes as { data: { spend?: number | null }[] | null }).data ?? [])
@@ -150,7 +200,6 @@ async function fetchSnapshotData(brand: Brand, date: string): Promise<SnapshotDa
   )
   const spend = Math.max(spendFromCampaigns, spendFromAdSpends)
 
-  // Return null only if there's truly nothing — no sales AND no spend
   if (snap.total_sales === 0 && spend === 0) return null
 
   return { ...snap, spend }
@@ -254,18 +303,17 @@ async function fetchKpiData(brand: Brand, from: string, to: string, days: number
   const suppQuery = brand === 'bowa'
     ? supabase.from('supplementary_revenue').select('source, amount, month')
         .gte('month', from.slice(0, 7) + '-01')
-        .lte('month', new Date().toISOString().slice(0, 7) + '-01')
+        .lte('month', to.slice(0, 7) + '-01')
         .eq('brand', 'bowa')
     : Promise.resolve({ data: [] })
 
-  const [snapshotsRes, marketingRes, fixedCostsRes, settingsRes, suppRes] = await Promise.all([
+  const [snapshotsRes, marketingRes, fixedCostsRaw, settingsRes, suppRes] = await Promise.all([
     supabase.from('daily_snapshots').select('total_sales, gross_profit, order_count, cogs, fulfillment_cost, returns')
       .gte('date', from).lte('date', to).in('brand', brands),
     supabase.from('ad_spends').select('spend')
       .gte('date', from).lte('date', to).in('brand', brands),
-    supabase.from('fixed_costs').select('amount, category')
-      .eq('month', '1900-01-01')
-      .eq('brand', brand),
+    // Use API route (service role) to bypass RLS on monthly rows
+    fetch(`/api/fixed-costs?brand=${brand}`).then(r => r.json()).catch(() => []),
     supabase.from('brand_settings').select('shipping_cost_per_order, transaction_fee_rate').eq('brand', brand).single(),
     suppQuery,
   ])
@@ -275,16 +323,45 @@ async function fetchKpiData(brand: Brand, from: string, to: string, days: number
     (s: number, r: { spend?: number | null }) => s + (r.spend ?? 0), 0
   )
 
-  // Fixed costs: read from sentinel row (1900-01-01), prorate to the selected period
-  type FixedRow = { amount?: number | null; category?: string | null }
-  let totalFixedApp = 0, totalFixedOther = 0
-  for (const r of (fixedCostsRes.data ?? []) as FixedRow[]) {
+  // Fixed costs: separate sentinel (recurring) from monthly fulfillment extras
+  type FixedRow = { amount?: number | null; category?: string | null; month?: string | null; label?: string | null }
+  const fromMonth = from.slice(0, 7) + '-01'
+  const toMonth   = to.slice(0, 7)   + '-01'
+  const allFixedCosts: FixedRow[] = Array.isArray(fixedCostsRaw) ? fixedCostsRaw : []
+  let totalFixedApp = 0, totalFixedTeam = 0, totalFixedInfra = 0
+  let sentinelFulfillment = 0
+  const sentinelFulfillmentRows: { label: string; amount: number }[] = []
+  const monthlyFulfillmentRows:  { label: string; amount: number }[] = []
+  for (const r of allFixedCosts) {
     const amount = r.amount ?? 0
-    if (r.category === 'app') totalFixedApp += amount
-    else                      totalFixedOther += amount
+    const isSentinel = r.month === '1900-01-01'
+    const isInPeriod = r.month != null && r.month >= fromMonth && r.month <= toMonth
+
+    if (isSentinel) {
+      if (r.category === 'app')              totalFixedApp  += amount
+      else if (r.category === 'fulfillment') {
+        sentinelFulfillment += amount
+        sentinelFulfillmentRows.push({ label: r.label ?? 'Fixe', amount })
+      }
+      else if (r.category === 'team')        totalFixedTeam += amount
+      else                                   totalFixedInfra += amount
+    } else if (isInPeriod && r.category === 'fulfillment') {
+      monthlyFulfillmentRows.push({ label: r.label ?? 'Variable', amount })
+    }
+    // Monthly non-fulfillment rows are ignored here (handled separately as variable costs)
   }
-  const app_charges = Math.round(totalFixedApp   * (days / 30.44))
-  const op_expenses = Math.round(totalFixedOther * (days / 30.44))
+
+  // For a full calendar month (from = 1st, days = full month), use 100% of sentinel costs.
+  // For partial periods (7j, 30j, MTD), prorate by days/30.44.
+  const [fy, fm] = from.split('-').map(Number)
+  const daysInFromMonth = new Date(fy, fm, 0).getDate()
+  const isFullCalendarMonth = from.endsWith('-01') && days === daysInFromMonth && fromMonth === toMonth
+  const sentinelRatio = isFullCalendarMonth ? 1 : days / 30.44
+
+  const app_charges   = Math.round(totalFixedApp   * sentinelRatio)
+  const salaires      = Math.round(totalFixedTeam  * sentinelRatio)
+  const charges_infra = Math.round(totalFixedInfra * sentinelRatio)
+  const op_expenses   = salaires + charges_infra
 
   const settingsData = (settingsRes.data as { shipping_cost_per_order?: number; transaction_fee_rate?: number } | null)
   const shippingRateRaw    = settingsData?.shipping_cost_per_order
@@ -292,12 +369,77 @@ async function fetchKpiData(brand: Brand, from: string, to: string, days: number
   const transactionFeeRate = settingsData?.transaction_fee_rate ?? 0.017
   const transaction_fees   = Math.round(snaps.total_sales * transactionFeeRate)
 
-  // For Bowa: fulfillment is "unconfigured" only if the row doesn't exist yet
-  const fulfillment_configured = brand !== 'bowa' || shippingRateRaw != null
+  // Build fulfillment breakdown for tooltip (sentinel prorated, monthly at face value)
+  const monthlyFulfillment = monthlyFulfillmentRows.reduce((s, r) => s + r.amount, 0)
+  const fulfillment_breakdown: { label: string; amount: number }[] = [
+    ...sentinelFulfillmentRows.map(r => ({ label: r.label, amount: Math.round(r.amount * sentinelRatio) })),
+    ...monthlyFulfillmentRows,
+  ]
+
+  // For Bowa: fulfillment is "unconfigured" only if no fulfillment fixed costs AND no per-order rate
+  const fulfillment_configured = brand !== 'bowa' || sentinelFulfillment > 0 || monthlyFulfillment > 0 || shippingRateRaw != null
 
   let fulfillment      = Math.round(shippingRate * snaps.order_count)
   let fulfillment_note: string | undefined
-  if (brand === 'moom') {
+  let fulfillment_breakdown_final = fulfillment_breakdown
+
+  if (brand === 'bowa' && (sentinelFulfillment > 0 || monthlyFulfillment > 0)) {
+    const fmtDate = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+    const fmtEurSimple = (n: number) => new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR', maximumFractionDigits: 0 }).format(n)
+    type ORow = { order_id: string | null; quantity?: number | null }
+
+    if (isFullCalendarMonth) {
+      // Mois complet : coût réel (sentinel + mensuel), CPO = coût réel / commandes panneaux du mois
+      const actualFulfillment = sentinelFulfillment + monthlyFulfillment
+      fulfillment = actualFulfillment
+      const curPanelRes = await supabase.from('product_sales').select('order_id, quantity')
+        .gte('date', from).lte('date', to)
+        .eq('brand', 'bowa').not('product_title', 'ilike', '%chantillon%')
+      const curRows = (curPanelRes.data ?? []) as ORow[]
+      const curPanelOrders = new Set(curRows.map(r => r.order_id).filter(Boolean)).size
+      const curPanelUnits  = curRows.reduce((s, r) => s + (r.quantity ?? 0), 0)
+      if (curPanelOrders > 0) {
+        const cpoLine = `${fmtEurSimple(Math.round(actualFulfillment / curPanelOrders))}/cmd`
+        const pppLine = curPanelUnits > 0 ? `${fmtEurSimple(Math.round(actualFulfillment / curPanelUnits))}/panneau` : ''
+        fulfillment_note = [cpoLine, pppLine].filter(Boolean).join(' · ')
+      }
+    } else {
+      // Période partielle (7j/30j) : CPO mois précédent × commandes panneaux de la période
+      const prevMonthStart = new Date(fy, fm - 2, 1)
+      const prevMonthEnd   = new Date(fy, fm - 1, 0)
+      const prevMonthStr   = `${prevMonthStart.getFullYear()}-${String(prevMonthStart.getMonth() + 1).padStart(2, '0')}-01`
+
+      const prevMonthlyFulfillment = allFixedCosts
+        .filter(r => r.month === prevMonthStr && r.category === 'fulfillment')
+        .reduce((s, r) => s + (r.amount ?? 0), 0)
+      const prevTotalFulfillment = sentinelFulfillment + prevMonthlyFulfillment
+
+      const [prevPanelRes, curPanelRes] = await Promise.all([
+        supabase.from('product_sales').select('order_id')
+          .gte('date', fmtDate(prevMonthStart)).lte('date', fmtDate(prevMonthEnd))
+          .eq('brand', 'bowa').not('product_title', 'ilike', '%chantillon%'),
+        supabase.from('product_sales').select('order_id, quantity')
+          .gte('date', from).lte('date', to)
+          .eq('brand', 'bowa').not('product_title', 'ilike', '%chantillon%'),
+      ])
+
+      const prevPanelOrders = new Set(((prevPanelRes.data ?? []) as ORow[]).map(r => r.order_id).filter(Boolean)).size
+      const curRows         = (curPanelRes.data ?? []) as ORow[]
+      const curPanelOrders  = new Set(curRows.map(r => r.order_id).filter(Boolean)).size
+      const curPanelUnits   = curRows.reduce((s, r) => s + (r.quantity ?? 0), 0)
+
+      if (prevPanelOrders > 0 && prevTotalFulfillment > 0) {
+        const cpo = prevTotalFulfillment / prevPanelOrders
+        fulfillment = Math.round(cpo * curPanelOrders)
+        const cpoLine = `${fmtEurSimple(Math.round(cpo))}/cmd (mois précédent)`
+        const pppLine = curPanelUnits > 0 ? `${fmtEurSimple(Math.round(fulfillment / curPanelUnits))}/panneau` : ''
+        fulfillment_note = [cpoLine, pppLine].filter(Boolean).join(' · ')
+        fulfillment_breakdown_final = []
+      } else {
+        fulfillment = Math.round(sentinelFulfillment * sentinelRatio) + monthlyFulfillment
+      }
+    }
+  } else if (brand === 'moom') {
     const mf = await fetchMoomFulfillment(from, to, snaps.order_count)
     if (mf.fulfillment >= 0) {
       fulfillment      = mf.fulfillment
@@ -305,25 +447,23 @@ async function fetchKpiData(brand: Brand, from: string, to: string, days: number
     }
   }
 
-  // Supplementary revenue (Bowa only) — prorate same as fixed costs
-  const avgOf = (map: Map<string, number>) => {
-    const vals = Array.from(map.values())
-    return vals.length > 0 ? vals.reduce((a, b) => a + b, 0) / vals.length : 0
-  }
+  // Supplementary revenue (Bowa only) — sum actual amounts for the period
   type SuppRow = { source: string; amount?: number | null; month: string }
-  const bySourceByMonth = new Map<string, Map<string, number>>()
+  const bySource = new Map<string, number>()
   for (const r of ((suppRes as { data: SuppRow[] | null }).data ?? []) as SuppRow[]) {
-    const month = r.month.slice(0, 7)
     const src = r.source
-    if (!bySourceByMonth.has(src)) bySourceByMonth.set(src, new Map())
-    const srcMap = bySourceByMonth.get(src)!
-    srcMap.set(month, (srcMap.get(month) ?? 0) + (r.amount ?? 0))
+    bySource.set(src, (bySource.get(src) ?? 0) + (r.amount ?? 0))
   }
-  const supplementary_breakdown = Array.from(bySourceByMonth.entries()).map(([source, monthMap]) => ({
-    source,
-    amount: Math.round(avgOf(monthMap) * (days / 30.44)),
-  })).filter(i => i.amount > 0)
+  const supplementary_breakdown = Array.from(bySource.entries())
+    .map(([source, amount]) => ({ source, amount: Math.round(amount) }))
+    .filter(i => i.amount > 0)
   const supplementary_ca = supplementary_breakdown.reduce((s, i) => s + i.amount, 0)
+
+  // TVA correction for Bowa: Shopify revenue is TTC, COGS are HT.
+  // Gross profit must be computed on HT basis: (CA TTC + Supp CA) × 5/6 − COGS
+  const gross_profit = brand === 'bowa'
+    ? Math.round((snaps.total_sales + supplementary_ca) * (5 / 6)) - snaps.cogs
+    : snaps.gross_profit
 
   // Gifting columns — fetched separately, gracefully degrade if columns don't exist yet
   let gifting_count = 0
@@ -342,8 +482,10 @@ async function fetchKpiData(brand: Brand, from: string, to: string, days: number
   } catch { /* columns not yet migrated — default to 0 */ }
 
   return {
-    ...snaps, fulfillment, marketing, op_expenses, app_charges, transaction_fees, net_profit: null,
+    ...snaps, gross_profit, fulfillment, marketing, op_expenses, app_charges, transaction_fees, net_profit: null,
+    salaires, charges_infra,
     gifting_count, gifting_cogs, fulfillment_note, fulfillment_configured,
+    ...(fulfillment_breakdown_final.length > 0 ? { fulfillment_breakdown: fulfillment_breakdown_final } : {}),
     ...(brand === 'bowa' && supplementary_ca > 0 ? { supplementary_ca, supplementary_breakdown } : {}),
   }
 }
@@ -413,42 +555,87 @@ async function fetchRoasData(
 }
 
 async function fetchBestSellers(brand: Brand, from: string, to: string): Promise<BestSeller[]> {
-  const [salesRes, productsRes] = await Promise.all([
+  const [salesRes, productsRes, variantsRes] = await Promise.all([
     supabase
       .from('product_sales')
-      .select('product_title, quantity, revenue')
+      .select('product_title, quantity, revenue, shopify_product_id')
       .eq('brand', brand)
       .gte('date', from)
       .lte('date', to)
       .limit(10000),
     supabase
       .from('products')
-      .select('title, image_url')
+      .select('shopify_id, title, image_url, cost_price, sell_price')
       .eq('brand', brand),
+    supabase
+      .from('product_variants')
+      .select('shopify_product_id, product_title, cost_price, sell_price')
+      .eq('brand', brand)
+      .not('cost_price', 'is', null),
   ])
 
-  const imageByTitle = new Map<string, string | null>()
-  for (const p of productsRes.data ?? []) imageByTitle.set(p.title, p.image_url ?? null)
+  // Variant aggregates keyed by shopify_product_id AND by product_title (double fallback)
+  type Agg = { costSum: number; sellSum: number; count: number }
+  const varByPid   = new Map<string, Agg>()
+  const varByTitle = new Map<string, Agg>()
+  for (const v of variantsRes.data ?? []) {
+    const add = (map: Map<string, Agg>, key: string) => {
+      const prev = map.get(key) ?? { costSum: 0, sellSum: 0, count: 0 }
+      map.set(key, { costSum: prev.costSum + (v.cost_price ?? 0), sellSum: prev.sellSum + (v.sell_price ?? 0), count: prev.count + 1 })
+    }
+    if (v.shopify_product_id) add(varByPid,   v.shopify_product_id)
+    if (v.product_title)      add(varByTitle, v.product_title)
+  }
+  const avgCost  = (a: Agg) => a.costSum / a.count
+  const avgSell  = (a: Agg) => a.sellSum / a.count
 
-  const byTitle = new Map<string, { quantity: number; revenue: number }>()
+  // Primary lookup by shopify_id, with variant fallback when cost_price is null
+  const imageById = new Map<string, string | null>()
+  const costById  = new Map<string, number | null>()
+  const sellById  = new Map<string, number | null>()
+  for (const p of productsRes.data ?? []) {
+    if (!p.shopify_id) continue
+    const va = varByPid.get(p.shopify_id)
+    imageById.set(p.shopify_id, p.image_url ?? null)
+    costById.set(p.shopify_id,  p.cost_price  ?? (va ? avgCost(va) : null))
+    sellById.set(p.shopify_id,  p.sell_price  ?? (va ? avgSell(va) : null))
+  }
+  // Also cover products absent from products table but present in product_variants
+  for (const [pid, va] of varByPid.entries()) {
+    if (!costById.has(pid)) {
+      costById.set(pid, avgCost(va))
+      sellById.set(pid, avgSell(va))
+    }
+  }
+
+  // Aggregate sales by title, tracking shopify_product_id
+  const byTitle = new Map<string, { quantity: number; revenue: number; shopify_product_id: string | null }>()
   for (const r of salesRes.data ?? []) {
-    const prev = byTitle.get(r.product_title) ?? { quantity: 0, revenue: 0 }
+    const prev = byTitle.get(r.product_title) ?? { quantity: 0, revenue: 0, shopify_product_id: r.shopify_product_id ?? null }
     byTitle.set(r.product_title, {
-      quantity: prev.quantity + (r.quantity ?? 0),
-      revenue:  prev.revenue  + (r.revenue  ?? 0),
+      quantity:           prev.quantity + (r.quantity ?? 0),
+      revenue:            prev.revenue  + (r.revenue  ?? 0),
+      shopify_product_id: prev.shopify_product_id ?? r.shopify_product_id ?? null,
     })
   }
 
   const totalRevenue = Array.from(byTitle.values()).reduce((s, v) => s + v.revenue, 0)
 
   return Array.from(byTitle.entries())
-    .map(([title, v]) => ({
-      title,
-      quantity: v.quantity,
-      revenue: Math.round(v.revenue * 100) / 100,
-      revenuePct: totalRevenue > 0 ? (v.revenue / totalRevenue) * 100 : 0,
-      image_url: imageByTitle.get(title) ?? null,
-    }))
+    .map(([title, v]) => {
+      const pid = v.shopify_product_id
+      // 1. By shopify_product_id  2. By title via variants  3. null
+      const vt = varByTitle.get(title)
+      return {
+        title,
+        quantity:   v.quantity,
+        revenue:    Math.round(v.revenue * 100) / 100,
+        revenuePct: totalRevenue > 0 ? (v.revenue / totalRevenue) * 100 : 0,
+        image_url:  pid ? (imageById.get(pid) ?? null) : null,
+        cost_price: pid ? (costById.get(pid)  ?? (vt ? avgCost(vt) : null)) : (vt ? avgCost(vt) : null),
+        sell_price: pid ? (sellById.get(pid)  ?? (vt ? avgSell(vt) : null)) : (vt ? avgSell(vt) : null),
+      }
+    })
     .sort((a, b) => b.quantity - a.quantity)
     .slice(0, 6)
 }
@@ -533,17 +720,15 @@ async function fetchAnnualData(brand: Brand, year: number): Promise<MonthPoint[]
   const to   = `${year}-12-31`
   const brands = brandFilter(brand)
 
-  const [snapshotsRes, marketingRes, fixedCostsRes, settingsRes] = await Promise.all([
+  const [snapshotsRes, marketingRes, fixedCostsRaw, settingsRes] = await Promise.all([
     supabase.from('daily_snapshots')
       .select('date, total_sales, gross_profit, order_count')
       .gte('date', from).lte('date', to).in('brand', brands),
     supabase.from('ad_spends')
       .select('date, spend')
       .gte('date', from).lte('date', to).in('brand', brands),
-    supabase.from('fixed_costs')
-      .select('amount, category')
-      .eq('month', '1900-01-01')
-      .eq('brand', brand),
+    // Use API route (service role) to bypass RLS on monthly rows
+    fetch(`/api/fixed-costs?brand=${brand}`).then(r => r.json()).catch(() => []),
     supabase.from('brand_settings')
       .select('shipping_cost_per_order, transaction_fee_rate')
       .eq('brand', brand).single(),
@@ -568,15 +753,24 @@ async function fetchAnnualData(brand: Brand, year: number): Promise<MonthPoint[]
     byMonth.set(m, { ...prev, marketing: prev.marketing + (r.spend ?? 0) })
   }
 
-  // Fixed costs: sentinel template — same amount applied to every month
-  type FixedRow = { amount?: number | null; category?: string | null }
-  let fixedApp = 0, fixedOther = 0
-  for (const r of (fixedCostsRes.data ?? []) as FixedRow[]) {
+  // Fixed costs: all rows from API (bypass RLS), split sentinel vs monthly in JS
+  type FixedRow = { amount?: number | null; category?: string | null; month?: string | null }
+  const allFixedCosts: FixedRow[] = Array.isArray(fixedCostsRaw) ? fixedCostsRaw : []
+  let fixedApp = 0, fixedOther = 0, fixedFulfillmentSentinel = 0
+  const monthlyFulfillmentByMonth = new Map<number, number>()
+  for (const r of allFixedCosts) {
     const amount = r.amount ?? 0
-    if (r.category === 'app') fixedApp += amount
-    else                      fixedOther += amount
+    if (r.month === '1900-01-01') {
+      if (r.category === 'app')              fixedApp += amount
+      else if (r.category === 'fulfillment') fixedFulfillmentSentinel += amount
+      else                                   fixedOther += amount
+    } else if (r.category === 'fulfillment' && r.month) {
+      const m = new Date(r.month + 'T00:00:00').getMonth() + 1
+      monthlyFulfillmentByMonth.set(m, (monthlyFulfillmentByMonth.get(m) ?? 0) + amount)
+    }
   }
-  const fixedTemplate = { app: fixedApp, other: fixedOther }
+
+  const fixedTemplate = { app: fixedApp, other: fixedOther, fulfillmentSentinel: fixedFulfillmentSentinel }
 
   const settingsData = (settingsRes.data as { shipping_cost_per_order?: number; transaction_fee_rate?: number } | null)
   const shippingRate = settingsData?.shipping_cost_per_order ?? 17
@@ -598,7 +792,12 @@ async function fetchAnnualData(brand: Brand, year: number): Promise<MonthPoint[]
     const caHT         = d.ca - tva
     const grossProfitHT = d.gross_profit - tva
 
-    const fulfillment      = Math.round(shippingRate * d.order_count)
+    // For Bowa: sentinel fulfillment + monthly variable fulfillment; otherwise per-order rate
+    const monthlyFulfillmentExtra = monthlyFulfillmentByMonth.get(month) ?? 0
+    const totalFulfillment = fixed.fulfillmentSentinel + monthlyFulfillmentExtra
+    const fulfillment = brand === 'bowa' && totalFulfillment > 0
+      ? totalFulfillment
+      : Math.round(shippingRate * d.order_count)
     const transaction_fees = Math.round(caHT * feeRate)
     const net_margin = grossProfitHT - d.marketing - fulfillment - transaction_fees - fixed.app - fixed.other
     const isFuture = year > currentYear || (year === currentYear && month > currentMonth)
@@ -943,7 +1142,7 @@ Stock faible (<20 unités): ${lowStock || 'Aucun'}`
           {/* Main content column */}
           <div className="space-y-4 sm:space-y-5 min-w-0">
             {/* Yesterday snapshot */}
-            <SnapshotBanner data={snapshot} date={yesterday} loading={loading} syncDone={syncDone} />
+            <SnapshotBanner data={snapshot} date={yesterday} loading={loading} brand={brand} syncDone={syncDone} />
 
             {/* KPI grid */}
             <section className="space-y-3">

@@ -16,6 +16,7 @@ interface Props {
   data: SnapshotData | null
   date: string
   loading: boolean
+  brand?: string
   syncDone?: boolean
   roasTarget?: number
 }
@@ -37,10 +38,28 @@ interface Item {
   tooltip?: string
 }
 
-function items(d: SnapshotData, roasTarget: number): Item[] {
+function items(d: SnapshotData, roasTarget: number, brand: string): Item[] {
   const roas = d.spend > 0 ? d.total_sales / d.spend : null
   const roasGood = roas != null ? roas >= roasTarget : null
   const netProfit = d.gross_profit - d.spend - d.fulfillment_cost
+
+  const netProfitTooltip = brand === 'bowa'
+    ? [
+        `CA TTC       ${fmt(d.total_sales)}`,
+        `− TVA (÷6)   ${fmt(Math.round(d.total_sales / 6))}`,
+        `= CA HT      ${fmt(Math.round(d.total_sales * 5 / 6))}`,
+        `− COGS       ${fmt(d.cogs)}`,
+        `− Pub        ${fmt(d.spend)}`,
+        `− Livraison  ${fmt(d.fulfillment_cost)}`,
+        `= ${fmt(netProfit)}`,
+      ].join('\n')
+    : [
+        `CA           ${fmt(d.total_sales)}`,
+        `− COGS       ${fmt(d.cogs)}`,
+        `− Pub        ${fmt(d.spend)}`,
+        `− Livraison  ${fmt(d.fulfillment_cost)}`,
+        `= ${fmt(netProfit)}`,
+      ].join('\n')
 
   return [
     {
@@ -55,13 +74,7 @@ function items(d: SnapshotData, roasTarget: number): Item[] {
       value: fmt(netProfit),
       sub: 'Après pub + shipping',
       valueColor: netProfit > 0 ? 'text-[#1a7f4b]' : netProfit < 0 ? 'text-[#c7293a]' : undefined,
-      tooltip: [
-        `Ventes      ${fmt(d.total_sales)}`,
-        `− COGS      ${fmt(d.cogs)}`,
-        `− Pub       ${fmt(d.spend)}`,
-        `− Shipping  ${fmt(d.fulfillment_cost)}`,
-        `= ${fmt(netProfit)}`,
-      ].join('\n'),
+      tooltip: netProfitTooltip,
     },
     {
       icon: ShoppingBag,
@@ -121,7 +134,7 @@ function SnapshotItem({ icon: Icon, label, value, sub, valueColor, subColor, too
   )
 }
 
-export default function SnapshotBanner({ data, date, loading, syncDone = false, roasTarget = 3 }: Props) {
+export default function SnapshotBanner({ data, date, loading, brand = 'bowa', syncDone = false, roasTarget = 3 }: Props) {
   const label = (() => {
     const d = new Date(date)
     return d.toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' })
@@ -158,7 +171,7 @@ export default function SnapshotBanner({ data, date, loading, syncDone = false, 
               </div>
             ))
           : data
-          ? items(data, roasTarget).map((item) => (
+          ? items(data, roasTarget, brand).map((item) => (
               <SnapshotItem key={item.label} {...item} />
             ))
           : null}

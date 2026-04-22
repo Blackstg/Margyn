@@ -8,7 +8,7 @@ import { Menu } from 'lucide-react'
 
 export default function ConditionalLayout({ children }: { children: React.ReactNode }) {
   const pathname   = usePathname()
-  const isAuthPage = pathname === '/login' || pathname === '/reconciliation'
+  const isAuthPage = pathname === '/login' || pathname === '/reconciliation' || pathname === '/tracking'
 
   const [role, setRole] = useState<string | null>(() => {
     if (typeof window !== 'undefined') return localStorage.getItem('bowa_role')

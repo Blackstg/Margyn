@@ -41,6 +41,7 @@ function detectZone(zip: string): Zone {
 interface ShopifyLineItem {
   id: string
   title: string
+  variant_title: string | null
   quantity: number
   sku: string
   variant_id: number | null
@@ -65,34 +66,33 @@ interface ShopifyOrder {
   line_items: ShopifyLineItem[]
 }
 
-// Fetch inventory_quantity for a batch of variant IDs (max 250)
-async function fetchVariantStock(
+// Fetch inventory_quantity AND sku for a batch of variant IDs (max 250)
+async function fetchVariantData(
   shop: string,
   token: string,
   variantIds: number[]
-): Promise<Map<number, number>> {
-  const map = new Map<number, number>()
-  if (variantIds.length === 0) return map
+): Promise<{ stock: Map<number, number>; skus: Map<number, string> }> {
+  const stock = new Map<number, number>()
+  const skus  = new Map<number, string>()
+  if (variantIds.length === 0) return { stock, skus }
 
-  // Shopify allows up to 250 IDs per request
   const chunks: number[][] = []
-  for (let i = 0; i < variantIds.length; i += 250) {
-    chunks.push(variantIds.slice(i, i + 250))
-  }
+  for (let i = 0; i < variantIds.length; i += 250) chunks.push(variantIds.slice(i, i + 250))
 
   await Promise.all(chunks.map(async (chunk) => {
     const res = await fetch(
-      `https://${shop}/admin/api/2024-01/variants.json?ids=${chunk.join(',')}&fields=id,inventory_quantity`,
+      `https://${shop}/admin/api/2024-01/variants.json?ids=${chunk.join(',')}&fields=id,sku,inventory_quantity`,
       { headers: { 'X-Shopify-Access-Token': token } }
     )
     if (!res.ok) return
-    const { variants } = await res.json() as { variants?: { id: number; inventory_quantity: number }[] }
+    const { variants } = await res.json() as { variants?: { id: number; sku: string; inventory_quantity: number }[] }
     for (const v of variants ?? []) {
-      map.set(v.id, v.inventory_quantity)
+      stock.set(v.id, v.inventory_quantity)
+      if (v.sku?.trim()) skus.set(v.id, v.sku.trim())
     }
   }))
 
-  return map
+  return { stock, skus }
 }
 
 export async function GET() {
@@ -125,14 +125,23 @@ export async function GET() {
     }
 
     // Get already-assigned order_names from Supabase
+    // A stop is "assigned" if it's in a non-cancelled tour AND its status is not 'failed'
     const admin = getAdmin()
-    const { data: assignedStops } = await admin
-      .from('delivery_stops')
-      .select('order_name, delivery_tours!inner(status)')
-      .neq('delivery_tours.status', 'cancelled')
+    const [{ data: assignedStops }, { data: failedStops }] = await Promise.all([
+      admin.from('delivery_stops')
+        .select('order_name, delivery_tours!inner(status)')
+        .neq('delivery_tours.status', 'cancelled')
+        .neq('status', 'failed'),
+      admin.from('delivery_stops')
+        .select('order_name')
+        .eq('status', 'failed'),
+    ])
 
     const assignedOrderNames = new Set(
       (assignedStops ?? []).map((s: { order_name: string }) => s.order_name)
+    )
+    const replanOrderNames = new Set(
+      (failedStops ?? []).map((s: { order_name: string }) => s.order_name)
     )
 
     const isSample = (title: string) => /échantillon|echantillon|sample/i.test(title)
@@ -145,6 +154,7 @@ export async function GET() {
       email: string
       created_at: string | null
       is_preorder: boolean
+      needs_replan: boolean
       address1: string
       address2: string
       city: string
@@ -166,18 +176,22 @@ export async function GET() {
       const zip  = addr?.zip ?? ''
       const zone = detectZone(zip)
 
-      const panel_details = order.line_items
-        .filter((li) => !isSample(li.title))
-        .map((li) => ({ sku: li.sku ?? '', title: li.title, qty: li.quantity }))
+      const panelLineItems = order.line_items.filter((li) => !isSample(li.title))
+      const panel_details = panelLineItems.map((li) => ({
+        sku: li.sku?.trim() ?? '',
+        variant_title: li.variant_title?.trim() ?? '',
+        title: li.title,
+        qty: li.quantity,
+        _variant_id: li.variant_id,  // temp, for SKU resolution
+      }))
       const panel_count = panel_details.reduce((sum, p) => sum + p.qty, 0)
       if (panel_count === 0) continue
 
-      const is_preorder = /pre.?order/i.test(order.tags ?? '')
-      const _variantIds = is_preorder
-        ? order.line_items
-            .map((li) => li.variant_id)
-            .filter((id): id is number => id != null && id > 0)
-        : []
+      const is_preorder = /pr[eé].?(order|commande)/i.test(order.tags ?? '')
+      // Collect all variant_ids (preorder check + SKU resolution for empty-SKU items)
+      const _variantIds = order.line_items
+        .map((li) => li.variant_id)
+        .filter((id): id is number => id != null && id > 0)
 
       drafts.push({
         order_name: order.name,
@@ -186,6 +200,7 @@ export async function GET() {
         email: order.email ?? '',
         created_at: order.created_at ?? null,
         is_preorder,
+        needs_replan: replanOrderNames.has(order.name),
         address1: addr?.address1 ?? '',
         address2: addr?.address2 ?? '',
         city: addr?.city ?? '',
@@ -197,26 +212,31 @@ export async function GET() {
       })
     }
 
-    // Batch-fetch inventory for all pre-order variants
-    const allPreorderVariantIds = [...new Set(
-      drafts.flatMap((d) => d._variantIds)
-    )]
-    const stockMap = await fetchVariantStock(shop, token, allPreorderVariantIds)
+    // Batch-fetch inventory + SKU from variant catalog for all variant IDs
+    const allVariantIds = [...new Set(drafts.flatMap((d) => d._variantIds))]
+    const { stock: stockMap, skus: variantSkuMap } = await fetchVariantData(shop, token, allVariantIds)
 
-    // Build final response
+    // Build final response — resolve missing SKUs from variant catalog
     const orders = drafts.map(({ _variantIds, ...order }) => {
-      if (!order.is_preorder) return { ...order, preorder_ready: false }
+      const resolvedDetails = (order.panel_details as (typeof order.panel_details[0] & { _variant_id?: number | null })[])
+        .map(({ _variant_id, ...d }) => {
+          const sku = d.sku || (_variant_id ? variantSkuMap.get(_variant_id) ?? '' : '')
+          return { ...d, sku }
+        })
 
-      // Ready = all variants with known stock have qty >= 0
-      // Variants with no variant_id (custom items) are ignored
-      const ready = _variantIds.length === 0
+      if (!order.is_preorder) {
+        return { ...order, panel_details: resolvedDetails, preorder_ready: false }
+      }
+
+      const preorderVariantIds = _variantIds.filter((id) => id > 0)
+      const ready = preorderVariantIds.length === 0
         ? false
-        : _variantIds.every((id) => {
+        : preorderVariantIds.every((id) => {
             const qty = stockMap.get(id)
-            return qty === undefined || qty > 0  // unknown = don't block
+            return qty === undefined || qty > 0
           })
 
-      return { ...order, preorder_ready: ready }
+      return { ...order, panel_details: resolvedDetails, preorder_ready: ready }
     })
 
     return NextResponse.json({ orders })

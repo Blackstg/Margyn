@@ -10,20 +10,13 @@ import {
   fetchPinterestAccountSpend,
   type PinterestConfig,
 } from '@/lib/pinterest'
+import { checkAndRefreshToken } from '@/lib/pinterest-auth'
 
-// ─── Store configs ────────────────────────────────────────────────────────────
+// ─── Store configs (no access token — fetched at runtime from Supabase) ───────
 
-const STORES: PinterestConfig[] = [
-  {
-    adAccountId: process.env.PINTEREST_AD_ACCOUNT_ID_BOWA!,
-    accessToken: process.env.PINTEREST_ACCESS_TOKEN_BOWA!,
-    brand: 'bowa',
-  },
-  {
-    adAccountId: process.env.PINTEREST_AD_ACCOUNT_ID_MOOM!,
-    accessToken: process.env.PINTEREST_ACCESS_TOKEN_MOOM!,
-    brand: 'moom',
-  },
+const STORES: Omit<PinterestConfig, 'accessToken'>[] = [
+  { adAccountId: process.env.PINTEREST_AD_ACCOUNT_ID_BOWA!, brand: 'bowa' },
+  { adAccountId: process.env.PINTEREST_AD_ACCOUNT_ID_MOOM!, brand: 'moom' },
 ]
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -88,8 +81,12 @@ export async function POST(req: NextRequest) {
 
   await Promise.all(stores.map(async (store) => {
     try {
+      // ── 0. Token — check expiry and refresh if < 5 days remaining ─────────
+      const accessToken = await checkAndRefreshToken(store.brand)
+      const storeWithToken: PinterestConfig = { ...store, accessToken }
+
       // ── 1. Campaigns ──────────────────────────────────────────────────────
-      const campaigns = await fetchPinterestCampaigns(store)
+      const campaigns = await fetchPinterestCampaigns(storeWithToken)
 
       if (campaigns.length > 0) {
         const { error } = await supabase
@@ -110,7 +107,7 @@ export async function POST(req: NextRequest) {
 
       // ── 2. Campaign stats — Reports API (returns real conversion data) ─────
       const campaignIds = campaigns.map((c) => c.externalId)
-      const normalizedStats = await fetchPinterestInsights(store, campaignIds, dateFrom, dateTo)
+      const normalizedStats = await fetchPinterestInsights(storeWithToken, campaignIds, dateFrom, dateTo)
 
       let campaignStatsCount = 0
       if (normalizedStats.length > 0) {
@@ -163,7 +160,7 @@ export async function POST(req: NextRequest) {
       }
 
       // ── 3. Ad spends — account-level spend + aggregated conversions ───────
-      const adSpends = await fetchPinterestAccountSpend(store, dateFrom, dateTo, normalizedStats)
+      const adSpends = await fetchPinterestAccountSpend(storeWithToken, dateFrom, dateTo, normalizedStats)
       let adSpendsCount = 0
 
       if (adSpends.length > 0) {

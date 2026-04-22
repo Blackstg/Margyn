@@ -26,6 +26,9 @@ export interface KpiData {
   gifting_cogs?: number
   fulfillment_note?: string
   fulfillment_configured?: boolean
+  fulfillment_breakdown?: { label: string; amount: number }[]
+  salaires?: number
+  charges_infra?: number
 }
 
 export interface SparklineData {
@@ -273,18 +276,42 @@ export default function KpiGrid({ current, previous, loading, brand, sparklines 
   const panierMoyen     = paidOrders > 0 ? totalSales / paidOrders : 0
   const prevPanierMoyen = prevPaidOrders > 0 ? prevTotalSales / prevPaidOrders : 0
 
-  const tvaCollectee     = Math.round(c.total_sales / 6)
-  const prevTvaCollectee = Math.round(p.total_sales / 6)
+  const suppCa           = c.supplementary_ca ?? 0
+  const tvaCollectee     = brand === 'bowa' ? Math.round((c.total_sales + suppCa) / 6) : Math.round(c.total_sales / 6)
+  const prevTvaCollectee = brand === 'bowa' ? Math.round((p.total_sales + (p.supplementary_ca ?? 0)) / 6) : Math.round(p.total_sales / 6)
 
-  // Net Profit tooltip — formula with real values
-  const netProfitTooltip = [
-    `Net Profit = Total Sales (${fmtEur(totalSales)})`,
-    `− COGS (${fmtEur(c.cogs)})`,
-    `− Marketing (${fmtEur(c.marketing)})`,
-    `− Fulfillment (${fmtEur(c.fulfillment)})`,
-    `− Transaction Fees (${fmtEur(c.transaction_fees)})`,
-    `− Apps Shopify (${fmtEur(c.app_charges)})`,
-    `− Op. Expenses (${fmtEur(c.op_expenses)})`,
+  // Net Profit tooltip — show HT formula for Bowa, simple formula otherwise
+  const netProfitTooltip = brand === 'bowa' ? (() => {
+    const caTTC   = c.total_sales + suppCa
+    const tva     = Math.round(caTTC / 6)
+    const caHT    = caTTC - tva
+    const margeHT = caHT - c.cogs
+    const lines: string[] = []
+    lines.push(`CA Shopify TTC     ${fmtEur(c.total_sales)}`)
+    if (suppCa > 0) lines.push(`+ CA complémentaire ${fmtEur(suppCa)}`)
+    if (suppCa > 0) lines.push(`= CA TTC total     ${fmtEur(caTTC)}`)
+    lines.push(`− TVA (÷6)         ${fmtEur(tva)}`)
+    lines.push(`= CA HT            ${fmtEur(caHT)}`)
+    lines.push(`− COGS             ${fmtEur(c.cogs)}`)
+    lines.push(`= Marge brute HT   ${fmtEur(margeHT)}`)
+    lines.push(`− Marketing        ${fmtEur(c.marketing)}`)
+    lines.push(`− Fulfillment      ${fmtEur(c.fulfillment)}`)
+    lines.push(`− Frais paiement   ${fmtEur(c.transaction_fees)}`)
+    lines.push(`− Apps             ${fmtEur(c.app_charges)}`)
+    if ((c.salaires ?? 0) > 0)      lines.push(`− Salaires         ${fmtEur(c.salaires!)}`)
+    if ((c.charges_infra ?? 0) > 0) lines.push(`− Loyers/crédits   ${fmtEur(c.charges_infra!)}`)
+    if ((c.salaires ?? 0) === 0 && (c.charges_infra ?? 0) === 0) lines.push(`− Charges fixes    ${fmtEur(c.op_expenses)}`)
+    lines.push(`= ${fmtEur(netProfit)}`)
+    return lines.join('\n')
+  })() : [
+    `CA               ${fmtEur(totalSales)}`,
+    `− COGS           ${fmtEur(c.cogs)}`,
+    `= Marge brute    ${fmtEur(grossProfit)}`,
+    `− Marketing      ${fmtEur(c.marketing)}`,
+    `− Fulfillment    ${fmtEur(c.fulfillment)}`,
+    `− Frais paiement ${fmtEur(c.transaction_fees)}`,
+    `− Apps           ${fmtEur(c.app_charges)}`,
+    `− Charges fixes  ${fmtEur(c.op_expenses)}`,
     `= ${fmtEur(netProfit)}`,
   ].join('\n')
 
@@ -292,7 +319,14 @@ export default function KpiGrid({ current, previous, loading, brand, sparklines 
   const fulfillmentPerOrder = c.order_count > 0 ? Math.round(c.fulfillment / c.order_count) : 0
   const fulfillmentTooltip = c.fulfillment_configured === false
     ? undefined
-    : `Fulfillment = ${fmtEur(fulfillmentPerOrder)}/cmd × ${c.order_count} commandes = ${fmtEur(c.fulfillment)}${c.fulfillment_note ? `\n${c.fulfillment_note}` : ''}`
+    : c.fulfillment_breakdown?.length
+    ? [
+        ...c.fulfillment_breakdown.map(r => `${r.label.padEnd(22)}${fmtEur(r.amount)}`),
+        `${''.padEnd(22,'─')}`,
+        `Total${' '.repeat(17)}${fmtEur(c.fulfillment)}`,
+        ...(c.fulfillment_note ? [c.fulfillment_note] : []),
+      ].join('\n')
+    : `${fmtEur(fulfillmentPerOrder)}/cmd × ${c.order_count} cmd = ${fmtEur(c.fulfillment)}${c.fulfillment_note ? `\n${c.fulfillment_note}` : ''}`
 
   const fulfillmentIsUnconfigured = brand === 'bowa' && c.fulfillment_configured === false
 
@@ -371,14 +405,27 @@ export default function KpiGrid({ current, previous, loading, brand, sparklines 
           prevValue={p.fulfillment}
           loading={loading}
           inverse
-          note={!fulfillmentIsUnconfigured && c.order_count > 0 ? `${fmtEur(fulfillmentPerOrder)}/cmd` : undefined}
+          note={!fulfillmentIsUnconfigured && c.order_count > 0 && !c.fulfillment_note ? `${fmtEur(fulfillmentPerOrder)}/cmd` : undefined}
           detail={c.fulfillment_note}
           isEmpty={fulfillmentIsUnconfigured}
           unconfiguredHref={fulfillmentIsUnconfigured ? '/settings' : undefined}
           tooltip={fulfillmentTooltip}
         />
         <KpiCard label="Apps Shopify"    value={c.app_charges}      formatted={fmtEur(c.app_charges)}   prevValue={p.app_charges}      loading={loading} inverse isEmpty />
-        <KpiCard label="Op. Expenses"    value={c.op_expenses}      formatted={fmtEur(c.op_expenses)}   prevValue={p.op_expenses}      loading={loading} inverse isEmpty />
+        <KpiCard
+          label="Op. Expenses"
+          value={c.op_expenses}
+          formatted={fmtEur(c.op_expenses)}
+          prevValue={p.op_expenses}
+          loading={loading}
+          inverse
+          isEmpty
+          tooltip={(c.salaires ?? 0) > 0 || (c.charges_infra ?? 0) > 0 ? [
+            (c.salaires ?? 0) > 0      ? `Salaires        ${fmtEur(c.salaires!)}` : null,
+            (c.charges_infra ?? 0) > 0 ? `Loyers/crédits  ${fmtEur(c.charges_infra!)}` : null,
+            `= ${fmtEur(c.op_expenses)}`,
+          ].filter(Boolean).join('\n') : undefined}
+        />
         {brand === 'bowa' && (
           <KpiCard
             label="TVA collectée"

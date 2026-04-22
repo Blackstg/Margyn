@@ -5,8 +5,8 @@ import type { NextRequest } from 'next/server'
 export async function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl
 
-  // Skip middleware entirely for API routes — they handle their own auth
-  if (pathname.startsWith('/api/')) {
+  // Skip middleware entirely for public routes and API routes
+  if (pathname.startsWith('/api/') || pathname === '/tracking') {
     return NextResponse.next()
   }
 

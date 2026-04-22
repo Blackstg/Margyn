@@ -29,6 +29,7 @@ interface ShopifyRefund {
 
 interface ShopifyLineItem {
   variant_id: number
+  title: string        // product title at time of order (present even for deleted variants)
   quantity: number
   price: string
   total_discount: string
@@ -209,7 +210,7 @@ export async function fetchOrders(
 
 export async function fetchProducts(config: ShopifyConfig): Promise<ShopifyProduct[]> {
   const products: ShopifyProduct[] = []
-  let path = `products.json?limit=250&fields=id,title,image,images,variants`
+  let path = `products.json?limit=250&status=active&fields=id,title,status,image,images,variants`
 
   while (true) {
     const { data, nextPageInfo } = await shopifyFetch<{ products: ShopifyProduct[] }>(
@@ -245,6 +246,7 @@ async function fetchInventoryCosts(
       if (item.cost != null) costMap.set(item.id, parseFloat(item.cost))
     }
   }
+
   return costMap
 }
 
@@ -431,6 +433,7 @@ export async function normalizeProducts(
 export interface ProductDailySales {
   date: string
   brand: string
+  order_id: string
   product_title: string
   variant_id: string
   variant_title: string | null
@@ -460,7 +463,9 @@ export function aggregateProductSales(
   }
 
   type Entry = {
+    date: string
     brand: string
+    order_id: string
     product_title: string
     variant_id: string
     variant_title: string | null
@@ -468,23 +473,28 @@ export function aggregateProductSales(
     quantity: number
     revenue: number
   }
+  // Key: order_id|variant_id — one row per (order, variant), preserving order identity
   const byKey = new Map<string, Entry>()
 
   for (const order of orders) {
     if (order.financial_status === 'voided' || order.financial_status === 'cancelled') continue
-    const date = utcToParisDate(order.created_at)
+    const date     = utcToParisDate(order.created_at)
+    const order_id = String(order.id)
 
     for (const item of order.line_items) {
-      const info              = variantMap.get(item.variant_id)
-      const product_title     = info?.product_title     ?? `Variant ${item.variant_id}`
-      const shopify_product_id = info?.product_id       ?? null
-      const variant_title     = info?.variant_title     ?? null
-      const variant_id        = item.variant_id ? String(item.variant_id) : ''
-      const revenue           = parseFloat(item.price) * item.quantity - parseFloat(item.total_discount)
-      const key               = `${date}|${variant_id || product_title}`
+      const info               = variantMap.get(item.variant_id)
+      // Use the order's line_item.title as product_title when the variant is no longer
+      // in the current Shopify catalog (deleted/archived). This preserves the product name
+      // for historical orders, enabling cost lookups via title-based fallback.
+      const product_title      = info?.product_title  ?? item.title ?? `Variant ${item.variant_id}`
+      const shopify_product_id = info?.product_id     ?? null
+      const variant_title      = info?.variant_title  ?? null
+      const variant_id         = item.variant_id ? String(item.variant_id) : ''
+      const revenue            = parseFloat(item.price) * item.quantity - parseFloat(item.total_discount)
+      const key                = `${order_id}|${variant_id || product_title}`
 
       const prev = byKey.get(key) ?? {
-        brand: config.brand, product_title, variant_id, variant_title,
+        date, brand: config.brand, order_id, product_title, variant_id, variant_title,
         shopify_product_id, quantity: 0, revenue: 0,
       }
       byKey.set(key, { ...prev, quantity: prev.quantity + item.quantity, revenue: prev.revenue + revenue })
@@ -492,11 +502,11 @@ export function aggregateProductSales(
   }
 
   const result: ProductDailySales[] = []
-  for (const [key, entry] of Array.from(byKey.entries())) {
-    const date = key.split('|')[0]
+  for (const entry of byKey.values()) {
     result.push({
-      date,
+      date:                entry.date,
       brand:               entry.brand,
+      order_id:            entry.order_id,
       product_title:       entry.product_title,
       variant_id:          entry.variant_id,
       variant_title:       entry.variant_title,

@@ -2,7 +2,7 @@
 
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
-import { LayoutDashboard, BarChart2, PackageOpen, Settings, LogOut, Boxes, FileText, Tag, Truck, PanelLeftClose } from 'lucide-react'
+import { LayoutDashboard, BarChart2, PackageOpen, Settings, LogOut, Boxes, FileText, Tag, Truck, PanelLeftClose, Headphones } from 'lucide-react'
 import { createBrowserClient } from '@supabase/auth-helpers-nextjs'
 import { useState, useEffect } from 'react'
 import DataFreshness from './DataFreshness'
@@ -15,6 +15,7 @@ const NAV = [
   { href: '/stock',     icon: Boxes,           label: 'Stock',       brand: 'moom' },
   { href: '/invoices',  icon: FileText,        label: 'Factures',    brand: 'moom' },
   { href: '/products',  icon: Tag,             label: 'Produits',    brand: 'moom' },
+  { href: '/sav',       icon: Headphones,      label: 'SAV',         brand: 'moom' },
   { href: '/settings',  icon: Settings,        label: 'Paramètres',  brand: null   },
 ]
 

@@ -6,6 +6,8 @@ export interface BestSeller {
   revenue: number
   revenuePct: number
   image_url?: string | null
+  sell_price?: number | null
+  cost_price?: number | null
 }
 
 export interface InventoryItem {
@@ -113,7 +115,7 @@ export default function ProductsView({ bestSellers, inventory, loading, stockThr
     <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
       {/* ── Meilleures ventes ──────────────────────────────────────────────── */}
       <div className="bg-white rounded-[20px] shadow-[0_2px_16px_rgba(0,0,0,0.06)] p-5">
-        <p className="text-[10px] font-semibold uppercase tracking-[0.1em] text-[#aeb0c9] mb-4">
+        <p className="text-[10px] font-semibold uppercase tracking-[0.1em] text-[#aeb0c9] mb-3">
           Meilleures ventes
         </p>
 
@@ -124,40 +126,85 @@ export default function ProductsView({ bestSellers, inventory, loading, stockThr
         ) : bestSellers.length === 0 ? (
           <p className="text-sm text-[#9b9b93] py-6 text-center">Aucune donnée — lancez un sync Shopify</p>
         ) : (
-          <div className="divide-y divide-[#f5f0f2]">
-            {bestSellers.map((item, idx) => (
-              <div key={item.title} className="flex items-center gap-3 py-2.5">
-                {/* Rank */}
-                <span className="w-4 text-[10px] font-semibold text-[#9b9b93] text-right shrink-0">
-                  {idx + 1}
-                </span>
-                {/* Image */}
-                <ProductThumb src={item.image_url} title={item.title} />
-                {/* Name */}
-                <p className="flex-1 min-w-0 text-xs font-medium text-[#1a1a2e] truncate">
-                  {item.title}
-                </p>
-                {/* Stats */}
-                <div className="text-right shrink-0 space-y-1">
-                  <p className="text-xs font-bold text-[#1a1a2e]">{fmtEur(item.revenue)}</p>
-                  <div className="flex items-center justify-end gap-1.5">
-                    <p className="text-[10px] text-[#9b9b93]">{item.quantity} cmd</p>
-                    {item.revenuePct > 0 && (
-                      <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-semibold ${
-                        item.revenuePct >= 20
-                          ? 'bg-[#f0faf4] text-[#1a7f4b]'
-                          : item.revenuePct >= 10
-                          ? 'bg-[#f0f0ff] text-[#6366f1]'
-                          : 'bg-[#f5f5f3] text-[#6b6b63]'
-                      }`}>
-                        {item.revenuePct.toFixed(1)}%
-                      </span>
-                    )}
+          <>
+            {/* ── Column headers (desktop only) ── */}
+            <div className="hidden lg:grid lg:grid-cols-[1fr_64px_44px_56px_80px] lg:gap-x-2 pb-1.5 mb-0.5">
+              <div />
+              <p className="text-[9px] font-semibold uppercase tracking-[0.08em] text-[#c0c0ba] text-right">CA HT</p>
+              <p className="text-[9px] font-semibold uppercase tracking-[0.08em] text-[#c0c0ba] text-right">Cmdes</p>
+              <p className="text-[9px] font-semibold uppercase tracking-[0.08em] text-[#c0c0ba] text-right">Part</p>
+              <p className="text-[9px] font-semibold uppercase tracking-[0.08em] text-[#c0c0ba] text-right">Marge moy.</p>
+            </div>
+
+            <div className="divide-y divide-[#f5f0f2]">
+              {bestSellers.map((item, idx) => {
+                const sp = item.sell_price, cp = item.cost_price
+                const marginPct = sp && cp && sp > 0 ? ((sp - cp) / sp) * 100 : null
+                const marginEur = sp && cp ? sp - cp : null
+                const mBg   = marginPct == null ? '' : marginPct >= 50 ? 'bg-[#dcf5e7]' : marginPct >= 30 ? 'bg-[#fff3dc]' : 'bg-[#fce8ea]'
+                const mText = marginPct == null ? '' : marginPct >= 50 ? 'text-[#1a7f4b]' : marginPct >= 30 ? 'text-[#a16207]' : 'text-[#c7293a]'
+                const pBg   = item.revenuePct >= 10 ? 'bg-[#f0f0ff]' : 'bg-[#f5f5f3]'
+                const pText = item.revenuePct >= 10 ? 'text-[#6366f1]'  : 'text-[#6b6b63]'
+
+                return (
+                  <div key={item.title} className="py-2.5">
+
+                    {/* Desktop: grille 5 colonnes */}
+                    <div className="hidden lg:grid lg:grid-cols-[1fr_64px_44px_56px_80px] lg:gap-x-2 items-center">
+                      <div className="flex items-center gap-2 min-w-0">
+                        <span className="w-4 text-[10px] font-semibold text-[#9b9b93] text-right shrink-0">{idx + 1}</span>
+                        <ProductThumb src={item.image_url} title={item.title} />
+                        <p className="text-xs font-medium text-[#1a1a2e] truncate">{item.title}</p>
+                      </div>
+                      <p className="text-xs font-bold text-[#1a1a2e] text-right tabular-nums">{fmtEur(item.revenue)}</p>
+                      <p className="text-xs font-medium text-[#1a1a2e] text-right tabular-nums">{item.quantity}</p>
+                      <div className="flex justify-end">
+                        {item.revenuePct > 0 && (
+                          <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-semibold ${pBg} ${pText}`}>
+                            {item.revenuePct.toFixed(1)}%
+                          </span>
+                        )}
+                      </div>
+                      <div className="flex justify-end">
+                        {marginPct != null && marginEur != null ? (
+                          <span className={`inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-semibold whitespace-nowrap ${mBg} ${mText}`}>
+                            {marginPct.toFixed(0)}%&nbsp;·&nbsp;{fmtEur(marginEur)}
+                          </span>
+                        ) : (
+                          <span className="text-[10px] text-[#d0d0cc]">—</span>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Mobile: nom + stats compactes sur 2e ligne */}
+                    <div className="lg:hidden flex items-center gap-2">
+                      <span className="w-4 text-[10px] font-semibold text-[#9b9b93] text-right shrink-0">{idx + 1}</span>
+                      <ProductThumb src={item.image_url} title={item.title} />
+                      <div className="flex-1 min-w-0">
+                        <p className="text-xs font-medium text-[#1a1a2e] truncate">{item.title}</p>
+                        <div className="flex items-center gap-1.5 mt-1 flex-wrap">
+                          <span className="text-[10px] font-semibold text-[#1a1a2e] tabular-nums">{fmtEur(item.revenue)}</span>
+                          <span className="text-[10px] text-[#d0d0cc]">·</span>
+                          <span className="text-[10px] text-[#9b9b93]">{item.quantity} cmd</span>
+                          {item.revenuePct > 0 && (
+                            <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-semibold ${pBg} ${pText}`}>
+                              {item.revenuePct.toFixed(1)}%
+                            </span>
+                          )}
+                          {marginPct != null && marginEur != null && (
+                            <span className={`inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-semibold whitespace-nowrap ${mBg} ${mText}`}>
+                              {marginPct.toFixed(0)}%&nbsp;·&nbsp;{fmtEur(marginEur)}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+
                   </div>
-                </div>
-              </div>
-            ))}
-          </div>
+                )
+              })}
+            </div>
+          </>
         )}
       </div>
 

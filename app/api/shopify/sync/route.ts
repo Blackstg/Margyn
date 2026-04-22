@@ -157,11 +157,22 @@ export async function POST(req: NextRequest) {
 
       // ── 6. Upsert product_variants ─────────────────────────────────────────
       if (variantRows.length > 0) {
-        const rows = variantRows.map((v) => ({ ...v, updated_at: new Date().toISOString() }))
-        const { error } = await supabase
-          .from('product_variants')
-          .upsert(rows, { onConflict: 'shopify_variant_id' })
-        if (error) throw new Error(`product_variants upsert: ${error.message}`)
+        // Rows with cost: full upsert (overwrites cost_price)
+        // Rows without cost: omit cost_price so existing value in DB is preserved
+        const withCost    = variantRows.filter((v) => v.cost_price != null)
+          .map((v) => ({ ...v, updated_at: new Date().toISOString() }))
+        const withoutCost = variantRows.filter((v) => v.cost_price == null)
+          // eslint-disable-next-line @typescript-eslint/no-unused-vars
+          .map(({ cost_price, ...v }) => ({ ...v, updated_at: new Date().toISOString() }))
+
+        if (withCost.length > 0) {
+          const { error } = await supabase.from('product_variants').upsert(withCost, { onConflict: 'shopify_variant_id' })
+          if (error) throw new Error(`product_variants upsert (with cost): ${error.message}`)
+        }
+        if (withoutCost.length > 0) {
+          const { error } = await supabase.from('product_variants').upsert(withoutCost, { onConflict: 'shopify_variant_id' })
+          if (error) throw new Error(`product_variants upsert (without cost): ${error.message}`)
+        }
 
         // Delete variants that no longer exist in Shopify
         const activeIds = variantRows.map((v) => v.shopify_variant_id)
@@ -171,6 +182,65 @@ export async function POST(req: NextRequest) {
           .eq('brand', store.brand)
           .not('shopify_variant_id', 'in', `(${activeIds.join(',')})`)
       }
+
+      // ── 7. COGS gap correction ─────────────────────────────────────────────
+      // The Shopify batch inventory_items API silently omits cost for some products.
+      // After every sync we re-apply the gap using product_variants.cost_price (DB),
+      // which includes costs fixed manually (e.g. CaryExplorer via fix-caryexplorer).
+      // Gap = max(0, expected_from_variants - batch_cogs) — no double-counting.
+      try {
+        const { data: dbVariants } = await supabase
+          .from('product_variants')
+          .select('shopify_product_id, cost_price')
+          .eq('brand', store.brand)
+          .not('cost_price', 'is', null)
+
+        const costAcc = new Map<string, { sum: number; count: number }>()
+        for (const v of dbVariants ?? []) {
+          if (!v.shopify_product_id) continue
+          const prev = costAcc.get(v.shopify_product_id) ?? { sum: 0, count: 0 }
+          costAcc.set(v.shopify_product_id, { sum: prev.sum + v.cost_price, count: prev.count + 1 })
+        }
+        const avgCostByPid = new Map<string, number>()
+        for (const [pid, { sum, count }] of costAcc) avgCostByPid.set(pid, sum / count)
+
+        const { data: salesForRange } = await supabase
+          .from('product_sales')
+          .select('date, shopify_product_id, quantity')
+          .eq('brand', store.brand)
+          .gte('date', dateFrom)
+          .lte('date', dateTo)
+          .not('shopify_product_id', 'is', null)
+
+        const expectedByDate = new Map<string, number>()
+        for (const row of salesForRange ?? []) {
+          const cost = avgCostByPid.get(row.shopify_product_id!)
+          if (cost == null) continue
+          expectedByDate.set(row.date, (expectedByDate.get(row.date) ?? 0) + cost * row.quantity)
+        }
+
+        const { data: currentSnaps } = await supabase
+          .from('daily_snapshots')
+          .select('date, cogs, gross_profit')
+          .eq('brand', store.brand)
+          .gte('date', dateFrom)
+          .lte('date', dateTo)
+
+        for (const snap of currentSnaps ?? []) {
+          const expected = expectedByDate.get(snap.date) ?? 0
+          const gap = Math.max(0, Math.round((expected - snap.cogs) * 100) / 100)
+          if (gap > 0) {
+            await supabase
+              .from('daily_snapshots')
+              .update({
+                cogs:         Math.round((snap.cogs + gap) * 100) / 100,
+                gross_profit: Math.round((snap.gross_profit - gap) * 100) / 100,
+              })
+              .eq('brand', store.brand)
+              .eq('date', snap.date)
+          }
+        }
+      } catch { /* gap correction is best-effort — don't fail the whole sync */ }
 
       results[store.brand] = { snapshots: snapshotCount, products: productCount, product_sales: productSalesCount }
     } catch (err) {
