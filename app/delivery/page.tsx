@@ -700,7 +700,7 @@ function PlanificateurView() {
                                 </span>
                               )}
                             </div>
-                            <div className="text-xs text-[#6b6b63] mt-0.5">{order.customer_name} · {order.city}</div>
+                            <div className="text-xs text-[#6b6b63] mt-0.5">{order.customer_name} · {order.city} {order.zip}</div>
                             {order.created_at && (
                               <div className="text-[10px] text-[#9b9b93] mt-0.5">
                                 {new Date(order.created_at).toLocaleDateString('fr-FR', { day: 'numeric', month: 'short', year: 'numeric' })}
