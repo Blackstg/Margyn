@@ -6,7 +6,7 @@ import { useState, useEffect, useCallback, useRef, Suspense } from 'react'
 import nextDynamic from 'next/dynamic'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { createBrowserClient } from '@supabase/auth-helpers-nextjs'
-import { ChevronDown, ChevronUp, ChevronLeft, ChevronRight, Trash2, Mail, Plus, X, MapPin, Package, Truck, Map as MapIcon } from 'lucide-react'
+import { ChevronDown, ChevronUp, ChevronLeft, ChevronRight, Trash2, Mail, Plus, X, MapPin, Package, Truck, Map as MapIcon, Search } from 'lucide-react'
 
 const TourMap        = nextDynamic(() => import('@/components/delivery/TourMap'),        { ssr: false })
 const OrdersMap      = nextDynamic(() => import('@/components/delivery/OrdersMap'),      { ssr: false })
@@ -208,6 +208,7 @@ function PlanificateurView() {
   const [savingTour, setSavingTour] = useState(false)
   const [addingStops, setAddingStops] = useState(false)
   const [optimizingTourId, setOptimizingTourId] = useState<string | null>(null)
+  const [tourSearch, setTourSearch] = useState('')
   const [showHistory, setShowHistory] = useState(false)
   const [ordersViewMode, setOrdersViewMode] = useState<'list' | 'map'>('list')
 
@@ -844,6 +845,18 @@ function PlanificateurView() {
               </div>
             </div>
 
+            {/* Tour search */}
+            <div className="relative mb-3">
+              <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-[#6b6b63] pointer-events-none" />
+              <input
+                type="text"
+                placeholder="Rechercher une commande, client, ville…"
+                value={tourSearch}
+                onChange={(e) => setTourSearch(e.target.value)}
+                className="w-full pl-8 pr-3 py-2 text-sm border border-[#e8e8e4] rounded-[10px] outline-none focus:border-[#aeb0c9] bg-white"
+              />
+            </div>
+
             {/* New tour form */}
             {showNewTour && (
               <div className="mb-4 p-4 rounded-[12px] bg-[#f5f5f3] border border-[#e8e8e4]">
@@ -922,6 +935,15 @@ function PlanificateurView() {
                   const isTarget = targetTourId === tour.id
                   const isExpanded = expandedTours.has(tour.id)
                   const sortedStops = [...tour.stops].sort((a, b) => a.sequence - b.sequence)
+                  const q = tourSearch.trim().toLowerCase()
+                  const filteredStops = q
+                    ? sortedStops.filter((s) =>
+                        s.order_name.toLowerCase().includes(q) ||
+                        s.customer_name.toLowerCase().includes(q) ||
+                        s.city.toLowerCase().includes(q) ||
+                        (s.zip ?? '').includes(q)
+                      )
+                    : sortedStops
 
                   const panelPct = Math.min((tour.total_panels / 100) * 100, 100)
                   const statusInfo = TOUR_STATUS_LABELS[tour.status] ?? TOUR_STATUS_LABELS.draft
@@ -1063,16 +1085,20 @@ function PlanificateurView() {
                           {/* Stops list */}
                           {sortedStops.length === 0 ? (
                             <div className="text-xs text-[#6b6b63] text-center py-3">Aucun arrêt</div>
+                          ) : filteredStops.length === 0 ? (
+                            <div className="text-xs text-[#6b6b63] text-center py-3">Aucun résultat</div>
                           ) : (
                             <div className="space-y-1.5">
-                              {sortedStops.map((stop, idx) => (
+                              {filteredStops.map((stop, idx) => {
+                                const realIdx = sortedStops.findIndex((s) => s.id === stop.id)
+                                return (
                                 <div
                                   key={stop.id}
                                   className="rounded-[8px] bg-[#f5f5f3] text-xs"
                                 >
                                   <div className="flex items-start gap-2 p-2">
                                     <span className="w-5 h-5 rounded-full bg-[#1a1a2e] text-white flex items-center justify-center text-[10px] font-bold shrink-0 mt-0.5">
-                                      {idx + 1}
+                                      {realIdx + 1}
                                     </span>
                                     <div className="flex-1 min-w-0">
                                       <div className="font-medium text-[#1a1a2e]">{stop.order_name}</div>
@@ -1095,14 +1121,14 @@ function PlanificateurView() {
                                       )}
                                       <button
                                         onClick={() => handleMoveStop(tour.id, stop.id, 'up')}
-                                        disabled={idx === 0}
+                                        disabled={realIdx === 0}
                                         className="p-0.5 rounded text-[#6b6b63] hover:text-[#1a1a2e] disabled:opacity-30"
                                       >
                                         <ChevronUp size={14} />
                                       </button>
                                       <button
                                         onClick={() => handleMoveStop(tour.id, stop.id, 'down')}
-                                        disabled={idx === sortedStops.length - 1}
+                                        disabled={realIdx === sortedStops.length - 1}
                                         className="p-0.5 rounded text-[#6b6b63] hover:text-[#1a1a2e] disabled:opacity-30"
                                       >
                                         <ChevronDown size={14} />
@@ -1116,7 +1142,8 @@ function PlanificateurView() {
                                     </div>
                                   </div>
                                 </div>
-                              ))}
+                                )
+                              })}
                             </div>
                           )}
 
