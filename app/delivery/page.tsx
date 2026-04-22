@@ -1742,7 +1742,10 @@ function LivreurView() {
                       {deliveryIdx}
                     </span>
                     <div className="flex-1 min-w-0">
-                      <div className="font-semibold text-sm text-[#1a1a2e] truncate">{stop.customer_name}</div>
+                      <div className="flex items-center gap-1.5 min-w-0">
+                        <span className="font-semibold text-sm text-[#1a1a2e] truncate">{stop.customer_name}</span>
+                        <span className="font-mono text-xs text-[#6b6b63] shrink-0">{stop.order_name}</span>
+                      </div>
                       <div className="text-xs text-[#6b6b63]">{stop.city} {stop.zip}</div>
                     </div>
                     {stopI === 0 && (
@@ -1936,7 +1939,9 @@ function LivreurView() {
         <div className="flex-1 px-6 py-6 flex flex-col">
           {/* Client + address */}
           <div className="flex-1">
-            <div className="text-[#6b6b63] text-sm mb-1">{currentStop.order_name}</div>
+            <div className="flex items-center gap-2 mb-1">
+              <span className="font-mono text-sm font-semibold text-[#1a1a2e] bg-[#f5f5f3] px-2 py-0.5 rounded-[6px]">{currentStop.order_name}</span>
+            </div>
             <div className="text-3xl font-bold text-[#1a1a2e] leading-tight mb-3">
               {currentStop.customer_name}
             </div>
