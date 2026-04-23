@@ -23,6 +23,7 @@ export interface ZendeskTicket {
   tags:         string[]
   requester_id: number
   created_at:   string
+  updated_at:   string   // dernière mise à jour du ticket (réponse client = updated_at avance)
 }
 
 interface ZendeskComment {

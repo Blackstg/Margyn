@@ -23,8 +23,22 @@ export interface RawTicketItem {
 }
 
 export async function getRawTicketList(): Promise<RawTicketItem[]> {
-  const [tickets, processedIds] = await Promise.all([getNewTickets(), getProcessedIds()])
-  const fresh = tickets.filter(t => !processedIds.has(t.id))
+  const [tickets, processedMap] = await Promise.all([getNewTickets(), getProcessedMap()])
+
+  const fresh = tickets.filter(t => {
+    const processedAt = processedMap.get(t.id)
+    // Never processed → always show
+    if (!processedAt) return true
+    // Processed before → only re-show if ticket was updated AFTER our last action
+    // (= client replied since we sent our response)
+    return new Date(t.updated_at) > new Date(processedAt)
+  })
+
+  console.log(
+    `[SAV] getRawTicketList: ${tickets.length} Zendesk, ${processedMap.size} traités en DB, ` +
+    `${fresh.length} à afficher (dont ${fresh.filter(t => processedMap.has(t.id)).length} ré-ouverts par le client)`
+  )
+
   return fresh.map(t => ({
     ticket_id:    t.id,
     subject:      t.subject,
@@ -36,19 +50,41 @@ export async function getRawTicketList(): Promise<RawTicketItem[]> {
 }
 
 // ─── Processed tickets filter ─────────────────────────────────────────────────
-// Fetches ticket IDs that were already handled via Steero (persisted in DB).
-// Falls back to an empty set if the table doesn't exist yet.
+// Returns a Map<ticketId, processed_at_iso> of tickets already handled by Steero.
+// The comparison logic: a ticket re-appears if its updated_at > processed_at,
+// meaning the client replied after our last action — it needs attention again.
 
-async function getProcessedIds(): Promise<Set<number>> {
+async function getProcessedMap(): Promise<Map<number, string>> {
   try {
     const sb = createAdminClient()
     const { data, error } = await sb
       .from('sav_processed_tickets')
-      .select('ticket_id')
-    if (error) return new Set()
-    return new Set((data as { ticket_id: number }[]).map(r => r.ticket_id))
+      .select('ticket_id, processed_at')
+    if (error) {
+      // Fallback: if processed_at column doesn't exist yet (migration pending),
+      // select only ticket_id and never re-show processed tickets (old behavior).
+      if (error.message.includes('processed_at')) {
+        console.warn('[SAV] processed_at column missing — run migration, falling back to old behavior')
+        const { data: legacyData } = await sb
+          .from('sav_processed_tickets')
+          .select('ticket_id')
+        const map = new Map<number, string>()
+        for (const r of (legacyData ?? []) as { ticket_id: number }[]) {
+          map.set(r.ticket_id, new Date().toISOString()) // treat as "just processed"
+        }
+        return map
+      }
+      return new Map()
+    }
+    const map = new Map<number, string>()
+    for (const r of (data as { ticket_id: number; processed_at: string | null }[])) {
+      // If processed_at is null (old row before migration), use a far-future date
+      // so the ticket stays excluded (safe default).
+      map.set(r.ticket_id, r.processed_at ?? new Date().toISOString())
+    }
+    return map
   } catch {
-    return new Set()
+    return new Map()
   }
 }
 
@@ -59,7 +95,7 @@ export async function markTicketProcessed(
   try {
     const sb = createAdminClient()
     await sb.from('sav_processed_tickets').upsert(
-      { ticket_id: ticketId, action },
+      { ticket_id: ticketId, action, processed_at: new Date().toISOString() },
       { onConflict: 'ticket_id' }
     )
   } catch (err) {
@@ -159,10 +195,14 @@ async function sendPartnershipEmail(
 // generates a draft reply. Returns all processed tickets for review.
 
 export async function processPendingTickets(): Promise<ProcessedTicket[]> {
-  const [tickets, processedIds] = await Promise.all([getNewTickets(), getProcessedIds()])
+  const [tickets, processedMap] = await Promise.all([getNewTickets(), getProcessedMap()])
 
-  const fresh = tickets.filter(t => !processedIds.has(t.id))
-  console.log(`[SAV] getNewTickets=${tickets.length}, déjà traités=${tickets.length - fresh.length}, à traiter=${fresh.length}`)
+  const fresh = tickets.filter(t => {
+    const processedAt = processedMap.get(t.id)
+    if (!processedAt) return true
+    return new Date(t.updated_at) > new Date(processedAt)
+  })
+  console.log(`[SAV] getNewTickets=${tickets.length}, déjà traités=${processedMap.size}, à traiter=${fresh.length}`)
   if (fresh.length === 0) return []
 
   // Process at most 3 tickets concurrently to avoid hammering Zendesk's rate limit
