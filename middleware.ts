@@ -60,9 +60,9 @@ export async function middleware(req: NextRequest) {
     return response
   }
 
-  // SAV-only users: restricted to /sav
+  // SAV role: access to /sav and /delivery only
   if (role === 'sav') {
-    if (!pathname.startsWith('/sav')) {
+    if (!pathname.startsWith('/sav') && !pathname.startsWith('/delivery')) {
       return NextResponse.redirect(new URL('/sav', req.url))
     }
     return response

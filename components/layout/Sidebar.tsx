@@ -71,7 +71,7 @@ export default function Sidebar({ isOpen, onToggle }: { isOpen: boolean; onToggl
         >
           S
         </span>
-        {role !== 'delivery' && (
+        {role !== 'delivery' && role !== 'sav' && (
           <button
             onClick={onToggle}
             className="w-9 h-9 rounded-xl flex items-center justify-center text-white/30 hover:text-white/70 hover:bg-white/8 transition-colors"
@@ -88,6 +88,7 @@ export default function Sidebar({ isOpen, onToggle }: { isOpen: boolean; onToggl
       <nav className="flex flex-col items-center gap-1.5 w-full px-2">
         {role === null ? null : NAV.filter(({ href, brand }) => {
           if (role === 'delivery') return href === '/delivery'
+          if (role === 'sav')     return href === '/sav' || href === '/delivery'
           return brand === null || allowedBrands === null || allowedBrands.includes(brand)
         }).map(({ href, icon: Icon, label }) => {
           const active = pathname.startsWith(href)

@@ -111,7 +111,7 @@ export async function POST(req: NextRequest) {
 
     if (user) {
       const { error } = await admin.auth.admin.updateUserById(user.id, {
-        user_metadata: { ...user.user_metadata, role: 'sav' },
+        user_metadata: { ...user.user_metadata, role: 'sav', delivery_views: ['sav'] },
       })
       if (error) {
         results[email] = { status: 'error', message: `updateUser: ${error.message}` }
