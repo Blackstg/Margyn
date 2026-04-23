@@ -1,6 +1,7 @@
 'use client'
 
-import { useState, useEffect, useCallback, useRef } from 'react'
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
+import { createBrowserClient } from '@supabase/auth-helpers-nextjs'
 import {
   RefreshCw, Send, ArrowUpRight, Archive, Package, ExternalLink,
   Inbox, CheckCheck, ChevronDown, ChevronUp,
@@ -418,7 +419,7 @@ function ReplyPanel({ ticket, draft, solved, onDraftChange, onSolvedChange, onSe
   draft: string; solved: boolean
   onDraftChange: (v: string) => void
   onSolvedChange: (v: boolean) => void
-  onSent: (action: ReplyAction) => void
+  onSent: (action: ReplyAction, wasModified?: boolean) => void
   onArchive: () => void
 }) {
   const [sending, setSending]         = useState(false)
@@ -461,7 +462,8 @@ function ReplyPanel({ ticket, draft, solved, onDraftChange, onSolvedChange, onSe
         body: JSON.stringify({ ticket_id: ticket.ticket_id, reply_body: draft, solved, action }),
       })
       if (!res.ok) { const d = await res.json(); throw new Error(d.error ?? `HTTP ${res.status}`) }
-      onSent(action)
+      const wasModified = draft.trim() !== ticket.draft_reply.trim()
+      onSent(action, wasModified)
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Erreur inconnue')
     } finally { setSending(false) }
@@ -756,6 +758,228 @@ function RulesPanel({ onClose }: { onClose: () => void }) {
   )
 }
 
+// ─── Qualité SAV — left placeholder (the tab content is QualiteDashboard) ────
+
+function QualitePanel() {
+  return (
+    <div className="flex flex-col items-center justify-center h-full gap-2 p-4 text-center">
+      <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-[#aeb0c9]">Admin</p>
+      <p className="text-xs text-[#9b9b93]">Métriques dans le panneau central</p>
+    </div>
+  )
+}
+
+// ─── Qualité SAV — main dashboard ────────────────────────────────────────────
+
+interface QualiteMetrics {
+  total: number; sent: number; escalated: number; archived: number
+  pct_sent: number; pct_escalated: number; pct_archived: number
+  pct_unmodified: number | null
+  avg_time_ms: number | null
+  full_auto_score: number | null
+  by_category: Record<string, { total: number; sent: number; escalated: number }>
+}
+
+const CAT_LABELS_FR: Record<string, string> = {
+  suivi_livraison: 'Suivi livraison', retour_remboursement: 'Retour / Remb.',
+  produit_defectueux: 'Produit défect.', modification_commande: 'Modif. commande',
+  question_produit: 'Question produit', partenariat: 'Partenariat', autre: 'Autre',
+}
+
+function fmtMs(ms: number) {
+  if (ms < 60_000) return `${Math.round(ms / 1000)}s`
+  return `${Math.round(ms / 60_000)}min`
+}
+
+function GaugeBar({ value, color }: { value: number; color: string }) {
+  return (
+    <div className="w-full h-2 bg-[#f0efec] rounded-full overflow-hidden">
+      <div
+        className="h-full rounded-full transition-all duration-700"
+        style={{ width: `${Math.min(100, value)}%`, backgroundColor: color }}
+      />
+    </div>
+  )
+}
+
+function QualiteDashboard() {
+  const [metrics, setMetrics]   = useState<QualiteMetrics | null>(null)
+  const [loading, setLoading]   = useState(true)
+  const [error, setError]       = useState<string | null>(null)
+  const [days, setDays]         = useState(7)
+
+  useEffect(() => {
+    setLoading(true); setError(null)
+    fetch(`/api/sav/actions?days=${days}`)
+      .then(r => r.json())
+      .then(d => {
+        if (d.error) throw new Error(d.error)
+        setMetrics(d.metrics)
+      })
+      .catch(e => setError(e instanceof Error ? e.message : 'Erreur'))
+      .finally(() => setLoading(false))
+  }, [days])
+
+  const fullAutoColor = (score: number | null) => {
+    if (score === null) return '#d0cfc9'
+    if (score >= 70) return '#1a7f4b'
+    if (score >= 40) return '#b45309'
+    return '#c7293a'
+  }
+
+  return (
+    <div className="flex flex-col h-full overflow-y-auto px-8 py-6 gap-6">
+      {/* Header */}
+      <div className="flex items-center justify-between">
+        <div>
+          <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-[#aeb0c9]">Admin · SAV Mōom</p>
+          <h2 className="text-base font-bold text-[#1a1a2e] mt-0.5">Qualité SAV</h2>
+        </div>
+        <div className="flex gap-1.5">
+          {[7, 30].map(d => (
+            <button
+              key={d}
+              onClick={() => setDays(d)}
+              className={`px-3 py-1.5 rounded-lg text-[11px] font-semibold transition-colors ${
+                days === d
+                  ? 'bg-[#1a1a2e] text-white'
+                  : 'bg-[#f3f3f1] text-[#6b6b63] hover:bg-[#eeede9]'
+              }`}
+            >
+              {d}j
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {loading && (
+        <div className="space-y-3">
+          {[1,2,3].map(i => <div key={i} className="h-16 bg-[#f3f3f1] rounded-2xl animate-pulse" />)}
+        </div>
+      )}
+
+      {error && (
+        <div className="rounded-xl bg-[#fce8ea] border border-[#fecaca] px-4 py-3 text-xs text-[#c7293a]">
+          {error.includes('does not exist') || error.includes('relation')
+            ? "La table sav_actions n'existe pas encore. Créez-la dans Supabase : CREATE TABLE sav_actions (id uuid DEFAULT gen_random_uuid() PRIMARY KEY, ticket_id integer NOT NULL, action text NOT NULL, was_modified boolean, category text, confidence numeric, time_to_action_ms integer, created_at timestamptz DEFAULT now() NOT NULL);"
+            : error}
+        </div>
+      )}
+
+      {!loading && !error && metrics && (
+        <>
+          {metrics.total === 0 ? (
+            <div className="flex flex-col items-center justify-center gap-3 py-16 text-center">
+              <p className="text-3xl">📊</p>
+              <p className="text-sm font-semibold text-[#1a1a2e]">Pas encore de données</p>
+              <p className="text-xs text-[#9b9b93] max-w-xs">Les métriques s&apos;accumuleront au fur et à mesure que l&apos;équipe traite des tickets.</p>
+            </div>
+          ) : (
+            <>
+              {/* KPI grid */}
+              <div className="grid grid-cols-2 gap-3">
+                <div className="rounded-2xl bg-[#f8f7f5] border border-[#e8e8e4] px-5 py-4">
+                  <p className="text-[10px] font-semibold uppercase tracking-[0.1em] text-[#aeb0c9]">Tickets traités</p>
+                  <p className="text-3xl font-bold text-[#1a1a2e] mt-1">{metrics.total}</p>
+                  <p className="text-[10px] text-[#9b9b93] mt-0.5">sur {days} jours</p>
+                </div>
+
+                <div className="rounded-2xl bg-[#f8f7f5] border border-[#e8e8e4] px-5 py-4">
+                  <p className="text-[10px] font-semibold uppercase tracking-[0.1em] text-[#aeb0c9]">Temps moyen</p>
+                  <p className="text-3xl font-bold text-[#1a1a2e] mt-1">
+                    {metrics.avg_time_ms !== null ? fmtMs(metrics.avg_time_ms) : '—'}
+                  </p>
+                  <p className="text-[10px] text-[#9b9b93] mt-0.5">du ticket à l&apos;action</p>
+                </div>
+
+                <div className="rounded-2xl bg-[#f8f7f5] border border-[#e8e8e4] px-5 py-4">
+                  <p className="text-[10px] font-semibold uppercase tracking-[0.1em] text-[#aeb0c9]">Réponses envoyées</p>
+                  <p className="text-3xl font-bold text-[#1a1a2e] mt-1">{metrics.pct_sent}%</p>
+                  <p className="text-[10px] text-[#9b9b93] mt-0.5">{metrics.sent} / {metrics.total} tickets</p>
+                </div>
+
+                <div className="rounded-2xl bg-[#f8f7f5] border border-[#e8e8e4] px-5 py-4">
+                  <p className="text-[10px] font-semibold uppercase tracking-[0.1em] text-[#aeb0c9]">Draft non modifié</p>
+                  <p className="text-3xl font-bold text-[#1a1a2e] mt-1">
+                    {metrics.pct_unmodified !== null ? `${metrics.pct_unmodified}%` : '—'}
+                  </p>
+                  <p className="text-[10px] text-[#9b9b93] mt-0.5">des réponses Claude acceptées telles quelles</p>
+                </div>
+              </div>
+
+              {/* Full-auto readiness gauge */}
+              <div className="rounded-2xl bg-[#f8f7f5] border border-[#e8e8e4] px-5 py-5">
+                <div className="flex items-center justify-between mb-3">
+                  <div>
+                    <p className="text-[10px] font-semibold uppercase tracking-[0.1em] text-[#aeb0c9]">Prêt pour full-auto</p>
+                    <p className="text-[11px] text-[#6b6b63] mt-0.5">Tickets envoyés sans modification avec confiance ≥ 85%</p>
+                  </div>
+                  <p className="text-2xl font-bold" style={{ color: fullAutoColor(metrics.full_auto_score) }}>
+                    {metrics.full_auto_score !== null ? `${metrics.full_auto_score}%` : '—'}
+                  </p>
+                </div>
+                {metrics.full_auto_score !== null && (
+                  <>
+                    <GaugeBar value={metrics.full_auto_score} color={fullAutoColor(metrics.full_auto_score)} />
+                    <p className="text-[10px] text-[#9b9b93] mt-2">
+                      {metrics.full_auto_score >= 70
+                        ? '✓ Le modèle est prêt pour le mode automatique'
+                        : metrics.full_auto_score >= 40
+                        ? 'En progression — quelques ajustements des règles peuvent aider'
+                        : 'Trop de modifications manuelles — affiner les règles Claude'}
+                    </p>
+                  </>
+                )}
+              </div>
+
+              {/* Action breakdown */}
+              <div className="rounded-2xl bg-[#f8f7f5] border border-[#e8e8e4] px-5 py-5">
+                <p className="text-[10px] font-semibold uppercase tracking-[0.1em] text-[#aeb0c9] mb-4">Répartition des actions</p>
+                <div className="space-y-3">
+                  {[
+                    { label: 'Envoyés', pct: metrics.pct_sent,      count: metrics.sent,      color: '#1a7f4b' },
+                    { label: 'Escaladés', pct: metrics.pct_escalated, count: metrics.escalated, color: '#b45309' },
+                    { label: 'Archivés', pct: metrics.pct_archived,  count: metrics.archived,  color: '#6b6b63' },
+                  ].map(({ label, pct, count, color }) => (
+                    <div key={label}>
+                      <div className="flex items-center justify-between mb-1">
+                        <span className="text-xs text-[#1a1a2e] font-medium">{label}</span>
+                        <span className="text-xs text-[#6b6b63]">{pct}% <span className="text-[#aeb0c9]">({count})</span></span>
+                      </div>
+                      <GaugeBar value={pct} color={color} />
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Category breakdown */}
+              {Object.keys(metrics.by_category).length > 0 && (
+                <div className="rounded-2xl bg-[#f8f7f5] border border-[#e8e8e4] px-5 py-5">
+                  <p className="text-[10px] font-semibold uppercase tracking-[0.1em] text-[#aeb0c9] mb-4">Par catégorie</p>
+                  <div className="space-y-2">
+                    {Object.entries(metrics.by_category)
+                      .sort((a, b) => b[1].total - a[1].total)
+                      .map(([cat, stats]) => (
+                        <div key={cat} className="flex items-center justify-between text-xs">
+                          <span className="text-[#1a1a2e] font-medium">{CAT_LABELS_FR[cat] ?? cat}</span>
+                          <div className="flex items-center gap-3 text-[#9b9b93]">
+                            <span>{stats.total} tickets</span>
+                            <span className="text-[#1a7f4b]">{stats.sent} envoyés</span>
+                            {stats.escalated > 0 && <span className="text-[#b45309]">{stats.escalated} escaladés</span>}
+                          </div>
+                        </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </>
+          )}
+        </>
+      )}
+    </div>
+  )
+}
+
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 export default function SavPage() {
@@ -767,11 +991,19 @@ export default function SavPage() {
   const [doneStatuses, setDoneStatuses]     = useState<Record<number, 'sent' | 'escalated' | 'archived'>>({})
   const [drafts, setDrafts]                 = useState<Record<number, string>>({})
   const [solvedMap, setSolvedMap]           = useState<Record<number, boolean>>({})
-  const [tab, setTab]                       = useState<'pending' | 'done'>('pending')
+  const [tab, setTab]                       = useState<'pending' | 'done' | 'qualite'>('pending')
   const [showRules, setShowRules]           = useState(false)
   const [importing, setImporting]           = useState(false)
   const [importMsg, setImportMsg]           = useState<string | null>(null)
   const [commentRefreshKey, setCommentRefreshKey] = useState(0)
+  const [role, setRole]                     = useState<string | null>(null)
+  // Tracks when each ticket was first selected (for time-to-action metric)
+  const ticketStartTimes = useRef<Record<number, number>>({})
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const supabase = useMemo(() => createBrowserClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+  ), [])
   const firstLoad  = useRef(true)
   // Tracks in-flight process requests to avoid duplicate fetches
   const fetchingRef = useRef<Set<number>>(new Set())
@@ -837,10 +1069,22 @@ export default function SavPage() {
 
   useEffect(() => { load() }, [load])
 
+  useEffect(() => {
+    supabase.auth.getUser().then(({ data }) => {
+      const r = (data.user?.user_metadata?.role as string | undefined) ?? 'admin'
+      setRole(r)
+    })
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
   // ── Ticket click ──────────────────────────────────────────────────────────
   function handleTicketClick(raw: RawTicket) {
     setSelectedId(raw.ticket_id)
     setCommentRefreshKey(n => n + 1)
+    // Record first-view time for time-to-action metric
+    if (!ticketStartTimes.current[raw.ticket_id]) {
+      ticketStartTimes.current[raw.ticket_id] = Date.now()
+    }
     if (!processedCache[raw.ticket_id]) processTicket(raw)
   }
 
@@ -857,9 +1101,28 @@ export default function SavPage() {
     }
   }
 
-  function handleSent(action: ReplyAction) {
+  function logAction(ticketId: number, action: 'sent' | 'escalated' | 'archived', wasModified?: boolean | null) {
+    const processed = processedCache[ticketId]
+    const startTime = ticketStartTimes.current[ticketId]
+    const time_to_action_ms = startTime ? Date.now() - startTime : null
+    fetch('/api/sav/actions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        ticket_id:         ticketId,
+        action,
+        was_modified:      wasModified ?? null,
+        category:          processed?.category ?? null,
+        confidence:        processed?.confidence ?? null,
+        time_to_action_ms,
+      }),
+    }).catch(err => console.warn('[SAV] logAction error:', err))
+  }
+
+  function handleSent(action: ReplyAction, wasModified?: boolean) {
     if (selectedId === null) return
     const status: 'escalated' | 'sent' = action === 'escalate' ? 'escalated' : 'sent'
+    logAction(selectedId, status, action === 'escalate' ? null : (wasModified ?? null))
     const doneAfter = { ...doneStatuses, [selectedId]: status }
     setDoneStatuses(doneAfter)
     advanceSelection(selectedId, doneAfter)
@@ -867,6 +1130,7 @@ export default function SavPage() {
 
   function handleArchive() {
     if (selectedId === null) return
+    logAction(selectedId, 'archived', null)
     const doneAfter = { ...doneStatuses, [selectedId]: 'archived' as const }
     setDoneStatuses(doneAfter)
     advanceSelection(selectedId, doneAfter)
@@ -953,6 +1217,18 @@ export default function SavPage() {
                 </span>
               )}
             </button>
+            {role === 'admin' && (
+              <button
+                onClick={() => setTab('qualite')}
+                className={`flex-1 flex items-center justify-center gap-1.5 py-2 text-[11px] font-semibold border-b-2 transition-colors ${
+                  tab === 'qualite'
+                    ? 'border-[#7e22ce] text-[#7e22ce]'
+                    : 'border-transparent text-[#9b9b93] hover:text-[#6b6b63]'
+                }`}
+              >
+                Qualité
+              </button>
+            )}
           </div>
         </div>
 
@@ -1037,6 +1313,11 @@ export default function SavPage() {
               ))}
             </>
           )}
+
+          {/* Qualité tab (admin only) */}
+          {tab === 'qualite' && role === 'admin' && (
+            <QualitePanel />
+          )}
         </div>
 
         {/* Left footer — tools */}
@@ -1062,21 +1343,24 @@ export default function SavPage() {
         </div>
       </div>
 
-      {/* ── CENTER — ticket detail ── */}
+      {/* ── CENTER — ticket detail or qualite dashboard ── */}
       <div className="flex-1 flex flex-col overflow-hidden border-r border-[#e8e8e4] bg-white">
-        {selectedId === null
-          ? <CenterEmpty />
-          : isProcessing && !selectedProcessed
-            ? <CenterSkeleton />
-            : selectedProcessed
-              ? <TicketDetail ticket={selectedProcessed} refreshKey={commentRefreshKey} />
-              : <CenterEmpty />
+        {tab === 'qualite' && role === 'admin'
+          ? <QualiteDashboard />
+          : selectedId === null
+            ? <CenterEmpty />
+            : isProcessing && !selectedProcessed
+              ? <CenterSkeleton />
+              : selectedProcessed
+                ? <TicketDetail ticket={selectedProcessed} refreshKey={commentRefreshKey} />
+                : <CenterEmpty />
         }
       </div>
 
       {/* ── RIGHT — reply panel or follow-up panel ── */}
       <div className="w-[380px] shrink-0 flex flex-col overflow-hidden bg-[#fafaf9]">
-        {selectedId === null ? (
+        {tab === 'qualite' ? null
+        : selectedId === null ? (
           <div className="flex items-center justify-center h-full">
             <p className="text-xs text-[#9b9b93]">Aucun ticket sélectionné</p>
           </div>
