@@ -68,14 +68,19 @@ export async function getRequesterEmail(requesterId: number): Promise<string> {
 // Posts a public reply and sets the ticket status.
 // When solving, includes the required "Motif de contact" field (20652537824913)
 // to satisfy Zendesk's resolution validation.
+// uploads: optional list of Zendesk upload tokens to attach to the comment.
 export async function postReply(
   ticketId: number,
   body:     string,
-  solved:   boolean
+  solved:   boolean,
+  uploads:  string[] = [],
 ): Promise<void> {
+  const comment: Record<string, unknown> = { body, public: true }
+  if (uploads.length > 0) comment.uploads = uploads
+
   const ticket: Record<string, unknown> = {
     status:  solved ? 'solved' : 'open',
-    comment: { body, public: true },
+    comment,
   }
   if (solved) {
     ticket.custom_fields = [{ id: 20652537824913, value: 'autres' }]

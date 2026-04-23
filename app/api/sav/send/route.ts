@@ -14,6 +14,7 @@ export async function POST(req: NextRequest) {
     reply_body: string
     solved:     boolean
     action:     ReplyAction
+    uploads?:   string[]
   }
 
   try {
@@ -22,7 +23,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 })
   }
 
-  const { ticket_id, reply_body, solved, action } = body
+  const { ticket_id, reply_body, solved, action, uploads = [] } = body
 
   if (!ticket_id || !action) {
     return NextResponse.json({ error: 'ticket_id and action are required' }, { status: 400 })
@@ -33,7 +34,7 @@ export async function POST(req: NextRequest) {
   }
 
   try {
-    await sendValidatedReply(ticket_id, reply_body, solved ?? false, action)
+    await sendValidatedReply(ticket_id, reply_body, solved ?? false, action, uploads)
     // Persist so this ticket is excluded from future fetches
     await markTicketProcessed(ticket_id, action === 'escalate' ? 'escalated' : 'sent')
     return NextResponse.json({ ok: true })

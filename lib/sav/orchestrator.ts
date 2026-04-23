@@ -315,10 +315,11 @@ export async function sendValidatedReply(
   replyBody:  string,
   solved:     boolean,
   action:     ReplyAction,
+  uploads:    string[] = [],
 ): Promise<void> {
   if (action === 'escalate') {
     await escalateTicket(ticketId)
   } else {
-    await postReply(ticketId, replyBody, solved)
+    await postReply(ticketId, replyBody, solved, uploads)
   }
 }

@@ -5,7 +5,7 @@ import { createBrowserClient } from '@supabase/auth-helpers-nextjs'
 import {
   RefreshCw, Send, ArrowUpRight, Archive, Package, ExternalLink,
   Inbox, CheckCheck, ChevronDown, ChevronUp,
-  Settings, Trash2, Plus, X, Download, RotateCcw,
+  Settings, Trash2, Plus, X, Download, RotateCcw, Paperclip,
 } from 'lucide-react'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -414,6 +414,11 @@ function RightPanelSkeleton() {
 
 // ─── Right column — reply panel ───────────────────────────────────────────────
 
+interface AttachmentState {
+  filename: string
+  token:    string
+}
+
 function ReplyPanel({ ticket, draft, solved, onDraftChange, onSolvedChange, onSent, onArchive }: {
   ticket: ProcessedTicket
   draft: string; solved: boolean
@@ -427,6 +432,28 @@ function ReplyPanel({ ticket, draft, solved, onDraftChange, onSolvedChange, onSe
   const [regenerating, setRegenerating] = useState(false)
   const [error, setError]             = useState<string | null>(null)
   const [showReason, setShowReason]   = useState(false)
+  const [attachment, setAttachment]   = useState<AttachmentState | null>(null)
+  const [uploading, setUploading]     = useState(false)
+  const fileInputRef                  = useRef<HTMLInputElement>(null)
+
+  async function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    if (!file) return
+    // Reset so the same file can be re-selected after removal
+    e.target.value = ''
+
+    setUploading(true); setError(null)
+    try {
+      const form = new FormData()
+      form.append('file', file)
+      const res = await fetch('/api/sav/upload', { method: 'POST', body: form })
+      const d   = await res.json() as { token?: string; filename?: string; error?: string }
+      if (!res.ok) throw new Error(d.error ?? `HTTP ${res.status}`)
+      setAttachment({ filename: d.filename ?? file.name, token: d.token! })
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Erreur upload')
+    } finally { setUploading(false) }
+  }
 
   async function regenerate() {
     setRegenerating(true); setError(null)
@@ -456,13 +483,15 @@ function ReplyPanel({ ticket, draft, solved, onDraftChange, onSolvedChange, onSe
   async function send(action: ReplyAction) {
     setSending(true); setError(null)
     try {
+      const uploads = attachment ? [attachment.token] : []
       const res = await fetch('/api/sav/send', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ticket_id: ticket.ticket_id, reply_body: draft, solved, action }),
+        body: JSON.stringify({ ticket_id: ticket.ticket_id, reply_body: draft, solved, action, uploads }),
       })
       if (!res.ok) { const d = await res.json(); throw new Error(d.error ?? `HTTP ${res.status}`) }
       const wasModified = draft.trim() !== ticket.draft_reply.trim()
+      setAttachment(null)
       onSent(action, wasModified)
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Erreur inconnue')
@@ -538,6 +567,40 @@ function ReplyPanel({ ticket, draft, solved, onDraftChange, onSolvedChange, onSe
         {error && (
           <p className="text-[11px] text-[#c7293a] bg-[#fce8ea] rounded-lg px-3 py-2">{error}</p>
         )}
+
+        {/* Attachment */}
+        <input
+          ref={fileInputRef}
+          type="file"
+          className="hidden"
+          onChange={handleFileChange}
+          accept=".pdf,.jpg,.jpeg,.png,.gif,.webp,.zip,.doc,.docx,.xls,.xlsx"
+        />
+        {attachment ? (
+          <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-[#f0efec] border border-[#e0deda]">
+            <Paperclip size={12} strokeWidth={1.8} className="text-[#6b6b63] shrink-0" />
+            <span className="text-[11px] text-[#1a1a2e] truncate flex-1 font-medium">{attachment.filename}</span>
+            <button
+              onClick={() => setAttachment(null)}
+              className="shrink-0 text-[#9b9b93] hover:text-[#c7293a] transition-colors"
+            >
+              <X size={13} strokeWidth={2} />
+            </button>
+          </div>
+        ) : (
+          <button
+            onClick={() => fileInputRef.current?.click()}
+            disabled={uploading || sending || archiving}
+            className="flex items-center gap-1.5 text-[11px] text-[#9b9b93] hover:text-[#6b6b63] transition-colors disabled:opacity-40"
+          >
+            {uploading
+              ? <RefreshCw size={12} strokeWidth={1.8} className="animate-spin" />
+              : <Paperclip size={12} strokeWidth={1.8} />
+            }
+            {uploading ? 'Upload…' : 'Joindre un fichier'}
+          </button>
+        )}
+
         <label className="flex items-center gap-2 text-xs text-[#6b6b63] cursor-pointer">
           <input
             type="checkbox" checked={solved} onChange={e => onSolvedChange(e.target.checked)}
