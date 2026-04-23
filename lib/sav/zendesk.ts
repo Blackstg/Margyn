@@ -65,21 +65,25 @@ export async function getRequesterEmail(requesterId: number): Promise<string> {
   return data.user.email
 }
 
-// Posts a public reply and sets the ticket status
+// Posts a public reply and sets the ticket status.
+// When solving, includes the required "Motif de contact" field (20652537824913)
+// to satisfy Zendesk's resolution validation.
 export async function postReply(
   ticketId: number,
   body:     string,
   solved:   boolean
 ): Promise<void> {
+  const ticket: Record<string, unknown> = {
+    status:  solved ? 'solved' : 'open',
+    comment: { body, public: true },
+  }
+  if (solved) {
+    ticket.custom_fields = [{ id: 20652537824913, value: 'autres' }]
+  }
   const res = await fetch(`${base()}/tickets/${ticketId}.json`, {
     method:  'PUT',
     headers: authHeaders(),
-    body: JSON.stringify({
-      ticket: {
-        status:  solved ? 'solved' : 'open',
-        comment: { body, public: true },
-      },
-    }),
+    body: JSON.stringify({ ticket }),
   })
   if (!res.ok) throw new Error(`[Zendesk] postReply ${res.status}: ${await res.text()}`)
 }
