@@ -89,21 +89,44 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  // ── 4. hello@bowa-concept.com → SAV only ─────────────────────────────────
+  // ── 4. hello@bowa-concept.com → SAV uniquement ───────────────────────────
   {
-    const user = findUser('hello@bowa-concept.com')
+    const email = 'hello@bowa-concept.com'
+    let user = findUser(email)
+
+    // Create the user if they don't exist yet
+    if (!user) {
+      const { data: created, error: createErr } = await admin.auth.admin.createUser({
+        email,
+        email_confirm: true,
+        user_metadata: { role: 'sav' },
+      })
+      if (createErr) {
+        results[email] = { status: 'error', message: `createUser: ${createErr.message}` }
+      } else {
+        user = created.user
+        results[email] = { status: 'created', id: created.user.id }
+      }
+    }
+
     if (user) {
       const { error } = await admin.auth.admin.updateUserById(user.id, {
-        user_metadata: {
-          ...user.user_metadata,
-          role: 'delivery',
-          brands: ['bowa'],
-          delivery_views: ['sav'],
-        },
+        user_metadata: { ...user.user_metadata, role: 'sav' },
       })
-      results['hello@bowa-concept.com'] = error
-        ? { status: 'error', message: error.message }
-        : { status: 'updated', id: user.id }
+      if (error) {
+        results[email] = { status: 'error', message: `updateUser: ${error.message}` }
+      } else {
+        results[email] = { ...(results[email] as object ?? {}), status: results[email] ? results[email] : 'updated', role: 'sav' }
+      }
+
+      // Send a password reset link so the user can set their password
+      const { error: inviteErr } = await admin.auth.admin.generateLink({
+        type: 'recovery',
+        email,
+      })
+      if (inviteErr) {
+        console.warn(`[setup] generateLink for ${email}:`, inviteErr.message)
+      }
     }
   }
 

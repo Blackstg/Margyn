@@ -60,6 +60,14 @@ export async function middleware(req: NextRequest) {
     return response
   }
 
+  // SAV-only users: restricted to /sav
+  if (role === 'sav') {
+    if (!pathname.startsWith('/sav')) {
+      return NextResponse.redirect(new URL('/sav', req.url))
+    }
+    return response
+  }
+
   // Brand-specific route protection
   // Add new entries here as more brand-specific pages are created
   const BRAND_ROUTES: Record<string, string> = {
