@@ -43,6 +43,8 @@ interface ProcessedTicket extends RawTicket {
   action: ReplyAction; confidence: number; reason: string
   order: MoomOrder | null; draft_reply: string; solved: boolean
   partnership_email_sent?: boolean
+  is_phishing?: boolean
+  phishing_signals?: string[]
 }
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -132,7 +134,12 @@ function TicketRow({ raw, processed, selected, doneAction, isProcessing, onClick
             En attente
           </span>
         )}
-        {!doneAction && !isPending && processed && catBadge(processed.category)}
+        {processed?.is_phishing && (
+          <span className="inline-flex items-center gap-1 text-[10px] font-bold shrink-0 bg-[#fee2e2] text-[#c7293a] px-1.5 py-0.5 rounded-full">
+            🎣 Phishing
+          </span>
+        )}
+        {!doneAction && !isPending && processed && !processed.is_phishing && catBadge(processed.category)}
         {!doneAction && !isPending && !processed && isProcessing && (
           <RefreshCw size={10} strokeWidth={1.8} className={`animate-spin shrink-0 ${selected ? 'text-white/40' : 'text-[#aeb0c9]'}`} />
         )}
@@ -294,7 +301,10 @@ function TicketDetail({ ticket, refreshKey }: { ticket: ProcessedTicket; refresh
         <div className="flex items-center gap-2 flex-wrap">
           <span className="text-xs text-[#6b6b63]">{ticket.customer_email}</span>
           <span className="text-[#d0cfc9]">·</span>
-          {catBadge(ticket.category)}
+          {ticket.is_phishing
+            ? <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-[#fee2e2] text-[#c7293a]">🎣 Phishing</span>
+            : catBadge(ticket.category)
+          }
           {ticket.action === 'auto_reply'
             ? <span className="inline-flex px-2 py-0.5 rounded-full text-[10px] font-semibold bg-[#dcf5e7] text-[#1a7f4b]">Réponse auto</span>
             : <span className="inline-flex px-2 py-0.5 rounded-full text-[10px] font-semibold bg-[#fef3c7] text-[#b45309]">À escalader</span>
@@ -310,6 +320,23 @@ function TicketDetail({ ticket, refreshKey }: { ticket: ProcessedTicket; refresh
 
       {/* Scrollable body */}
       <div className="flex-1 overflow-y-auto px-6 py-5 space-y-5">
+
+        {/* Phishing warning */}
+        {ticket.is_phishing && (
+          <div className="rounded-xl bg-[#fef2f2] border border-[#fecaca] px-4 py-3 flex gap-3">
+            <span className="text-xl shrink-0">🎣</span>
+            <div>
+              <p className="text-sm font-bold text-[#c7293a] mb-0.5">Tentative de phishing détectée</p>
+              <p className="text-xs font-semibold text-[#c7293a] mb-1">⚠ Ne pas cliquer sur les liens de ce message</p>
+              {ticket.phishing_signals && ticket.phishing_signals.length > 0 && (
+                <ul className="text-xs text-[#7f1d1d] space-y-0.5 list-disc list-inside">
+                  {ticket.phishing_signals.map((s, i) => <li key={i}>{s}</li>)}
+                </ul>
+              )}
+            </div>
+          </div>
+        )}
+
         {/* Conversation thread */}
         <div>
           <p className="text-[10px] font-semibold uppercase tracking-[0.1em] text-[#aeb0c9] mb-3">

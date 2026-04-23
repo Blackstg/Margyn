@@ -61,6 +61,83 @@ export interface ReplyResult {
   solved: boolean  // true if the reply closes the ticket
 }
 
+// ─── Phishing detection ───────────────────────────────────────────────────────
+// Runs before Claude — if any signal matches, returns the list of matched reasons
+// so the orchestrator can short-circuit and tag the ticket immediately.
+
+const TRUSTED_DOMAINS = ['moom-paris.co', 'zendesk.com']
+
+function isTrustedUrl(url: string): boolean {
+  try {
+    const host = new URL(url).hostname.toLowerCase()
+    return TRUSTED_DOMAINS.some((d) => host === d || host.endsWith('.' + d))
+  } catch {
+    return false
+  }
+}
+
+const PHISHING_SENDER_PATTERNS = [/^donotreply@/i, /^noreply@/i]
+const PHISHING_BRAND_KEYWORDS  = [
+  'meta support', 'facebook team', 'google support', 'instagram team',
+]
+const PHISHING_SHORTENER_HOSTS = ['forms.gle', 'bit.ly']
+const PHISHING_KEYWORDS = [
+  'verification portal', 'final activation',
+  'account suspended', 'unusual activity detected',
+]
+
+// Matches http(s):// URLs in a string
+const URL_REGEX = /https?:\/\/[^\s"'<>)]+/gi
+
+export interface PhishingDetectionResult {
+  is_phishing: true
+  signals: string[]
+}
+
+export function detectPhishing(
+  senderEmail: string,
+  subject: string,
+  description: string,
+): PhishingDetectionResult | null {
+  const signals: string[] = []
+  const text = `${subject} ${description}`.toLowerCase()
+
+  // Extract all URLs from the content
+  const urls = [...description.matchAll(URL_REGEX)].map((m) => m[0])
+  const hasExternalLink = urls.some((url) => !isTrustedUrl(url))
+
+  // 1. noreply/donotreply sender + external link
+  if (hasExternalLink && PHISHING_SENDER_PATTERNS.some((p) => p.test(senderEmail))) {
+    signals.push(`Expéditeur ${senderEmail} combiné à un lien externe non approuvé`)
+  }
+
+  // 2. Phishing brand mentions
+  for (const kw of PHISHING_BRAND_KEYWORDS) {
+    if (text.includes(kw)) signals.push(`Mention suspecte : "${kw}"`)
+  }
+
+  // 3. Known shortener / suspicious domains
+  for (const url of urls) {
+    try {
+      const host = new URL(url).hostname.toLowerCase()
+      if (PHISHING_SHORTENER_HOSTS.includes(host)) {
+        signals.push(`Lien vers domaine suspect : ${host}`)
+      } else if (!isTrustedUrl(url)) {
+        // Generic external domain — only flag if combined with other signals or shortener
+        // (avoid false positives for innocent client links)
+      }
+    } catch { /* ignore malformed URLs */ }
+  }
+
+  // 4. Phishing keywords
+  for (const kw of PHISHING_KEYWORDS) {
+    if (text.includes(kw)) signals.push(`Mot-clé phishing : "${kw}"`)
+  }
+
+  if (signals.length === 0) return null
+  return { is_phishing: true, signals }
+}
+
 // ─── Classifier ───────────────────────────────────────────────────────────────
 
 const CATEGORY_DESCRIPTIONS: Record<TicketCategory, string> = {

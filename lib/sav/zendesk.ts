@@ -84,6 +84,27 @@ export async function postReply(
   if (!res.ok) throw new Error(`[Zendesk] postReply ${res.status}: ${await res.text()}`)
 }
 
+// Adds one or more tags to a ticket (fire-and-forget safe)
+export async function tagTicket(ticketId: number, tags: string[]): Promise<void> {
+  const getRes = await fetch(
+    `${base()}/tickets/${ticketId}.json`,
+    { headers: authHeaders(), cache: 'no-store' }
+  )
+  if (!getRes.ok) throw new Error(`[Zendesk] tagTicket read ${getRes.status}`)
+  const { ticket } = await getRes.json() as { ticket: ZendeskTicket }
+
+  const res = await fetch(`${base()}/tickets/${ticketId}.json`, {
+    method:  'PUT',
+    headers: authHeaders(),
+    body: JSON.stringify({
+      ticket: {
+        tags: [...new Set([...ticket.tags, ...tags])],
+      },
+    }),
+  })
+  if (!res.ok) throw new Error(`[Zendesk] tagTicket write ${res.status}: ${await res.text()}`)
+}
+
 // Adds the "escalade-humain" tag silently — no public reply
 export async function escalateTicket(ticketId: number): Promise<void> {
   const getRes = await fetch(

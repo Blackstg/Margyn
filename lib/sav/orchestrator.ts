@@ -4,9 +4,9 @@
 //   - Semi-auto (default): classify + draft reply, return for human validation
 //   - Auto: classify + draft + post reply immediately (for high-confidence auto_reply)
 
-import { getNewTickets, getRequesterEmail, postReply, escalateTicket } from './zendesk'
+import { getNewTickets, getRequesterEmail, postReply, escalateTicket, tagTicket } from './zendesk'
 import { getMostRecentOrder } from './shopify'
-import { classifyTicket, generateReply } from './classifier'
+import { classifyTicket, generateReply, detectPhishing } from './classifier'
 import type { TicketCategory, ReplyAction } from './classifier'
 import type { MoomOrder } from './shopify'
 import { createAdminClient } from '@/lib/supabase'
@@ -83,6 +83,8 @@ export interface ProcessedTicket {
   draft_reply:    string
   solved:         boolean
   partnership_email_sent?: boolean
+  is_phishing?:   boolean
+  phishing_signals?: string[]
 }
 
 // ─── Sage-femme detection ─────────────────────────────────────────────────────
@@ -197,19 +199,50 @@ export async function processOneTicket(
   requesterId: number,
   ticketStatus: 'new' | 'open' | 'pending' = 'open',
 ): Promise<ProcessedTicket> {
-  // Run email fetch + classification in parallel
-  const [email, classification] = await Promise.all([
-    getRequesterEmail(requesterId),
+  // ─── Phishing fast-path (before any Claude call) ──────────────────────────
+  // Fetch email first — needed for sender-based phishing check.
+  const email = await getRequesterEmail(requesterId)
+
+  const phishing = detectPhishing(email, subject, description)
+  if (phishing) {
+    console.warn(`[SAV] Phishing détecté ticket #${ticketId} — signaux:`, phishing.signals)
+    // Tag Zendesk asynchronously (fire-and-forget)
+    tagTicket(ticketId, ['phishing']).catch((err) =>
+      console.error('[SAV] tagTicket phishing failed:', err)
+    )
+    return {
+      ticket_id:       ticketId,
+      subject,
+      description,
+      created_at:      createdAt,
+      status:          ticketStatus,
+      requester_id:    requesterId,
+      customer_email:  email,
+      category:        'autre',
+      action:          'escalate',
+      confidence:      1,
+      reason:          `Phishing détecté : ${phishing.signals.join(' | ')}`,
+      order:           null,
+      draft_reply:     '',
+      solved:          false,
+      is_phishing:     true,
+      phishing_signals: phishing.signals,
+    }
+  }
+
+  // Run classification + Shopify order fetch in parallel
+  const [classification, shopifyOrder] = await Promise.allSettled([
     classifyTicket(subject, description),
+    getMostRecentOrder(email),
   ])
 
-  // Fetch Shopify order (non-blocking — null if not found or error)
-  let order: MoomOrder | null = null
-  try {
-    order = await getMostRecentOrder(email)
-  } catch {
-    // Continue without order data
+  const order: MoomOrder | null =
+    shopifyOrder.status === 'fulfilled' ? shopifyOrder.value : null
+
+  if (classification.status === 'rejected') {
+    throw new Error(`[SAV] classifyTicket failed: ${classification.reason}`)
   }
+  const cls = classification.value
 
   // ─── Pending tickets ──────────────────────────────────────────────────────
   // "Pending" means waiting for the client to reply — no action needed from
@@ -223,10 +256,10 @@ export async function processOneTicket(
       status:         'pending',
       requester_id:   requesterId,
       customer_email: email,
-      category:       classification.category,
-      action:         classification.action,
-      confidence:     classification.confidence,
-      reason:         classification.reason,
+      category:       cls.category,
+      action:         cls.action,
+      confidence:     cls.confidence,
+      reason:         cls.reason,
       order,
       draft_reply:    '',
       solved:         false,
@@ -239,7 +272,7 @@ export async function processOneTicket(
   // since partnership tickets don't need a Claude draft.
   let partnershipEmailSent: boolean | undefined
 
-  if (classification.category === 'partenariat') {
+  if (cls.category === 'partenariat') {
     if (isSageFemme(subject, description)) {
       console.log(`[SAV] #${ticketId} partenariat sage-femme — pas de transfert Pauline`)
     } else {
@@ -251,7 +284,7 @@ export async function processOneTicket(
   }
 
   // Generate reply draft
-  const reply = await generateReply(subject, description, classification.category, order, email)
+  const reply = await generateReply(subject, description, cls.category, order, email)
 
   return {
     ticket_id:      ticketId,
@@ -261,10 +294,10 @@ export async function processOneTicket(
     status:         ticketStatus,
     requester_id:   requesterId,
     customer_email: email,
-    category:       classification.category,
-    action:         classification.action,
-    confidence:     classification.confidence,
-    reason:         classification.reason,
+    category:       cls.category,
+    action:         cls.action,
+    confidence:     cls.confidence,
+    reason:         cls.reason,
     order,
     draft_reply:    reply.body,
     solved:         reply.solved,
