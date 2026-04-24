@@ -127,10 +127,10 @@ function stripQuotedReply(text: string): string {
 export async function getUnreadThreads(): Promise<GmailThread[]> {
   const gmail = getGmail()
 
-  // List threads with unread messages
+  // List all inbox threads (not archived) — processed filtering is done via DB
   const listRes = await gmail.users.threads.list({
     userId: 'me',
-    q: 'is:unread in:inbox',
+    q: 'in:inbox',
     maxResults: 50,
   })
 
