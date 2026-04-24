@@ -24,8 +24,13 @@ interface MoomOrder {
   estimated_delivery: string | null; products: OrderProduct[]; created_at: string
 }
 
+interface FileAttachment {
+  id: number; file_name: string; content_url: string; content_type: string; size: number
+}
+
 interface CommentItem {
   id: number; body: string; author_type: 'client' | 'agent'; created_at: string
+  attachments: FileAttachment[]
 }
 
 // Minimal ticket from the fast list endpoint (no AI data)
@@ -266,6 +271,7 @@ function ConversationThread({ ticket, refreshKey }: { ticket: ProcessedTicket; r
           : d.toLocaleDateString('fr-FR', { day: '2-digit', month: 'short' }) + ' ' +
             d.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })
 
+        const attachments = c.attachments ?? []
         return (
           <div key={c.id ?? i} className={`rounded-xl px-4 py-3 border-l-[3px] ${
             isAgent
@@ -280,9 +286,54 @@ function ConversationThread({ ticket, refreshKey }: { ticket: ProcessedTicket; r
               </span>
               <span className="text-[10px] text-[#aeb0c9]">{dateStr}</span>
             </div>
-            <p className="text-xs text-[#1a1a2e] leading-relaxed whitespace-pre-wrap break-words">
-              {c.body}
-            </p>
+            {c.body && (
+              <p className="text-xs text-[#1a1a2e] leading-relaxed whitespace-pre-wrap break-words">
+                {c.body}
+              </p>
+            )}
+            {attachments.length > 0 && (
+              <div className={`flex flex-col gap-2 ${c.body ? 'mt-2.5' : ''}`}>
+                {attachments.map(a => {
+                  const isImage = a.content_type.startsWith('image/')
+                  const isPdf   = a.content_type === 'application/pdf'
+                  const sizeKb  = Math.round(a.size / 1024)
+                  return (
+                    <div key={a.id}>
+                      {isImage ? (
+                        <a href={a.content_url} target="_blank" rel="noopener noreferrer" title={a.file_name}>
+                          {/* eslint-disable-next-line @next/next/no-img-element */}
+                          <img
+                            src={a.content_url}
+                            alt={a.file_name}
+                            className="max-w-full max-h-48 rounded-lg object-contain border border-[#e8e8e4] cursor-pointer hover:opacity-90 transition-opacity"
+                          />
+                          <p className="text-[10px] text-[#9b9b93] mt-1">{a.file_name} · {sizeKb} Ko</p>
+                        </a>
+                      ) : (
+                        <a
+                          href={a.content_url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          download={a.file_name}
+                          className="inline-flex items-center gap-2 px-3 py-2 rounded-lg bg-white border border-[#e8e8e4] hover:border-[#aeb0c9] transition-colors group"
+                        >
+                          <span className="text-base leading-none">
+                            {isPdf ? '📄' : '📎'}
+                          </span>
+                          <div className="min-w-0">
+                            <p className="text-[11px] font-medium text-[#1a1a2e] truncate group-hover:text-[#4527a0] transition-colors">
+                              {a.file_name}
+                            </p>
+                            <p className="text-[10px] text-[#9b9b93]">{sizeKb} Ko</p>
+                          </div>
+                          <ExternalLink size={11} strokeWidth={1.8} className="text-[#aeb0c9] shrink-0 ml-1" />
+                        </a>
+                      )}
+                    </div>
+                  )
+                })}
+              </div>
+            )}
           </div>
         )
       })}

@@ -26,12 +26,21 @@ export interface ZendeskTicket {
   updated_at:   string   // dernière mise à jour du ticket (réponse client = updated_at avance)
 }
 
+interface ZendeskAttachment {
+  id:           number
+  file_name:    string
+  content_url:  string   // URL directe Zendesk (authentifiée via token dans l'URL)
+  content_type: string
+  size:         number
+}
+
 interface ZendeskComment {
-  id:        number
-  author_id: number
-  body:      string
-  public:    boolean
-  created_at: string
+  id:          number
+  author_id:   number
+  body:        string
+  public:      boolean
+  created_at:  string
+  attachments: ZendeskAttachment[]
 }
 
 // Returns all new/open/pending tickets, excluding vip and litige
@@ -156,11 +165,20 @@ export async function archiveTicket(ticketId: number): Promise<void> {
 
 // ─── Conversation thread ──────────────────────────────────────────────────────
 
+export interface ZendeskFileAttachment {
+  id:           number
+  file_name:    string
+  content_url:  string
+  content_type: string
+  size:         number
+}
+
 export interface CommentItem {
   id:          number
   body:        string
   author_type: 'client' | 'agent'
   created_at:  string
+  attachments: ZendeskFileAttachment[]
 }
 
 // Returns all public comments for a ticket, labelled client vs agent.
@@ -195,12 +213,22 @@ export async function getTicketComments(
   // If we have a valid requesterId, use it to distinguish client vs agent.
   // Otherwise, fall back: the first public comment is from the client,
   // subsequent ones alternate but we mark them all as agent (better than nothing).
+  const mapAttachments = (c: ZendeskComment): ZendeskFileAttachment[] =>
+    (c.attachments ?? []).map(a => ({
+      id:           a.id,
+      file_name:    a.file_name,
+      content_url:  a.content_url,
+      content_type: a.content_type,
+      size:         a.size,
+    }))
+
   if (requesterId) {
     return publicComments.map(c => ({
       id:          c.id,
       body:        c.body,
       author_type: c.author_id === requesterId ? 'client' : 'agent',
       created_at:  c.created_at,
+      attachments: mapAttachments(c),
     }))
   }
 
@@ -210,6 +238,7 @@ export async function getTicketComments(
     body:        c.body,
     author_type: (i === 0 ? 'client' : 'agent') as 'client' | 'agent',
     created_at:  c.created_at,
+    attachments: mapAttachments(c),
   }))
 }
 
