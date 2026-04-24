@@ -118,6 +118,7 @@ export interface ProcessedTicket {
   order:          MoomOrder | null
   draft_reply:    string
   solved:         boolean
+  situation_detectee?: string
   partnership_email_sent?: boolean
   is_phishing?:   boolean
   phishing_signals?: string[]
@@ -350,8 +351,9 @@ export async function processOneTicket(
     confidence:     cls.confidence,
     reason:         cls.reason,
     order,
-    draft_reply:    reply.body,
-    solved:         reply.solved,
+    draft_reply:        reply.body,
+    solved:             reply.solved,
+    situation_detectee: reply.situation_detectee,
     ...(partnershipEmailSent !== undefined && { partnership_email_sent: partnershipEmailSent }),
   }
 }

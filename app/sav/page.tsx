@@ -48,6 +48,7 @@ interface ProcessedTicket extends RawTicket {
   customer_email: string; category: TicketCategory
   action: ReplyAction; confidence: number; reason: string
   order: MoomOrder | null; draft_reply: string; solved: boolean
+  situation_detectee?: string
   partnership_email_sent?: boolean
   is_phishing?: boolean
   phishing_signals?: string[]
@@ -590,6 +591,17 @@ function ReplyPanel({ ticket, draft, solved, onDraftChange, onSolvedChange, onSe
             </button>
           </div>
         </div>
+
+        {/* Situation détectée — ce que Claude a compris du dernier message */}
+        {ticket.situation_detectee && (
+          <div className="flex gap-2 items-start px-3 py-2 rounded-lg bg-[#f0f4ff] border border-[#c7d2fe]">
+            <span className="text-[10px] shrink-0 mt-px">🎯</span>
+            <p className="text-[11px] text-[#3730a3] leading-snug font-medium">
+              {ticket.situation_detectee}
+            </p>
+          </div>
+        )}
+
         <button
           onClick={() => setShowReason(v => !v)}
           className="flex items-center gap-1 text-[10px] text-[#9b9b93] hover:text-[#6b6b63] transition-colors"

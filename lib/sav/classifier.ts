@@ -58,8 +58,9 @@ export interface ClassificationResult {
 }
 
 export interface ReplyResult {
-  body:   string
-  solved: boolean  // true if the reply closes the ticket
+  situation_detectee: string   // ce que Claude a compris du dernier message client
+  body:               string
+  solved:             boolean  // true if the reply closes the ticket
 }
 
 // ─── Phishing detection ───────────────────────────────────────────────────────
@@ -306,73 +307,85 @@ export async function generateReply(
     }
   }
 
-  // ── Build the conversation context block ──────────────────────────────────
-  // If we have the full thread, surface the last client message prominently
-  // so Claude answers the right question, then show prior exchanges as context.
-  let conversationBlock: string
+  // ── Isoler le dernier message client ─────────────────────────────────────
+  let lastClientMsg: string
+  let priorHistory: string
+
   if (comments && comments.length > 0) {
     const clientComments = comments.filter(c => c.author_type === 'client')
-    const lastClientMsg  = clientComments[clientComments.length - 1]?.body ?? description
+    lastClientMsg = clientComments[clientComments.length - 1]?.body ?? description
 
-    // Prior exchanges = everything except the last client message (oldest first for readability)
     const priorComments = [...comments]
       .filter(c => !(c.author_type === 'client' && c.body === lastClientMsg))
       .sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime())
 
-    const historyBlock = priorComments.length > 0
-      ? `\nHistorique de la conversation pour contexte (du plus ancien au plus récent) :\n${
-          priorComments.map(c =>
-            `[${c.author_type === 'client' ? 'Client' : 'Agent'}] ${c.body.slice(0, 600)}`
-          ).join('\n\n')
-        }`
-      : ''
-
-    conversationBlock = `Sujet : ${subject}
-
-Dernier message du client (celui auquel tu dois répondre) :
-${lastClientMsg}
-${historyBlock}`
+    priorHistory = priorComments.length > 0
+      ? priorComments.map(c => {
+          const role = c.author_type === 'client' ? 'Client' : 'Agent Mōom'
+          const date = new Date(c.created_at).toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' })
+          return `[${role} — ${date}]\n${c.body.slice(0, 600)}`
+        }).join('\n\n')
+      : '(premier message du client, pas d\'historique)'
   } else {
-    // Fallback: no thread available, use the ticket description
-    conversationBlock = `Sujet : ${subject}
-Message : ${description}`
+    lastClientMsg = description
+    priorHistory  = '(pas d\'historique disponible)'
   }
 
-  const prompt = `Tu es un agent SAV pour la marque Mōom, une marque française de cosmétiques naturels haut de gamme.
-Tu dois répondre au ticket suivant de manière professionnelle, chaleureuse et efficace, en français.
-${rulesBlock}${examplesBlock}
-Catégorie identifiée : ${category}
+  const prompt = `Tu es un agent SAV pour la marque Mōom (cosmétiques naturels français haut de gamme).
+Ton objectif : rédiger la meilleure réponse possible au dernier message du client.
+Langue : français. Ton : professionnel, chaleureux, humain.
+
+━━━ SECTION 1 — SITUATION ACTUELLE ━━━
+Lis UNIQUEMENT ce dernier message du client (ignore l'historique pour identifier la demande) :
+
+Sujet du ticket : ${subject}
 Email du client : ${customerEmail}
 
-Ticket SAV :
-${conversationBlock}
+DERNIER MESSAGE DU CLIENT :
+${lastClientMsg}
 
+━━━ SECTION 2 — CONTEXTE (pour comprendre, ne pas répéter) ━━━
+Catégorie identifiée : ${category}
+
+Historique de la conversation (du plus ancien au plus récent) :
+${priorHistory}
+${previousTicketsBlock ? '\n' + previousTicketsBlock : ''}
 ${orderContext}
-${catalogBlock}${previousTicketsBlock}
-Instructions :
-- Rédige une réponse complète, naturelle et empathique, comme si tu étais une vraie conseillère SAV Mōom
-- Commence par remercier le client pour son message ou te présenter brièvement
-- Réponds directement à sa demande en utilisant les informations de commande disponibles
-- Si le suivi est disponible, donne le lien directement dans la réponse
-- Termine toujours par une formule de politesse chaleureuse et une invitation à revenir si besoin
-- N'utilise pas de placeholders comme [NOM] — si tu ne connais pas le prénom, n'en mets pas
-- Longueur : 3 à 6 paragraphes, ton professionnel mais humain
-${previousTicketsBlock ? '- Le client fait référence à un ticket précédent (contexte injecté ci-dessus) — tiens-en compte pour ne pas redemander des informations déjà fournies et assurer une continuité dans le suivi.' : ''}
-${category === 'modification_commande' ? `- PRIX : utilise UNIQUEMENT les prix fournis ci-dessus (commande + catalogue). Ne jamais deviner ou inventer un montant. Si les deux produits ont le même prix → "sans supplément". Si différence → "différence de X€". Si produit non trouvé dans le catalogue → dire qu'on va vérifier et revenir vers le client.` : ''}
+${catalogBlock}
+${examplesBlock ? 'Exemples de style de réponse Mōom (ton et structure de référence) :\n' + examplesBlock : ''}
+
+━━━ SECTION 3 — RÈGLES OBLIGATOIRES ━━━
+${rulesBlock || '(aucune règle spécifique — appliquer les bonnes pratiques SAV)'}
+
+━━━ SECTION 4 — INSTRUCTION ━━━
+Rédige une réponse UNIQUEMENT pour répondre à la SITUATION ACTUELLE (dernier message).
+
+Contraintes strictes :
+- Ne PAS répéter ni résumer ce qui a déjà été dit dans l'historique
+- Ne PAS inventer d'informations absentes du contexte (numéro de suivi, délais, prix, etc.)
+- Si une information manque, dire "je vérifie et reviens vers vous" plutôt qu'inventer
+- Répondre directement à la demande du dernier message — pas à une demande précédente déjà traitée
+- Ne pas utiliser de placeholders comme [NOM] ou [PRÉNOM]
+- Si le suivi est disponible dans les données commande, l'inclure directement
+- Longueur : 2 à 5 paragraphes selon la complexité de la demande
+${previousTicketsBlock ? '- Ticket précédent récupéré (voir contexte ci-dessus) : ne pas redemander des informations déjà fournies dans ce ticket' : ''}
+${category === 'modification_commande' ? '- PRIX : utiliser UNIQUEMENT les montants fournis dans commande + catalogue. Jamais inventer. Si produit absent du catalogue → "je vérifie et reviens vers vous".' : ''}
 
 Réponds UNIQUEMENT avec un objet JSON valide (sans markdown, sans backticks) :
 {
-  "body": "<le texte complet de la réponse>",
-  "solved": <true si la réponse résout le problème sans action supplémentaire attendue, false sinon>
+  "situation_detectee": "<une phrase : ce que le client demande dans son DERNIER MESSAGE — ex: Le client demande un remboursement car le colis n'est toujours pas arrivé>",
+  "body": "<le texte complet de la réponse à envoyer au client>",
+  "solved": <true si la réponse clôt le problème sans action supplémentaire attendue, false sinon>
 }`
 
   const msg = await client.messages.create({
     model:      'claude-sonnet-4-6',
-    max_tokens: 1024,
+    max_tokens: 1500,
     messages:   [{ role: 'user', content: prompt }],
   })
 
   const text = (msg.content[0] as { type: string; text: string }).text.trim()
   const result = JSON.parse(text) as ReplyResult
+  console.log(`[SAV] generateReply — situation_detectee: "${result.situation_detectee}"`)
   return result
 }
