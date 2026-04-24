@@ -4,7 +4,7 @@
 //   - Semi-auto (default): classify + draft reply, return for human validation
 //   - Auto: classify + draft + post reply immediately (for high-confidence auto_reply)
 
-import { getNewTickets, getRequesterEmail, postReply, escalateTicket, tagTicket } from './zendesk'
+import { getNewTickets, getRequesterEmail, postReply, escalateTicket, tagTicket, getTicketComments } from './zendesk'
 import { getMostRecentOrder } from './shopify'
 import { classifyTicket, generateReply, detectPhishing } from './classifier'
 import type { TicketCategory, ReplyAction } from './classifier'
@@ -323,8 +323,19 @@ export async function processOneTicket(
     }
   }
 
+  // Fetch the full conversation thread so generateReply can:
+  // a) answer the correct (latest) client message
+  // b) detect references to previous tickets (#XXXXX) anywhere in the thread
+  let comments
+  try {
+    comments = await getTicketComments(ticketId, requesterId)
+    console.log(`[SAV] processOneTicket #${ticketId} — ${comments.length} commentaire(s) récupéré(s)`)
+  } catch (err) {
+    console.warn(`[SAV] processOneTicket #${ticketId} — getTicketComments échoué:`, err)
+  }
+
   // Generate reply draft
-  const reply = await generateReply(subject, description, cls.category, order, email)
+  const reply = await generateReply(subject, description, cls.category, order, email, comments)
 
   return {
     ticket_id:      ticketId,

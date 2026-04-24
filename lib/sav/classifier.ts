@@ -271,13 +271,19 @@ export async function generateReply(
   }
 
   // ── Previous ticket context (references like #12345) ─────────────────────
-  // Extract Zendesk ticket IDs referenced in the subject or description,
-  // fetch each one, and inject as context so Claude has the full history.
+  // Extract Zendesk ticket IDs referenced in the subject, description, OR any
+  // comment body (client may reference a prior ticket in a follow-up message).
   const TICKET_REF_RE = /#(\d{4,8})\b/g
-  const refText = `${subject} ${description}`
+  const commentBodies = (comments ?? []).map(c => c.body).join('\n')
+  const refText = `${subject} ${description} ${commentBodies}`
   const referencedIds = [...new Set(
     [...refText.matchAll(TICKET_REF_RE)].map(m => parseInt(m[1], 10))
   )]
+
+  console.log(
+    `[SAV] generateReply — scan références tickets dans subject+description+${(comments ?? []).length} commentaire(s) : ` +
+    (referencedIds.length > 0 ? referencedIds.map(id => '#' + id).join(', ') : 'aucune')
+  )
 
   let previousTicketsBlock = ''
   if (referencedIds.length > 0) {
