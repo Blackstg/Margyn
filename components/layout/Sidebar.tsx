@@ -16,6 +16,7 @@ const NAV = [
   { href: '/invoices',  icon: FileText,        label: 'Factures',    brand: 'moom' },
   { href: '/products',  icon: Tag,             label: 'Produits',    brand: 'moom' },
   { href: '/sav',       icon: Headphones,      label: 'SAV',         brand: 'moom' },
+  { href: '/sav-krom',  icon: Headphones,      label: 'SAV Krom',    brand: 'krom' },
   { href: '/settings',  icon: Settings,        label: 'Paramètres',  brand: null   },
 ]
 
@@ -88,7 +89,7 @@ export default function Sidebar({ isOpen, onToggle }: { isOpen: boolean; onToggl
       <nav className="flex flex-col items-center gap-1.5 w-full px-2">
         {role === null ? null : NAV.filter(({ href, brand }) => {
           if (role === 'delivery') return href === '/delivery'
-          if (role === 'sav')     return href === '/sav' || href === '/delivery'
+          if (role === 'sav')     return href === '/sav' || href === '/sav-krom' || href === '/delivery'
           return brand === null || allowedBrands === null || allowedBrands.includes(brand)
         }).map(({ href, icon: Icon, label }) => {
           const active = pathname.startsWith(href)

@@ -60,7 +60,7 @@ export async function middleware(req: NextRequest) {
     return response
   }
 
-  // SAV role: access to /sav and /delivery only
+  // SAV role: access to /sav, /sav-krom and /delivery only
   if (role === 'sav') {
     if (!pathname.startsWith('/sav') && !pathname.startsWith('/delivery')) {
       return NextResponse.redirect(new URL('/sav', req.url))
@@ -74,7 +74,9 @@ export async function middleware(req: NextRequest) {
     '/stock':    'moom',
     '/invoices': 'moom',
     '/products': 'moom',
+    '/sav':      'moom',
     '/delivery': 'bowa',
+    '/sav-krom': 'krom',
   }
   const requiredBrand = Object.entries(BRAND_ROUTES).find(([path]) =>
     pathname === path || pathname.startsWith(path + '/')
