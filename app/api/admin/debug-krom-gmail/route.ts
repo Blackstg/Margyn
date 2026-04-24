@@ -14,7 +14,7 @@ function getOAuth2Client() {
   return oauth2
 }
 
-export async function GET(req: NextRequest) {
+export async function GET(_req: NextRequest) {
   const envCheck = {
     KROM_GMAIL_CLIENT_ID:     !!process.env.KROM_GMAIL_CLIENT_ID,
     KROM_GMAIL_CLIENT_SECRET: !!process.env.KROM_GMAIL_CLIENT_SECRET,
