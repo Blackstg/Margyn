@@ -143,12 +143,13 @@ function ThreadRow({ raw, processed, selected, isProcessing, doneAction, onClick
 
 // ─── Right panel — reply panel ────────────────────────────────────────────────
 
-function ReplyPanel({ thread, draft, onDraftChange, onSent, onArchive }: {
+function ReplyPanel({ thread, draft, onDraftChange, onSent, onArchive, onRegenerate }: {
   thread:         ProcessedThread
   draft:          string
   onDraftChange:  (v: string) => void
   onSent:         (wasModified: boolean) => void
   onArchive:      () => void
+  onRegenerate:   () => void
 }) {
   const [sending, setSending]       = useState(false)
   const [archiving, setArchiving]   = useState(false)
@@ -207,13 +208,23 @@ function ReplyPanel({ thread, draft, onDraftChange, onSent, onArchive }: {
       <div className="px-5 py-4 border-b border-[#e8e8e4] shrink-0 space-y-2">
         <div className="flex items-center justify-between gap-2">
           <p className="text-[10px] font-semibold uppercase tracking-[0.1em] text-[#aeb0c9]">Réponse Claude</p>
-          <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${
-            thread.confidence >= 0.85 ? 'bg-[#dcf5e7] text-[#1a7f4b]'
-            : thread.confidence >= 0.6  ? 'bg-[#fef3c7] text-[#b45309]'
-            : 'bg-[#fce8ea] text-[#c7293a]'
-          }`}>
-            {Math.round(thread.confidence * 100)}% confiance
-          </span>
+          <div className="flex items-center gap-2">
+            <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${
+              thread.confidence >= 0.85 ? 'bg-[#dcf5e7] text-[#1a7f4b]'
+              : thread.confidence >= 0.6  ? 'bg-[#fef3c7] text-[#b45309]'
+              : 'bg-[#fce8ea] text-[#c7293a]'
+            }`}>
+              {Math.round(thread.confidence * 100)}% confiance
+            </span>
+            <button
+              onClick={onRegenerate}
+              disabled={sending || archiving}
+              title="Regénérer la réponse"
+              className="w-6 h-6 rounded-lg flex items-center justify-center text-[#9b9b93] hover:text-[#1a1a2e] hover:bg-[#eeede9] transition-colors disabled:opacity-40"
+            >
+              <RefreshCw size={12} strokeWidth={1.8} />
+            </button>
+          </div>
         </div>
 
         {/* Situation détectée */}
@@ -623,6 +634,10 @@ export default function SavKromPage() {
             onDraftChange={v => setDrafts(prev => ({ ...prev, [selected.thread_id]: v }))}
             onSent={handleSent}
             onArchive={handleArchive}
+            onRegenerate={() => {
+              const raw = threads.find(t => t.thread_id === selected.thread_id)
+              if (raw) processThread(raw)
+            }}
           />
         ) : null}
       </div>
