@@ -1,7 +1,7 @@
 // ─── SAV Orchestrator — Krom Water ───────────────────────────────────────────
 // Gmail-based, semi-auto mode (classify + draft, human validates before send).
 
-import { getUnreadThreads, getThreadMessages, sendReply, markThreadRead, archiveThread } from './gmail'
+import { getUnreadThreads, getThreadMessages, sendReply, markThreadRead, archiveThread, GmailMessage } from './gmail'
 import { classifyEmail, generateReply } from './classifier'
 import type { KromCategory, ReplyAction } from './classifier'
 import { createAdminClient } from '@/lib/supabase'
@@ -33,6 +33,7 @@ export interface ProcessedThread {
   draft_reply:        string
   solved:             boolean
   situation_detectee: string
+  messages:           GmailMessage[]
 }
 
 // ─── Processed threads tracking ──────────────────────────────────────────────
@@ -137,6 +138,7 @@ export async function processOneThread(
     draft_reply:        finalReply.body,
     solved:             finalReply.solved,
     situation_detectee: finalReply.situation_detectee,
+    messages,
   }
 }
 

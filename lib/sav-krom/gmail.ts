@@ -44,6 +44,14 @@ export interface GmailThread {
   is_unread:    boolean
 }
 
+export interface GmailAttachment {
+  attachment_id: string
+  message_id:    string
+  filename:      string
+  mime_type:     string
+  size:          number
+}
+
 export interface GmailMessage {
   message_id:   string
   thread_id:    string
@@ -52,6 +60,7 @@ export interface GmailMessage {
   sender_name:  string
   received_at:  string
   is_client:    boolean         // true si expéditeur ≠ hello@krom-water.com
+  attachments:  GmailAttachment[]
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -195,6 +204,39 @@ async function fetchThread(threadId: string): Promise<GmailThread | null> {
 
 // ─── Get full thread messages ─────────────────────────────────────────────────
 
+// ─── Attachment helpers ───────────────────────────────────────────────────────
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function extractAttachments(messageId: string, payload: any, result: GmailAttachment[] = []): GmailAttachment[] {
+  if (!payload) return result
+  if (payload.filename && payload.body?.attachmentId) {
+    result.push({
+      attachment_id: payload.body.attachmentId,
+      message_id:    messageId,
+      filename:      payload.filename,
+      mime_type:     payload.mimeType ?? 'application/octet-stream',
+      size:          payload.body.size ?? 0,
+    })
+  }
+  for (const part of payload.parts ?? []) {
+    extractAttachments(messageId, part, result)
+  }
+  return result
+}
+
+export async function getAttachmentData(messageId: string, attachmentId: string): Promise<{ data: string; mimeType: string }> {
+  const gmail = getGmail()
+  const res = await gmail.users.messages.attachments.get({
+    userId:    'me',
+    messageId: messageId,
+    id:        attachmentId,
+  })
+  const data = res.data.data ?? ''
+  // Gmail uses base64url — convert to standard base64
+  const base64 = data.replace(/-/g, '+').replace(/_/g, '/')
+  return { data: base64, mimeType: '' }
+}
+
 export async function getThreadMessages(threadId: string): Promise<GmailMessage[]> {
   const gmail = getGmail()
   const res = await gmail.users.threads.get({
@@ -210,6 +252,7 @@ export async function getThreadMessages(threadId: string): Promise<GmailMessage[
     const { name, email } = parseEmailAddress(fromRaw)
     const dateStr    = headerVal(headers, 'Date')
     const body       = stripQuotedReply(extractTextFromPayload(msg.payload ?? {}))
+    const attachments = extractAttachments(msg.id ?? '', msg.payload)
     return {
       message_id:   msg.id ?? '',
       thread_id:    threadId,
@@ -218,6 +261,7 @@ export async function getThreadMessages(threadId: string): Promise<GmailMessage[
       sender_name:  name,
       received_at:  dateStr ? new Date(dateStr).toISOString() : new Date().toISOString(),
       is_client:    email !== KROM_EMAIL,
+      attachments,
     }
   })
 }

@@ -16,6 +16,25 @@ type KromCategory =
 
 type ReplyAction = 'auto_reply' | 'escalate'
 
+interface GmailAttachment {
+  attachment_id: string
+  message_id:    string
+  filename:      string
+  mime_type:     string
+  size:          number
+}
+
+interface GmailMessage {
+  message_id:   string
+  thread_id:    string
+  body:         string
+  sender_email: string
+  sender_name:  string
+  received_at:  string
+  is_client:    boolean
+  attachments:  GmailAttachment[]
+}
+
 interface RawThread {
   thread_id:     string
   subject:       string
@@ -34,6 +53,7 @@ interface ProcessedThread extends RawThread {
   draft_reply:        string
   solved:             boolean
   situation_detectee: string
+  messages:           GmailMessage[]
 }
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -249,9 +269,37 @@ function ReplyPanel({ thread, draft, onDraftChange, onSent, onArchive }: {
   )
 }
 
+// ─── Attachment renderer ──────────────────────────────────────────────────────
+
+function AttachmentBadge({ att }: { att: GmailAttachment }) {
+  const url = `/api/sav-krom/attachment?message_id=${encodeURIComponent(att.message_id)}&attachment_id=${encodeURIComponent(att.attachment_id)}&mime_type=${encodeURIComponent(att.mime_type)}`
+  const isImage = att.mime_type.startsWith('image/')
+
+  if (isImage) {
+    return (
+      <a href={url} target="_blank" rel="noopener noreferrer" className="block mt-2">
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img src={url} alt={att.filename} className="max-w-full max-h-64 rounded-lg border border-[#e8e8e4] object-contain" />
+      </a>
+    )
+  }
+
+  return (
+    <a
+      href={url} target="_blank" rel="noopener noreferrer" download={att.filename}
+      className="inline-flex items-center gap-1.5 mt-2 px-3 py-1.5 rounded-lg border border-[#e8e8e4] bg-white text-[11px] text-[#1a1a2e] font-medium hover:bg-[#f8f7f5] transition-colors"
+    >
+      📎 {att.filename}
+      {att.size > 0 && <span className="text-[#aeb0c9]">({Math.round(att.size / 1024)} Ko)</span>}
+    </a>
+  )
+}
+
 // ─── Center — thread detail ───────────────────────────────────────────────────
 
 function ThreadDetail({ thread }: { thread: ProcessedThread }) {
+  const messages = thread.messages ?? []
+
   return (
     <div className="flex flex-col h-full overflow-hidden">
       <div className="px-6 py-4 border-b border-[#e8e8e4] shrink-0">
@@ -271,14 +319,35 @@ function ThreadDetail({ thread }: { thread: ProcessedThread }) {
         </div>
       </div>
 
-      <div className="flex-1 overflow-y-auto px-6 py-5 space-y-4">
-        <div className="rounded-xl px-4 py-3 border-l-[3px] bg-[#f8f7f5] border-[#e0cfc9]">
-          <div className="flex items-center justify-between gap-2 mb-1.5">
-            <span className="text-[10px] font-bold uppercase tracking-[0.08em] text-[#b45309]">Client</span>
-            <span className="text-[10px] text-[#aeb0c9]">{fmtTime(thread.received_at)}</span>
+      <div className="flex-1 overflow-y-auto px-6 py-5 space-y-3">
+        {messages.length === 0 ? (
+          <div className="rounded-xl px-4 py-3 border-l-[3px] bg-[#f8f7f5] border-[#e0cfc9]">
+            <p className="text-xs text-[#1a1a2e] leading-relaxed whitespace-pre-wrap break-words">{thread.body}</p>
           </div>
-          <p className="text-xs text-[#1a1a2e] leading-relaxed whitespace-pre-wrap break-words">{thread.body}</p>
-        </div>
+        ) : messages.map((msg, i) => {
+          const isClient = msg.is_client
+          return (
+            <div
+              key={msg.message_id || i}
+              className={`rounded-xl px-4 py-3 border-l-[3px] ${
+                isClient
+                  ? 'bg-[#f8f7f5] border-[#e0cfc9]'
+                  : 'bg-[#f0f4ff] border-[#c7d2fe]'
+              }`}
+            >
+              <div className="flex items-center justify-between gap-2 mb-1.5">
+                <span className={`text-[10px] font-bold uppercase tracking-[0.08em] ${isClient ? 'text-[#b45309]' : 'text-[#3730a3]'}`}>
+                  {isClient ? (msg.sender_name || msg.sender_email.split('@')[0]) : 'Krom Water'}
+                </span>
+                <span className="text-[10px] text-[#aeb0c9]">{fmtTime(msg.received_at)}</span>
+              </div>
+              <p className="text-xs text-[#1a1a2e] leading-relaxed whitespace-pre-wrap break-words">{msg.body}</p>
+              {msg.attachments?.map(att => (
+                <AttachmentBadge key={att.attachment_id} att={att} />
+              ))}
+            </div>
+          )
+        })}
       </div>
     </div>
   )
