@@ -7,6 +7,7 @@ import path from 'path'
 import { searchCatalog } from './shopify'
 import type { MoomOrder, CatalogProduct } from './shopify'
 import type { CommentItem } from './zendesk'
+import { fetchTicketContext } from './zendesk'
 import { findSimilarExamples } from './history'
 import { createAdminClient } from '@/lib/supabase'
 
@@ -269,6 +270,36 @@ export async function generateReply(
     }
   }
 
+  // ── Previous ticket context (references like #12345) ─────────────────────
+  // Extract Zendesk ticket IDs referenced in the subject or description,
+  // fetch each one, and inject as context so Claude has the full history.
+  const TICKET_REF_RE = /#(\d{4,8})\b/g
+  const refText = `${subject} ${description}`
+  const referencedIds = [...new Set(
+    [...refText.matchAll(TICKET_REF_RE)].map(m => parseInt(m[1], 10))
+  )]
+
+  let previousTicketsBlock = ''
+  if (referencedIds.length > 0) {
+    console.log(`[SAV] generateReply — références tickets détectées : ${referencedIds.map(id => '#' + id).join(', ')}`)
+    const contexts = await Promise.allSettled(
+      referencedIds.map(id => fetchTicketContext(id))
+    )
+    const blocks: string[] = []
+    for (let i = 0; i < referencedIds.length; i++) {
+      const r = contexts[i]
+      if (r.status === 'fulfilled' && r.value) {
+        blocks.push(`CONTEXTE TICKET PRÉCÉDENT #${referencedIds[i]} :\n${r.value}`)
+        console.log(`[SAV] generateReply — contexte #${referencedIds[i]} injecté (${r.value.length} chars)`)
+      } else {
+        console.warn(`[SAV] generateReply — contexte #${referencedIds[i]} non disponible`)
+      }
+    }
+    if (blocks.length > 0) {
+      previousTicketsBlock = '\n' + blocks.join('\n\n') + '\n'
+    }
+  }
+
   // ── Build the conversation context block ──────────────────────────────────
   // If we have the full thread, surface the last client message prominently
   // so Claude answers the right question, then show prior exchanges as context.
@@ -311,7 +342,7 @@ Ticket SAV :
 ${conversationBlock}
 
 ${orderContext}
-${catalogBlock}
+${catalogBlock}${previousTicketsBlock}
 Instructions :
 - Rédige une réponse complète, naturelle et empathique, comme si tu étais une vraie conseillère SAV Mōom
 - Commence par remercier le client pour son message ou te présenter brièvement
@@ -320,6 +351,7 @@ Instructions :
 - Termine toujours par une formule de politesse chaleureuse et une invitation à revenir si besoin
 - N'utilise pas de placeholders comme [NOM] — si tu ne connais pas le prénom, n'en mets pas
 - Longueur : 3 à 6 paragraphes, ton professionnel mais humain
+${previousTicketsBlock ? '- Le client fait référence à un ticket précédent (contexte injecté ci-dessus) — tiens-en compte pour ne pas redemander des informations déjà fournies et assurer une continuité dans le suivi.' : ''}
 ${category === 'modification_commande' ? `- PRIX : utilise UNIQUEMENT les prix fournis ci-dessus (commande + catalogue). Ne jamais deviner ou inventer un montant. Si les deux produits ont le même prix → "sans supplément". Si différence → "différence de X€". Si produit non trouvé dans le catalogue → dire qu'on va vérifier et revenir vers le client.` : ''}
 
 Réponds UNIQUEMENT avec un objet JSON valide (sans markdown, sans backticks) :

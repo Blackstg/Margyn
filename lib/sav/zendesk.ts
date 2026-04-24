@@ -242,6 +242,60 @@ export async function getTicketComments(
   }))
 }
 
+// ─── Previous ticket context ─────────────────────────────────────────────────
+// When a client references a previous ticket (#XXXXX), fetch its subject and
+// public comments so Claude can understand the full history before replying.
+
+export async function fetchTicketContext(ticketId: number): Promise<string | null> {
+  // 1. Fetch ticket metadata
+  const ticketRes = await fetch(
+    `${base()}/tickets/${ticketId}.json`,
+    { headers: authHeaders(), cache: 'no-store' }
+  ).catch(() => null)
+
+  if (!ticketRes || !ticketRes.ok) {
+    console.warn(`[Zendesk] fetchTicketContext #${ticketId} — ticket introuvable (${ticketRes?.status ?? 'network error'})`)
+    return null
+  }
+
+  const { ticket } = await ticketRes.json() as { ticket: ZendeskTicket }
+
+  // 2. Fetch public comments
+  const commentsRes = await fetchWithRetry(
+    `${base()}/tickets/${ticketId}/comments.json`,
+    { headers: authHeaders(), cache: 'no-store' },
+    2,
+    1000,
+  ).catch(() => null)
+
+  const publicComments: Array<{ author_id: number; body: string; created_at: string }> = []
+  if (commentsRes?.ok) {
+    const data = await commentsRes.json() as { comments?: ZendeskComment[] }
+    publicComments.push(...(data.comments ?? []).filter(c => c.public))
+  }
+
+  // 3. Format as a readable context block
+  const lines: string[] = [
+    `Ticket #${ticketId} — "${ticket.subject}" (statut : ${ticket.status})`,
+  ]
+
+  if (publicComments.length > 0) {
+    lines.push('Historique :')
+    for (const c of publicComments) {
+      const isRequester = c.author_id === ticket.requester_id
+      const role = isRequester ? 'Client' : 'Agent'
+      const date = new Date(c.created_at).toLocaleDateString('fr-FR', {
+        day: 'numeric', month: 'short', year: 'numeric',
+      })
+      lines.push(`[${role} — ${date}] ${c.body.slice(0, 800).trim()}`)
+    }
+  } else {
+    lines.push(`Description : ${ticket.description.slice(0, 800).trim()}`)
+  }
+
+  return lines.join('\n')
+}
+
 // ─── History export ───────────────────────────────────────────────────────────
 
 export interface SolvedTicketData {
