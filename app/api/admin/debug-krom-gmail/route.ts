@@ -15,11 +15,6 @@ function getOAuth2Client() {
 }
 
 export async function GET(req: NextRequest) {
-  const secret = req.nextUrl.searchParams.get('secret')
-  if (secret !== process.env.SETUP_SECRET) {
-    return NextResponse.json({ error: 'unauthorized' }, { status: 401 })
-  }
-
   const envCheck = {
     KROM_GMAIL_CLIENT_ID:     !!process.env.KROM_GMAIL_CLIENT_ID,
     KROM_GMAIL_CLIENT_SECRET: !!process.env.KROM_GMAIL_CLIENT_SECRET,
