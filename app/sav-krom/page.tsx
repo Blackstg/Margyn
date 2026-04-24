@@ -636,7 +636,12 @@ export default function SavKromPage() {
             onArchive={handleArchive}
             onRegenerate={() => {
               const raw = threads.find(t => t.thread_id === selected.thread_id)
-              if (raw) processThread(raw)
+              if (!raw) return
+              // Vider draft + cache pour forcer la mise à jour
+              setDrafts(prev => { const n = { ...prev }; delete n[raw.thread_id]; return n })
+              setProcessedCache(prev => { const n = { ...prev }; delete n[raw.thread_id]; return n })
+              fetchingRef.current.delete(raw.thread_id)
+              processThread(raw)
             }}
           />
         ) : null}
