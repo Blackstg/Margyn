@@ -287,6 +287,9 @@ function ThreadDetail({ thread }: { thread: ProcessedThread }) {
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 export default function SavKromPage() {
+  const [mounted, setMounted] = useState(false)
+  useEffect(() => setMounted(true), [])
+
   const [threads, setThreads]           = useState<RawThread[]>([])
   const [processedCache, setProcessedCache] = useState<Record<string, ProcessedThread>>({})
   const [selectedId, setSelectedId]     = useState<string | null>(null)
@@ -398,6 +401,8 @@ export default function SavKromPage() {
   const done     = threads.filter(t =>  doneStatuses[t.thread_id])
   const selected = selectedId ? (processedCache[selectedId] ?? null) : null
   const isProcessing = processingId === selectedId && selectedId !== null
+
+  if (!mounted) return null
 
   return (
     <div className="h-screen overflow-hidden flex relative">
