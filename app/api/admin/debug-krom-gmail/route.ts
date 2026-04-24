@@ -1,6 +1,6 @@
 // GET /api/admin/debug-krom-gmail?secret=XXX — teste la connexion Gmail Krom
 
-import { NextRequest, NextResponse } from 'next/server'
+import { NextResponse } from 'next/server'
 import { google } from 'googleapis'
 
 export const dynamic = 'force-dynamic'
@@ -14,7 +14,7 @@ function getOAuth2Client() {
   return oauth2
 }
 
-export async function GET(_req: NextRequest) {
+export async function GET() {
   const envCheck = {
     KROM_GMAIL_CLIENT_ID:     !!process.env.KROM_GMAIL_CLIENT_ID,
     KROM_GMAIL_CLIENT_SECRET: !!process.env.KROM_GMAIL_CLIENT_SECRET,
