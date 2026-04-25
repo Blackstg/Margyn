@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { createBrowserClient } from '@supabase/auth-helpers-nextjs'
 import {
   RefreshCw, Send, Archive, Inbox, CheckCheck,
-  ChevronDown, ChevronUp, Mail,
+  ChevronDown, ChevronUp, Mail, Settings, X, Trash2,
 } from 'lucide-react'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -95,6 +95,98 @@ function fmtTime(iso: string) {
   return sameDay
     ? d.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })
     : d.toLocaleDateString('fr-FR', { day: '2-digit', month: 'short' })
+}
+
+// ─── Rules panel ─────────────────────────────────────────────────────────────
+
+function RulesPanel({ onClose }: { onClose: () => void }) {
+  const [rules, setRules]     = useState<string[]>([])
+  const [loading, setLoading] = useState(true)
+  const [newRule, setNewRule] = useState('')
+  const [saving, setSaving]   = useState(false)
+  const [error, setError]     = useState<string | null>(null)
+
+  useEffect(() => {
+    fetch('/api/sav-krom/rules')
+      .then(r => r.json()).then((d: { rules?: string[] }) => setRules(d.rules ?? []))
+      .catch(() => setError('Erreur de chargement'))
+      .finally(() => setLoading(false))
+  }, [])
+
+  async function addRule() {
+    const rule = newRule.trim(); if (!rule) return
+    setSaving(true); setError(null)
+    try {
+      const res = await fetch('/api/sav-krom/rules', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ rule }) })
+      const d = await res.json() as { rules?: string[]; error?: string }
+      if (!res.ok) throw new Error(d.error ?? `HTTP ${res.status}`)
+      setRules(d.rules ?? []); setNewRule('')
+    } catch (e) { setError(e instanceof Error ? e.message : 'Erreur') }
+    finally { setSaving(false) }
+  }
+
+  async function deleteRule(index: number) {
+    setError(null)
+    try {
+      const res = await fetch('/api/sav-krom/rules', { method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ index }) })
+      const d = await res.json() as { rules?: string[]; error?: string }
+      if (!res.ok) throw new Error(d.error ?? `HTTP ${res.status}`)
+      setRules(d.rules ?? [])
+    } catch (e) { setError(e instanceof Error ? e.message : 'Erreur') }
+  }
+
+  return (
+    <div className="absolute inset-0 z-20 bg-white flex flex-col">
+      <div className="flex items-center justify-between px-8 py-5 border-b border-[#e8e8e4] shrink-0">
+        <div>
+          <p className="text-[10px] font-semibold uppercase tracking-[0.1em] text-[#aeb0c9]">SAV Krom Water</p>
+          <h2 className="text-base font-semibold text-[#1a1a2e] mt-0.5">Instructions &amp; règles</h2>
+        </div>
+        <button onClick={onClose} className="w-8 h-8 rounded-lg flex items-center justify-center text-[#6b6b63] hover:bg-[#f8f7f5] transition-colors">
+          <X size={16} strokeWidth={1.8} />
+        </button>
+      </div>
+
+      <div className="flex-1 overflow-y-auto px-8 py-6 max-w-2xl space-y-6">
+        <p className="text-xs text-[#9b9b93] leading-relaxed">
+          Ces règles sont injectées dans chaque prompt de génération de réponse. Claude les respecte impérativement avant toute autre instruction.
+        </p>
+
+        {error && <p className="text-xs text-[#c7293a] bg-[#fce8ea] rounded-xl px-3 py-2">{error}</p>}
+
+        <div className="space-y-2">
+          {loading && <><div className="h-10 bg-[#f3f3f1] rounded-xl animate-pulse" /><div className="h-10 bg-[#f3f3f1] rounded-xl animate-pulse" /></>}
+          {!loading && rules.length === 0 && <p className="text-xs text-[#9b9b93] py-4 text-center">Aucune règle définie.</p>}
+          {!loading && rules.map((rule, i) => (
+            <div key={i} className="flex items-start gap-3 bg-[#f8f7f5] rounded-xl px-4 py-3 group">
+              <span className="text-[10px] font-bold text-[#aeb0c9] mt-0.5 w-4 text-right shrink-0">{i + 1}</span>
+              <p className="text-sm text-[#1a1a2e] leading-relaxed flex-1">{rule}</p>
+              <button onClick={() => deleteRule(i)} className="shrink-0 text-[#c7293a] opacity-0 group-hover:opacity-100 transition-opacity hover:bg-[#fce8ea] rounded-lg p-1">
+                <Trash2 size={13} strokeWidth={1.8} />
+              </button>
+            </div>
+          ))}
+        </div>
+
+        <div className="space-y-3 pt-2 border-t border-[#f0f0ee]">
+          <p className="text-[10px] font-semibold uppercase tracking-[0.1em] text-[#aeb0c9] pt-1">Ajouter une règle</p>
+          <textarea
+            value={newRule} onChange={e => setNewRule(e.target.value)}
+            onKeyDown={e => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) addRule() }}
+            placeholder="Ex : Toujours mentionner que les cartouches durent 3 mois ou 150L."
+            rows={3}
+            className="w-full text-sm text-[#1a1a2e] bg-[#f8f7f5] rounded-xl px-4 py-3 leading-relaxed resize-none border border-transparent focus:border-[#aeb0c9] focus:outline-none transition-colors font-[inherit]"
+          />
+          <button
+            onClick={addRule} disabled={saving || !newRule.trim()}
+            className="px-4 py-2 rounded-xl bg-[#1a1a2e] text-white text-xs font-semibold hover:bg-[#2a2a4e] transition-colors disabled:opacity-40"
+          >
+            {saving ? 'Ajout…' : 'Ajouter'}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
 }
 
 // ─── Thread row (left column) ─────────────────────────────────────────────────
@@ -378,6 +470,7 @@ export default function SavKromPage() {
   const [doneStatuses, setDoneStatuses] = useState<Record<string, 'sent' | 'archived'>>({})
   const [drafts, setDrafts]             = useState<Record<string, string>>({})
   const [tab, setTab]                   = useState<'pending' | 'done'>('pending')
+  const [showRules, setShowRules]       = useState(false)
   const fetchingRef = useRef<Set<string>>(new Set())
   const ticketStartTimes = useRef<Record<string, number>>({})
 
@@ -500,13 +593,22 @@ export default function SavKromPage() {
                 </span>
               </div>
             </div>
-            <button
-              onClick={load} disabled={listLoading}
-              className="w-7 h-7 rounded-lg flex items-center justify-center text-[#6b6b63] hover:bg-[#eeede9] transition-colors disabled:opacity-40"
-              title="Actualiser"
-            >
-              <RefreshCw size={13} strokeWidth={1.8} className={listLoading ? 'animate-spin' : ''} />
-            </button>
+            <div className="flex items-center gap-1">
+              <button
+                onClick={() => setShowRules(true)}
+                className="h-7 px-2 rounded-lg flex items-center gap-1 text-[#6b6b63] hover:bg-[#eeede9] transition-colors text-[10px] font-medium"
+                title="Règles Claude"
+              >
+                <Settings size={12} strokeWidth={1.8} /> Règles
+              </button>
+              <button
+                onClick={load} disabled={listLoading}
+                className="w-7 h-7 rounded-lg flex items-center justify-center text-[#6b6b63] hover:bg-[#eeede9] transition-colors disabled:opacity-40"
+                title="Actualiser"
+              >
+                <RefreshCw size={13} strokeWidth={1.8} className={listLoading ? 'animate-spin' : ''} />
+              </button>
+            </div>
           </div>
 
           {/* Tabs */}
@@ -646,6 +748,9 @@ export default function SavKromPage() {
           />
         ) : null}
       </div>
+
+      {/* Rules overlay */}
+      {showRules && <RulesPanel onClose={() => setShowRules(false)} />}
     </div>
   )
 }
