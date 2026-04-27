@@ -274,7 +274,7 @@ export async function processOneTicket(
   // Run classification + Shopify order fetch in parallel
   const [classification, shopifyOrder] = await Promise.allSettled([
     classifyTicket(subject, description),
-    getMostRecentOrder(email),
+    getMostRecentOrder(email, `${subject}\n${description}`),
   ])
 
   const order: MoomOrder | null =
