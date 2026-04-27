@@ -1718,6 +1718,10 @@ function LivreurView() {
           })
           await fetchTours()
         }}
+        onRemoveStop={async (stopId) => {
+          await fetch(`/api/delivery/stops/${stopId}`, { method: 'DELETE' })
+          await fetchTours()
+        }}
       />
     )
   }

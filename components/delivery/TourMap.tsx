@@ -80,9 +80,10 @@ interface TourMapProps {
   precomputedCoords?: Map<string, [number, number]>
   etaMap?: Map<string, string>
   onMarkDelivered?: (stopId: string) => Promise<void>
+  onRemoveStop?: (stopId: string) => Promise<void>
 }
 
-export default function TourMap({ stops, onBack, precomputedCoords, onMarkDelivered }: TourMapProps) {
+export default function TourMap({ stops, onBack, precomputedCoords, onMarkDelivered, onRemoveStop }: TourMapProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const mapRef       = useRef<mapboxgl.Map | null>(null)
   const markerElsRef = useRef<Record<string, HTMLElement>>({})
@@ -90,9 +91,12 @@ export default function TourMap({ stops, onBack, precomputedCoords, onMarkDelive
   const [phase, setPhase]               = useState<'geocoding' | 'routing' | 'ready' | 'error'>('geocoding')
   const [selectedStop, setSelectedStop] = useState<MapStop | null>(null)
   const [marking, setMarking]           = useState(false)
+  const [removing, setRemoving]         = useState(false)
+  const [confirmRemove, setConfirmRemove] = useState(false)
   const [localStatuses, setLocalStatuses] = useState<Record<string, string>>(() =>
     Object.fromEntries(stops.map(s => [s.id, s.status]))
   )
+  const [, setRemovedIds] = useState<Set<string>>(new Set())
 
   const sortedStops = [...stops].sort((a, b) => a.sequence - b.sequence)
   const token = process.env.NEXT_PUBLIC_MAPBOX_TOKEN ?? ''
@@ -217,13 +221,28 @@ export default function TourMap({ stops, onBack, precomputedCoords, onMarkDelive
     setMarking(true)
     try {
       await onMarkDelivered(selectedStop.id)
-      // Update marker color immediately — no map reload
       const el = markerElsRef.current[selectedStop.id]
       if (el) el.style.background = '#22c55e'
       setLocalStatuses(prev => ({ ...prev, [selectedStop.id]: 'delivered' }))
       setSelectedStop(null)
     } finally {
       setMarking(false)
+    }
+  }
+
+  async function handleRemoveStop() {
+    if (!selectedStop || !onRemoveStop) return
+    setRemoving(true)
+    try {
+      await onRemoveStop(selectedStop.id)
+      // Hide the marker immediately without reloading the map
+      const el = markerElsRef.current[selectedStop.id]
+      if (el) el.style.display = 'none'
+      setRemovedIds(prev => new Set([...prev, selectedStop.id]))
+      setSelectedStop(null)
+      setConfirmRemove(false)
+    } finally {
+      setRemoving(false)
     }
   }
 
@@ -285,7 +304,7 @@ export default function TourMap({ stops, onBack, precomputedCoords, onMarkDelive
           {/* Backdrop */}
           <div
             className="absolute inset-0 z-20 bg-black/20"
-            onClick={() => setSelectedStop(null)}
+            onClick={() => { setSelectedStop(null); setConfirmRemove(false) }}
           />
           {/* Sheet */}
           <div className="absolute bottom-0 left-0 right-0 z-30 bg-white rounded-t-[24px] shadow-[0_-4px_32px_rgba(0,0,0,0.18)] px-5 pt-4 pb-8">
@@ -309,7 +328,7 @@ export default function TourMap({ stops, onBack, precomputedCoords, onMarkDelive
                 <p className="text-sm text-[#6b6b63]">{selectedStop.address1}, {selectedStop.city} {selectedStop.zip}</p>
               </div>
               <button
-                onClick={() => setSelectedStop(null)}
+                onClick={() => { setSelectedStop(null); setConfirmRemove(false) }}
                 className="w-8 h-8 rounded-full bg-[#f5f5f3] flex items-center justify-center shrink-0 mt-1 text-[#6b6b63]"
               >
                 ✕
@@ -335,24 +354,59 @@ export default function TourMap({ stops, onBack, precomputedCoords, onMarkDelive
               </div>
             )}
 
-            {/* Action button */}
+            {/* Primary action */}
             {currentStatus !== 'delivered' ? (
               <button
                 onClick={handleMarkDelivered}
-                disabled={marking || !onMarkDelivered}
+                disabled={marking || removing || !onMarkDelivered}
                 className="w-full flex items-center justify-center gap-2 py-4 rounded-[16px] bg-[#1a7f4b] text-white font-bold text-base disabled:opacity-50 active:bg-[#15703f] transition-colors"
               >
-                {marking ? (
-                  <span className="animate-spin text-lg">⏳</span>
-                ) : (
-                  <CheckCircle2 size={20} />
-                )}
+                {marking ? <span className="animate-spin text-lg">⏳</span> : <CheckCircle2 size={20} />}
                 {marking ? 'Enregistrement…' : 'Marquer comme livré'}
               </button>
             ) : (
               <div className="w-full flex items-center justify-center gap-2 py-4 rounded-[16px] bg-[#f0fdf4] text-[#1a7f4b] font-bold text-base">
                 <CheckCircle2 size={20} />
                 Déjà livré
+              </div>
+            )}
+
+            {/* Secondary action — remove from tour */}
+            {onRemoveStop && !confirmRemove && (
+              <button
+                onClick={() => setConfirmRemove(true)}
+                disabled={marking || removing}
+                className="w-full flex items-center justify-center gap-2 py-3 mt-2 rounded-[14px] border border-[#fcd5d5] bg-[#fff5f5] text-[#c7293a] text-sm font-semibold disabled:opacity-40 active:bg-[#ffe8e8] transition-colors"
+              >
+                Retirer de la tournée
+              </button>
+            )}
+
+            {/* Confirmation step */}
+            {confirmRemove && (
+              <div className="mt-2 rounded-[14px] border border-[#fcd5d5] bg-[#fff5f5] p-4 space-y-3">
+                <p className="text-sm font-semibold text-[#c7293a] text-center">
+                  Retirer cette commande de la tournée ?
+                </p>
+                <p className="text-xs text-[#6b6b63] text-center">
+                  Elle repassera dans les commandes à planifier.
+                </p>
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => setConfirmRemove(false)}
+                    disabled={removing}
+                    className="flex-1 py-3 rounded-[12px] border border-[#e0deda] bg-white text-sm font-semibold text-[#6b6b63] disabled:opacity-40"
+                  >
+                    Annuler
+                  </button>
+                  <button
+                    onClick={handleRemoveStop}
+                    disabled={removing}
+                    className="flex-1 py-3 rounded-[12px] bg-[#c7293a] text-white text-sm font-bold disabled:opacity-50"
+                  >
+                    {removing ? '…' : 'Confirmer'}
+                  </button>
+                </div>
               </div>
             )}
           </div>
