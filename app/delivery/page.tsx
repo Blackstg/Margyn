@@ -1488,12 +1488,7 @@ function PlanificateurView() {
                   const previewDateEnd = notifModal.plannedDate
                     ? (() => {
                         const end = new Date(notifModal.plannedDate + 'T00:00:00')
-                        let added = 0
-                        while (added < 4) {
-                          end.setDate(end.getDate() + 1)
-                          const dow = end.getDay()
-                          if (dow !== 0 && dow !== 6) added++
-                        }
+                        end.setDate(end.getDate() + 4)
                         return end.toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })
                       })()
                     : null
@@ -3034,26 +3029,15 @@ function getISOWeekNum(dateStr: string): number {
   return Math.ceil((((utc.getTime() - yearStart.getTime()) / 86400000) + 1) / 7)
 }
 
-/** Adds N working days (Mon–Fri) to a date, skipping Sat & Sun. */
-function addWorkingDays(date: Date, days: number): Date {
-  const result = new Date(date)
-  let added = 0
-  while (added < days) {
-    result.setDate(result.getDate() + 1)
-    const dow = result.getDay()
-    if (dow !== 0 && dow !== 6) added++
-  }
-  return result
-}
-
 /**
- * Returns a delivery window: tour start date → start + 4 working days.
- * e.g. mercredi 6 mai → lundi 11 mai
+ * Returns a delivery window: tour start date → start + 4 calendar days.
+ * e.g. mercredi 6 mai → dimanche 10 mai
  */
 function getWeekRange(dateStr: string): { start: string; end: string } {
   const opts: Intl.DateTimeFormatOptions = { weekday: 'long', day: 'numeric', month: 'long' }
   const start = new Date(dateStr + 'T00:00:00')
-  const end   = addWorkingDays(start, 4)
+  const end   = new Date(start)
+  end.setDate(start.getDate() + 4)
   return {
     start: start.toLocaleDateString('fr-FR', opts),
     end:   end.toLocaleDateString('fr-FR', opts),
