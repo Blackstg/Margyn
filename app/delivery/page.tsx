@@ -1356,7 +1356,7 @@ function PlanificateurView() {
 
 // ─── Livreur View ─────────────────────────────────────────────────────────────
 
-type LivreurScreen = 'home' | 'loading' | 'tour' | 'map'
+type LivreurScreen = 'home' | 'loading' | 'tour' | 'map' | 'nearby'
 
 const DEPOT = 'Rue Lamartine, Zone Industrielle des Distraits, 18390 Saint-Germain-du-Puy, France'
 const DEPOT_COORDS: [number, number] = [2.4524, 47.0873]  // Saint-Germain-du-Puy
@@ -1488,7 +1488,11 @@ function LivreurView() {
   const [selectedChip, setSelectedChip] = useState('')
   const coordsCache = useRef<Map<string, [number, number]>>(new Map())
   const [navSheet, setNavSheet] = useState(false)
-  const [nearbyOrders, setNearbyOrders] = useState<ShopifyOrder[]>([])
+  const [nearbyOrders, setNearbyOrders]   = useState<ShopifyOrder[]>([])
+  const [nearbyLoading, setNearbyLoading] = useState(false)
+  const [nearbyZoneFilter, setNearbyZoneFilter] = useState<string>('all')
+  const [addingOrderName, setAddingOrderName]   = useState<string | null>(null)
+  const [addedToTourNames, setAddedToTourNames] = useState<Set<string>>(new Set())
 
   const fetchTours = useCallback(async () => {
     setLoading(true)
@@ -1514,11 +1518,14 @@ function LivreurView() {
   }, [])
 
   const fetchNearbyOrders = useCallback(async () => {
+    setNearbyLoading(true)
     try {
       const r = await fetch('/api/delivery/orders', { cache: 'no-store' })
       const data = await r.json()
       setNearbyOrders(data.orders ?? [])
-    } catch { /* best-effort — nearby feature is optional */ }
+    } catch { /* best-effort — nearby feature is optional */ } finally {
+      setNearbyLoading(false)
+    }
   }, [])
 
   useEffect(() => {
@@ -1737,6 +1744,25 @@ function LivreurView() {
             Aucune tournée disponible
           </div>
         )}
+
+        {/* Nearby orders button */}
+        <button
+          onClick={() => setScreen('nearby')}
+          className="w-full flex items-center gap-4 px-5 py-4 rounded-[18px] bg-[#fffbeb] border border-[#fde68a] active:bg-[#fef3c7] transition-colors"
+        >
+          <span className="w-10 h-10 rounded-full bg-[#f59e0b] flex items-center justify-center text-white font-bold text-xl shrink-0">+</span>
+          <div className="flex-1 text-left min-w-0">
+            <p className="text-sm font-bold text-[#92400e]">Commandes non planifiées</p>
+            <p className="text-xs text-[#92400e]/70">
+              {nearbyLoading
+                ? 'Chargement...'
+                : nearbyOrders.length > 0
+                  ? `${nearbyOrders.length} commande${nearbyOrders.length > 1 ? 's' : ''} disponible${nearbyOrders.length > 1 ? 's' : ''}`
+                  : 'Aucune commande en attente'}
+            </p>
+          </div>
+          <ChevronRight size={18} className="text-[#f59e0b] shrink-0" />
+        </button>
       </div>
     )
   }
@@ -1795,6 +1821,169 @@ function LivreurView() {
           await fetchTours()
         }}
       />
+    )
+  }
+
+  // ── Screen: nearby (unplanned orders) ──
+  if (screen === 'nearby') {
+    const ZONES = ['all', 'nord-est', 'nord-ouest', 'sud-est', 'sud-ouest'] as const
+    const filteredNearby = nearbyOrders.filter(
+      o => nearbyZoneFilter === 'all' || o.zone === nearbyZoneFilter
+    )
+
+    async function handleAddToTour(order: ShopifyOrder) {
+      if (!selectedTourId) return
+      setAddingOrderName(order.order_name)
+      try {
+        await fetch(`/api/delivery/tours/${selectedTourId}/stops`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ stops: [{
+            order_name:       order.order_name,
+            shopify_order_id: order.shopify_order_id,
+            customer_name:    order.customer_name,
+            email:            order.email,
+            address1:         order.address1,
+            address2:         '',
+            city:             order.city,
+            zip:              order.zip,
+            zone:             order.zone,
+            panel_count:      order.panel_count,
+            panel_details:    order.panel_details,
+          }] }),
+        })
+        setAddedToTourNames(prev => new Set([...prev, order.order_name]))
+        await fetchTours()
+        fetchNearbyOrders()
+      } finally {
+        setAddingOrderName(null)
+      }
+    }
+
+    return (
+      <div className="w-full pb-8">
+        {/* Header */}
+        <div className="flex items-center gap-3 mb-4">
+          <button
+            onClick={() => setScreen('home')}
+            className="w-10 h-10 rounded-full bg-white shadow flex items-center justify-center shrink-0"
+          >
+            <ChevronLeft size={20} />
+          </button>
+          <div className="flex-1 min-w-0">
+            <h2 className="text-lg font-bold text-[#1a1a2e]">Commandes non planifiées</h2>
+            {tour && (
+              <p className="text-xs text-[#6b6b63]">Tournée : <span className="font-medium text-[#1a1a2e]">{tour.name}</span></p>
+            )}
+          </div>
+          {nearbyLoading && <span className="text-xs text-[#9b9b93]">Actualisation...</span>}
+        </div>
+
+        {/* Zone filter */}
+        <div className="flex gap-2 overflow-x-auto pb-1 mb-4">
+          {ZONES.map((z) => (
+            <button
+              key={z}
+              onClick={() => setNearbyZoneFilter(z)}
+              className={`shrink-0 px-3 py-1.5 rounded-full text-xs font-semibold transition-all ${
+                nearbyZoneFilter === z
+                  ? 'bg-[#f59e0b] text-white'
+                  : 'bg-white text-[#92400e] border border-[#fcd34d]'
+              }`}
+            >
+              {z === 'all' ? 'Toutes zones' : ZONE_LABEL[z as Zone]}
+            </button>
+          ))}
+        </div>
+
+        {/* Count */}
+        <p className="text-xs text-[#6b6b63] mb-3 px-1">
+          {nearbyLoading
+            ? 'Chargement...'
+            : `${filteredNearby.length} commande${filteredNearby.length !== 1 ? 's' : ''}`}
+        </p>
+
+        {/* List */}
+        {nearbyLoading && nearbyOrders.length === 0 ? (
+          <div className="text-center py-16 text-sm text-[#6b6b63]">Chargement des commandes...</div>
+        ) : filteredNearby.length === 0 ? (
+          <div className="text-center py-16 text-sm text-[#6b6b63]">Aucune commande dans cette zone</div>
+        ) : (
+          <div className="space-y-3">
+            {filteredNearby.map((order) => {
+              const isAdded   = addedToTourNames.has(order.order_name)
+              const isAdding  = addingOrderName === order.order_name
+              const zc        = ZONE_COLOR[order.zone] ?? { bg: '#f5f5f3', text: '#6b6b63' }
+              return (
+                <div key={order.order_name} className={`rounded-[16px] bg-white shadow-[0_2px_12px_rgba(0,0,0,0.06)] overflow-hidden transition-all ${isAdded ? 'opacity-60' : ''}`}>
+                  {/* Card header */}
+                  <div className="px-4 pt-4 pb-3">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 flex-wrap mb-1">
+                          <span className="font-mono text-xs font-bold text-[#1a1a2e] bg-[#f5f5f3] px-2 py-0.5 rounded-[6px]">
+                            {order.order_name}
+                          </span>
+                          <span
+                            className="px-2 py-0.5 rounded-full text-[10px] font-semibold"
+                            style={{ background: zc.bg, color: zc.text }}
+                          >
+                            {ZONE_LABEL[order.zone as Zone] ?? order.zone}
+                          </span>
+                          <span className="px-2 py-0.5 rounded-full bg-[#f5f5f3] text-[#6b6b63] text-[10px]">
+                            {order.panel_count} panneau{order.panel_count !== 1 ? 'x' : ''}
+                          </span>
+                        </div>
+                        <p className="text-base font-bold text-[#1a1a2e] leading-tight">{order.customer_name}</p>
+                        <p className="text-sm text-[#6b6b63] mt-0.5">{order.address1}</p>
+                        <p className="text-sm text-[#6b6b63]">{order.city} {order.zip}</p>
+                      </div>
+                    </div>
+
+                    {/* Products */}
+                    {order.panel_details?.length > 0 && (
+                      <div className="mt-3 space-y-1">
+                        {order.panel_details.map((item, i) => (
+                          <div key={i} className="flex items-center gap-2 text-xs">
+                            <span className="w-6 h-6 rounded-lg bg-[#f59e0b] text-white flex items-center justify-center font-bold text-[10px] shrink-0">
+                              {item.qty}
+                            </span>
+                            {item.sku?.trim() && (
+                              <span className="font-mono text-[#9b9b93] bg-[#f5f5f3] px-1.5 py-0.5 rounded shrink-0">{item.sku}</span>
+                            )}
+                            <span className="text-[#1a1a2e] truncate">{item.title}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Action */}
+                  <div className="px-4 pb-4">
+                    {!tour ? (
+                      <div className="w-full py-3 rounded-[12px] bg-[#f5f5f3] text-[#9b9b93] text-sm font-medium text-center">
+                        Aucune tournée sélectionnée
+                      </div>
+                    ) : isAdded ? (
+                      <div className="w-full py-3 rounded-[12px] bg-[#d1fae5] text-[#1a7f4b] text-sm font-bold text-center">
+                        ✓ Ajoutée à {tour.name}
+                      </div>
+                    ) : (
+                      <button
+                        onClick={() => handleAddToTour(order)}
+                        disabled={isAdding || !!addingOrderName}
+                        className="w-full py-4 rounded-[12px] bg-[#f59e0b] text-white font-bold text-base disabled:opacity-60 active:bg-[#d97706] transition-colors"
+                      >
+                        {isAdding ? 'Ajout en cours...' : '+ Ajouter à ma tournée'}
+                      </button>
+                    )}
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        )}
+      </div>
     )
   }
 
