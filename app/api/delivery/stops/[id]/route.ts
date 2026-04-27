@@ -130,9 +130,8 @@ function buildSatisfactionEmail(customerName: string, orderName: string): string
 </html>`
 }
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 async function sendSatisfactionEmail(
-  admin: any,
+  admin: any, // eslint-disable-line @typescript-eslint/no-explicit-any
   stopId: string,
   email: string,
   customerName: string,
