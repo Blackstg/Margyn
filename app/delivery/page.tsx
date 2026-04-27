@@ -76,6 +76,7 @@ interface TourStop {
   status: StopStatus
   email_sent_at: string | null
   delivered_at: string | null
+  satisfaction_sent_at?: string | null
   comment?: string | null
   comment_at?: string | null
 }
