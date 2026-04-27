@@ -320,7 +320,12 @@ function PlanificateurView() {
       if (preorderFilter && !o.is_preorder) return false
       if (search) {
         const q = search.toLowerCase()
-        if (!o.order_name.toLowerCase().includes(q) && !o.city.toLowerCase().includes(q)) return false
+        if (
+          !o.order_name.toLowerCase().includes(q) &&
+          !o.city.toLowerCase().includes(q) &&
+          !(o.email ?? '').toLowerCase().includes(q) &&
+          !(o.customer_name ?? '').toLowerCase().includes(q)
+        ) return false
       }
       return true
     })
@@ -1036,6 +1041,7 @@ function PlanificateurView() {
                         s.order_name.toLowerCase().includes(q) ||
                         s.customer_name.toLowerCase().includes(q) ||
                         s.city.toLowerCase().includes(q) ||
+                        (s.email ?? '').toLowerCase().includes(q) ||
                         (s.zip ?? '').includes(q)
                       )
                     : sortedStops
@@ -3195,7 +3201,8 @@ function SavView() {
     return (
       e.order_name.toLowerCase().includes(q) ||
       e.customer_name.toLowerCase().includes(q) ||
-      e.city.toLowerCase().includes(q)
+      e.city.toLowerCase().includes(q) ||
+      (e.email ?? '').toLowerCase().includes(q)
     )
   })
 
