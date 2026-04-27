@@ -1477,15 +1477,19 @@ function LivreurView() {
       const today = new Date().toISOString().slice(0, 10)
       const all: Tour[] = (data.tours ?? []).filter((t: Tour) => t.status !== 'cancelled')
       setTours(all)
-      // Auto-select today's tour, fallback to first
-      const todayTour = all.find((t: Tour) => t.planned_date === today) ?? all[0]
-      if (todayTour && !selectedTourId) setSelectedTourId(todayTour.id)
+      // Keep the current selection if it still exists in the refreshed list.
+      // Only auto-select when there is genuinely no selection yet (first load)
+      // or the previously selected tour disappeared (e.g. deleted).
+      setSelectedTourId(prev => {
+        if (prev && all.find((t) => t.id === prev)) return prev   // stay on current tour
+        const todayTour = all.find((t: Tour) => t.planned_date === today) ?? all[0]
+        return todayTour?.id ?? prev
+      })
     } catch (e) {
       console.error(e)
     } finally {
       setLoading(false)
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   useEffect(() => { fetchTours() }, [fetchTours])
@@ -1559,9 +1563,15 @@ function LivreurView() {
     })
     await fetchTours()
     setMarking(false)
-    // Auto-advance to next actionable stop (skip delivered and failed)
-    const nextIdx = sortedStops.findIndex((s, i) => i > stopIdx && s.status !== 'delivered' && s.status !== 'failed')
-    if (nextIdx !== -1) setStopIdx(nextIdx)
+    // Auto-advance: use functional updater so we read the freshly-set tours state
+    setTours(latestTours => {
+      const latestTour = latestTours.find(t => t.id === selectedTourId)
+      if (!latestTour) return latestTours
+      const fresh = [...latestTour.stops].sort((a, b) => a.sequence - b.sequence)
+      const nextIdx = fresh.findIndex((s, i) => i > stopIdx && s.status !== 'delivered' && s.status !== 'failed')
+      if (nextIdx !== -1) setStopIdx(nextIdx)
+      return latestTours  // no mutation
+    })
   }
 
   async function handleMarkFailed() {
@@ -1574,9 +1584,15 @@ function LivreurView() {
     })
     await fetchTours()
     setMarking(false)
-    // Auto-advance to next actionable stop
-    const nextIdx = sortedStops.findIndex((s, i) => i > stopIdx && s.status !== 'delivered' && s.status !== 'failed')
-    if (nextIdx !== -1) setStopIdx(nextIdx)
+    // Auto-advance: use functional updater so we read the freshly-set tours state
+    setTours(latestTours => {
+      const latestTour = latestTours.find(t => t.id === selectedTourId)
+      if (!latestTour) return latestTours
+      const fresh = [...latestTour.stops].sort((a, b) => a.sequence - b.sequence)
+      const nextIdx = fresh.findIndex((s, i) => i > stopIdx && s.status !== 'delivered' && s.status !== 'failed')
+      if (nextIdx !== -1) setStopIdx(nextIdx)
+      return latestTours  // no mutation
+    })
   }
 
   if (loading) {
