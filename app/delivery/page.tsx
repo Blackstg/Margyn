@@ -6,7 +6,15 @@ import { useState, useEffect, useCallback, useRef, Suspense } from 'react'
 import nextDynamic from 'next/dynamic'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { createBrowserClient } from '@supabase/auth-helpers-nextjs'
-import { ChevronDown, ChevronUp, ChevronLeft, ChevronRight, Trash2, Mail, Plus, X, MapPin, Package, Truck, Map as MapIcon, Search, Pencil, Check, MessageSquare } from 'lucide-react'
+import { ChevronDown, ChevronUp, ChevronLeft, ChevronRight, Trash2, Mail, Plus, X, MapPin, Package, Truck, Map as MapIcon, Search, Pencil, Check, MessageSquare, GripVertical } from 'lucide-react'
+import {
+  DndContext, DragEndEvent, DragOverlay, DragStartEvent,
+  PointerSensor, TouchSensor, closestCenter, useSensor, useSensors,
+} from '@dnd-kit/core'
+import {
+  SortableContext, arrayMove, useSortable, verticalListSortingStrategy,
+} from '@dnd-kit/sortable'
+import { CSS } from '@dnd-kit/utilities'
 
 const TourMap        = nextDynamic(() => import('@/components/delivery/TourMap'),        { ssr: false })
 const OrdersMap      = nextDynamic(() => import('@/components/delivery/OrdersMap'),      { ssr: false })
@@ -1356,7 +1364,62 @@ function PlanificateurView() {
 
 // ─── Livreur View ─────────────────────────────────────────────────────────────
 
-type LivreurScreen = 'home' | 'loading' | 'tour' | 'map' | 'nearby'
+type LivreurScreen = 'home' | 'loading' | 'tour' | 'map' | 'nearby' | 'reorder'
+
+// ─── Drag-and-drop stop item ──────────────────────────────────────────────────
+
+function SortableStopItem({ stop, index }: { stop: TourStop; index: number }) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: stop.id })
+
+  const style: React.CSSProperties = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    position: 'relative',
+    zIndex: isDragging ? 50 : 'auto',
+  }
+
+  return (
+    <div
+      ref={setNodeRef}
+      style={style}
+      className={`flex items-center gap-3 rounded-[16px] bg-white px-4 py-4 border transition-all ${
+        isDragging
+          ? 'opacity-0 border-[#e8e8e4]'
+          : 'opacity-100 shadow-[0_2px_8px_rgba(0,0,0,0.06)] border-transparent'
+      }`}
+    >
+      {/* Drag handle */}
+      <button
+        className="touch-none shrink-0 p-1 -ml-1 text-[#c0c0ba] cursor-grab active:cursor-grabbing"
+        {...attributes}
+        {...listeners}
+        aria-label="Déplacer"
+      >
+        <GripVertical size={20} />
+      </button>
+
+      {/* Sequence badge */}
+      <span className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold shrink-0 ${
+        stop.status === 'delivered' ? 'bg-[#1a7f4b] text-white' :
+        stop.status === 'failed'    ? 'bg-[#f97316] text-white' :
+        'bg-[#1a1a2e] text-white'
+      }`}>
+        {stop.status === 'delivered' ? '✓' : stop.status === 'failed' ? '✕' : index + 1}
+      </span>
+
+      {/* Info */}
+      <div className="flex-1 min-w-0">
+        <p className="font-semibold text-sm text-[#1a1a2e] truncate">{stop.customer_name}</p>
+        <p className="text-xs text-[#6b6b63] truncate">{stop.city} {stop.zip}</p>
+        {stop.panel_count > 0 && (
+          <p className="text-[10px] text-[#9b9b93] mt-0.5">{stop.panel_count} panneau{stop.panel_count !== 1 ? 'x' : ''}</p>
+        )}
+      </div>
+
+      <span className="font-mono text-[10px] text-[#9b9b93] shrink-0">{stop.order_name}</span>
+    </div>
+  )
+}
 
 const DEPOT = 'Rue Lamartine, Zone Industrielle des Distraits, 18390 Saint-Germain-du-Puy, France'
 const DEPOT_COORDS: [number, number] = [2.4524, 47.0873]  // Saint-Germain-du-Puy
@@ -1493,6 +1556,14 @@ function LivreurView() {
   const [nearbyZoneFilter, setNearbyZoneFilter] = useState<string>('all')
   const [addingOrderName, setAddingOrderName]   = useState<string | null>(null)
   const [addedToTourNames, setAddedToTourNames] = useState<Set<string>>(new Set())
+  // Reorder screen state
+  const [reorderStops, setReorderStops]     = useState<TourStop[]>([])
+  const [reorderSaving, setReorderSaving]   = useState(false)
+  const [reorderActiveId, setReorderActiveId] = useState<string | null>(null)
+  const reorderSensors = useSensors(
+    useSensor(PointerSensor),
+    useSensor(TouchSensor, { activationConstraint: { delay: 200, tolerance: 8 } }),
+  )
 
   const fetchTours = useCallback(async () => {
     setLoading(true)
@@ -1756,6 +1827,14 @@ function LivreurView() {
                 <MapIcon size={20} strokeWidth={1.8} />
                 Voir l&apos;itinéraire
               </button>
+              <button
+                onClick={() => { setReorderStops([...sortedStops]); setScreen('reorder') }}
+                disabled={sortedStops.length < 2}
+                className="w-full flex items-center justify-center gap-3 py-4 rounded-[16px] border border-white/25 text-white font-semibold text-base disabled:opacity-30 active:bg-white/10 transition-colors"
+              >
+                <GripVertical size={20} strokeWidth={1.8} />
+                Réordonner les arrêts
+              </button>
             </div>
           </div>
         ) : (
@@ -2002,6 +2081,98 @@ function LivreurView() {
             })}
           </div>
         )}
+      </div>
+    )
+  }
+
+  // ── Screen: reorder ──
+  if (screen === 'reorder') {
+    const activeStop = reorderActiveId ? reorderStops.find(s => s.id === reorderActiveId) ?? null : null
+
+    async function handleDragEnd(event: DragEndEvent) {
+      setReorderActiveId(null)
+      const { active, over } = event
+      if (!over || active.id === over.id) return
+
+      const oldIdx = reorderStops.findIndex(s => s.id === active.id)
+      const newIdx = reorderStops.findIndex(s => s.id === over.id)
+      const newOrder = arrayMove(reorderStops, oldIdx, newIdx)
+      setReorderStops(newOrder)
+
+      setReorderSaving(true)
+      try {
+        await Promise.all(
+          newOrder.map((stop, i) =>
+            fetch(`/api/delivery/stops/${stop.id}`, {
+              method: 'PATCH',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ sequence: i }),
+            })
+          )
+        )
+        fetchTours()
+      } finally {
+        setReorderSaving(false)
+      }
+    }
+
+    return (
+      <div className="w-full pb-10">
+        {/* Header */}
+        <div className="flex items-center gap-3 mb-5">
+          <button
+            onClick={() => setScreen('home')}
+            className="w-10 h-10 rounded-full bg-white shadow flex items-center justify-center shrink-0"
+          >
+            <ChevronLeft size={20} />
+          </button>
+          <div className="flex-1 min-w-0">
+            <h2 className="text-lg font-bold text-[#1a1a2e]">Réordonner les arrêts</h2>
+            <p className="text-xs text-[#6b6b63]">Glisser ⠿ pour déplacer un arrêt</p>
+          </div>
+          {reorderSaving && (
+            <span className="text-xs text-[#6b6b63] animate-pulse">Sauvegarde…</span>
+          )}
+          {!reorderSaving && (
+            <span className="text-xs text-[#1a7f4b] font-medium">✓ Synchronisé</span>
+          )}
+        </div>
+
+        {/* Sortable list */}
+        <DndContext
+          sensors={reorderSensors}
+          collisionDetection={closestCenter}
+          onDragStart={(e: DragStartEvent) => setReorderActiveId(String(e.active.id))}
+          onDragEnd={handleDragEnd}
+          onDragCancel={() => setReorderActiveId(null)}
+        >
+          <SortableContext items={reorderStops.map(s => s.id)} strategy={verticalListSortingStrategy}>
+            <div className="space-y-2">
+              {reorderStops.map((stop, i) => (
+                <SortableStopItem key={stop.id} stop={stop} index={i} />
+              ))}
+            </div>
+          </SortableContext>
+
+          {/* Overlay: renders the dragging item at cursor */}
+          <DragOverlay dropAnimation={{ duration: 180, easing: 'ease' }}>
+            {activeStop && (
+              <div className="flex items-center gap-3 rounded-[16px] bg-white shadow-[0_12px_40px_rgba(0,0,0,0.18)] px-4 py-4 border border-[#e8e8e4] scale-[1.03]">
+                <span className="shrink-0 p-1 text-[#1a1a2e]">
+                  <GripVertical size={20} />
+                </span>
+                <span className="w-7 h-7 rounded-full bg-[#1a1a2e] text-white flex items-center justify-center text-xs font-bold shrink-0">
+                  {reorderStops.findIndex(s => s.id === activeStop.id) + 1}
+                </span>
+                <div className="flex-1 min-w-0">
+                  <p className="font-semibold text-sm text-[#1a1a2e] truncate">{activeStop.customer_name}</p>
+                  <p className="text-xs text-[#6b6b63] truncate">{activeStop.city} {activeStop.zip}</p>
+                </div>
+                <span className="font-mono text-[10px] text-[#9b9b93] shrink-0">{activeStop.order_name}</span>
+              </div>
+            )}
+          </DragOverlay>
+        </DndContext>
       </div>
     )
   }
