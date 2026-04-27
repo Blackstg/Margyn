@@ -6,7 +6,7 @@ import { useState, useEffect, useCallback, useRef, Suspense } from 'react'
 import nextDynamic from 'next/dynamic'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { createBrowserClient } from '@supabase/auth-helpers-nextjs'
-import { ChevronDown, ChevronUp, ChevronLeft, ChevronRight, Trash2, Mail, Plus, X, MapPin, Package, Truck, Map as MapIcon, Search, Pencil, Check, MessageSquare, GripVertical, Printer } from 'lucide-react'
+import { ChevronDown, ChevronUp, ChevronLeft, ChevronRight, Trash2, Mail, Plus, X, MapPin, Package, Truck, Map as MapIcon, Search, Pencil, Check, MessageSquare, GripVertical, Printer, RefreshCw } from 'lucide-react'
 import {
   DndContext, DragEndEvent, DragOverlay, DragStartEvent,
   PointerSensor, TouchSensor, closestCenter, useSensor, useSensors,
@@ -224,6 +224,19 @@ function PlanificateurView() {
   const [renameValue, setRenameValue] = useState('')
   const [showHistory, setShowHistory] = useState(false)
   const [ordersViewMode, setOrdersViewMode] = useState<'list' | 'map'>('list')
+  const [syncingStopId, setSyncingStopId] = useState<string | null>(null)
+
+  async function handleSyncStop(stopId: string) {
+    setSyncingStopId(stopId)
+    try {
+      const r = await fetch(`/api/delivery/stops/${stopId}/sync-shopify`, { method: 'POST' })
+      const data = await r.json()
+      if (data.error) { alert(`Erreur sync : ${data.error}`); return }
+      await fetchTours()
+    } finally {
+      setSyncingStopId(null)
+    }
+  }
 
   // Notifier les clients modal
   type NotifStop = { id: string; customer_name: string; email: string; email_sent_at: string | null }
@@ -1268,6 +1281,14 @@ function PlanificateurView() {
                                       )}
                                     </div>
                                     <div className="flex items-center gap-1 shrink-0">
+                                      <button
+                                        onClick={() => handleSyncStop(stop.id)}
+                                        disabled={syncingStopId === stop.id}
+                                        title="Resync depuis Shopify"
+                                        className="p-0.5 rounded text-[#6b6b63] hover:text-[#1d4ed8] disabled:opacity-40"
+                                      >
+                                        <RefreshCw size={13} className={syncingStopId === stop.id ? 'animate-spin' : ''} />
+                                      </button>
                                       {stop.email_sent_at && (
                                         <Mail size={12} className="text-[#1a7f4b]" />
                                       )}
