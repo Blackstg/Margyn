@@ -5,6 +5,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { sendValidatedReply, markTicketProcessed } from '@/lib/sav/orchestrator'
 import type { ReplyAction } from '@/lib/sav/classifier'
+import { getBonRetourToken } from '@/lib/sav/bon-retour'
 
 export const dynamic = 'force-dynamic'
 
@@ -14,6 +15,7 @@ export async function POST(req: NextRequest) {
     reply_body: string
     solved:     boolean
     action:     ReplyAction
+    category?:  string
     uploads?:   string[]
   }
 
@@ -23,7 +25,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 })
   }
 
-  const { ticket_id, reply_body, solved, action, uploads = [] } = body
+  const { ticket_id, reply_body, solved, action, category, uploads = [] } = body
 
   if (!ticket_id || !action) {
     return NextResponse.json({ error: 'ticket_id and action are required' }, { status: 400 })
@@ -34,7 +36,20 @@ export async function POST(req: NextRequest) {
   }
 
   try {
-    await sendValidatedReply(ticket_id, reply_body, solved ?? false, action, uploads)
+    // Joindre automatiquement le bon de retour PDF pour les tickets retour/remb.
+    const allUploads = [...uploads]
+    if (category === 'retour_remboursement') {
+      try {
+        const bonRetourToken = await getBonRetourToken()
+        allUploads.push(bonRetourToken)
+        console.log(`[SAV] Bon de retour joint automatiquement (ticket #${ticket_id})`)
+      } catch (err) {
+        // Non-bloquant : on envoie quand même sans le PDF
+        console.error('[SAV] Impossible de joindre le bon de retour:', err)
+      }
+    }
+
+    await sendValidatedReply(ticket_id, reply_body, solved ?? false, action, allUploads)
     // Persist so this ticket is excluded from future fetches
     await markTicketProcessed(ticket_id, action === 'escalate' ? 'escalated' : 'sent')
     return NextResponse.json({ ok: true })

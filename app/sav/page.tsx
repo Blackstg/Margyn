@@ -539,7 +539,7 @@ function ReplyPanel({ ticket, draft, solved, onDraftChange, onSolvedChange, onSe
       const res = await fetch('/api/sav/send', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ticket_id: ticket.ticket_id, reply_body: draft, solved, action, uploads }),
+        body: JSON.stringify({ ticket_id: ticket.ticket_id, reply_body: draft, solved, action, category: ticket.category, uploads }),
       })
       if (!res.ok) { const d = await res.json(); throw new Error(d.error ?? `HTTP ${res.status}`) }
       const wasModified = draft.trim() !== ticket.draft_reply.trim()
@@ -662,6 +662,26 @@ function ReplyPanel({ ticket, draft, solved, onDraftChange, onSolvedChange, onSe
             }
             {uploading ? 'Upload…' : 'Joindre un fichier'}
           </button>
+        )}
+
+        {/* Bon de retour — auto-attach indicator */}
+        {ticket.category === 'retour_remboursement' && (
+          <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-[#e8f4fd] border border-[#bfdbfe]">
+            <span className="text-[11px]">📎</span>
+            <p className="text-[11px] text-[#1e40af] font-medium leading-snug">
+              Bon de retour joint automatiquement
+            </p>
+          </div>
+        )}
+
+        {/* Colissimo reminder — shown when draft mentions exchange or credit note */}
+        {ticket.category === 'retour_remboursement' && /échange|echange|avoir/i.test(draft) && (
+          <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-[#fff7ed] border border-[#fed7aa]">
+            <span className="text-[11px]">⚠️</span>
+            <p className="text-[11px] text-[#c2410c] font-medium leading-snug">
+              Pensez à joindre l&apos;étiquette Colissimo
+            </p>
+          </div>
         )}
 
         <label className="flex items-center gap-2 text-xs text-[#6b6b63] cursor-pointer">
