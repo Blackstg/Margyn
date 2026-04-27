@@ -1488,6 +1488,7 @@ function LivreurView() {
   const [selectedChip, setSelectedChip] = useState('')
   const coordsCache = useRef<Map<string, [number, number]>>(new Map())
   const [navSheet, setNavSheet] = useState(false)
+  const [nearbyOrders, setNearbyOrders] = useState<ShopifyOrder[]>([])
 
   const fetchTours = useCallback(async () => {
     setLoading(true)
@@ -1512,7 +1513,18 @@ function LivreurView() {
     }
   }, [])
 
-  useEffect(() => { fetchTours() }, [fetchTours])
+  const fetchNearbyOrders = useCallback(async () => {
+    try {
+      const r = await fetch('/api/delivery/orders', { cache: 'no-store' })
+      const data = await r.json()
+      setNearbyOrders(data.orders ?? [])
+    } catch { /* best-effort — nearby feature is optional */ }
+  }, [])
+
+  useEffect(() => {
+    fetchTours()
+    fetchNearbyOrders()
+  }, [fetchTours, fetchNearbyOrders])
 
   const tour = tours.find((t) => t.id === selectedTourId)
   const sortedStopsForETA = tour ? [...tour.stops].sort((a, b) => a.sequence - b.sequence) : []
@@ -1737,6 +1749,31 @@ function LivreurView() {
         onBack={() => setScreen('home')}
         precomputedCoords={coordsCache.current}
         etaMap={etaMap}
+        nearbyOrders={nearbyOrders}
+        tourId={selectedTourId}
+        onAddToTour={async (order) => {
+          if (!selectedTourId) return
+          await fetch(`/api/delivery/tours/${selectedTourId}/stops`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ stops: [{
+              order_name:       order.order_name,
+              shopify_order_id: order.shopify_order_id,
+              customer_name:    order.customer_name,
+              email:            order.email,
+              address1:         order.address1,
+              address2:         '',
+              city:             order.city,
+              zip:              order.zip,
+              zone:             order.zone,
+              panel_count:      order.panel_count,
+              panel_details:    order.panel_details,
+            }] }),
+          })
+          await fetchTours()
+          // Refresh nearby orders so added order disappears
+          fetchNearbyOrders()
+        }}
         onMarkDelivered={async (stopId, comment) => {
           await fetch(`/api/delivery/stops/${stopId}`, {
             method: 'PATCH',

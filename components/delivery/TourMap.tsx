@@ -74,6 +74,40 @@ function makeDepotMarkerEl(): HTMLElement {
   return el
 }
 
+function makeNearbyMarkerEl(): HTMLElement {
+  const el = document.createElement('div')
+  el.style.cssText = `
+    width:26px;height:26px;border-radius:50%;
+    background:#f59e0b;border:2.5px solid white;
+    box-shadow:0 2px 8px rgba(0,0,0,0.3);
+    display:flex;align-items:center;justify-content:center;
+    font-size:15px;font-weight:800;color:white;
+    cursor:pointer;
+  `
+  el.textContent = '+'
+  return el
+}
+
+const ZONE_LABEL: Record<string, string> = {
+  'nord-est':   'Nord-Est',
+  'nord-ouest': 'Nord-Ouest',
+  'sud-est':    'Sud-Est',
+  'sud-ouest':  'Sud-Ouest',
+}
+
+export interface NearbyOrder {
+  order_name: string
+  shopify_order_id: string
+  customer_name: string
+  email: string
+  address1: string
+  city: string
+  zip: string
+  zone: string
+  panel_count: number
+  panel_details: PanelItem[]
+}
+
 interface TourMapProps {
   stops: MapStop[]
   onBack: () => void
@@ -82,12 +116,16 @@ interface TourMapProps {
   onMarkDelivered?: (stopId: string, comment?: string) => Promise<void>
   onMarkFailed?: (stopId: string, comment: string) => Promise<void>
   onRemoveStop?: (stopId: string) => Promise<void>
+  nearbyOrders?: NearbyOrder[]
+  tourId?: string
+  onAddToTour?: (order: NearbyOrder) => Promise<void>
 }
 
-export default function TourMap({ stops, onBack, precomputedCoords, onMarkDelivered, onMarkFailed, onRemoveStop }: TourMapProps) {
-  const containerRef = useRef<HTMLDivElement>(null)
-  const mapRef       = useRef<mapboxgl.Map | null>(null)
-  const markerElsRef = useRef<Record<string, HTMLElement>>({})
+export default function TourMap({ stops, onBack, precomputedCoords, onMarkDelivered, onMarkFailed, onRemoveStop, nearbyOrders, onAddToTour }: TourMapProps) {
+  const containerRef       = useRef<HTMLDivElement>(null)
+  const mapRef             = useRef<mapboxgl.Map | null>(null)
+  const markerElsRef       = useRef<Record<string, HTMLElement>>({})
+  const nearbyMarkerElsRef = useRef<Record<string, HTMLElement>>({})
 
   const [phase, setPhase]               = useState<'geocoding' | 'routing' | 'ready' | 'error'>('geocoding')
   const [selectedStop, setSelectedStop] = useState<MapStop | null>(null)
@@ -101,6 +139,10 @@ export default function TourMap({ stops, onBack, precomputedCoords, onMarkDelive
   const [commentMode, setCommentMode] = useState<'none' | 'delivered' | 'failed'>('none')
   const [pendingComment, setPendingComment] = useState('')
   const [selectedChip, setSelectedChip] = useState('')
+  const [selectedNearby, setSelectedNearby] = useState<NearbyOrder | null>(null)
+  const [addingToTour, setAddingToTour] = useState(false)
+  const [addedOrderNames, setAddedOrderNames] = useState<Set<string>>(new Set())
+  const [zoneFilter, setZoneFilter] = useState<string>('all')
 
   const sortedStops = [...stops].sort((a, b) => a.sequence - b.sequence)
   const token = process.env.NEXT_PUBLIC_MAPBOX_TOKEN ?? ''
@@ -156,6 +198,7 @@ export default function TourMap({ stops, onBack, precomputedCoords, onMarkDelive
           // Click opens bottom sheet (no Mapbox popup)
           el.addEventListener('click', () => {
             setSelectedStop(stop)
+            setSelectedNearby(null)
           })
 
           new mgl.Marker({ element: el })
@@ -219,6 +262,54 @@ export default function TourMap({ stops, onBack, precomputedCoords, onMarkDelive
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])   // run once on mount
+
+  // Geocode and place nearby-order markers whenever orders arrive (or phase becomes ready)
+  useEffect(() => {
+    if (!nearbyOrders?.length || phase !== 'ready' || !mapRef.current) return
+    let cancelled = false
+
+    ;(async () => {
+      const mgl = (await import('mapbox-gl')).default
+      const map = mapRef.current!
+
+      await Promise.all(nearbyOrders.map(async (order) => {
+        if (nearbyMarkerElsRef.current[order.order_name]) return // already placed
+        const coord = await geocodeAddress(
+          `${order.address1}, ${order.city} ${order.zip}, France`, token
+        )
+        if (cancelled || !coord || !mapRef.current) return
+
+        const el = makeNearbyMarkerEl()
+        nearbyMarkerElsRef.current[order.order_name] = el
+
+        // Apply current zone filter immediately
+        if (zoneFilter !== 'all' && order.zone !== zoneFilter) {
+          el.style.display = 'none'
+        }
+
+        el.addEventListener('click', () => {
+          setSelectedNearby(order)
+          setSelectedStop(null)
+          setCommentMode('none')
+          setConfirmRemove(false)
+        })
+
+        new mgl.Marker({ element: el }).setLngLat(coord).addTo(map)
+      }))
+    })()
+
+    return () => { cancelled = true }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [nearbyOrders, phase])
+
+  // Zone filter: toggle marker visibility via DOM refs (no map re-init)
+  useEffect(() => {
+    for (const order of (nearbyOrders ?? [])) {
+      const el = nearbyMarkerElsRef.current[order.order_name]
+      if (!el) continue
+      el.style.display = (zoneFilter === 'all' || order.zone === zoneFilter) ? 'flex' : 'none'
+    }
+  }, [zoneFilter, nearbyOrders])
 
   async function handleMarkDelivered(comment?: string) {
     if (!selectedStop || !onMarkDelivered) return
@@ -300,6 +391,29 @@ export default function TourMap({ stops, onBack, precomputedCoords, onMarkDelive
           <span className="flex items-center gap-1"><span className="w-3 h-3 rounded-full bg-[#3b82f6] inline-block" />À livrer</span>
           <span className="flex items-center gap-1"><span className="w-3 h-3 rounded-full bg-[#22c55e] inline-block" />Livré</span>
           <span className="flex items-center gap-1"><span className="w-3 h-3 rounded-full bg-[#f97316] inline-block" />Non livré</span>
+          {nearbyOrders && nearbyOrders.length > 0 && (
+            <span className="flex items-center gap-1"><span className="w-3 h-3 rounded-full bg-[#f59e0b] inline-block" />Non planifiées</span>
+          )}
+        </div>
+      )}
+
+      {/* Zone filter for nearby orders */}
+      {nearbyOrders && nearbyOrders.length > 0 && phase === 'ready' && (
+        <div className="flex items-center gap-2 px-3 py-2 bg-[#fffbeb] border-b border-[#fde68a] overflow-x-auto shrink-0">
+          <span className="text-[10px] font-semibold text-[#92400e] shrink-0 uppercase tracking-wide">Filtre :</span>
+          {(['all', 'nord-est', 'nord-ouest', 'sud-est', 'sud-ouest'] as const).map((z) => (
+            <button
+              key={z}
+              onClick={() => setZoneFilter(z)}
+              className={`shrink-0 px-2.5 py-1 rounded-full text-[10px] font-semibold transition-all ${
+                zoneFilter === z
+                  ? 'bg-[#f59e0b] text-white'
+                  : 'bg-white text-[#92400e] border border-[#fcd34d]'
+              }`}
+            >
+              {z === 'all' ? 'Toutes zones' : ZONE_LABEL[z]}
+            </button>
+          ))}
         </div>
       )}
 
@@ -328,7 +442,13 @@ export default function TourMap({ stops, onBack, precomputedCoords, onMarkDelive
           {/* Backdrop */}
           <div
             className="absolute inset-0 z-20 bg-black/20"
-            onClick={() => { setSelectedStop(null); setConfirmRemove(false); setCommentMode('none'); setPendingComment(''); setSelectedChip('') }}
+            onClick={() => {
+              setSelectedStop(null)
+              setConfirmRemove(false)
+              setCommentMode('none')
+              setPendingComment('')
+              setSelectedChip('')
+            }}
           />
           {/* Sheet */}
           <div className="absolute bottom-0 left-0 right-0 z-30 bg-white rounded-t-[24px] shadow-[0_-4px_32px_rgba(0,0,0,0.18)] px-5 pt-4 pb-8">
@@ -519,6 +639,86 @@ export default function TourMap({ stops, onBack, precomputedCoords, onMarkDelive
                 </div>
               </div>
             )}
+          </div>
+        </>
+      )}
+
+      {/* ── Nearby order bottom sheet ── */}
+      {selectedNearby && (
+        <>
+          <div
+            className="absolute inset-0 z-20 bg-black/20"
+            onClick={() => setSelectedNearby(null)}
+          />
+          <div className="absolute bottom-0 left-0 right-0 z-30 bg-white rounded-t-[24px] shadow-[0_-4px_32px_rgba(0,0,0,0.18)] px-5 pt-4 pb-8">
+            {/* Handle */}
+            <div className="w-10 h-1 bg-[#e0e0e0] rounded-full mx-auto mb-4" />
+
+            {/* Header */}
+            <div className="flex items-start justify-between gap-3 mb-4">
+              <div>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="font-mono text-xs bg-[#fffbeb] px-2 py-0.5 rounded text-[#92400e]">
+                    {selectedNearby.order_name}
+                  </span>
+                  <span className="text-[10px] px-2 py-0.5 rounded-full bg-[#fffbeb] text-[#92400e] border border-[#fcd34d] font-medium">
+                    {ZONE_LABEL[selectedNearby.zone] ?? selectedNearby.zone}
+                  </span>
+                </div>
+                <p className="text-xl font-bold text-[#1a1a2e] mt-1 leading-tight">{selectedNearby.customer_name}</p>
+                <p className="text-sm text-[#6b6b63] mt-0.5">{selectedNearby.address1}</p>
+                <p className="text-sm text-[#6b6b63]">{selectedNearby.city} {selectedNearby.zip}</p>
+              </div>
+              <button
+                onClick={() => setSelectedNearby(null)}
+                className="w-8 h-8 rounded-full bg-[#f5f5f3] flex items-center justify-center shrink-0 mt-1 text-[#6b6b63]"
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* Products */}
+            {(selectedNearby.panel_details ?? []).filter(p => p.qty > 0).map((p, i) => (
+              <div key={i} className="flex items-center gap-3 bg-[#f8f7f5] rounded-[10px] px-3 py-2.5 mb-2">
+                <span className="w-8 h-8 rounded-lg bg-[#f59e0b] text-white flex items-center justify-center font-bold text-base shrink-0">
+                  {p.qty}
+                </span>
+                <div className="min-w-0">
+                  {p.sku?.trim() && <p className="font-mono text-[10px] text-[#9b9b93] truncate">{p.sku}</p>}
+                  <p className="text-sm font-medium text-[#1a1a2e] truncate">{p.title}</p>
+                </div>
+              </div>
+            ))}
+
+            {/* Action */}
+            <div className="mt-3">
+              {addedOrderNames.has(selectedNearby.order_name) ? (
+                <div className="w-full flex items-center justify-center gap-2 py-5 rounded-[16px] bg-[#f0fdf4] text-[#1a7f4b] font-bold text-lg">
+                  <CheckCircle2 size={22} />
+                  Ajoutée à la tournée
+                </div>
+              ) : (
+                <button
+                  onClick={async () => {
+                    if (!onAddToTour) return
+                    setAddingToTour(true)
+                    try {
+                      await onAddToTour(selectedNearby)
+                      const el = nearbyMarkerElsRef.current[selectedNearby.order_name]
+                      if (el) { el.style.background = '#3b82f6'; el.textContent = '+' }
+                      setAddedOrderNames(prev => new Set([...prev, selectedNearby.order_name]))
+                      setSelectedNearby(null)
+                    } finally {
+                      setAddingToTour(false)
+                    }
+                  }}
+                  disabled={addingToTour || !onAddToTour}
+                  className="w-full py-5 rounded-[16px] bg-[#f59e0b] text-white font-bold text-lg disabled:opacity-50 active:bg-[#d97706] transition-colors"
+                >
+                  {addingToTour ? 'Ajout en cours…' : '+ Ajouter à ma tournée'}
+                </button>
+              )}
+            </div>
           </div>
         </>
       )}
