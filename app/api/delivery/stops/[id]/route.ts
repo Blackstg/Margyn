@@ -14,10 +14,11 @@ export async function PATCH(
 ) {
   try {
     const body = await req.json()
-    const { status, sequence, email_sent_at } = body as {
+    const { status, sequence, email_sent_at, comment } = body as {
       status?: string
       sequence?: number
       email_sent_at?: string
+      comment?: string
     }
 
     const updates: Record<string, unknown> = {}
@@ -29,6 +30,10 @@ export async function PATCH(
     }
     if (sequence !== undefined) updates.sequence = sequence
     if (email_sent_at !== undefined) updates.email_sent_at = email_sent_at
+    if (comment !== undefined) {
+      updates.comment = comment
+      updates.comment_at = new Date().toISOString()
+    }
 
     const admin = getAdmin()
     const { data, error } = await admin

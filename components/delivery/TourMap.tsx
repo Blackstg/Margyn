@@ -79,11 +79,12 @@ interface TourMapProps {
   onBack: () => void
   precomputedCoords?: Map<string, [number, number]>
   etaMap?: Map<string, string>
-  onMarkDelivered?: (stopId: string) => Promise<void>
+  onMarkDelivered?: (stopId: string, comment?: string) => Promise<void>
+  onMarkFailed?: (stopId: string, comment: string) => Promise<void>
   onRemoveStop?: (stopId: string) => Promise<void>
 }
 
-export default function TourMap({ stops, onBack, precomputedCoords, onMarkDelivered, onRemoveStop }: TourMapProps) {
+export default function TourMap({ stops, onBack, precomputedCoords, onMarkDelivered, onMarkFailed, onRemoveStop }: TourMapProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const mapRef       = useRef<mapboxgl.Map | null>(null)
   const markerElsRef = useRef<Record<string, HTMLElement>>({})
@@ -97,6 +98,9 @@ export default function TourMap({ stops, onBack, precomputedCoords, onMarkDelive
     Object.fromEntries(stops.map(s => [s.id, s.status]))
   )
   const [, setRemovedIds] = useState<Set<string>>(new Set())
+  const [commentMode, setCommentMode] = useState<'none' | 'delivered' | 'failed'>('none')
+  const [pendingComment, setPendingComment] = useState('')
+  const [selectedChip, setSelectedChip] = useState('')
 
   const sortedStops = [...stops].sort((a, b) => a.sequence - b.sequence)
   const token = process.env.NEXT_PUBLIC_MAPBOX_TOKEN ?? ''
@@ -216,15 +220,35 @@ export default function TourMap({ stops, onBack, precomputedCoords, onMarkDelive
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])   // run once on mount
 
-  async function handleMarkDelivered() {
+  async function handleMarkDelivered(comment?: string) {
     if (!selectedStop || !onMarkDelivered) return
     setMarking(true)
     try {
-      await onMarkDelivered(selectedStop.id)
+      await onMarkDelivered(selectedStop.id, comment)
       const el = markerElsRef.current[selectedStop.id]
       if (el) el.style.background = '#22c55e'
       setLocalStatuses(prev => ({ ...prev, [selectedStop.id]: 'delivered' }))
       setSelectedStop(null)
+      setCommentMode('none')
+      setPendingComment('')
+      setSelectedChip('')
+    } finally {
+      setMarking(false)
+    }
+  }
+
+  async function handleMarkFailed(comment: string) {
+    if (!selectedStop || !onMarkFailed) return
+    setMarking(true)
+    try {
+      await onMarkFailed(selectedStop.id, comment)
+      const el = markerElsRef.current[selectedStop.id]
+      if (el) el.style.background = '#f97316'
+      setLocalStatuses(prev => ({ ...prev, [selectedStop.id]: 'failed' }))
+      setSelectedStop(null)
+      setCommentMode('none')
+      setPendingComment('')
+      setSelectedChip('')
     } finally {
       setMarking(false)
     }
@@ -304,7 +328,7 @@ export default function TourMap({ stops, onBack, precomputedCoords, onMarkDelive
           {/* Backdrop */}
           <div
             className="absolute inset-0 z-20 bg-black/20"
-            onClick={() => { setSelectedStop(null); setConfirmRemove(false) }}
+            onClick={() => { setSelectedStop(null); setConfirmRemove(false); setCommentMode('none'); setPendingComment(''); setSelectedChip('') }}
           />
           {/* Sheet */}
           <div className="absolute bottom-0 left-0 right-0 z-30 bg-white rounded-t-[24px] shadow-[0_-4px_32px_rgba(0,0,0,0.18)] px-5 pt-4 pb-8">
@@ -328,7 +352,7 @@ export default function TourMap({ stops, onBack, precomputedCoords, onMarkDelive
                 <p className="text-sm text-[#6b6b63]">{selectedStop.address1}, {selectedStop.city} {selectedStop.zip}</p>
               </div>
               <button
-                onClick={() => { setSelectedStop(null); setConfirmRemove(false) }}
+                onClick={() => { setSelectedStop(null); setConfirmRemove(false); setCommentMode('none'); setPendingComment(''); setSelectedChip('') }}
                 className="w-8 h-8 rounded-full bg-[#f5f5f3] flex items-center justify-center shrink-0 mt-1 text-[#6b6b63]"
               >
                 ✕
@@ -354,25 +378,111 @@ export default function TourMap({ stops, onBack, precomputedCoords, onMarkDelive
               </div>
             )}
 
-            {/* Primary action */}
-            {currentStatus !== 'delivered' ? (
-              <button
-                onClick={handleMarkDelivered}
-                disabled={marking || removing || !onMarkDelivered}
-                className="w-full flex items-center justify-center gap-2 py-4 rounded-[16px] bg-[#1a7f4b] text-white font-bold text-base disabled:opacity-50 active:bg-[#15703f] transition-colors"
-              >
-                {marking ? <span className="animate-spin text-lg">⏳</span> : <CheckCircle2 size={20} />}
-                {marking ? 'Enregistrement…' : 'Marquer comme livré'}
-              </button>
-            ) : (
+            {/* Actions */}
+            {currentStatus === 'delivered' ? (
               <div className="w-full flex items-center justify-center gap-2 py-4 rounded-[16px] bg-[#f0fdf4] text-[#1a7f4b] font-bold text-base">
                 <CheckCircle2 size={20} />
                 Déjà livré
               </div>
+            ) : currentStatus === 'failed' ? (
+              <div className="w-full flex items-center justify-center gap-2 py-4 rounded-[16px] bg-[#fff7ed] text-[#c2680a] font-bold text-base">
+                Non livré — à replanifier
+              </div>
+            ) : commentMode === 'delivered' ? (
+              <div className="space-y-2">
+                <p className="text-sm font-semibold text-[#1a1a2e]">Commentaire <span className="text-[#9b9b93] font-normal">(optionnel)</span></p>
+                <textarea
+                  value={pendingComment}
+                  onChange={(e) => setPendingComment(e.target.value)}
+                  placeholder="Tout s'est bien passé..."
+                  className="w-full px-3 py-2.5 text-sm border border-[#e8e8e4] rounded-[12px] outline-none focus:border-[#aeb0c9] resize-none"
+                  rows={2}
+                  autoFocus
+                />
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => { setCommentMode('none'); setPendingComment('') }}
+                    className="flex-1 py-3 rounded-[14px] border border-[#e8e8e4] bg-white text-sm font-medium text-[#6b6b63]"
+                  >
+                    Annuler
+                  </button>
+                  <button
+                    onClick={() => handleMarkDelivered(pendingComment.trim() || undefined)}
+                    disabled={marking}
+                    className="flex-[2] py-3 rounded-[14px] bg-[#1a7f4b] text-white font-bold text-sm disabled:opacity-60 active:bg-[#15703f] transition-colors"
+                  >
+                    {marking ? 'Enregistrement…' : 'Confirmer ✓'}
+                  </button>
+                </div>
+              </div>
+            ) : commentMode === 'failed' ? (
+              <div className="space-y-2">
+                <p className="text-sm font-semibold text-[#1a1a2e]">Raison <span className="text-[#c7293a]">*</span></p>
+                <div className="flex flex-wrap gap-1.5">
+                  {['Client absent', 'Refus de livraison', 'Adresse introuvable', 'Mauvais article', 'Autre'].map((chip) => (
+                    <button
+                      key={chip}
+                      onClick={() => { setSelectedChip(chip); setPendingComment(chip) }}
+                      className={`px-3 py-1.5 rounded-full text-xs font-medium transition-all ${
+                        selectedChip === chip
+                          ? 'bg-[#c2680a] text-white'
+                          : 'bg-[#fff7ed] text-[#c2680a] border border-[#fed7aa]'
+                      }`}
+                    >
+                      {chip}
+                    </button>
+                  ))}
+                </div>
+                <textarea
+                  value={pendingComment}
+                  onChange={(e) => { setPendingComment(e.target.value); setSelectedChip('') }}
+                  placeholder="Précisez la situation..."
+                  className="w-full px-3 py-2.5 text-sm border border-[#e8e8e4] rounded-[12px] outline-none focus:border-[#aeb0c9] resize-none"
+                  rows={2}
+                />
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => { setCommentMode('none'); setPendingComment(''); setSelectedChip('') }}
+                    className="flex-1 py-3 rounded-[14px] border border-[#e8e8e4] bg-white text-sm font-medium text-[#6b6b63]"
+                  >
+                    Annuler
+                  </button>
+                  <button
+                    onClick={() => {
+                      if (!pendingComment.trim()) return
+                      handleMarkFailed(pendingComment.trim())
+                    }}
+                    disabled={!pendingComment.trim() || marking}
+                    className="flex-[2] py-3 rounded-[14px] bg-[#c2680a] text-white font-bold text-sm disabled:opacity-50 active:bg-[#b45309] transition-colors"
+                  >
+                    {marking ? 'Enregistrement…' : 'Confirmer'}
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <>
+                <button
+                  onClick={() => setCommentMode('delivered')}
+                  disabled={marking || removing || !onMarkDelivered}
+                  className="w-full flex items-center justify-center gap-2 py-4 rounded-[16px] bg-[#1a7f4b] text-white font-bold text-base disabled:opacity-50 active:bg-[#15703f] transition-colors"
+                >
+                  <CheckCircle2 size={20} />
+                  Marquer comme livré
+                </button>
+                {onMarkFailed && (
+                  <button
+                    onClick={() => setCommentMode('failed')}
+                    disabled={marking || removing}
+                    className="w-full flex items-center justify-center gap-2 py-3 mt-2 rounded-[14px] border border-[#fed7aa] bg-[#fff7ed] text-[#c2680a] text-sm font-semibold disabled:opacity-40 active:bg-[#ffedd5] transition-colors"
+                  >
+                    Non livré — reporter
+                  </button>
+                )}
+              </>
             )}
 
-            {/* Secondary action — remove from tour */}
-            {onRemoveStop && !confirmRemove && (
+            {/* Remove from tour — only visible in default mode */}
+            {commentMode === 'none' && onRemoveStop && !confirmRemove && (
               <button
                 onClick={() => setConfirmRemove(true)}
                 disabled={marking || removing}
@@ -382,7 +492,7 @@ export default function TourMap({ stops, onBack, precomputedCoords, onMarkDelive
               </button>
             )}
 
-            {/* Confirmation step */}
+            {/* Confirmation step for remove */}
             {confirmRemove && (
               <div className="mt-2 rounded-[14px] border border-[#fcd5d5] bg-[#fff5f5] p-4 space-y-3">
                 <p className="text-sm font-semibold text-[#c7293a] text-center">

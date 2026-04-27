@@ -6,7 +6,7 @@ import { useState, useEffect, useCallback, useRef, Suspense } from 'react'
 import nextDynamic from 'next/dynamic'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { createBrowserClient } from '@supabase/auth-helpers-nextjs'
-import { ChevronDown, ChevronUp, ChevronLeft, ChevronRight, Trash2, Mail, Plus, X, MapPin, Package, Truck, Map as MapIcon, Search, Pencil, Check } from 'lucide-react'
+import { ChevronDown, ChevronUp, ChevronLeft, ChevronRight, Trash2, Mail, Plus, X, MapPin, Package, Truck, Map as MapIcon, Search, Pencil, Check, MessageSquare } from 'lucide-react'
 
 const TourMap        = nextDynamic(() => import('@/components/delivery/TourMap'),        { ssr: false })
 const OrdersMap      = nextDynamic(() => import('@/components/delivery/OrdersMap'),      { ssr: false })
@@ -68,6 +68,8 @@ interface TourStop {
   status: StopStatus
   email_sent_at: string | null
   delivered_at: string | null
+  comment?: string | null
+  comment_at?: string | null
 }
 
 interface Tour {
@@ -1200,6 +1202,21 @@ function PlanificateurView() {
                                       {stop.email_sent_at && (
                                         <Mail size={12} className="text-[#1a7f4b]" />
                                       )}
+                                      {stop.comment && (
+                                        <div className="relative group/comment">
+                                          <span className="p-0.5 rounded text-[#6d28d9] cursor-default">
+                                            <MessageSquare size={12} />
+                                          </span>
+                                          <div className="absolute right-0 bottom-full mb-1.5 w-52 bg-[#1a1a2e] text-white text-[10px] rounded-[8px] p-2.5 hidden group-hover/comment:block z-20 shadow-lg pointer-events-none">
+                                            <p className="leading-relaxed">{stop.comment}</p>
+                                            {stop.comment_at && (
+                                              <p className="text-white/50 mt-1">
+                                                {new Date(stop.comment_at).toLocaleString('fr-FR', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}
+                                              </p>
+                                            )}
+                                          </div>
+                                        </div>
+                                      )}
                                       <button
                                         onClick={() => handleMoveStop(tour.id, stop.id, 'up')}
                                         disabled={realIdx === 0}
@@ -1466,6 +1483,9 @@ function LivreurView() {
   const [marking, setMarking] = useState(false)
   const [checkedItems, setCheckedItems] = useState<Set<string>>(new Set())
   const [etaMap, setEtaMap] = useState<Map<string, string>>(new Map())
+  const [commentMode, setCommentMode] = useState<'none' | 'delivered' | 'failed'>('none')
+  const [pendingComment, setPendingComment] = useState('')
+  const [selectedChip, setSelectedChip] = useState('')
   const coordsCache = useRef<Map<string, [number, number]>>(new Map())
   const [navSheet, setNavSheet] = useState(false)
 
@@ -1532,6 +1552,13 @@ function LivreurView() {
   const sortedStops = sortedStopsForETA  // alias — même tableau
   const deliveredCount = sortedStops.filter((s) => s.status === 'delivered').length
 
+  // Reset comment state whenever the user navigates to a different stop
+  useEffect(() => {
+    setCommentMode('none')
+    setPendingComment('')
+    setSelectedChip('')
+  }, [stopIdx])
+
   // Loading order: stops in REVERSE delivery order (last stop loaded first = goes deepest in truck)
   // Each stop shows its own items so the driver knows what to load for each destination
   const loadingStops = tour
@@ -1553,13 +1580,13 @@ function LivreurView() {
     return `https://www.google.com/maps/dir/${encodeURIComponent(DEPOT)}/${waypoints.join('/')}`
   })()
 
-  async function handleMarkDelivered() {
+  async function handleMarkDelivered(comment?: string) {
     if (!currentStop) return
     setMarking(true)
     await fetch(`/api/delivery/stops/${currentStop.id}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ status: 'delivered' }),
+      body: JSON.stringify({ status: 'delivered', ...(comment ? { comment } : {}) }),
     })
     await fetchTours()
     setMarking(false)
@@ -1574,13 +1601,13 @@ function LivreurView() {
     })
   }
 
-  async function handleMarkFailed() {
+  async function handleMarkFailed(comment: string) {
     if (!currentStop) return
     setMarking(true)
     await fetch(`/api/delivery/stops/${currentStop.id}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ status: 'failed' }),
+      body: JSON.stringify({ status: 'failed', comment }),
     })
     await fetchTours()
     setMarking(false)
@@ -1710,11 +1737,19 @@ function LivreurView() {
         onBack={() => setScreen('home')}
         precomputedCoords={coordsCache.current}
         etaMap={etaMap}
-        onMarkDelivered={async (stopId) => {
+        onMarkDelivered={async (stopId, comment) => {
           await fetch(`/api/delivery/stops/${stopId}`, {
             method: 'PATCH',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ status: 'delivered' }),
+            body: JSON.stringify({ status: 'delivered', ...(comment ? { comment } : {}) }),
+          })
+          await fetchTours()
+        }}
+        onMarkFailed={async (stopId, comment) => {
+          await fetch(`/api/delivery/stops/${stopId}`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ status: 'failed', comment }),
           })
           await fetchTours()
         }}
@@ -2042,29 +2077,121 @@ function LivreurView() {
         {/* Delivery button — full width, pinned to bottom */}
         <div className="px-5 pb-5 space-y-2">
           {currentStop.status === 'delivered' ? (
-            <div className="w-full py-4 rounded-[16px] bg-[#d1fae5] text-[#1a7f4b] font-bold text-center text-lg">
-              Livré ✓
-              {currentStop.delivered_at && (
-                <span className="ml-2 text-sm font-normal opacity-70">
-                  {new Date(currentStop.delivered_at).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}
-                </span>
+            <>
+              <div className="w-full py-4 rounded-[16px] bg-[#d1fae5] text-[#1a7f4b] font-bold text-center text-lg">
+                Livré ✓
+                {currentStop.delivered_at && (
+                  <span className="ml-2 text-sm font-normal opacity-70">
+                    {new Date(currentStop.delivered_at).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}
+                  </span>
+                )}
+              </div>
+              {currentStop.comment && (
+                <div className="rounded-[12px] bg-[#f0fdf4] border border-[#bbf7d0] px-3 py-2">
+                  <p className="text-xs text-[#1a7f4b]">💬 {currentStop.comment}</p>
+                </div>
               )}
-            </div>
+            </>
           ) : currentStop.status === 'failed' ? (
-            <div className="w-full py-4 rounded-[16px] bg-[#fff7ed] text-[#c2680a] font-bold text-center text-lg">
-              Non livré — à replanifier
+            <>
+              <div className="w-full py-4 rounded-[16px] bg-[#fff7ed] text-[#c2680a] font-bold text-center text-lg">
+                Non livré — à replanifier
+              </div>
+              {currentStop.comment && (
+                <div className="rounded-[12px] bg-[#fff7ed] border border-[#fed7aa] px-3 py-2">
+                  <p className="text-xs text-[#c2680a]">💬 {currentStop.comment}</p>
+                </div>
+              )}
+            </>
+          ) : commentMode === 'delivered' ? (
+            <div className="space-y-2">
+              <p className="text-sm font-semibold text-[#1a1a2e]">Commentaire <span className="text-[#9b9b93] font-normal">(optionnel)</span></p>
+              <textarea
+                value={pendingComment}
+                onChange={(e) => setPendingComment(e.target.value)}
+                placeholder="Tout s'est bien passé..."
+                className="w-full px-3 py-2.5 text-sm border border-[#e8e8e4] rounded-[12px] outline-none focus:border-[#aeb0c9] resize-none"
+                rows={2}
+                autoFocus
+              />
+              <div className="flex gap-2">
+                <button
+                  onClick={() => { setCommentMode('none'); setPendingComment('') }}
+                  className="flex-1 py-3 rounded-[14px] border border-[#e8e8e4] bg-white text-sm font-medium text-[#6b6b63]"
+                >
+                  Annuler
+                </button>
+                <button
+                  onClick={() => {
+                    handleMarkDelivered(pendingComment.trim() || undefined)
+                    setCommentMode('none')
+                    setPendingComment('')
+                  }}
+                  disabled={marking}
+                  className="flex-[2] py-3 rounded-[14px] bg-[#6b21a8] text-white font-bold text-sm disabled:opacity-60 active:bg-[#7c3aed] transition-colors"
+                >
+                  {marking ? 'Enregistrement...' : 'Confirmer ✓'}
+                </button>
+              </div>
+            </div>
+          ) : commentMode === 'failed' ? (
+            <div className="space-y-2">
+              <p className="text-sm font-semibold text-[#1a1a2e]">Raison <span className="text-[#c7293a]">*</span></p>
+              <div className="flex flex-wrap gap-1.5">
+                {['Client absent', 'Refus de livraison', 'Adresse introuvable', 'Mauvais article', 'Autre'].map((chip) => (
+                  <button
+                    key={chip}
+                    onClick={() => { setSelectedChip(chip); setPendingComment(chip) }}
+                    className={`px-3 py-1.5 rounded-full text-xs font-medium transition-all ${
+                      selectedChip === chip
+                        ? 'bg-[#c2680a] text-white'
+                        : 'bg-[#fff7ed] text-[#c2680a] border border-[#fed7aa]'
+                    }`}
+                  >
+                    {chip}
+                  </button>
+                ))}
+              </div>
+              <textarea
+                value={pendingComment}
+                onChange={(e) => { setPendingComment(e.target.value); setSelectedChip('') }}
+                placeholder="Précisez la situation..."
+                className="w-full px-3 py-2.5 text-sm border border-[#e8e8e4] rounded-[12px] outline-none focus:border-[#aeb0c9] resize-none"
+                rows={2}
+              />
+              <div className="flex gap-2">
+                <button
+                  onClick={() => { setCommentMode('none'); setPendingComment(''); setSelectedChip('') }}
+                  className="flex-1 py-3 rounded-[14px] border border-[#e8e8e4] bg-white text-sm font-medium text-[#6b6b63]"
+                >
+                  Annuler
+                </button>
+                <button
+                  onClick={() => {
+                    if (!pendingComment.trim()) return
+                    handleMarkFailed(pendingComment.trim())
+                    setCommentMode('none')
+                    setPendingComment('')
+                    setSelectedChip('')
+                  }}
+                  disabled={!pendingComment.trim() || marking}
+                  className="flex-[2] py-3 rounded-[14px] bg-[#c2680a] text-white font-bold text-sm disabled:opacity-50 active:bg-[#b45309] transition-colors"
+                >
+                  {marking ? 'Enregistrement...' : 'Confirmer'}
+                </button>
+              </div>
             </div>
           ) : (
             <>
               <button
-                onClick={handleMarkDelivered}
+                onClick={() => setCommentMode('delivered')}
                 disabled={marking}
                 className="w-full py-5 rounded-[16px] bg-[#6b21a8] text-white font-bold text-lg disabled:opacity-60 active:bg-[#7c3aed] transition-colors"
               >
-                {marking ? 'Enregistrement...' : 'Marquer comme livré'}
+                Marquer comme livré
               </button>
               <button
-                onClick={handleMarkFailed}
+                onClick={() => setCommentMode('failed')}
                 disabled={marking}
                 className="w-full py-3 rounded-[16px] border border-[#e8e8e4] bg-white text-[#c2680a] font-semibold text-sm disabled:opacity-60 active:bg-[#fff7ed] transition-colors"
               >
@@ -2118,6 +2245,7 @@ interface SavEntry {
   stop_status: StopStatus | null
   stop_sequence: number
   delivered_at: string | null
+  comment?: string | null
   sav_status: SavStatus
 }
 
@@ -2225,7 +2353,7 @@ function buildSavEntries(toursRaw: any[], ordersRaw: ShopifyOrder[]): SavEntry[]
         stops_before: stopsBefore, tour_stops_summary: tourStopsSummary,
         driver_name: tour.driver_name ?? null,
         stop_status: stop.status, stop_sequence: stop.sequence,
-        delivered_at: stop.delivered_at ?? null, sav_status,
+        delivered_at: stop.delivered_at ?? null, comment: stop.comment ?? null, sav_status,
       })
     }
   }
@@ -2720,6 +2848,22 @@ function SavView() {
                   <p className="text-xs text-[#9b9b93]">—</p>
                 )}
               </div>
+
+              {/* ── Commentaire livreur ── */}
+              {selected.comment && (
+                <div>
+                  <p className="text-[10px] font-semibold uppercase tracking-[0.08em] text-[#9b9b93] mb-1.5">Note du livreur</p>
+                  <div className={`rounded-[12px] border px-3 py-2.5 ${
+                    selected.stop_status === 'failed'
+                      ? 'bg-[#fff7ed] border-[#fed7aa]'
+                      : 'bg-[#f0fdf4] border-[#bbf7d0]'
+                  }`}>
+                    <p className={`text-xs ${selected.stop_status === 'failed' ? 'text-[#c2680a]' : 'text-[#1a7f4b]'}`}>
+                      💬 {selected.comment}
+                    </p>
+                  </div>
+                </div>
+              )}
 
               {/* ── Address ── */}
               <div className="flex items-start gap-2">
