@@ -3021,18 +3021,9 @@ function getISOWeekNum(dateStr: string): number {
 }
 
 function getWeekRange(dateStr: string): { start: string; end: string } {
-  const d = new Date(dateStr + 'T00:00:00')
-  const day = d.getDay()
-  const diffToMonday = day === 0 ? -6 : 1 - day
-  const monday = new Date(d)
-  monday.setDate(d.getDate() + diffToMonday)
-  const friday = new Date(monday)
-  friday.setDate(monday.getDate() + 4)
   const opts: Intl.DateTimeFormatOptions = { weekday: 'long', day: 'numeric', month: 'long' }
-  return {
-    start: monday.toLocaleDateString('fr-FR', opts),
-    end:   friday.toLocaleDateString('fr-FR', opts),
-  }
+  const exact = new Date(dateStr + 'T00:00:00').toLocaleDateString('fr-FR', opts)
+  return { start: exact, end: exact }
 }
 
 function buildSavEmail(entry: SavEntry): string {
@@ -3043,7 +3034,7 @@ function buildSavEmail(entry: SavEntry): string {
       return `Bonjour ${prenom},\n\nJe reviens vers vous concernant votre commande ${ref}. Votre commande est bien enregistrée et sera intégrée à notre prochaine tournée de livraison dans votre région. Nous vous tiendrons informé(e) dès qu'une date sera confirmée.\n\nCordialement,\nL'équipe Bowa`
     case 'planned': {
       const range = entry.tour_planned_date ? getWeekRange(entry.tour_planned_date) : null
-      const rangeStr = range ? ` Notre livreur sera dans votre secteur entre le ${range.start} et le ${range.end}.` : ''
+      const rangeStr = range ? ` Notre livreur sera dans votre secteur le ${range.start}.` : ''
       return `Bonjour ${prenom},\n\nBonne nouvelle ! Je vois que votre commande ${ref} est d'ores et déjà programmée.${rangeStr} Notre livreur vous contactera par téléphone avant de passer. Merci de votre patience.\n\nCordialement,\nL'équipe Bowa`
     }
     case 'in_progress':
@@ -3517,7 +3508,7 @@ function SavView() {
                   </div>
                   {range && (
                     <p className="text-sm font-medium text-[#1a1a2e]">
-                      {range.start} → {range.end}
+                      {range.start}
                     </p>
                   )}
                   {selected.driver_name && (
@@ -3533,7 +3524,7 @@ function SavView() {
                     <div className="rounded-[14px] bg-[#faf5ff] border border-[#e9d5ff] p-4 space-y-1.5">
                       {range && (
                         <p className="text-sm font-semibold text-[#1a1a2e]">
-                          Livraison prévue entre le {range.start} et le {range.end}
+                          Livraison prévue le {range.start}
                         </p>
                       )}
                       {selected.stops_before > 0 && (
