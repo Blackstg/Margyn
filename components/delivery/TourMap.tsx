@@ -1,8 +1,15 @@
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
-import { ChevronLeft } from 'lucide-react'
+import { ChevronLeft, CheckCircle2 } from 'lucide-react'
 import type mapboxgl from 'mapbox-gl'
+
+interface PanelItem {
+  title: string
+  qty: number
+  sku?: string | null
+  variant_title?: string | null
+}
 
 interface MapStop {
   id: string
@@ -13,6 +20,7 @@ interface MapStop {
   zip: string
   sequence: number
   status: 'pending' | 'delivered' | 'failed'
+  panel_details?: PanelItem[]
 }
 
 // Dépôt Bourges — Saint-Germain-du-Puy
@@ -31,6 +39,12 @@ async function geocodeAddress(address: string, token: string): Promise<[number, 
   } catch {
     return null
   }
+}
+
+function stopColor(status: string) {
+  if (status === 'delivered') return '#22c55e'
+  if (status === 'failed')    return '#f97316'
+  return '#3b82f6'
 }
 
 function makeStopMarkerEl(label: string, color: string): HTMLElement {
@@ -65,12 +79,20 @@ interface TourMapProps {
   onBack: () => void
   precomputedCoords?: Map<string, [number, number]>
   etaMap?: Map<string, string>
+  onMarkDelivered?: (stopId: string) => Promise<void>
 }
 
-export default function TourMap({ stops, onBack, precomputedCoords, etaMap }: TourMapProps) {
+export default function TourMap({ stops, onBack, precomputedCoords, onMarkDelivered }: TourMapProps) {
   const containerRef = useRef<HTMLDivElement>(null)
-  const mapRef = useRef<mapboxgl.Map | null>(null)
-  const [phase, setPhase] = useState<'geocoding' | 'routing' | 'ready' | 'error'>('geocoding')
+  const mapRef       = useRef<mapboxgl.Map | null>(null)
+  const markerElsRef = useRef<Record<string, HTMLElement>>({})
+
+  const [phase, setPhase]               = useState<'geocoding' | 'routing' | 'ready' | 'error'>('geocoding')
+  const [selectedStop, setSelectedStop] = useState<MapStop | null>(null)
+  const [marking, setMarking]           = useState(false)
+  const [localStatuses, setLocalStatuses] = useState<Record<string, string>>(() =>
+    Object.fromEntries(stops.map(s => [s.id, s.status]))
+  )
 
   const sortedStops = [...stops].sort((a, b) => a.sequence - b.sequence)
   const token = process.env.NEXT_PUBLIC_MAPBOX_TOKEN ?? ''
@@ -80,9 +102,7 @@ export default function TourMap({ stops, onBack, precomputedCoords, etaMap }: To
     let cancelled = false
 
     async function init() {
-      // Dynamic import to avoid SSR issues
       const mgl = (await import('mapbox-gl')).default
-      // CSS must be imported once — guard with a flag on window
       if (cancelled) return
 
       // Use precomputed coords when available, geocode the rest
@@ -122,30 +142,20 @@ export default function TourMap({ stops, onBack, precomputedCoords, etaMap }: To
           if (!coord) return
           routeWaypoints.push(coord)
 
-          const color =
-            stop.status === 'delivered' ? '#22c55e'
-            : stop.status === 'failed'    ? '#f97316'
-            : '#3b82f6'
+          const el = makeStopMarkerEl(String(i + 1), stopColor(stop.status))
+          markerElsRef.current[stop.id] = el
 
-          const el = makeStopMarkerEl(String(i + 1), color)
-          const eta = etaMap?.get(stop.id)
+          // Click opens bottom sheet (no Mapbox popup)
+          el.addEventListener('click', () => {
+            setSelectedStop(stop)
+          })
+
           new mgl.Marker({ element: el })
             .setLngLat(coord)
-            .setPopup(
-              new mgl.Popup({ offset: 18 }).setHTML(
-                `<div style="font-size:13px;line-height:1.5">
-                  <span style="font-family:monospace;font-size:11px;background:#f5f5f3;padding:1px 5px;border-radius:4px;color:#1a1a2e">${stop.order_name}</span><br>
-                  <strong>${stop.customer_name}</strong><br>
-                  <span style="color:#555">${stop.address1}, ${stop.city}</span>${eta
-                    ? `<br><span style="color:#1a7f4b;font-weight:600">⏱ ${stop.status === 'delivered' ? 'Livré à' : 'Arrivée'} : ${eta}</span>`
-                    : ''}
-                </div>`
-              )
-            )
             .addTo(map)
         })
 
-        // Route line via Directions API (max 25 waypoints)
+        // Route line via Directions API
         const capped = routeWaypoints.slice(0, 25)
         if (capped.length >= 2) {
           try {
@@ -202,10 +212,28 @@ export default function TourMap({ stops, onBack, precomputedCoords, etaMap }: To
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])   // run once on mount
 
+  async function handleMarkDelivered() {
+    if (!selectedStop || !onMarkDelivered) return
+    setMarking(true)
+    try {
+      await onMarkDelivered(selectedStop.id)
+      // Update marker color immediately — no map reload
+      const el = markerElsRef.current[selectedStop.id]
+      if (el) el.style.background = '#22c55e'
+      setLocalStatuses(prev => ({ ...prev, [selectedStop.id]: 'delivered' }))
+      setSelectedStop(null)
+    } finally {
+      setMarking(false)
+    }
+  }
+
   const phaseLabel =
     phase === 'geocoding' ? 'Localisation des arrêts…'
     : phase === 'routing'  ? 'Calcul de l\'itinéraire…'
     : ''
+
+  const currentStatus = selectedStop ? (localStatuses[selectedStop.id] ?? selectedStop.status) : null
+  const products = (selectedStop?.panel_details ?? []).filter(p => p.qty > 0)
 
   return (
     <div className="fixed inset-0 z-50 flex flex-col bg-white">
@@ -249,6 +277,86 @@ export default function TourMap({ stops, onBack, precomputedCoords, etaMap }: To
             <p className="text-xs text-[#6b6b63]">Vérifie la variable NEXT_PUBLIC_MAPBOX_TOKEN</p>
           </div>
         </div>
+      )}
+
+      {/* Bottom sheet — stop detail */}
+      {selectedStop && (
+        <>
+          {/* Backdrop */}
+          <div
+            className="absolute inset-0 z-20 bg-black/20"
+            onClick={() => setSelectedStop(null)}
+          />
+          {/* Sheet */}
+          <div className="absolute bottom-0 left-0 right-0 z-30 bg-white rounded-t-[24px] shadow-[0_-4px_32px_rgba(0,0,0,0.18)] px-5 pt-4 pb-8">
+            {/* Handle */}
+            <div className="w-10 h-1 bg-[#e0e0e0] rounded-full mx-auto mb-4" />
+
+            {/* Header */}
+            <div className="flex items-start justify-between gap-3 mb-4">
+              <div>
+                <div className="flex items-center gap-2">
+                  <span className="font-mono text-xs bg-[#f5f5f3] px-2 py-0.5 rounded text-[#6b6b63]">
+                    {selectedStop.order_name}
+                  </span>
+                  {currentStatus === 'delivered' && (
+                    <span className="flex items-center gap-1 text-xs font-semibold text-[#1a7f4b]">
+                      <CheckCircle2 size={13} /> Livré
+                    </span>
+                  )}
+                </div>
+                <p className="text-lg font-bold text-[#1a1a2e] mt-1">{selectedStop.customer_name}</p>
+                <p className="text-sm text-[#6b6b63]">{selectedStop.address1}, {selectedStop.city} {selectedStop.zip}</p>
+              </div>
+              <button
+                onClick={() => setSelectedStop(null)}
+                className="w-8 h-8 rounded-full bg-[#f5f5f3] flex items-center justify-center shrink-0 mt-1 text-[#6b6b63]"
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* Products */}
+            {products.length > 0 && (
+              <div className="mb-4 space-y-1.5">
+                {products.map((p, i) => (
+                  <div key={i} className="flex items-center gap-3 bg-[#f8f7f5] rounded-[10px] px-3 py-2">
+                    <span className="w-7 h-7 rounded-lg bg-[#1a1a2e] text-white flex items-center justify-center font-bold text-sm shrink-0">
+                      {p.qty}
+                    </span>
+                    <div className="min-w-0">
+                      {(p.sku?.trim() || p.variant_title) && (
+                        <p className="font-mono text-[10px] text-[#9b9b93] truncate">{p.sku?.trim() || p.variant_title}</p>
+                      )}
+                      <p className="text-sm font-medium text-[#1a1a2e] truncate">{p.title}</p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* Action button */}
+            {currentStatus !== 'delivered' ? (
+              <button
+                onClick={handleMarkDelivered}
+                disabled={marking || !onMarkDelivered}
+                className="w-full flex items-center justify-center gap-2 py-4 rounded-[16px] bg-[#1a7f4b] text-white font-bold text-base disabled:opacity-50 active:bg-[#15703f] transition-colors"
+              >
+                {marking ? (
+                  <span className="animate-spin text-lg">⏳</span>
+                ) : (
+                  <CheckCircle2 size={20} />
+                )}
+                {marking ? 'Enregistrement…' : 'Marquer comme livré'}
+              </button>
+            ) : (
+              <div className="w-full flex items-center justify-center gap-2 py-4 rounded-[16px] bg-[#f0fdf4] text-[#1a7f4b] font-bold text-base">
+                <CheckCircle2 size={20} />
+                Déjà livré
+              </div>
+            )}
+          </div>
+        </>
       )}
     </div>
   )

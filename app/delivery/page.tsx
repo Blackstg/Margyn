@@ -1672,7 +1672,11 @@ function LivreurView() {
                 Préparer le camion
               </button>
               <button
-                onClick={() => { setStopIdx(0); setScreen('tour') }}
+                onClick={() => {
+                  const resumeIdx = sortedStops.findIndex(s => s.status !== 'delivered' && s.status !== 'failed')
+                  setStopIdx(resumeIdx !== -1 ? resumeIdx : 0)
+                  setScreen('tour')
+                }}
                 disabled={sortedStops.length === 0}
                 className="w-full flex items-center justify-center gap-3 py-5 rounded-[16px] bg-[#4ade80] text-[#1a1a2e] font-bold text-lg disabled:opacity-30 active:bg-[#22c55e] transition-colors"
               >
@@ -1706,6 +1710,14 @@ function LivreurView() {
         onBack={() => setScreen('home')}
         precomputedCoords={coordsCache.current}
         etaMap={etaMap}
+        onMarkDelivered={async (stopId) => {
+          await fetch(`/api/delivery/stops/${stopId}`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ status: 'delivered' }),
+          })
+          await fetchTours()
+        }}
       />
     )
   }
@@ -1819,7 +1831,11 @@ function LivreurView() {
         {allChecked && (
           <div className="fixed bottom-6 left-0 right-0 flex justify-center px-6">
             <button
-              onClick={() => { setStopIdx(0); setScreen('tour') }}
+              onClick={() => {
+                const resumeIdx = sortedStops.findIndex(s => s.status !== 'delivered' && s.status !== 'failed')
+                setStopIdx(resumeIdx !== -1 ? resumeIdx : 0)
+                setScreen('tour')
+              }}
               className="w-full max-w-md py-5 rounded-[16px] bg-[#1a7f4b] text-white font-bold text-lg shadow-[0_8px_32px_rgba(26,127,75,0.35)]"
             >
               Camion chargé ✓
