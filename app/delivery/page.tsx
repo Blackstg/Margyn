@@ -226,15 +226,23 @@ function PlanificateurView() {
 
   // Notifier les clients modal
   type NotifStop = { id: string; customer_name: string; email: string; email_sent_at: string | null }
-  const [notifModal, setNotifModal] = useState<{ tourId: string; tourName: string; stops: NotifStop[] } | null>(null)
+  const [notifModal, setNotifModal] = useState<{ tourId: string; tourName: string; plannedDate: string; stops: NotifStop[] } | null>(null)
   const [notifSending, setNotifSending] = useState(false)
   const [notifResult, setNotifResult] = useState<{ sent: number; errors: number } | null>(null)
+  const [notifTab, setNotifTab] = useState<'destinataires' | 'apercu'>('destinataires')
 
-  async function openNotifModal(tourId: string, tourName: string) {
+  function formatTourDateFr(dateStr: string): string {
+    if (!dateStr) return ''
+    const d = new Date(dateStr + 'T00:00:00')
+    return d.toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })
+  }
+
+  async function openNotifModal(tourId: string, tourName: string, plannedDate: string) {
     const r = await fetch(`/api/delivery/tours/${tourId}/emails`)
     const data = await r.json()
     setNotifResult(null)
-    setNotifModal({ tourId, tourName, stops: data.stops ?? [] })
+    setNotifTab('destinataires')
+    setNotifModal({ tourId, tourName, plannedDate, stops: data.stops ?? [] })
   }
 
   async function sendNotifEmails(force = false) {
@@ -1170,7 +1178,7 @@ function PlanificateurView() {
                                 : null
                               return allNotified ? (
                                 <button
-                                  onClick={(e) => { e.stopPropagation(); openNotifModal(tour.id, tour.name) }}
+                                  onClick={(e) => { e.stopPropagation(); openNotifModal(tour.id, tour.name, tour.planned_date ?? '') }}
                                   className="flex items-center gap-1 px-3 py-1 text-xs rounded-[8px] bg-[#f0fdf4] text-[#1a7f4b] border border-[#bbf7d0] hover:bg-[#dcfce7] transition-colors"
                                 >
                                   <Mail size={12} />
@@ -1178,7 +1186,7 @@ function PlanificateurView() {
                                 </button>
                               ) : (
                                 <button
-                                  onClick={(e) => { e.stopPropagation(); openNotifModal(tour.id, tour.name) }}
+                                  onClick={(e) => { e.stopPropagation(); openNotifModal(tour.id, tour.name, tour.planned_date ?? '') }}
                                   className="flex items-center gap-1 px-3 py-1 text-xs rounded-[8px] bg-[#1a1a2e] text-white hover:bg-[#2a2a4e] transition-colors"
                                 >
                                   <Mail size={12} />
@@ -1439,10 +1447,29 @@ function PlanificateurView() {
               )}
             </div>
 
+            {/* Tabs — seulement avant envoi */}
+            {!notifResult && (
+              <div className="flex border-b border-[#ebebeb]">
+                {(['destinataires', 'apercu'] as const).map((tab) => (
+                  <button
+                    key={tab}
+                    onClick={() => setNotifTab(tab)}
+                    className={`flex-1 py-2.5 text-xs font-semibold transition-colors ${
+                      notifTab === tab
+                        ? 'text-[#1a1a2e] border-b-2 border-[#1a1a2e]'
+                        : 'text-[#6b6b63] hover:text-[#1a1a2e]'
+                    }`}
+                  >
+                    {tab === 'destinataires' ? 'Destinataires' : 'Aperçu email'}
+                  </button>
+                ))}
+              </div>
+            )}
+
             {/* Body */}
-            <div className="px-5 py-4 max-h-[60vh] overflow-y-auto">
+            <div className={`${notifTab === 'apercu' && !notifResult ? 'p-0' : 'px-5 py-4'} max-h-[65vh] overflow-y-auto`}>
               {notifResult ? (
-                <div className="text-center py-4 space-y-2">
+                <div className="px-5 py-4 text-center py-4 space-y-2">
                   <div className="text-3xl">{notifResult.errors === 0 ? '✅' : '⚠️'}</div>
                   <p className="font-semibold text-[#1a1a2e]">
                     {notifResult.sent} email{notifResult.sent !== 1 ? 's' : ''} envoyé{notifResult.sent !== 1 ? 's' : ''}
@@ -1451,6 +1478,47 @@ function PlanificateurView() {
                     <p className="text-xs text-[#c7293a]">{notifResult.errors} erreur{notifResult.errors !== 1 ? 's' : ''}</p>
                   )}
                 </div>
+              ) : notifTab === 'apercu' ? (
+                /* ── Aperçu email ── */
+                (() => {
+                  const previewFirst = (notifModal.stops[0]?.customer_name ?? 'Prénom').split(' ')[0]
+                  const previewDate = formatTourDateFr(notifModal.plannedDate) || notifModal.tourName
+                  return (
+                    <div className="bg-[#f5f5f3]">
+                      {/* Faux header email */}
+                      <div className="px-4 pt-4 pb-3 border-b border-[#e8e8e4] bg-white text-xs space-y-1">
+                        <div className="flex gap-2">
+                          <span className="text-[#6b6b63] w-12 shrink-0">De :</span>
+                          <span className="font-medium text-[#1a1a2e]">Léa – Bowa Concept &lt;lea@bowa-concept.com&gt;</span>
+                        </div>
+                        <div className="flex gap-2">
+                          <span className="text-[#6b6b63] w-12 shrink-0">À :</span>
+                          <span className="text-[#1a1a2e]">{notifModal.stops[0]?.email || 'client@exemple.com'}</span>
+                        </div>
+                        <div className="flex gap-2">
+                          <span className="text-[#6b6b63] w-12 shrink-0">Objet :</span>
+                          <span className="font-semibold text-[#1a1a2e]">BOWA CONCEPT : LIVRAISON</span>
+                        </div>
+                      </div>
+                      {/* Corps du mail */}
+                      <div className="bg-white mx-3 my-3 rounded-[12px] px-5 py-5 text-sm text-[#1a1a2e] leading-relaxed shadow-sm">
+                        <p className="mb-3">Bonjour <strong>{previewFirst}</strong>,</p>
+                        <p className="mb-3">Bonne nouvelle ! 🎉 Votre commande sera livrée cette semaine.<br/>
+                        Notre livreur commencera sa tournée le <strong>{previewDate}</strong> et passera chez vous dans les prochains jours.</p>
+                        <p className="mb-3">La livraison s&apos;effectuera au pied du camion 🚛. Nous vous demandons donc de faire le nécessaire pour être accompagné(e) d&apos;une autre personne afin de récupérer les panneaux en toute sécurité 🔧.</p>
+                        <p className="mb-3">Pour garantir une livraison en toute fluidité, notre livreur vous appellera très probablement au fil de sa tournée, en fonction de l&apos;ordre des livraisons, afin de vérifier votre disponibilité. Vous serez joint(e) depuis le numéro suivant : <strong>06 02 40 15 86</strong>.</p>
+                        <p className="mb-3">Si vous êtes indisponible, merci de nous en informer par retour de mail, afin que nous puissions reprogrammer votre livraison.</p>
+                        <p className="mb-4">Nous nous réjouissons de finaliser votre livraison très prochainement ☀️.</p>
+                        <p className="text-[#6b6b63] text-xs border-t border-[#f0f0f0] pt-3">
+                          Cordialement,<br/>
+                          <strong className="text-[#1a1a2e]">Léa</strong><br/>
+                          Service client
+                        </p>
+                      </div>
+                      <p className="text-center text-[10px] text-[#a0a099] pb-3">Aperçu — le prénom sera personnalisé pour chaque client</p>
+                    </div>
+                  )
+                })()
               ) : (
                 <>
                   {allAlreadyNotified && notifDate && (
