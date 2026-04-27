@@ -16,6 +16,12 @@ type KromCategory =
 
 type ReplyAction = 'auto_reply' | 'escalate'
 
+interface DecisionOption {
+  key:   string
+  emoji: string
+  label: string
+}
+
 interface GmailAttachment {
   attachment_id: string
   message_id:    string
@@ -54,6 +60,8 @@ interface ProcessedThread extends RawThread {
   solved:             boolean
   situation_detectee: string
   messages:           GmailMessage[]
+  needs_decision?:    boolean
+  decision_options?:  DecisionOption[]
 }
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -243,11 +251,16 @@ function ReplyPanel({ thread, draft, onDraftChange, onSent, onArchive, onRegener
   onArchive:      () => void
   onRegenerate:   () => void
 }) {
-  const [sending, setSending]       = useState(false)
-  const [archiving, setArchiving]   = useState(false)
-  const [error, setError]           = useState<string | null>(null)
-  const [showReason, setShowReason] = useState(false)
+  const [sending, setSending]             = useState(false)
+  const [archiving, setArchiving]         = useState(false)
+  const [deciding, setDeciding]           = useState(false)
+  const [improving, setImproving]         = useState(false)
+  const [previousDraft, setPreviousDraft] = useState<string | null>(null)
+  const [error, setError]                 = useState<string | null>(null)
+  const [showReason, setShowReason]       = useState(false)
   const startTime = useRef(Date.now())
+
+  const showDecisionPanel = thread.needs_decision && !draft
 
   async function send() {
     setSending(true); setError(null)
@@ -294,6 +307,53 @@ function ReplyPanel({ thread, draft, onDraftChange, onSent, onArchive, onRegener
     } finally { setArchiving(false) }
   }
 
+  async function decide(option: DecisionOption) {
+    setDeciding(true); setError(null)
+    try {
+      const res = await fetch('/api/sav-krom/decide', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          thread_id:      thread.thread_id,
+          subject:        thread.subject,
+          body:           thread.body,
+          category:       thread.category,
+          sender_email:   thread.sender_email,
+          decision_key:   option.key,
+          decision_label: option.label,
+        }),
+      })
+      const d = await res.json() as { body?: string; solved?: boolean; error?: string }
+      if (!res.ok) throw new Error(d.error ?? `HTTP ${res.status}`)
+      if (d.body) onDraftChange(d.body)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Erreur inconnue')
+    } finally { setDeciding(false) }
+  }
+
+  async function improve() {
+    if (!draft.trim()) return
+    setImproving(true); setError(null)
+    setPreviousDraft(draft)
+    try {
+      const res = await fetch('/api/sav-krom/improve', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ current_draft: draft }),
+      })
+      const d = await res.json() as { body?: string; error?: string }
+      if (!res.ok) throw new Error(d.error ?? `HTTP ${res.status}`)
+      if (d.body) onDraftChange(d.body)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Erreur inconnue')
+      setPreviousDraft(null)
+    } finally { setImproving(false) }
+  }
+
+  function undoImprove() {
+    if (previousDraft !== null) { onDraftChange(previousDraft); setPreviousDraft(null) }
+  }
+
   return (
     <div className="flex flex-col h-full overflow-hidden">
       {/* Header */}
@@ -310,7 +370,7 @@ function ReplyPanel({ thread, draft, onDraftChange, onSent, onArchive, onRegener
             </span>
             <button
               onClick={onRegenerate}
-              disabled={sending || archiving}
+              disabled={sending || archiving || deciding}
               title="Regénérer la réponse"
               className="w-6 h-6 rounded-lg flex items-center justify-center text-[#9b9b93] hover:text-[#1a1a2e] hover:bg-[#eeede9] transition-colors disabled:opacity-40"
             >
@@ -341,27 +401,78 @@ function ReplyPanel({ thread, draft, onDraftChange, onSent, onArchive, onRegener
         )}
       </div>
 
-      {/* Textarea */}
-      <div className="flex-1 overflow-hidden px-5 py-4">
-        <textarea
-          value={draft}
-          onChange={e => onDraftChange(e.target.value)}
-          className="w-full h-full text-xs text-[#1a1a2e] bg-[#f8f7f5] rounded-xl px-3 py-3 leading-relaxed resize-none border border-transparent focus:border-[#aeb0c9] focus:outline-none transition-colors font-[inherit]"
-        />
+      {/* Decision panel OR Textarea */}
+      <div className="flex-1 overflow-hidden px-5 py-4 flex flex-col gap-3">
+        {showDecisionPanel ? (
+          <div className="flex flex-col gap-2 h-full justify-center">
+            <p className="text-[11px] text-[#6b6b63] text-center font-medium mb-1">
+              Quelle décision prenez-vous ?
+            </p>
+            {deciding ? (
+              <div className="flex items-center justify-center gap-2 py-6">
+                <RefreshCw size={14} className="animate-spin text-[#9b9b93]" />
+                <span className="text-xs text-[#9b9b93]">Rédaction en cours…</span>
+              </div>
+            ) : (
+              (thread.decision_options ?? []).map(opt => (
+                <button
+                  key={opt.key}
+                  onClick={() => decide(opt)}
+                  className="flex items-center gap-2.5 px-4 py-3 rounded-xl border border-[#e8e8e4] bg-white hover:bg-[#f0efec] hover:border-[#aeb0c9] text-[12px] font-medium text-[#1a1a2e] transition-colors text-left"
+                >
+                  <span className="text-base leading-none">{opt.emoji}</span>
+                  {opt.label}
+                </button>
+              ))
+            )}
+          </div>
+        ) : (
+          <textarea
+            value={draft}
+            onChange={e => { onDraftChange(e.target.value); setPreviousDraft(null) }}
+            className="w-full flex-1 text-xs text-[#1a1a2e] bg-[#f8f7f5] rounded-xl px-3 py-3 leading-relaxed resize-none border border-transparent focus:border-[#aeb0c9] focus:outline-none transition-colors font-[inherit]"
+            style={{ minHeight: 0 }}
+          />
+        )}
       </div>
 
       {/* Footer */}
       <div className="px-5 pb-5 shrink-0 space-y-3">
         {error && <p className="text-[11px] text-[#c7293a] bg-[#fce8ea] rounded-lg px-3 py-2">{error}</p>}
+
+        {/* Améliorer — toolbar row */}
+        {!showDecisionPanel && draft.trim() && (
+          <div className="flex items-center gap-2">
+            <button
+              onClick={improve}
+              disabled={improving || sending || archiving || deciding}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-[#e0d4f7] bg-[#faf5ff] text-[11px] font-medium text-[#7c3aed] hover:bg-[#f3e8ff] hover:border-[#c4b5fd] transition-colors disabled:opacity-40"
+            >
+              {improving
+                ? <RefreshCw size={11} strokeWidth={1.8} className="animate-spin" />
+                : <span className="text-[12px] leading-none">✨</span>}
+              {improving ? 'Amélioration…' : 'Améliorer'}
+            </button>
+            {previousDraft !== null && !improving && (
+              <button
+                onClick={undoImprove}
+                className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-[#e0deda] bg-white text-[11px] font-medium text-[#9b9b93] hover:bg-[#f0efec] hover:text-[#6b6b63] transition-colors"
+              >
+                ↩ Annuler
+              </button>
+            )}
+          </div>
+        )}
+
         <button
-          onClick={send} disabled={sending || archiving}
+          onClick={send} disabled={sending || archiving || deciding}
           className="w-full flex items-center justify-center gap-1.5 py-2.5 rounded-xl bg-[#1a1a2e] text-white text-xs font-semibold hover:bg-[#2a2a4e] transition-colors disabled:opacity-50"
         >
           {sending ? <RefreshCw size={13} className="animate-spin" /> : <Send size={13} strokeWidth={1.8} />}
           {sending ? 'Envoi…' : 'Envoyer par email'}
         </button>
         <button
-          onClick={doArchive} disabled={sending || archiving}
+          onClick={doArchive} disabled={sending || archiving || deciding}
           className="w-full flex items-center justify-center gap-1.5 py-2 rounded-xl border border-[#e8e8e4] text-[#9b9b93] text-xs font-medium hover:bg-[#f8f7f5] hover:text-[#6b6b63] transition-colors disabled:opacity-50"
         >
           {archiving ? <RefreshCw size={12} className="animate-spin" /> : <Archive size={12} strokeWidth={1.8} />}

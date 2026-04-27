@@ -3,7 +3,7 @@
 
 import { getUnreadThreads, getThreadMessages, sendReply, markThreadRead, archiveThread, GmailMessage } from './gmail'
 import { classifyEmail, generateReply } from './classifier'
-import type { KromCategory, ReplyAction } from './classifier'
+import type { KromCategory, ReplyAction, KromDecisionOption } from './classifier'
 import { createAdminClient } from '@/lib/supabase'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -34,6 +34,8 @@ export interface ProcessedThread {
   solved:             boolean
   situation_detectee: string
   messages:           GmailMessage[]
+  needs_decision?:    boolean
+  decision_options?:  KromDecisionOption[]
 }
 
 // ─── Processed threads tracking ──────────────────────────────────────────────
@@ -119,9 +121,35 @@ export async function processOneThread(
     return clientMsgs[clientMsgs.length - 1]?.body ?? body
   })()
 
-  // Classify first, then generate reply with the correct category
+  // Classify first
   const classification = await classifyEmail(subject, lastClientBody)
-  const finalReply     = await generateReply(subject, body, classification.category, senderEmail, messages)
+
+  // If a human decision is required, skip reply generation — the UI will show decision buttons
+  if (classification.needs_decision) {
+    console.log(`[SAV-Krom] processOneThread ${threadId} — needs_decision: affichage des boutons de décision`)
+    return {
+      thread_id:         threadId,
+      subject,
+      sender_email:      senderEmail,
+      sender_name:       senderName,
+      body,
+      received_at:       receivedAt,
+      message_count:     messageCount,
+      category:          classification.category,
+      action:            classification.action,
+      confidence:        classification.confidence,
+      reason:            classification.reason,
+      draft_reply:       '',
+      solved:            false,
+      situation_detectee: '',
+      messages,
+      needs_decision:    true,
+      decision_options:  classification.decision_options ?? [],
+    }
+  }
+
+  // Generate reply draft
+  const finalReply = await generateReply(subject, body, classification.category, senderEmail, messages)
 
   return {
     thread_id:          threadId,

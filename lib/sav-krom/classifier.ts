@@ -35,11 +35,19 @@ export type KromCategory =
 
 export type ReplyAction = 'auto_reply' | 'escalate'
 
+export interface KromDecisionOption {
+  key:   string
+  emoji: string
+  label: string
+}
+
 export interface KromClassification {
-  category:    KromCategory
-  action:      ReplyAction
-  confidence:  number
-  reason:      string
+  category:         KromCategory
+  action:           ReplyAction
+  confidence:       number
+  reason:           string
+  needs_decision?:  boolean
+  decision_options?: KromDecisionOption[]
 }
 
 export interface KromReplyResult {
@@ -85,22 +93,40 @@ Réponds UNIQUEMENT avec un objet JSON valide (sans markdown, sans backticks) :
   "category": "<une des catégories>",
   "action": "auto_reply" | "escalate",
   "confidence": <nombre entre 0 et 1>,
-  "reason": "<courte justification en français>"
+  "reason": "<courte justification en français>",
+  "needs_decision": <true | false>,
+  "decision_options": [
+    { "key": "<clé courte>", "emoji": "<emoji>", "label": "<libellé court>" },
+    ...
+  ]
 }
 
 Règles pour "action" :
 - "escalate" si client très mécontent, situation complexe ou litige
 - "escalate" si confidence < 0.6
-- "auto_reply" pour les demandes standard`
+- "auto_reply" pour les demandes standard
+
+Règles pour "needs_decision" :
+- true si le ticket nécessite une décision humaine avant de répondre : remboursement exceptionnel, geste commercial, litige ambigu, demande de retour où la politique n'est pas claire, produit défectueux sans décision évidente
+- false pour les demandes standard (suivi livraison, question technique, question produit, partenariat)
+
+Règles pour "decision_options" (seulement si needs_decision=true, 2 à 4 options max) :
+- Pour retour/remboursement : ["💸 On rembourse", "🔄 On propose un échange", "🎁 On propose un avoir", "📎 On demande un justificatif"]
+- Pour produit défectueux : ["🎁 Geste commercial", "🔄 On renvoie le produit", "💸 On rembourse", "📎 On demande des photos"]
+- Pour litige/situation complexe : ["✅ On accepte", "❌ On refuse", "🤔 On demande plus d'infos"]
+- Toujours inclure "✍️ Rédiger moi une réponse" comme dernière option (key: "libre")
+- Si needs_decision=false, mettre decision_options: []`
 
   const msg = await client.messages.create({
     model:      'claude-sonnet-4-6',
-    max_tokens: 256,
+    max_tokens: 512,
     messages:   [{ role: 'user', content: prompt }],
   })
 
   const text = (msg.content[0] as { type: string; text: string }).text.trim()
-  return JSON.parse(text) as KromClassification
+  const result = JSON.parse(text) as KromClassification
+  if (!result.decision_options) result.decision_options = []
+  return result
 }
 
 // ─── Reply generator ──────────────────────────────────────────────────────────
@@ -111,6 +137,7 @@ export async function generateReply(
   category:      KromCategory,
   senderEmail:   string,
   messages?:     GmailMessage[],
+  decision?:     string,
 ): Promise<KromReplyResult> {
   const rules = await loadRules()
   const rulesBlock = rules.length > 0
@@ -164,7 +191,10 @@ ${priorHistory}
 ${rulesBlock}
 
 ━━━ SECTION 4 — INSTRUCTION ━━━
-Rédige une réponse UNIQUEMENT pour répondre à la SITUATION ACTUELLE.
+${decision ? `⚡ DÉCISION PRISE PAR L'ÉQUIPE : "${decision}"
+Tu DOIS rédiger la réponse en appliquant strictement cette décision. Ne la remet pas en question.
+
+` : ''}Rédige une réponse UNIQUEMENT pour répondre à la SITUATION ACTUELLE.
 
 Contraintes :
 - Ne PAS répéter ce qui a déjà été dit dans l'historique
