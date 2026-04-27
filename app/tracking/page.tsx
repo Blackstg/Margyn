@@ -57,6 +57,22 @@ function addDays(iso: string, days: number): string {
   return d.toISOString()
 }
 
+/** Adds N working days (Mon–Fri), skipping Sat & Sun. */
+function addWorkingDays(dateStr: string, days: number): Date {
+  const result = new Date(dateStr + 'T00:00:00')
+  let added = 0
+  while (added < days) {
+    result.setDate(result.getDate() + 1)
+    const dow = result.getDay()
+    if (dow !== 0 && dow !== 6) added++
+  }
+  return result
+}
+
+function fmtDateFr(d: Date): string {
+  return d.toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' })
+}
+
 function stepDate(result: TrackingResult, stepIndex: number): string | null {
   if (stepIndex === 0) return fmtDate(result.created_at)
   if (stepIndex === 1) return fmtDate(addDays(result.created_at, 1))
@@ -204,9 +220,10 @@ export default function TrackingPage() {
                 </span>
                 <p className="text-sm text-black/70 mt-2">
                   Votre commande est confirmée et sera expédiée dès que tous les produits sont disponibles.
-                  {result.tour_planned_date && (
-                    <> Livraison estimée à partir du <strong>{fmtDate(result.tour_planned_date)}</strong>.</>
-                  )}
+                  {result.tour_planned_date && (() => {
+                    const end = addWorkingDays(result.tour_planned_date!, 4)
+                    return <> Livraison estimée entre le <strong>{fmtDateFr(new Date(result.tour_planned_date! + 'T00:00:00'))}</strong> et le <strong>{fmtDateFr(end)}</strong>.</>
+                  })()}
                 </p>
               </div>
             )}

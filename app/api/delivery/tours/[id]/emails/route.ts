@@ -12,23 +12,32 @@ function firstNameOf(fullName: string): string {
   return fullName?.split(' ')[0] ?? fullName ?? ''
 }
 
-function formatTourDate(dateStr: string): string {
-  if (!dateStr) return ''
-  const d = new Date(dateStr + 'T00:00:00')
-  return d.toLocaleDateString('fr-FR', {
-    weekday: 'long',
-    day: 'numeric',
-    month: 'long',
-    year: 'numeric',
-  })
+function addWorkingDays(dateStr: string, days: number): Date {
+  const result = new Date(dateStr + 'T00:00:00')
+  let added = 0
+  while (added < days) {
+    result.setDate(result.getDate() + 1)
+    const dow = result.getDay()
+    if (dow !== 0 && dow !== 6) added++
+  }
+  return result
 }
 
-function buildEmailHtml(firstName: string, tourDate: string): string {
+function fmtDateLong(d: Date): string {
+  return d.toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })
+}
+
+function buildEmailHtml(firstName: string, startDateStr: string): string {
+  const start   = new Date(startDateStr + 'T00:00:00')
+  const end     = addWorkingDays(startDateStr, 4)
+  const startFr = fmtDateLong(start)
+  const endFr   = fmtDateLong(end)
+
   return `<div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;padding:24px;color:#1a1a2e">
   <p>Bonjour ${firstName},</p>
 
   <p>Bonne nouvelle ! 🎉 Votre commande sera livrée cette semaine.<br>
-  Notre livreur commencera sa tournée le <strong>${tourDate}</strong> et passera chez vous dans les prochains jours.</p>
+  Notre livreur commencera sa tournée le <strong>${startFr}</strong> et passera chez vous dans les prochains jours (entre le ${startFr} et le ${endFr}).</p>
 
   <p>La livraison s'effectuera au pied du camion 🚛. Nous vous demandons donc de faire le nécessaire pour être accompagné(e) d'une autre personne afin de récupérer les panneaux en toute sécurité 🔧.</p>
 
@@ -102,14 +111,14 @@ export async function POST(
     if (stopsError) throw stopsError
 
     const pendingStops = (stops ?? []).filter((s) => s.email)
-    const tourDate = formatTourDate(tour.planned_date ?? '') || tour.name
+    const startDateStr = tour.planned_date ?? ''
     let sent = 0
     let errors = 0
 
     for (const stop of pendingStops) {
       try {
         if (process.env.RESEND_API_KEY) {
-          const html = buildEmailHtml(firstNameOf(stop.customer_name ?? ''), tourDate)
+          const html = buildEmailHtml(firstNameOf(stop.customer_name ?? ''), startDateStr)
 
           const emailRes = await fetch('https://api.resend.com/emails', {
             method: 'POST',

@@ -1482,7 +1482,21 @@ function PlanificateurView() {
                 /* ── Aperçu email ── */
                 (() => {
                   const previewFirst = (notifModal.stops[0]?.customer_name ?? 'Prénom').split(' ')[0]
-                  const previewDate = formatTourDateFr(notifModal.plannedDate) || notifModal.tourName
+                  const previewDateStart = notifModal.plannedDate
+                    ? formatTourDateFr(notifModal.plannedDate)
+                    : notifModal.tourName
+                  const previewDateEnd = notifModal.plannedDate
+                    ? (() => {
+                        const end = new Date(notifModal.plannedDate + 'T00:00:00')
+                        let added = 0
+                        while (added < 4) {
+                          end.setDate(end.getDate() + 1)
+                          const dow = end.getDay()
+                          if (dow !== 0 && dow !== 6) added++
+                        }
+                        return end.toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })
+                      })()
+                    : null
                   return (
                     <div className="bg-[#f5f5f3]">
                       {/* Faux header email */}
@@ -1504,7 +1518,7 @@ function PlanificateurView() {
                       <div className="bg-white mx-3 my-3 rounded-[12px] px-5 py-5 text-sm text-[#1a1a2e] leading-relaxed shadow-sm">
                         <p className="mb-3">Bonjour <strong>{previewFirst}</strong>,</p>
                         <p className="mb-3">Bonne nouvelle ! 🎉 Votre commande sera livrée cette semaine.<br/>
-                        Notre livreur commencera sa tournée le <strong>{previewDate}</strong> et passera chez vous dans les prochains jours.</p>
+                        Notre livreur commencera sa tournée le <strong>{previewDateStart}</strong> et passera chez vous dans les prochains jours (entre le {previewDateStart}{previewDateEnd ? ` et le ${previewDateEnd}` : ''}).</p>
                         <p className="mb-3">La livraison s&apos;effectuera au pied du camion 🚛. Nous vous demandons donc de faire le nécessaire pour être accompagné(e) d&apos;une autre personne afin de récupérer les panneaux en toute sécurité 🔧.</p>
                         <p className="mb-3">Pour garantir une livraison en toute fluidité, notre livreur vous appellera très probablement au fil de sa tournée, en fonction de l&apos;ordre des livraisons, afin de vérifier votre disponibilité. Vous serez joint(e) depuis le numéro suivant : <strong>06 02 40 15 86</strong>.</p>
                         <p className="mb-3">Si vous êtes indisponible, merci de nous en informer par retour de mail, afin que nous puissions reprogrammer votre livraison.</p>
@@ -3020,10 +3034,30 @@ function getISOWeekNum(dateStr: string): number {
   return Math.ceil((((utc.getTime() - yearStart.getTime()) / 86400000) + 1) / 7)
 }
 
+/** Adds N working days (Mon–Fri) to a date, skipping Sat & Sun. */
+function addWorkingDays(date: Date, days: number): Date {
+  const result = new Date(date)
+  let added = 0
+  while (added < days) {
+    result.setDate(result.getDate() + 1)
+    const dow = result.getDay()
+    if (dow !== 0 && dow !== 6) added++
+  }
+  return result
+}
+
+/**
+ * Returns a delivery window: tour start date → start + 4 working days.
+ * e.g. mercredi 6 mai → lundi 11 mai
+ */
 function getWeekRange(dateStr: string): { start: string; end: string } {
   const opts: Intl.DateTimeFormatOptions = { weekday: 'long', day: 'numeric', month: 'long' }
-  const exact = new Date(dateStr + 'T00:00:00').toLocaleDateString('fr-FR', opts)
-  return { start: exact, end: exact }
+  const start = new Date(dateStr + 'T00:00:00')
+  const end   = addWorkingDays(start, 4)
+  return {
+    start: start.toLocaleDateString('fr-FR', opts),
+    end:   end.toLocaleDateString('fr-FR', opts),
+  }
 }
 
 function buildSavEmail(entry: SavEntry): string {
@@ -3034,7 +3068,7 @@ function buildSavEmail(entry: SavEntry): string {
       return `Bonjour ${prenom},\n\nJe reviens vers vous concernant votre commande ${ref}. Votre commande est bien enregistrée et sera intégrée à notre prochaine tournée de livraison dans votre région. Nous vous tiendrons informé(e) dès qu'une date sera confirmée.\n\nCordialement,\nL'équipe Bowa`
     case 'planned': {
       const range = entry.tour_planned_date ? getWeekRange(entry.tour_planned_date) : null
-      const rangeStr = range ? ` Notre livreur sera dans votre secteur le ${range.start}.` : ''
+      const rangeStr = range ? ` Notre livreur sera dans votre secteur entre le ${range.start} et le ${range.end}.` : ''
       return `Bonjour ${prenom},\n\nBonne nouvelle ! Je vois que votre commande ${ref} est d'ores et déjà programmée.${rangeStr} Notre livreur vous contactera par téléphone avant de passer. Merci de votre patience.\n\nCordialement,\nL'équipe Bowa`
     }
     case 'in_progress':
@@ -3508,7 +3542,7 @@ function SavView() {
                   </div>
                   {range && (
                     <p className="text-sm font-medium text-[#1a1a2e]">
-                      {range.start}
+                      {range.start} → {range.end}
                     </p>
                   )}
                   {selected.driver_name && (
@@ -3524,7 +3558,7 @@ function SavView() {
                     <div className="rounded-[14px] bg-[#faf5ff] border border-[#e9d5ff] p-4 space-y-1.5">
                       {range && (
                         <p className="text-sm font-semibold text-[#1a1a2e]">
-                          Livraison prévue le {range.start}
+                          Livraison prévue entre le {range.start} et le {range.end}
                         </p>
                       )}
                       {selected.stops_before > 0 && (
