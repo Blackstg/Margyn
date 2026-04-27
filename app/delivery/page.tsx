@@ -224,6 +224,40 @@ function PlanificateurView() {
   const [showHistory, setShowHistory] = useState(false)
   const [ordersViewMode, setOrdersViewMode] = useState<'list' | 'map'>('list')
 
+  // Notifier les clients modal
+  type NotifStop = { id: string; customer_name: string; email: string; email_sent_at: string | null }
+  const [notifModal, setNotifModal] = useState<{ tourId: string; tourName: string; stops: NotifStop[] } | null>(null)
+  const [notifSending, setNotifSending] = useState(false)
+  const [notifResult, setNotifResult] = useState<{ sent: number; errors: number } | null>(null)
+
+  async function openNotifModal(tourId: string, tourName: string) {
+    const r = await fetch(`/api/delivery/tours/${tourId}/emails`)
+    const data = await r.json()
+    setNotifResult(null)
+    setNotifModal({ tourId, tourName, stops: data.stops ?? [] })
+  }
+
+  async function sendNotifEmails(force = false) {
+    if (!notifModal) return
+    setNotifSending(true)
+    try {
+      const r = await fetch(`/api/delivery/tours/${notifModal.tourId}/emails`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ force }),
+      })
+      const data = await r.json()
+      setNotifResult(data)
+      await fetchTours()
+      // Refresh modal stops so badge updates
+      const r2 = await fetch(`/api/delivery/tours/${notifModal.tourId}/emails`)
+      const data2 = await r2.json()
+      setNotifModal((prev) => prev ? { ...prev, stops: data2.stops ?? [] } : null)
+    } finally {
+      setNotifSending(false)
+    }
+  }
+
   const fetchOrders = useCallback(async () => {
     setLoadingOrders(true)
     try {
@@ -571,6 +605,7 @@ function PlanificateurView() {
   }
 
   return (
+    <>
     <div className="relative pb-24">
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 lg:gap-5">
         {/* Left: Orders */}
@@ -1124,22 +1159,33 @@ function PlanificateurView() {
                               <option value="in_progress">En cours</option>
                               <option value="completed">Terminée</option>
                             </select>
-                            {tour.stops.some((s) => s.email) && (
-                              <button
-                                onClick={(e) => {
-                                  e.stopPropagation()
-                                  const emails = tour.stops
-                                    .map((s) => s.email)
-                                    .filter(Boolean)
-                                    .join(', ')
-                                  navigator.clipboard.writeText(emails)
-                                }}
-                                className="flex items-center gap-1 px-3 py-1 text-xs rounded-[8px] bg-[#1a1a2e] text-white hover:bg-[#2a2a4e] transition-colors"
-                              >
-                                <Mail size={12} />
-                                Copier les emails
-                              </button>
-                            )}
+                            {tour.stops.some((s) => s.email) && (() => {
+                              const stopsWithEmail = tour.stops.filter((s) => s.email)
+                              const allNotified = stopsWithEmail.length > 0 && stopsWithEmail.every((s) => s.email_sent_at)
+                              const notifDate = allNotified
+                                ? stopsWithEmail
+                                    .map((s) => s.email_sent_at!)
+                                    .sort()
+                                    .at(0)!
+                                : null
+                              return allNotified ? (
+                                <button
+                                  onClick={(e) => { e.stopPropagation(); openNotifModal(tour.id, tour.name) }}
+                                  className="flex items-center gap-1 px-3 py-1 text-xs rounded-[8px] bg-[#f0fdf4] text-[#1a7f4b] border border-[#bbf7d0] hover:bg-[#dcfce7] transition-colors"
+                                >
+                                  <Mail size={12} />
+                                  Clients notifiés ✓ · {new Date(notifDate!).toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' })}
+                                </button>
+                              ) : (
+                                <button
+                                  onClick={(e) => { e.stopPropagation(); openNotifModal(tour.id, tour.name) }}
+                                  className="flex items-center gap-1 px-3 py-1 text-xs rounded-[8px] bg-[#1a1a2e] text-white hover:bg-[#2a2a4e] transition-colors"
+                                >
+                                  <Mail size={12} />
+                                  Notifier les clients
+                                </button>
+                              )
+                            })()}
                             {tour.stops.length >= 2 && (
                               <button
                                 onClick={(e) => { e.stopPropagation(); handleOptimizeRoute(tour.id) }}
@@ -1359,6 +1405,171 @@ function PlanificateurView() {
         </div>
       )}
     </div>
+
+    {/* ── Modale Notifier les clients ── */}
+    {notifModal && (() => {
+      const stopsWithEmail = notifModal.stops.filter((s) => s.email)
+      const stopsWithoutEmail = notifModal.stops.filter((s) => !s.email)
+      const alreadyNotified = stopsWithEmail.filter((s) => s.email_sent_at)
+      const pendingNotif = stopsWithEmail.filter((s) => !s.email_sent_at)
+      const allAlreadyNotified = pendingNotif.length === 0 && alreadyNotified.length > 0
+      const notifDate = alreadyNotified.length > 0
+        ? alreadyNotified.map((s) => s.email_sent_at!).sort().at(0)!
+        : null
+
+      return (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm"
+          onClick={() => { if (!notifSending) setNotifModal(null) }}
+        >
+          <div
+            className="bg-white rounded-[20px] shadow-2xl w-full max-w-md mx-4 overflow-hidden"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Header */}
+            <div className="flex items-center justify-between px-5 py-4 border-b border-[#ebebeb]">
+              <div>
+                <h3 className="font-bold text-[#1a1a2e]">Notifier les clients</h3>
+                <p className="text-xs text-[#6b6b63] mt-0.5">{notifModal.tourName}</p>
+              </div>
+              {!notifSending && !notifResult && (
+                <button onClick={() => setNotifModal(null)} className="text-[#6b6b63] hover:text-[#1a1a2e]">
+                  <X size={18} />
+                </button>
+              )}
+            </div>
+
+            {/* Body */}
+            <div className="px-5 py-4 max-h-[60vh] overflow-y-auto">
+              {notifResult ? (
+                <div className="text-center py-4 space-y-2">
+                  <div className="text-3xl">{notifResult.errors === 0 ? '✅' : '⚠️'}</div>
+                  <p className="font-semibold text-[#1a1a2e]">
+                    {notifResult.sent} email{notifResult.sent !== 1 ? 's' : ''} envoyé{notifResult.sent !== 1 ? 's' : ''}
+                  </p>
+                  {notifResult.errors > 0 && (
+                    <p className="text-xs text-[#c7293a]">{notifResult.errors} erreur{notifResult.errors !== 1 ? 's' : ''}</p>
+                  )}
+                </div>
+              ) : (
+                <>
+                  {allAlreadyNotified && notifDate && (
+                    <div className="mb-4 rounded-[10px] bg-[#fffbeb] border border-[#fde68a] px-4 py-3 text-sm text-[#92400e]">
+                      <p className="font-semibold mb-1">⚠️ Clients déjà notifiés</p>
+                      <p>Ces clients ont déjà reçu un email le {new Date(notifDate).toLocaleDateString('fr-FR', { day: 'numeric', month: 'long', year: 'numeric' })}.</p>
+                      <p className="mt-1 text-xs">Confirmer pour renvoyer un email à tous.</p>
+                    </div>
+                  )}
+                  {!allAlreadyNotified && alreadyNotified.length > 0 && (
+                    <div className="mb-4 rounded-[10px] bg-[#eff6ff] border border-[#bfdbfe] px-4 py-3 text-xs text-[#1e40af]">
+                      {alreadyNotified.length} client{alreadyNotified.length !== 1 ? 's' : ''} déjà notifié{alreadyNotified.length !== 1 ? 's' : ''} — seuls les {pendingNotif.length} restants recevront l&apos;email.
+                    </div>
+                  )}
+
+                  {pendingNotif.length > 0 && (
+                    <>
+                      <p className="text-xs font-semibold text-[#6b6b63] uppercase tracking-wide mb-2">
+                        {pendingNotif.length} email{pendingNotif.length !== 1 ? 's' : ''} à envoyer
+                      </p>
+                      <div className="space-y-1.5 mb-4">
+                        {pendingNotif.map((s) => (
+                          <div key={s.id} className="flex items-center gap-2 text-sm">
+                            <span className="w-5 h-5 rounded-full bg-[#1a1a2e] text-white flex items-center justify-center shrink-0">
+                              <Mail size={10} />
+                            </span>
+                            <span className="font-medium text-[#1a1a2e] truncate">{s.customer_name}</span>
+                            <span className="text-[#6b6b63] text-xs truncate">{s.email}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </>
+                  )}
+
+                  {alreadyNotified.length > 0 && (
+                    <div className="space-y-1 mb-4">
+                      {alreadyNotified.map((s) => (
+                        <div key={s.id} className="flex items-center gap-2 text-sm opacity-50">
+                          <span className="w-5 h-5 rounded-full bg-[#1a7f4b] text-white flex items-center justify-center shrink-0">
+                            <Check size={10} />
+                          </span>
+                          <span className="font-medium text-[#1a1a2e] truncate">{s.customer_name}</span>
+                          <span className="text-[#6b6b63] text-xs">déjà notifié</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {stopsWithoutEmail.length > 0 && (
+                    <p className="text-xs text-[#6b6b63]">
+                      {stopsWithoutEmail.length} client{stopsWithoutEmail.length !== 1 ? 's' : ''} sans email (ignoré{stopsWithoutEmail.length !== 1 ? 's' : ''})
+                    </p>
+                  )}
+                </>
+              )}
+            </div>
+
+            {/* Footer */}
+            <div className="px-5 py-4 border-t border-[#ebebeb] flex gap-2 justify-end">
+              {notifResult ? (
+                <button
+                  onClick={() => setNotifModal(null)}
+                  className="px-4 py-2 rounded-[10px] bg-[#1a1a2e] text-white text-sm font-medium"
+                >
+                  Fermer
+                </button>
+              ) : (
+                <>
+                  <button
+                    onClick={() => setNotifModal(null)}
+                    disabled={notifSending}
+                    className="px-4 py-2 rounded-[10px] text-sm text-[#6b6b63] hover:text-[#1a1a2e] disabled:opacity-40"
+                  >
+                    Annuler
+                  </button>
+                  {allAlreadyNotified ? (
+                    <button
+                      onClick={() => sendNotifEmails(true)}
+                      disabled={notifSending}
+                      className="flex items-center gap-1.5 px-4 py-2 rounded-[10px] bg-[#c2680a] text-white text-sm font-medium disabled:opacity-40"
+                    >
+                      {notifSending ? (
+                        <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24" fill="none">
+                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
+                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"/>
+                        </svg>
+                      ) : <Mail size={14} />}
+                      Renvoyer quand même
+                    </button>
+                  ) : pendingNotif.length > 0 ? (
+                    <button
+                      onClick={() => sendNotifEmails(false)}
+                      disabled={notifSending}
+                      className="flex items-center gap-1.5 px-4 py-2 rounded-[10px] bg-[#1a1a2e] text-white text-sm font-medium disabled:opacity-40"
+                    >
+                      {notifSending ? (
+                        <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24" fill="none">
+                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
+                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"/>
+                        </svg>
+                      ) : <Mail size={14} />}
+                      Envoyer {pendingNotif.length} email{pendingNotif.length !== 1 ? 's' : ''}
+                    </button>
+                  ) : (
+                    <button
+                      onClick={() => setNotifModal(null)}
+                      className="px-4 py-2 rounded-[10px] bg-[#1a1a2e] text-white text-sm font-medium"
+                    >
+                      OK
+                    </button>
+                  )}
+                </>
+              )}
+            </div>
+          </div>
+        </div>
+      )
+    })()}
+    </>
   )
 }
 

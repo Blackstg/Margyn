@@ -8,30 +8,75 @@ function getAdmin() {
   )
 }
 
-function buildEmailHtml(
-  customerName: string,
-  orderName: string,
-  date: string,
-  address1: string,
-  city: string,
-  zip: string
-): string {
-  return `<div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;padding:24px">
-  <h2 style="color:#1a1a2e">Votre livraison est planifiée</h2>
-  <p>Bonjour ${customerName},</p>
-  <p>Votre commande <strong>${orderName}</strong> sera livrée le <strong>${date}</strong>.</p>
-  <p>Adresse de livraison :<br><strong>${address1}, ${city} ${zip}</strong></p>
-  <p>Notre livreur passera en journée. Vous recevrez un appel avant le passage.</p>
-  <p>Pour toute question, contactez-nous à <a href="mailto:contact@bowa-concept.com">contact@bowa-concept.com</a></p>
-  <br><p style="color:#6b6b63">L'équipe Bowa</p>
+function firstNameOf(fullName: string): string {
+  return fullName?.split(' ')[0] ?? fullName ?? ''
+}
+
+function formatTourDate(dateStr: string): string {
+  if (!dateStr) return ''
+  const d = new Date(dateStr + 'T00:00:00')
+  return d.toLocaleDateString('fr-FR', {
+    weekday: 'long',
+    day: 'numeric',
+    month: 'long',
+    year: 'numeric',
+  })
+}
+
+function buildEmailHtml(firstName: string, tourDate: string): string {
+  return `<div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;padding:24px;color:#1a1a2e">
+  <p>Bonjour ${firstName},</p>
+
+  <p>Bonne nouvelle ! 🎉 Votre commande sera livrée cette semaine.<br>
+  Notre livreur commencera sa tournée le <strong>${tourDate}</strong> et passera chez vous dans les prochains jours.</p>
+
+  <p>La livraison s'effectuera au pied du camion 🚛. Nous vous demandons donc de faire le nécessaire pour être accompagné(e) d'une autre personne afin de récupérer les panneaux en toute sécurité 🔧.</p>
+
+  <p>Pour garantir une livraison en toute fluidité, notre livreur vous appellera très probablement au fil de sa tournée, en fonction de l'ordre des livraisons, afin de vérifier votre disponibilité. Vous serez joint(e) depuis le numéro suivant : <strong>06 02 40 15 86</strong>.</p>
+
+  <p>Si vous êtes indisponible, merci de nous en informer par retour de mail, afin que nous puissions reprogrammer votre livraison.</p>
+
+  <p>Nous nous réjouissons de finaliser votre livraison très prochainement ☀️.</p>
+
+  <p>Cordialement,<br>
+  <strong>Léa</strong><br>
+  Service client<br>
+  <img src="https://bowa-concept.com/cdn/shop/files/Logo_Bowa_concept.png" alt="Bowa Concept" style="height:40px;margin-top:8px" /></p>
 </div>`
 }
 
-export async function POST(
+// GET — returns list of stops (with/without email) for preview in modal
+export async function GET(
   _req: NextRequest,
   { params }: { params: { id: string } }
 ) {
   try {
+    const admin = getAdmin()
+
+    const { data: stops, error } = await admin
+      .from('delivery_stops')
+      .select('id, customer_name, email, email_sent_at')
+      .eq('tour_id', params.id)
+      .order('sequence', { ascending: true })
+
+    if (error) throw error
+
+    return NextResponse.json({ stops: stops ?? [] })
+  } catch (err) {
+    console.error('[delivery/tours/:id/emails GET]', err)
+    return NextResponse.json({ error: String(err) }, { status: 500 })
+  }
+}
+
+// POST — send notification emails (only to stops without email_sent_at)
+export async function POST(
+  req: NextRequest,
+  { params }: { params: { id: string } }
+) {
+  try {
+    const body = await req.json().catch(() => ({}))
+    const force = body?.force === true   // force re-send even if already notified
+
     const admin = getAdmin()
 
     // Fetch tour info for the date
@@ -43,39 +88,28 @@ export async function POST(
 
     if (tourError) throw tourError
 
-    // Fetch stops that haven't had emails sent
-    const { data: stops, error: stopsError } = await admin
+    // Fetch target stops
+    let query = admin
       .from('delivery_stops')
-      .select('id, order_name, customer_name, email, address1, city, zip')
+      .select('id, customer_name, email, email_sent_at')
       .eq('tour_id', params.id)
-      .is('email_sent_at', null)
 
+    if (!force) {
+      query = query.is('email_sent_at', null)
+    }
+
+    const { data: stops, error: stopsError } = await query
     if (stopsError) throw stopsError
 
-    const pendingStops = stops ?? []
+    const pendingStops = (stops ?? []).filter((s) => s.email)
+    const tourDate = formatTourDate(tour.planned_date ?? '') || tour.name
     let sent = 0
     let errors = 0
 
-    const date = tour.planned_date
-      ? new Date(tour.planned_date).toLocaleDateString('fr-FR', {
-          weekday: 'long',
-          day: 'numeric',
-          month: 'long',
-          year: 'numeric',
-        })
-      : tour.name
-
     for (const stop of pendingStops) {
       try {
-        if (process.env.RESEND_API_KEY && stop.email) {
-          const html = buildEmailHtml(
-            stop.customer_name ?? '',
-            stop.order_name,
-            date,
-            stop.address1 ?? '',
-            stop.city ?? '',
-            stop.zip ?? ''
-          )
+        if (process.env.RESEND_API_KEY) {
+          const html = buildEmailHtml(firstNameOf(stop.customer_name ?? ''), tourDate)
 
           const emailRes = await fetch('https://api.resend.com/emails', {
             method: 'POST',
@@ -84,15 +118,16 @@ export async function POST(
               'Content-Type': 'application/json',
             },
             body: JSON.stringify({
-              from: 'livraison@bowa-concept.com',
+              from: 'Léa – Bowa Concept <lea@bowa-concept.com>',
               to: stop.email,
-              subject: `Votre livraison Bowa - ${stop.order_name}`,
+              subject: 'BOWA CONCEPT : LIVRAISON',
               html,
             }),
           })
 
           if (!emailRes.ok) {
-            throw new Error(`Resend error: ${emailRes.status}`)
+            const errText = await emailRes.text()
+            throw new Error(`Resend ${emailRes.status}: ${errText}`)
           }
         }
 
