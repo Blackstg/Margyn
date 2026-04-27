@@ -50,11 +50,19 @@ export type TicketCategory =
 
 export type ReplyAction = 'auto_reply' | 'escalate'
 
+export interface DecisionOption {
+  key:   string  // e.g. 'rembourser', 'echange', 'justificatif', 'libre'
+  emoji: string  // e.g. '💸'
+  label: string  // e.g. 'On rembourse'
+}
+
 export interface ClassificationResult {
-  category:    TicketCategory
-  action:      ReplyAction
-  confidence:  number   // 0–1
-  reason:      string
+  category:         TicketCategory
+  action:           ReplyAction
+  confidence:       number   // 0–1
+  reason:           string
+  needs_decision?:  boolean
+  decision_options?: DecisionOption[]
 }
 
 export interface ReplyResult {
@@ -174,21 +182,39 @@ Réponds UNIQUEMENT avec un objet JSON valide (sans markdown, sans backticks) av
   "category": "<une des catégories>",
   "action": "auto_reply" | "escalate",
   "confidence": <nombre entre 0 et 1>,
-  "reason": "<courte justification en français>"
+  "reason": "<courte justification en français>",
+  "needs_decision": <true | false>,
+  "decision_options": [
+    { "key": "<clé courte>", "emoji": "<emoji>", "label": "<libellé court>" },
+    ...
+  ]
 }
 
 Règles pour "action" :
 - "auto_reply" si la réponse est standard et ne nécessite pas d'intervention humaine
-- "escalate" si le client semble très mécontent, si la situation est complexe/litige, si le ticket concerne un produit défectueux grave, ou si la confiance est < 0.6`
+- "escalate" si le client semble très mécontent, si la situation est complexe/litige, si le ticket concerne un produit défectueux grave, ou si la confiance est < 0.6
+
+Règles pour "needs_decision" :
+- true si le ticket nécessite une décision humaine avant de répondre : remboursement exceptionnel, geste commercial, litige ambigu, demande de retour où la politique n'est pas claire, produit défectueux sans décision évidente
+- false pour toutes les demandes standard (suivi livraison, question produit, partenariat, etc.)
+
+Règles pour "decision_options" (seulement si needs_decision=true, 2 à 4 options max) :
+- Pour retour/remboursement : ["💸 On rembourse", "🔄 On propose un échange", "🎁 On propose un avoir", "📎 On demande un justificatif"]
+- Pour produit défectueux : ["🎁 Geste commercial", "🔄 On renvoie le produit", "💸 On rembourse", "📎 On demande des photos"]
+- Pour litige/situation complexe : ["✅ On accepte", "❌ On refuse", "🤔 On demande plus d'infos"]
+- Toujours inclure "✍️ Rédiger moi une réponse" comme dernière option (key: "libre")
+- Si needs_decision=false, mettre decision_options: []`
 
   const msg = await client.messages.create({
     model:      'claude-sonnet-4-6',
-    max_tokens: 256,
+    max_tokens: 512,
     messages:   [{ role: 'user', content: prompt }],
   })
 
   const text = (msg.content[0] as { type: string; text: string }).text.trim()
   const result = JSON.parse(text) as ClassificationResult
+  // Ensure arrays are always present
+  if (!result.decision_options) result.decision_options = []
   return result
 }
 
@@ -201,6 +227,7 @@ export async function generateReply(
   order:          MoomOrder | null,
   customerEmail:  string,
   comments?:      CommentItem[],
+  decision?:      string,  // e.g. "On rembourse" — human decision to base the reply on
 ): Promise<ReplyResult> {
   const rules = await loadRules()
   console.log(`[SAV] generateReply — ${rules.length} règle(s) chargée(s) :`, rules)
@@ -358,7 +385,10 @@ ${examplesBlock ? 'Exemples de style de réponse Mōom (ton et structure de réf
 ${rulesBlock || '(aucune règle spécifique — appliquer les bonnes pratiques SAV)'}
 
 ━━━ SECTION 4 — INSTRUCTION ━━━
-Rédige une réponse UNIQUEMENT pour répondre à la SITUATION ACTUELLE (dernier message).
+${decision ? `⚡ DÉCISION PRISE PAR L'ÉQUIPE : "${decision}"
+Tu DOIS rédiger la réponse en appliquant strictement cette décision. Ne la remet pas en question.
+
+` : ''}Rédige une réponse UNIQUEMENT pour répondre à la SITUATION ACTUELLE (dernier message).
 
 Contraintes strictes :
 - Ne PAS répéter ni résumer ce qui a déjà été dit dans l'historique

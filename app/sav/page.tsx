@@ -16,6 +16,12 @@ type TicketCategory =
 
 type ReplyAction = 'auto_reply' | 'escalate'
 
+interface DecisionOption {
+  key:   string
+  emoji: string
+  label: string
+}
+
 interface OrderProduct { name: string; quantity: number; price: string }
 
 interface MoomOrder {
@@ -52,6 +58,8 @@ interface ProcessedTicket extends RawTicket {
   partnership_email_sent?: boolean
   is_phishing?: boolean
   phishing_signals?: string[]
+  needs_decision?:   boolean
+  decision_options?: DecisionOption[]
 }
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -479,14 +487,17 @@ function ReplyPanel({ ticket, draft, solved, onDraftChange, onSolvedChange, onSe
   onSent: (action: ReplyAction, wasModified?: boolean) => void
   onArchive: () => void
 }) {
-  const [sending, setSending]         = useState(false)
-  const [archiving, setArchiving]     = useState(false)
-  const [regenerating, setRegenerating] = useState(false)
-  const [error, setError]             = useState<string | null>(null)
-  const [showReason, setShowReason]   = useState(false)
-  const [attachment, setAttachment]   = useState<AttachmentState | null>(null)
-  const [uploading, setUploading]     = useState(false)
-  const fileInputRef                  = useRef<HTMLInputElement>(null)
+  const [sending, setSending]             = useState(false)
+  const [archiving, setArchiving]         = useState(false)
+  const [regenerating, setRegenerating]   = useState(false)
+  const [deciding, setDeciding]           = useState(false)
+  const [improving, setImproving]         = useState(false)
+  const [previousDraft, setPreviousDraft] = useState<string | null>(null)
+  const [error, setError]                 = useState<string | null>(null)
+  const [showReason, setShowReason]       = useState(false)
+  const [attachment, setAttachment]       = useState<AttachmentState | null>(null)
+  const [uploading, setUploading]         = useState(false)
+  const fileInputRef                      = useRef<HTMLInputElement>(null)
 
   async function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0]
@@ -565,6 +576,61 @@ function ReplyPanel({ ticket, draft, solved, onDraftChange, onSolvedChange, onSe
     } finally { setArchiving(false) }
   }
 
+  async function decide(option: DecisionOption) {
+    setDeciding(true); setError(null)
+    try {
+      const res = await fetch('/api/sav/decide', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          subject:        ticket.subject,
+          description:    ticket.description,
+          category:       ticket.category,
+          order:          ticket.order,
+          customer_email: ticket.customer_email,
+          decision_key:   option.key,
+          decision_label: option.label,
+          ticket_id:      ticket.ticket_id,
+          requester_id:   ticket.requester_id ?? 0,
+        }),
+      })
+      const d = await res.json() as { body?: string; solved?: boolean; error?: string }
+      if (!res.ok) throw new Error(d.error ?? `HTTP ${res.status}`)
+      if (d.body) onDraftChange(d.body)
+      if (d.solved !== undefined) onSolvedChange(d.solved)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Erreur inconnue')
+    } finally { setDeciding(false) }
+  }
+
+  async function improve() {
+    if (!draft.trim()) return
+    setImproving(true); setError(null)
+    setPreviousDraft(draft)
+    try {
+      const res = await fetch('/api/sav/improve', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ current_draft: draft }),
+      })
+      const d = await res.json() as { body?: string; error?: string }
+      if (!res.ok) throw new Error(d.error ?? `HTTP ${res.status}`)
+      if (d.body) onDraftChange(d.body)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Erreur inconnue')
+      setPreviousDraft(null)
+    } finally { setImproving(false) }
+  }
+
+  function undoImprove() {
+    if (previousDraft !== null) {
+      onDraftChange(previousDraft)
+      setPreviousDraft(null)
+    }
+  }
+
+  const showDecisionPanel = ticket.needs_decision && !draft
+
   return (
     <div className="flex flex-col h-full overflow-hidden">
       {/* Header */}
@@ -616,13 +682,39 @@ function ReplyPanel({ ticket, draft, solved, onDraftChange, onSolvedChange, onSe
         )}
       </div>
 
-      {/* Textarea */}
-      <div className="flex-1 overflow-hidden px-5 py-4">
-        <textarea
-          value={draft}
-          onChange={e => onDraftChange(e.target.value)}
-          className="w-full h-full text-xs text-[#1a1a2e] bg-[#f8f7f5] rounded-xl px-3 py-3 leading-relaxed resize-none border border-transparent focus:border-[#aeb0c9] focus:outline-none transition-colors font-[inherit]"
-        />
+      {/* Decision panel OR Textarea */}
+      <div className="flex-1 overflow-hidden px-5 py-4 flex flex-col gap-3">
+        {showDecisionPanel ? (
+          <div className="flex flex-col gap-2 h-full justify-center">
+            <p className="text-[11px] text-[#6b6b63] text-center font-medium mb-1">
+              Quelle décision prenez-vous ?
+            </p>
+            {deciding ? (
+              <div className="flex items-center justify-center gap-2 py-6">
+                <RefreshCw size={14} className="animate-spin text-[#9b9b93]" />
+                <span className="text-xs text-[#9b9b93]">Rédaction en cours…</span>
+              </div>
+            ) : (
+              (ticket.decision_options ?? []).map(opt => (
+                <button
+                  key={opt.key}
+                  onClick={() => decide(opt)}
+                  className="flex items-center gap-2.5 px-4 py-3 rounded-xl border border-[#e8e8e4] bg-white hover:bg-[#f0efec] hover:border-[#aeb0c9] text-[12px] font-medium text-[#1a1a2e] transition-colors text-left"
+                >
+                  <span className="text-base leading-none">{opt.emoji}</span>
+                  {opt.label}
+                </button>
+              ))
+            )}
+          </div>
+        ) : (
+          <textarea
+            value={draft}
+            onChange={e => { onDraftChange(e.target.value); setPreviousDraft(null) }}
+            className="w-full flex-1 text-xs text-[#1a1a2e] bg-[#f8f7f5] rounded-xl px-3 py-3 leading-relaxed resize-none border border-transparent focus:border-[#aeb0c9] focus:outline-none transition-colors font-[inherit]"
+            style={{ minHeight: 0 }}
+          />
+        )}
       </div>
 
       {/* Footer */}
@@ -662,6 +754,31 @@ function ReplyPanel({ ticket, draft, solved, onDraftChange, onSolvedChange, onSe
             }
             {uploading ? 'Upload…' : 'Joindre un fichier'}
           </button>
+        )}
+
+        {/* Améliorer ma réponse */}
+        {!showDecisionPanel && draft.trim() && (
+          <div className="flex items-center gap-2">
+            <button
+              onClick={improve}
+              disabled={improving || sending || archiving || deciding}
+              className="flex items-center gap-1.5 text-[11px] text-[#7c3aed] hover:text-[#5b21b6] font-medium transition-colors disabled:opacity-40"
+            >
+              {improving
+                ? <RefreshCw size={12} strokeWidth={1.8} className="animate-spin" />
+                : <span className="text-[13px] leading-none">✨</span>
+              }
+              {improving ? 'Amélioration…' : 'Améliorer ma réponse'}
+            </button>
+            {previousDraft !== null && !improving && (
+              <button
+                onClick={undoImprove}
+                className="text-[11px] text-[#9b9b93] hover:text-[#6b6b63] transition-colors"
+              >
+                ↩ Annuler
+              </button>
+            )}
+          </div>
         )}
 
         {/* Bon de retour — auto-attach indicator */}

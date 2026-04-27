@@ -7,7 +7,7 @@
 import { getNewTickets, getRequesterEmail, postReply, escalateTicket, tagTicket, getTicketComments } from './zendesk'
 import { getMostRecentOrder } from './shopify'
 import { classifyTicket, generateReply, detectPhishing } from './classifier'
-import type { TicketCategory, ReplyAction } from './classifier'
+import type { TicketCategory, ReplyAction, DecisionOption } from './classifier'
 import type { MoomOrder } from './shopify'
 import { createAdminClient } from '@/lib/supabase'
 
@@ -122,6 +122,8 @@ export interface ProcessedTicket {
   partnership_email_sent?: boolean
   is_phishing?:   boolean
   phishing_signals?: string[]
+  needs_decision?:   boolean
+  decision_options?: DecisionOption[]
 }
 
 // ─── Sage-femme detection ─────────────────────────────────────────────────────
@@ -321,6 +323,31 @@ export async function processOneTicket(
         console.error(`[SAV] #${ticketId} partnership email error:`, err)
         return false
       })
+    }
+  }
+
+  // If the ticket requires a human decision, skip reply generation entirely.
+  // The UI will show decision buttons; the reply is generated after the human chooses.
+  if (cls.needs_decision) {
+    console.log(`[SAV] processOneTicket #${ticketId} — needs_decision: affichage des boutons de décision`)
+    return {
+      ticket_id:       ticketId,
+      subject,
+      description,
+      created_at:      createdAt,
+      status:          ticketStatus,
+      requester_id:    requesterId,
+      customer_email:  email,
+      category:        cls.category,
+      action:          cls.action,
+      confidence:      cls.confidence,
+      reason:          cls.reason,
+      order,
+      draft_reply:     '',
+      solved:          false,
+      needs_decision:  true,
+      decision_options: cls.decision_options ?? [],
+      ...(partnershipEmailSent !== undefined && { partnership_email_sent: partnershipEmailSent }),
     }
   }
 
