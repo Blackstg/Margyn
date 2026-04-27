@@ -1507,8 +1507,15 @@ function LivreurView() {
       // or the previously selected tour disappeared (e.g. deleted).
       setSelectedTourId(prev => {
         if (prev && all.find((t) => t.id === prev)) return prev   // stay on current tour
-        const todayTour = all.find((t: Tour) => t.planned_date === today) ?? all[0]
-        return todayTour?.id ?? prev
+        // Priority: in_progress → today → closest upcoming → first
+        const inProgress = all.find((t: Tour) => t.status === 'in_progress')
+        if (inProgress) return inProgress.id
+        const todayTour = all.find((t: Tour) => t.planned_date === today)
+        if (todayTour) return todayTour.id
+        const upcoming = [...all]
+          .filter((t: Tour) => t.planned_date && t.planned_date >= today)
+          .sort((a: Tour, b: Tour) => a.planned_date.localeCompare(b.planned_date))[0]
+        return upcoming?.id ?? all[0]?.id ?? prev
       })
     } catch (e) {
       console.error(e)
@@ -1659,7 +1666,10 @@ function LivreurView() {
               className="w-full px-4 py-4 text-base font-medium border border-[#e8e8e4] rounded-[14px] outline-none bg-white"
             >
               {tours.map((t) => (
-                <option key={t.id} value={t.id}>{t.name} — {t.planned_date ? formatDate(t.planned_date) : 'sans date'}</option>
+                <option key={t.id} value={t.id}>
+                  {t.status === 'in_progress' ? '🟢 ' : t.status === 'completed' ? '✓ ' : ''}
+                  {t.name} — {t.planned_date ? formatDate(t.planned_date) : 'sans date'}
+                </option>
               ))}
             </select>
           </div>
@@ -1669,6 +1679,15 @@ function LivreurView() {
           <div className="w-full rounded-[20px] bg-[#1a1a2e] overflow-hidden">
             {/* Header */}
             <div className="px-6 pt-8 pb-6 text-white">
+              {tour.status === 'in_progress' && (
+                <div className="flex items-center gap-2 mb-3">
+                  <span className="relative flex h-2.5 w-2.5">
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-[#4ade80] opacity-75" />
+                    <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-[#4ade80]" />
+                  </span>
+                  <span className="text-[#4ade80] text-xs font-bold uppercase tracking-widest">Tournée en cours</span>
+                </div>
+              )}
               <div className="text-2xl font-bold leading-tight">{tour.name}</div>
               {tour.planned_date && (
                 <div className="text-white/50 text-base mt-1 capitalize">{formatDate(tour.planned_date)}</div>
