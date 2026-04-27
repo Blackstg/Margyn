@@ -6,7 +6,7 @@ import { useState, useEffect, useCallback, useRef, Suspense } from 'react'
 import nextDynamic from 'next/dynamic'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { createBrowserClient } from '@supabase/auth-helpers-nextjs'
-import { ChevronDown, ChevronUp, ChevronLeft, ChevronRight, Trash2, Mail, Plus, X, MapPin, Package, Truck, Map as MapIcon, Search, Pencil, Check, MessageSquare, GripVertical } from 'lucide-react'
+import { ChevronDown, ChevronUp, ChevronLeft, ChevronRight, Trash2, Mail, Plus, X, MapPin, Package, Truck, Map as MapIcon, Search, Pencil, Check, MessageSquare, GripVertical, Printer } from 'lucide-react'
 import {
   DndContext, DragEndEvent, DragOverlay, DragStartEvent,
   PointerSensor, TouchSensor, closestCenter, useSensor, useSensors,
@@ -2202,7 +2202,61 @@ function LivreurView() {
           <h2 className="text-lg font-bold text-[#1a1a2e]">Chargement camion</h2>
           <span className="ml-auto text-sm text-[#6b6b63]">{checkedItems.size} / {totalLoadingItems}</span>
         </div>
-        <p className="text-xs text-[#6b6b63] mb-5 pl-1">Charger du dernier arrêt au premier — le premier arrêt doit être accessible en premier.</p>
+        <p className="text-xs text-[#6b6b63] mb-4 pl-1">Charger du dernier arrêt au premier — le premier arrêt doit être accessible en premier.</p>
+
+        {/* Récapitulatif produits */}
+        {loadingStops.length > 0 && (() => {
+          const summaryMap = new Map<string, { sku: string; title: string; variant_title: string; qty: number }>()
+          for (const { items } of loadingStops) {
+            for (const item of items) {
+              const key = item.sku?.trim() || item.title
+              const existing = summaryMap.get(key)
+              if (existing) existing.qty += item.qty
+              else summaryMap.set(key, { sku: item.sku?.trim() ?? '', title: item.title, variant_title: item.variant_title ?? '', qty: item.qty })
+            }
+          }
+          const summary = [...summaryMap.values()].sort((a, b) => b.qty - a.qty)
+          const totalQty = summary.reduce((s, r) => s + r.qty, 0)
+          return (
+            <div className="print-summary rounded-[16px] bg-white shadow-[0_2px_12px_rgba(0,0,0,0.06)] overflow-hidden mb-5 print:shadow-none">
+              <div className="flex items-center justify-between px-4 py-3 bg-[#f8f8f6] border-b border-[#ebebeb]">
+                <span className="text-sm font-bold text-[#1a1a2e]">Récapitulatif produits</span>
+                <button
+                  onClick={() => window.print()}
+                  className="flex items-center gap-1.5 text-xs font-medium text-[#6b6b63] hover:text-[#1a1a2e] transition-colors"
+                >
+                  <Printer size={14} />
+                  Imprimer
+                </button>
+              </div>
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-[#ebebeb]">
+                    <th className="text-left px-4 py-2 text-xs font-semibold text-[#6b6b63] uppercase tracking-wide w-24">Réf.</th>
+                    <th className="text-left px-4 py-2 text-xs font-semibold text-[#6b6b63] uppercase tracking-wide">Produit</th>
+                    <th className="text-right px-4 py-2 text-xs font-semibold text-[#6b6b63] uppercase tracking-wide w-16">Qté</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {summary.map((row, i) => (
+                    <tr key={i} className="border-b border-[#f0f0f0] last:border-0">
+                      <td className="px-4 py-2.5 font-mono text-xs text-[#6b6b63]">{row.sku || '—'}</td>
+                      <td className="px-4 py-2.5 text-[#1a1a2e]">
+                        {row.title}
+                        {row.variant_title && <span className="text-xs text-[#6b6b63] ml-1">· {row.variant_title}</span>}
+                      </td>
+                      <td className="px-4 py-2.5 text-right font-bold text-[#1a1a2e]">{row.qty}</td>
+                    </tr>
+                  ))}
+                  <tr className="bg-[#f8f8f6]">
+                    <td className="px-4 py-2.5 font-bold text-[#1a1a2e]" colSpan={2}>TOTAL</td>
+                    <td className="px-4 py-2.5 text-right font-bold text-[#1a1a2e] text-base">{totalQty}</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          )
+        })()}
 
         {loadingStops.length === 0 ? (
           <div className="rounded-[20px] bg-white shadow-[0_4px_24px_rgba(0,0,0,0.08)] p-8 text-center text-sm text-[#6b6b63]">Aucun produit</div>
