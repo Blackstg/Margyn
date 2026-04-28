@@ -3788,9 +3788,9 @@ function SavView() {
                     {!editingNote && (
                       <button
                         onClick={() => { setNoteValue(selected.sav_note ?? ''); setEditingNote(true) }}
-                        className="text-[10px] font-medium text-[#d97706] hover:text-[#b45309] transition-colors"
+                        className="flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-semibold bg-[#fef3c7] text-[#92400e] hover:bg-[#fde68a] transition-colors"
                       >
-                        {selected.sav_note ? 'Modifier' : '+ Ajouter'}
+                        {selected.sav_note ? '✏️ Modifier' : '+ Ajouter une note'}
                       </button>
                     )}
                   </div>
