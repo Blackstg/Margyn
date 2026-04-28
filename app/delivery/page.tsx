@@ -296,7 +296,7 @@ function PlanificateurView() {
   const fetchTours = useCallback(async () => {
     setLoadingTours(true)
     try {
-      const r = await fetch('/api/delivery/tours')
+      const r = await fetch('/api/delivery/tours', { cache: 'no-store' })
       const data = await r.json()
       const sorted = (data.tours ?? []).sort((a: Tour, b: Tour) => {
         if (!a.planned_date) return 1
@@ -1884,7 +1884,7 @@ function LivreurView() {
   const fetchTours = useCallback(async () => {
     setLoading(true)
     try {
-      const r = await fetch('/api/delivery/tours')
+      const r = await fetch('/api/delivery/tours', { cache: 'no-store' })
       const data = await r.json()
       const today = new Date().toISOString().slice(0, 10)
       const all: Tour[] = (data.tours ?? []).filter((t: Tour) => t.status !== 'cancelled')
@@ -3107,17 +3107,16 @@ function buildSavEntries(toursRaw: any[], ordersRaw: ShopifyOrder[]): SavEntry[]
     const tourDelivered = stops.filter((s: TourStop) => s.status === 'delivered').length
     const sortedStops  = [...stops].sort((a: TourStop, b: TourStop) => a.sequence - b.sequence)
     // Build summary in actual validation order:
-    //   1. Delivered + failed stops sorted by delivered_at ASC (real chronological order)
-    //      Stops without delivered_at (edge case: old failed stops) fall back to sequence order
-    //      and are placed after timestamped stops.
+    //   1. Delivered + failed stops sorted by delivered_at ASC when both have timestamps.
+    //      If either stop is missing delivered_at (old failed stops), fall back to sequence
+    //      so they are interleaved at their planned position rather than dumped at the end.
     //   2. Pending stops sorted by sequence (planned order for what's left)
     const doneStops = stops
       .filter((s: TourStop) => s.status === 'delivered' || s.status === 'failed')
       .sort((a: TourStop, b: TourStop) => {
         if (a.delivered_at && b.delivered_at) return a.delivered_at.localeCompare(b.delivered_at)
-        if (a.delivered_at && !b.delivered_at) return -1  // timestamped first
-        if (!a.delivered_at && b.delivered_at) return 1
-        return a.sequence - b.sequence  // both null → by sequence
+        // At least one is missing delivered_at → use sequence as positional proxy
+        return a.sequence - b.sequence
       })
     const tourStopsSummary: SavStopSummary[] = [
       ...doneStops,
@@ -3194,7 +3193,7 @@ function SavView() {
       setLoading(true)
       try {
         const [toursData, ordersData] = await Promise.all([
-          fetch('/api/delivery/tours').then(r => r.json()),
+          fetch('/api/delivery/tours', { cache: 'no-store' }).then(r => r.json()),
           fetch('/api/delivery/orders').then(r => r.json()),
         ])
         cachedOrdersRef.current = ordersData.orders ?? []
@@ -3216,7 +3215,7 @@ function SavView() {
       if (refreshingRef.current) return
       refreshingRef.current = true
       try {
-        const toursData = await fetch('/api/delivery/tours').then(r => r.json())
+        const toursData = await fetch('/api/delivery/tours', { cache: 'no-store' }).then(r => r.json())
         applyEntries(buildSavEntries(toursData.tours ?? [], cachedOrdersRef.current))
       } catch { /* silent */ } finally {
         refreshingRef.current = false
