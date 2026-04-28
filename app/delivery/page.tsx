@@ -3114,7 +3114,7 @@ function buildSavEntries(toursRaw: any[], ordersRaw: ShopifyOrder[]): SavEntry[]
       ...stops
         .filter((s: TourStop) => s.status === 'delivered' || s.status === 'failed')
         .sort((a: TourStop, b: TourStop) =>
-          (a.delivered_at ?? '').localeCompare(b.delivered_at ?? '')),
+          (a.delivered_at ?? '9999').localeCompare(b.delivered_at ?? '9999')),
       ...stops
         .filter((s: TourStop) => s.status === 'pending')
         .sort((a: TourStop, b: TourStop) => a.sequence - b.sequence),
