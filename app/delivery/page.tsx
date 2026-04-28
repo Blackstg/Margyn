@@ -3379,7 +3379,7 @@ function SavView() {
                   </div>
                 </div>
 
-                {/* Mini-carte position Khalid */}
+                {/* Carte itinéraire complet */}
                 {(() => {
                   const tourStops = entries
                     .filter(e => e.tour_name === rep.tour_name && e.stop_status !== null)
@@ -3390,12 +3390,12 @@ function SavView() {
                       city: e.city,
                       zip: e.zip,
                       customer_name: e.customer_name,
+                      order_name: e.order_name,
                       status: e.stop_status!,
                       delivered_at: e.delivered_at,
                     }))
-                  const hasDelivered = tourStops.some(s => s.status === 'delivered')
-                  if (!hasDelivered) return null
-                  return <SavPositionMap stops={tourStops} />
+                  if (tourStops.length === 0) return null
+                  return <SavPositionMap stops={tourStops} height={340} />
                 })()}
 
               </div>
