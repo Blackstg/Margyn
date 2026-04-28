@@ -3350,6 +3350,7 @@ function SavView() {
                       {/* Stop circles */}
                       {stops.map((s, i) => {
                         const isDelivered = s.status === 'delivered'
+                        const isFailed    = s.status === 'failed'
                         const isCurrent   = i === currentIdx
                         return (
                           <div key={i} className="relative flex flex-col items-center flex-1 pt-0">
@@ -3358,6 +3359,8 @@ function SavView() {
                                 className={`relative z-10 w-8 h-8 rounded-full border-2 flex items-center justify-center transition-all duration-500 ${
                                   isDelivered
                                     ? 'bg-[#1a7f4b] border-[#1a7f4b]'
+                                    : isFailed
+                                    ? 'bg-[#f97316] border-[#f97316]'
                                     : isCurrent
                                     ? 'bg-[#4b5563] border-[#4b5563]'
                                     : 'bg-white border-[#d1d5db]'
@@ -3368,11 +3371,16 @@ function SavView() {
                                     <path d="M2 6L5 9L10 3" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
                                   </svg>
                                 )}
+                                {isFailed && (
+                                  <svg width="10" height="10" viewBox="0 0 10 10" fill="none">
+                                    <path d="M2 2L8 8M8 2L2 8" stroke="white" strokeWidth="2" strokeLinecap="round"/>
+                                  </svg>
+                                )}
                               </div>
                             </div>
                             {/* City */}
                             <span className={`mt-2 text-[10px] font-semibold text-center leading-tight max-w-[68px] truncate ${
-                              isDelivered ? 'text-[#1a7f4b]' : isCurrent ? 'text-[#1a1a2e]' : 'text-[#6b6b63]'
+                              isDelivered ? 'text-[#1a7f4b]' : isFailed ? 'text-[#f97316]' : isCurrent ? 'text-[#1a1a2e]' : 'text-[#6b6b63]'
                             }`}>
                               {s.city}
                             </span>
