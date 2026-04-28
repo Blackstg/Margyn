@@ -33,8 +33,11 @@ async function geocodeAddress(address: string, token: string): Promise<[number, 
   } catch { return null }
 }
 
+/**
+ * Mapbox sets transform: translate3d(...) directly on the element passed as `element`.
+ * Never modify that element's transform — use a child `inner` for animations instead.
+ */
 function makeStopMarker(index: number, status: 'pending' | 'delivered' | 'failed'): HTMLElement {
-  const el = document.createElement('div')
   const isDelivered = status === 'delivered'
   const isFailed    = status === 'failed'
 
@@ -42,32 +45,43 @@ function makeStopMarker(index: number, status: 'pending' | 'delivered' | 'failed
   const border = isDelivered ? '#bbf7d0' : isFailed ? '#fed7aa' : '#aeb0c9'
   const size   = isDelivered ? 28 : 32
 
-  el.style.cssText = `
-    width:${size}px;height:${size}px;border-radius:50%;
+  // Wrapper — Mapbox owns this element's transform for positioning
+  const el = document.createElement('div')
+  el.style.cssText = `width:${size}px;height:${size}px;cursor:pointer;`
+
+  // Inner — we own this element's transform for hover animation
+  const inner = document.createElement('div')
+  inner.style.cssText = `
+    width:100%;height:100%;border-radius:50%;
     background:${bg};border:2.5px solid ${border};
     box-shadow:0 2px 8px rgba(0,0,0,0.25);
     display:flex;align-items:center;justify-content:center;
     font-size:11px;font-weight:700;color:white;
     font-family:system-ui,sans-serif;
-    cursor:pointer;
     transition:transform 0.15s;
   `
-  el.textContent = isDelivered ? '✓' : isFailed ? '✕' : String(index + 1)
-  el.addEventListener('mouseenter', () => { el.style.transform = 'scale(1.15)' })
-  el.addEventListener('mouseleave', () => { el.style.transform = 'scale(1)' })
+  inner.textContent = isDelivered ? '✓' : isFailed ? '✕' : String(index + 1)
+  inner.addEventListener('mouseenter', () => { inner.style.transform = 'scale(1.2)' })
+  inner.addEventListener('mouseleave', () => { inner.style.transform = 'scale(1)' })
+
+  el.appendChild(inner)
   return el
 }
 
 function makeTruckMarker(): HTMLElement {
   const el = document.createElement('div')
-  el.style.cssText = `
-    width:40px;height:40px;border-radius:50%;
+  el.style.cssText = `width:40px;height:40px;cursor:default;`
+
+  const inner = document.createElement('div')
+  inner.style.cssText = `
+    width:100%;height:100%;border-radius:50%;
     background:#1d4ed8;border:3px solid white;
     box-shadow:0 3px 12px rgba(29,78,216,0.4);
     display:flex;align-items:center;justify-content:center;
-    font-size:20px;z-index:10;
+    font-size:20px;
   `
-  el.textContent = '🚛'
+  inner.textContent = '🚛'
+  el.appendChild(inner)
   return el
 }
 
