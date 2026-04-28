@@ -538,7 +538,7 @@ function ThreadDetail({ thread }: { thread: ProcessedThread }) {
           <div className="rounded-xl px-4 py-3 border-l-[3px] bg-[#f8f7f5] border-[#e0cfc9]">
             <p className="text-xs text-[#1a1a2e] leading-relaxed whitespace-pre-wrap break-words">{thread.body}</p>
           </div>
-        ) : messages.map((msg, i) => {
+        ) : [...messages].reverse().map((msg, i) => {
           const isClient = msg.is_client
           return (
             <div
@@ -582,6 +582,8 @@ export default function SavKromPage() {
   const [drafts, setDrafts]             = useState<Record<string, string>>({})
   const [tab, setTab]                   = useState<'pending' | 'done'>('pending')
   const [showRules, setShowRules]       = useState(false)
+  const [search, setSearch]             = useState('')
+  const [catFilter, setCatFilter]       = useState<KromCategory | 'all'>('all')
   const fetchingRef = useRef<Set<string>>(new Set())
   const ticketStartTimes = useRef<Record<string, number>>({})
 
@@ -681,8 +683,24 @@ export default function SavKromPage() {
     advanceSelection(selectedId, doneAfter)
   }
 
-  const pending  = threads.filter(t => !doneStatuses[t.thread_id])
-  const done     = threads.filter(t =>  doneStatuses[t.thread_id])
+  const searchLow = search.toLowerCase().trim()
+
+  function matchesSearch(t: RawThread): boolean {
+    if (!searchLow) return true
+    return (
+      t.subject.toLowerCase().includes(searchLow) ||
+      t.sender_email.toLowerCase().includes(searchLow) ||
+      t.sender_name.toLowerCase().includes(searchLow)
+    )
+  }
+
+  function matchesCat(t: RawThread): boolean {
+    if (catFilter === 'all') return true
+    return processedCache[t.thread_id]?.category === catFilter
+  }
+
+  const pending  = threads.filter(t => !doneStatuses[t.thread_id] && matchesSearch(t) && matchesCat(t))
+  const done     = threads.filter(t =>  doneStatuses[t.thread_id] && matchesSearch(t) && matchesCat(t))
   const selected = selectedId ? (processedCache[selectedId] ?? null) : null
   const isProcessing = processingId === selectedId && selectedId !== null
 
@@ -720,6 +738,54 @@ export default function SavKromPage() {
                 <RefreshCw size={13} strokeWidth={1.8} className={listLoading ? 'animate-spin' : ''} />
               </button>
             </div>
+          </div>
+
+          {/* Search */}
+          <div className="relative mb-2">
+            <input
+              type="text"
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+              placeholder="Rechercher…"
+              className="w-full text-[11px] bg-[#f0efec] rounded-lg px-3 py-1.5 pr-7 text-[#1a1a2e] placeholder-[#aeb0c9] border border-transparent focus:border-[#aeb0c9] focus:outline-none transition-colors"
+            />
+            {search && (
+              <button
+                onClick={() => setSearch('')}
+                className="absolute right-2 top-1/2 -translate-y-1/2 text-[#aeb0c9] hover:text-[#6b6b63]"
+              >
+                <X size={11} strokeWidth={2} />
+              </button>
+            )}
+          </div>
+
+          {/* Category chips */}
+          <div className="flex flex-wrap gap-1 mb-2">
+            <button
+              onClick={() => setCatFilter('all')}
+              className={`px-2 py-0.5 rounded-full text-[10px] font-semibold transition-colors ${
+                catFilter === 'all' ? 'bg-[#1a1a2e] text-white' : 'bg-[#eeede9] text-[#6b6b63] hover:bg-[#e0deda]'
+              }`}
+            >
+              Tous
+            </button>
+            {(Object.keys(CAT_LABELS) as KromCategory[]).map(cat => {
+              const { bg, text } = CAT_COLORS[cat]
+              const isActive = catFilter === cat
+              return (
+                <button
+                  key={cat}
+                  onClick={() => setCatFilter(isActive ? 'all' : cat)}
+                  className="px-2 py-0.5 rounded-full text-[10px] font-semibold transition-colors"
+                  style={isActive
+                    ? { backgroundColor: text, color: '#fff' }
+                    : { backgroundColor: bg, color: text }
+                  }
+                >
+                  {CAT_LABELS[cat]}
+                </button>
+              )
+            })}
           </div>
 
           {/* Tabs */}
