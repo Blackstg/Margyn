@@ -3106,15 +3106,23 @@ function buildSavEntries(toursRaw: any[], ordersRaw: ShopifyOrder[]): SavEntry[]
     const tourTotal    = stops.length
     const tourDelivered = stops.filter((s: TourStop) => s.status === 'delivered').length
     const sortedStops  = [...stops].sort((a: TourStop, b: TourStop) => a.sequence - b.sequence)
-    // Build summary in planned sequence order (all stops sorted by sequence).
-    // This ensures the progress bar reflects the actual route order and that
-    // "current stop" is computed correctly even when the driver delivers out of order.
-    const tourStopsSummary: SavStopSummary[] = [...stops]
-      .sort((a: TourStop, b: TourStop) => a.sequence - b.sequence)
-      .map((s: TourStop) => ({
-        city: s.city, order_name: s.order_name, status: s.status,
-        delivered_at: s.delivered_at ?? null, sequence: s.sequence,
-      }))
+    // Build summary in actual delivery order:
+    //   1. Delivered stops sorted by delivered_at ASC (real validation order)
+    //   2. Failed + pending stops sorted by sequence (planned order for what's left)
+    // This ensures the green bar and dot position match what Khalid actually did,
+    // even when he delivers stops out of planned sequence.
+    const tourStopsSummary: SavStopSummary[] = [
+      ...stops
+        .filter((s: TourStop) => s.status === 'delivered')
+        .sort((a: TourStop, b: TourStop) =>
+          (a.delivered_at ?? '').localeCompare(b.delivered_at ?? '')),
+      ...stops
+        .filter((s: TourStop) => s.status !== 'delivered')
+        .sort((a: TourStop, b: TourStop) => a.sequence - b.sequence),
+    ].map((s: TourStop) => ({
+      city: s.city, order_name: s.order_name, status: s.status,
+      delivered_at: s.delivered_at ?? null, sequence: s.sequence,
+    }))
 
     for (const stop of stops) {
       let sav_status: SavStatus
@@ -3279,24 +3287,10 @@ function SavView() {
             const total      = rep.tour_total_stops
             const done       = rep.tour_delivered_stops
             const pct        = total > 0 ? Math.round((done / total) * 100) : 0
-            // "Current" stop = first pending stop (not delivered, not failed) that comes
-            // AFTER the most recently delivered stop, anchored by delivered_at timestamp.
-            // Using delivered_at (not sequence position) correctly handles drivers who
-            // deliver stops out of planned order.
-            const lastDeliveredByTime = stops
-              .filter(s => s.delivered_at)
-              .sort((a, b) => (b.delivered_at ?? '') > (a.delivered_at ?? '') ? 1 : -1)[0] ?? null
-            const lastDeliveredPos = lastDeliveredByTime
-              ? stops.findIndex(s => s === lastDeliveredByTime)
-              : -1
+            // stops is ordered: [delivered ASC by delivered_at] + [remaining by sequence]
+            // → current stop = first element that is neither delivered nor failed
             const isPending = (s: { status: string }) => s.status !== 'delivered' && s.status !== 'failed'
-            const currentIdx = (() => {
-              if (lastDeliveredPos >= 0) {
-                const after = stops.findIndex((s, i) => i > lastDeliveredPos && isPending(s))
-                if (after !== -1) return after
-              }
-              return stops.findIndex(isPending)
-            })()
+            const currentIdx = stops.findIndex(isPending)
             const weekNum = rep.tour_planned_date ? getISOWeekNum(rep.tour_planned_date) : null
 
             // Progress line width: from left edge to midpoint between last delivered and next stop
