@@ -2,7 +2,7 @@
 
 export const dynamic = 'force-dynamic'
 
-import { useState, useEffect, useCallback, useRef, Suspense } from 'react'
+import { useState, useEffect, useCallback, useRef, useMemo, Suspense } from 'react'
 import nextDynamic from 'next/dynamic'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { createBrowserClient } from '@supabase/auth-helpers-nextjs'
@@ -3215,8 +3215,29 @@ function SavView() {
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   const [emailOpen, setEmailOpen] = useState(false)
+  const [statusFilter, setStatusFilter] = useState<SavStatus | 'all'>('all')
+  const [tourFilter, setTourFilter]     = useState<string>('all')
+
+  // Unique tours from entries, sorted by planned_date desc
+  const availableTours = useMemo(() => {
+    const seen = new Map<string, { name: string; date: string | null; status: string | null }>()
+    for (const e of entries) {
+      if (e.tour_name && !seen.has(e.tour_name)) {
+        seen.set(e.tour_name, { name: e.tour_name, date: e.tour_planned_date, status: e.tour_status })
+      }
+    }
+    return [...seen.values()].sort((a, b) => {
+      if (!a.date && !b.date) return 0
+      if (!a.date) return 1
+      if (!b.date) return -1
+      return b.date.localeCompare(a.date)
+    })
+  }, [entries])
 
   const filtered = entries.filter((e) => {
+    if (statusFilter !== 'all' && e.sav_status !== statusFilter) return false
+    if (tourFilter === '') { if (e.tour_name) return false }
+    else if (tourFilter !== 'all' && e.tour_name !== tourFilter) return false
     if (!search.trim()) return true
     const q = search.toLowerCase()
     return (
@@ -3388,9 +3409,57 @@ function SavView() {
       <div className={`flex-shrink-0 ${selected ? 'hidden md:block md:w-[300px]' : 'w-full md:flex-1 md:max-w-xl'}`}>
         <div className="rounded-[20px] shadow-[0_2px_16px_rgba(0,0,0,0.06)] bg-white p-5">
           <h2 className="text-base font-semibold text-[#1a1a2e] mb-3">SAV — Suivi livraisons</h2>
+
+          {/* Status chips */}
+          <div className="flex flex-wrap gap-1.5 mb-3">
+            {([
+              { key: 'all',         label: 'Tous',        bg: '#f5f5f3', text: '#6b6b63', activeBg: '#1a1a2e', activeText: '#fff' },
+              { key: 'pending',     label: 'En attente',  bg: '#f5f5f3', text: '#6b6b63', activeBg: '#6b6b63', activeText: '#fff' },
+              { key: 'planned',     label: 'Planifiée',   bg: '#f5f5f3', text: '#6b6b63', activeBg: '#6d28d9', activeText: '#fff' },
+              { key: 'in_progress', label: 'En cours',    bg: '#f5f5f3', text: '#6b6b63', activeBg: '#1d4ed8', activeText: '#fff' },
+              { key: 'delivered',   label: 'Livrée',      bg: '#f5f5f3', text: '#6b6b63', activeBg: '#1a7f4b', activeText: '#fff' },
+            ] as const).map(({ key, label, activeBg, activeText }) => {
+              const count = key === 'all' ? entries.length : entries.filter(e => e.sav_status === key).length
+              const active = statusFilter === key
+              return (
+                <button
+                  key={key}
+                  onClick={() => setStatusFilter(key)}
+                  className="flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium transition-colors"
+                  style={{ background: active ? activeBg : '#f0f0ee', color: active ? activeText : '#6b6b63' }}
+                >
+                  {label}
+                  <span className="text-[10px] opacity-70">{count}</span>
+                </button>
+              )
+            })}
+          </div>
+
+          {/* Tour select */}
+          {availableTours.length > 0 && (
+            <select
+              value={tourFilter}
+              onChange={(e) => setTourFilter(e.target.value)}
+              className="w-full px-3 py-2 text-sm border border-[#e8e8e4] rounded-[10px] mb-3 outline-none focus:border-[#aeb0c9] bg-white text-[#1a1a2e]"
+            >
+              <option value="all">Toutes les tournées</option>
+              {availableTours.map((t) => {
+                const statusLabel = t.status === 'in_progress' ? ' 🟢 En cours' : t.status === 'planned' ? ' · Planifiée' : ''
+                const dateLabel = t.date ? ` · ${new Date(t.date + 'T00:00:00').toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' })}` : ''
+                return (
+                  <option key={t.name} value={t.name}>
+                    {t.name}{dateLabel}{statusLabel}
+                  </option>
+                )
+              })}
+              <option value="">— Sans tournée (en attente)</option>
+            </select>
+          )}
+
+          {/* Search */}
           <input
             type="text"
-            placeholder="Commande, client, ville..."
+            placeholder="Commande, client, ville, email..."
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             className="w-full px-3 py-2 text-sm border border-[#e8e8e4] rounded-[10px] mb-3 outline-none focus:border-[#aeb0c9]"
