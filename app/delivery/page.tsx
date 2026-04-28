@@ -79,6 +79,8 @@ interface TourStop {
   satisfaction_sent_at?: string | null
   comment?: string | null
   comment_at?: string | null
+  sav_note?: string | null
+  sav_note_at?: string | null
 }
 
 interface Tour {
@@ -1291,6 +1293,15 @@ function PlanificateurView() {
                                       </button>
                                       {stop.email_sent_at && (
                                         <Mail size={12} className="text-[#1a7f4b]" />
+                                      )}
+                                      {stop.sav_note && (
+                                        <div className="relative group/savnote">
+                                          <span className="p-0.5 rounded text-[#d97706] cursor-default text-[11px]">📝</span>
+                                          <div className="absolute right-0 bottom-full mb-1.5 w-56 bg-[#78350f] text-white text-[10px] rounded-[8px] p-2.5 hidden group-hover/savnote:block z-20 shadow-lg pointer-events-none">
+                                            <p className="font-semibold text-[#fde68a] mb-1">Note SAV</p>
+                                            <p className="leading-relaxed">{stop.sav_note}</p>
+                                          </div>
+                                        </div>
                                       )}
                                       {stop.comment && (
                                         <div className="relative group/comment">
@@ -2837,6 +2848,17 @@ function LivreurView() {
                 ))}
               </div>
             )}
+
+            {/* Note SAV — visible prominently for the driver */}
+            {currentStop.sav_note && (
+              <div className="mt-4 rounded-[16px] bg-[#fffbeb] border-2 border-[#fbbf24] px-4 py-3.5">
+                <div className="flex items-center gap-2 mb-1">
+                  <span className="text-base">📝</span>
+                  <span className="text-xs font-bold text-[#92400e] uppercase tracking-wide">Note SAV</span>
+                </div>
+                <p className="text-sm font-medium text-[#78350f] leading-snug">{currentStop.sav_note}</p>
+              </div>
+            )}
           </div>
 
           {/* Navigation arrows */}
@@ -3033,6 +3055,7 @@ interface SavEntry {
   stop_sequence: number
   delivered_at: string | null
   comment?: string | null
+  sav_note?: string | null
   sav_status: SavStatus
 }
 
@@ -3149,7 +3172,8 @@ function buildSavEntries(toursRaw: any[], ordersRaw: ShopifyOrder[]): SavEntry[]
         stops_before: stopsBefore, tour_stops_summary: tourStopsSummary,
         driver_name: tour.driver_name ?? null,
         stop_status: stop.status, stop_sequence: stop.sequence,
-        delivered_at: stop.delivered_at ?? null, comment: stop.comment ?? null, sav_status,
+        delivered_at: stop.delivered_at ?? null, comment: stop.comment ?? null,
+        sav_note: stop.sav_note ?? null, sav_status,
       })
     }
   }
@@ -3227,6 +3251,29 @@ function SavView() {
   const [emailOpen, setEmailOpen] = useState(false)
   const [statusFilter, setStatusFilter] = useState<SavStatus | 'all'>('all')
   const [tourFilter, setTourFilter]     = useState<string>('all')
+  const [editingNote, setEditingNote]   = useState(false)
+  const [noteValue, setNoteValue]       = useState('')
+  const [savingNote, setSavingNote]     = useState(false)
+
+  async function handleSaveNote(stopId: string) {
+    setSavingNote(true)
+    try {
+      const r = await fetch(`/api/delivery/stops/${stopId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sav_note: noteValue.trim() || null }),
+      })
+      if (!r.ok) throw new Error(await r.text())
+      const note = noteValue.trim() || null
+      setEntries(prev => prev.map(e => e.id === stopId ? { ...e, sav_note: note } : e))
+      setSelected(prev => prev?.id === stopId ? { ...prev, sav_note: note } : prev)
+      setEditingNote(false)
+    } catch (e) {
+      console.error(e)
+    } finally {
+      setSavingNote(false)
+    }
+  }
 
   // Unique tours from entries, sorted by planned_date desc
   const availableTours = useMemo(() => {
@@ -3269,6 +3316,8 @@ function SavView() {
     setSelected(entry)
     setCopied(false)
     setEmailOpen(false)
+    setEditingNote(false)
+    setNoteValue(entry.sav_note ?? '')
   }
 
   // Build live tour widgets from entries (updated by polling)
@@ -3511,12 +3560,17 @@ function SavView() {
                   >
                     <div className="flex items-center justify-between gap-1.5 mb-0.5">
                       <span className="font-mono text-xs font-bold text-[#1a1a2e]">{entry.order_name}</span>
-                      <span
-                        className="px-1.5 py-0.5 rounded-full text-[10px] font-medium whitespace-nowrap flex-shrink-0"
-                        style={{ backgroundColor: cfg.bg, color: cfg.text }}
-                      >
-                        {cfg.label}
-                      </span>
+                      <div className="flex items-center gap-1 flex-shrink-0">
+                        {entry.sav_note && (
+                          <span title={entry.sav_note} className="w-4 h-4 rounded-full bg-[#fef3c7] text-[#d97706] flex items-center justify-center text-[9px]">📝</span>
+                        )}
+                        <span
+                          className="px-1.5 py-0.5 rounded-full text-[10px] font-medium whitespace-nowrap"
+                          style={{ backgroundColor: cfg.bg, color: cfg.text }}
+                        >
+                          {cfg.label}
+                        </span>
+                      </div>
                     </div>
                     <div className="text-xs text-[#6b6b63] truncate">{entry.customer_name} · {entry.city}</div>
                     {entry.tour_name && (
@@ -3725,6 +3779,58 @@ function SavView() {
                   <p className="text-xs text-[#9b9b93]">—</p>
                 )}
               </div>
+
+              {/* ── Note SAV pour le livreur ── */}
+              {selected.stop_status !== null && (
+                <div>
+                  <div className="flex items-center justify-between mb-1.5">
+                    <p className="text-[10px] font-semibold uppercase tracking-[0.08em] text-[#9b9b93]">Note pour le livreur</p>
+                    {!editingNote && (
+                      <button
+                        onClick={() => { setNoteValue(selected.sav_note ?? ''); setEditingNote(true) }}
+                        className="text-[10px] font-medium text-[#d97706] hover:text-[#b45309] transition-colors"
+                      >
+                        {selected.sav_note ? 'Modifier' : '+ Ajouter'}
+                      </button>
+                    )}
+                  </div>
+                  {editingNote ? (
+                    <div className="space-y-2">
+                      <textarea
+                        value={noteValue}
+                        onChange={(e) => setNoteValue(e.target.value)}
+                        placeholder="Ex : veut être livré uniquement le matin, code portail A1234..."
+                        className="w-full px-3 py-2.5 text-sm border border-[#fcd34d] rounded-[12px] outline-none focus:border-[#f59e0b] resize-none bg-[#fffbeb]"
+                        rows={3}
+                        autoFocus
+                      />
+                      <div className="flex gap-2">
+                        <button
+                          onClick={() => setEditingNote(false)}
+                          className="flex-1 py-2 rounded-[10px] border border-[#e8e8e4] text-xs font-medium text-[#6b6b63]"
+                        >
+                          Annuler
+                        </button>
+                        <button
+                          onClick={() => handleSaveNote(selected.id)}
+                          disabled={savingNote}
+                          className="flex-1 py-2 rounded-[10px] bg-[#d97706] text-white text-xs font-semibold disabled:opacity-50"
+                        >
+                          {savingNote ? 'Enregistrement...' : 'Enregistrer'}
+                        </button>
+                      </div>
+                    </div>
+                  ) : selected.sav_note ? (
+                    <div className="rounded-[12px] bg-[#fffbeb] border border-[#fde68a] px-3 py-2.5">
+                      <p className="text-sm text-[#92400e]">📝 {selected.sav_note}</p>
+                    </div>
+                  ) : (
+                    <div className="rounded-[12px] bg-[#fafaf8] border border-dashed border-[#e8e8e4] px-3 py-2 text-center">
+                      <p className="text-xs text-[#9b9b93]">Aucune note — cliquez sur "+ Ajouter"</p>
+                    </div>
+                  )}
+                </div>
+              )}
 
               {/* ── Commentaire livreur ── */}
               {selected.comment && (
