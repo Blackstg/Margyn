@@ -3279,16 +3279,23 @@ function SavView() {
             const total      = rep.tour_total_stops
             const done       = rep.tour_delivered_stops
             const pct        = total > 0 ? Math.round((done / total) * 100) : 0
-            // "Current" stop = first non-delivered stop that comes AFTER the last delivered
-            // stop in the sorted array. This handles drivers who skip a stop and come back
-            // to it later — we show where they physically ARE, not the lowest sequence number.
-            const lastDeliveredIdx = stops.reduce((max, s, i) => s.status === 'delivered' ? i : max, -1)
+            // "Current" stop = first pending stop (not delivered, not failed) that comes
+            // AFTER the most recently delivered stop, anchored by delivered_at timestamp.
+            // Using delivered_at (not sequence position) correctly handles drivers who
+            // deliver stops out of planned order.
+            const lastDeliveredByTime = stops
+              .filter(s => s.delivered_at)
+              .sort((a, b) => (b.delivered_at ?? '') > (a.delivered_at ?? '') ? 1 : -1)[0] ?? null
+            const lastDeliveredPos = lastDeliveredByTime
+              ? stops.findIndex(s => s === lastDeliveredByTime)
+              : -1
+            const isPending = (s: { status: string }) => s.status !== 'delivered' && s.status !== 'failed'
             const currentIdx = (() => {
-              if (lastDeliveredIdx >= 0) {
-                const afterLast = stops.findIndex((s, i) => i > lastDeliveredIdx && s.status !== 'delivered')
-                if (afterLast !== -1) return afterLast
+              if (lastDeliveredPos >= 0) {
+                const after = stops.findIndex((s, i) => i > lastDeliveredPos && isPending(s))
+                if (after !== -1) return after
               }
-              return stops.findIndex(s => s.status !== 'delivered')
+              return stops.findIndex(isPending)
             })()
             const weekNum = rep.tour_planned_date ? getISOWeekNum(rep.tour_planned_date) : null
 
@@ -3351,7 +3358,7 @@ function SavView() {
                       {stops.map((s, i) => {
                         const isDelivered = s.status === 'delivered'
                         const isFailed    = s.status === 'failed'
-                        const isCurrent   = i === currentIdx
+                        const isCurrent   = i === currentIdx && !isFailed && !isDelivered
                         return (
                           <div key={i} className="relative flex flex-col items-center flex-1 pt-0">
                             <div className="relative flex items-center justify-center">
