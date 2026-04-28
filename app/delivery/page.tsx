@@ -3106,18 +3106,17 @@ function buildSavEntries(toursRaw: any[], ordersRaw: ShopifyOrder[]): SavEntry[]
     const tourTotal    = stops.length
     const tourDelivered = stops.filter((s: TourStop) => s.status === 'delivered').length
     const sortedStops  = [...stops].sort((a: TourStop, b: TourStop) => a.sequence - b.sequence)
-    // Build summary in actual delivery order:
-    //   1. Delivered stops sorted by delivered_at ASC (real validation order)
-    //   2. Failed + pending stops sorted by sequence (planned order for what's left)
-    // This ensures the green bar and dot position match what Khalid actually did,
-    // even when he delivers stops out of planned sequence.
+    // Build summary in actual validation order:
+    //   1. Delivered + failed stops sorted by delivered_at ASC (real chronological order)
+    //      — failed stops now also receive delivered_at when marked failed (see PATCH handler)
+    //   2. Pending stops sorted by sequence (planned order for what's left)
     const tourStopsSummary: SavStopSummary[] = [
       ...stops
-        .filter((s: TourStop) => s.status === 'delivered')
+        .filter((s: TourStop) => s.status === 'delivered' || s.status === 'failed')
         .sort((a: TourStop, b: TourStop) =>
           (a.delivered_at ?? '').localeCompare(b.delivered_at ?? '')),
       ...stops
-        .filter((s: TourStop) => s.status !== 'delivered')
+        .filter((s: TourStop) => s.status === 'pending')
         .sort((a: TourStop, b: TourStop) => a.sequence - b.sequence),
     ].map((s: TourStop) => ({
       city: s.city, order_name: s.order_name, status: s.status,

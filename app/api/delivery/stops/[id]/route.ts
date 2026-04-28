@@ -184,7 +184,7 @@ export async function PATCH(
     const updates: Record<string, unknown> = {}
     if (status !== undefined) {
       updates.status = status
-      if (status === 'delivered') {
+      if (status === 'delivered' || status === 'failed') {
         updates.delivered_at = new Date().toISOString()
       }
     }
