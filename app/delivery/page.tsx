@@ -3826,7 +3826,7 @@ function SavView() {
                     </div>
                   ) : (
                     <div className="rounded-[12px] bg-[#fafaf8] border border-dashed border-[#e8e8e4] px-3 py-2 text-center">
-                      <p className="text-xs text-[#9b9b93]">Aucune note — cliquez sur "+ Ajouter"</p>
+                      <p className="text-xs text-[#9b9b93]">Aucune note — cliquez sur &ldquo;+ Ajouter&rdquo;</p>
                     </div>
                   )}
                 </div>
