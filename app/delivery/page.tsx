@@ -1883,6 +1883,29 @@ function LivreurView() {
   const [nearbyZoneFilter, setNearbyZoneFilter] = useState<string>('all')
   const [addingOrderName, setAddingOrderName]   = useState<string | null>(null)
   const [addedToTourNames, setAddedToTourNames] = useState<Set<string>>(new Set())
+  // Complete tour
+  const [confirmComplete, setConfirmComplete] = useState(false)
+  const [completingTour, setCompletingTour]   = useState(false)
+
+  async function handleCompleteTour() {
+    if (!tour) return
+    setCompletingTour(true)
+    try {
+      const r = await fetch(`/api/delivery/tours/${tour.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: 'completed' }),
+      })
+      if (!r.ok) throw new Error(await r.text())
+      setConfirmComplete(false)
+      await fetchTours()
+    } catch (e) {
+      console.error(e)
+    } finally {
+      setCompletingTour(false)
+    }
+  }
+
   // Reorder screen state
   const [reorderStops, setReorderStops]     = useState<TourStop[]>([])
   const [reorderSaving, setReorderSaving]   = useState(false)
@@ -2162,6 +2185,41 @@ function LivreurView() {
                 <GripVertical size={20} strokeWidth={1.8} />
                 Réordonner les arrêts
               </button>
+
+              {/* Terminer la tournée */}
+              {tour.status !== 'completed' && (
+                confirmComplete ? (
+                  <div className="rounded-[16px] bg-[#7f1d1d]/40 border border-red-400/30 p-4 space-y-3">
+                    <p className="text-white text-sm font-semibold text-center">Terminer et archiver cette tournée ?</p>
+                    <p className="text-white/60 text-xs text-center">Cette action est définitive. La tournée passera en statut &ldquo;Terminée&rdquo;.</p>
+                    <div className="flex gap-2">
+                      <button
+                        onClick={() => setConfirmComplete(false)}
+                        className="flex-1 py-3 rounded-[12px] border border-white/20 text-white/70 text-sm font-medium active:bg-white/10"
+                      >
+                        Annuler
+                      </button>
+                      <button
+                        onClick={handleCompleteTour}
+                        disabled={completingTour}
+                        className="flex-1 py-3 rounded-[12px] bg-red-500 text-white text-sm font-bold disabled:opacity-50 active:bg-red-600"
+                      >
+                        {completingTour ? 'En cours...' : 'Confirmer'}
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <button
+                    onClick={() => setConfirmComplete(true)}
+                    className="w-full flex items-center justify-center gap-3 py-4 rounded-[16px] border border-red-400/40 text-red-400 font-semibold text-base active:bg-red-400/10 transition-colors"
+                  >
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <polyline points="9 11 12 14 22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/>
+                    </svg>
+                    Terminer la tournée
+                  </button>
+                )
+              )}
             </div>
           </div>
         ) : (
