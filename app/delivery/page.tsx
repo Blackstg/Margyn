@@ -1269,7 +1269,7 @@ function PlanificateurView() {
                                     </span>
                                     <div className="flex-1 min-w-0">
                                       <div className="font-medium text-[#1a1a2e]">{stop.order_name}</div>
-                                      <div className="text-[#6b6b63]">{stop.customer_name} · {stop.city}</div>
+                                      <div className="text-[#6b6b63]">{stop.customer_name} · {stop.zip} {stop.city}</div>
                                       {stop.panel_details?.length > 0 && (
                                         <div className="mt-1 text-[10px] text-[#6b6b63] space-y-0.5">
                                           {stop.panel_details.map((item, i) => (
