@@ -3254,22 +3254,25 @@ function SavView() {
   const [editingNote, setEditingNote]   = useState(false)
   const [noteValue, setNoteValue]       = useState('')
   const [savingNote, setSavingNote]     = useState(false)
+  const [noteError, setNoteError]       = useState<string | null>(null)
 
   async function handleSaveNote(stopId: string) {
     setSavingNote(true)
+    setNoteError(null)
     try {
       const r = await fetch(`/api/delivery/stops/${stopId}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ sav_note: noteValue.trim() || null }),
       })
-      if (!r.ok) throw new Error(await r.text())
+      const data = await r.json()
+      if (!r.ok) throw new Error(data.error ?? `Erreur ${r.status}`)
       const note = noteValue.trim() || null
       setEntries(prev => prev.map(e => e.id === stopId ? { ...e, sav_note: note } : e))
       setSelected(prev => prev?.id === stopId ? { ...prev, sav_note: note } : prev)
       setEditingNote(false)
     } catch (e) {
-      console.error(e)
+      setNoteError(e instanceof Error ? e.message : 'Erreur inconnue')
     } finally {
       setSavingNote(false)
     }
@@ -3806,7 +3809,7 @@ function SavView() {
                       />
                       <div className="flex gap-2">
                         <button
-                          onClick={() => setEditingNote(false)}
+                          onClick={() => { setEditingNote(false); setNoteError(null) }}
                           className="flex-1 py-2 rounded-[10px] border border-[#e8e8e4] text-xs font-medium text-[#6b6b63]"
                         >
                           Annuler
@@ -3819,6 +3822,9 @@ function SavView() {
                           {savingNote ? 'Enregistrement...' : 'Enregistrer'}
                         </button>
                       </div>
+                      {noteError && (
+                        <p className="text-xs text-[#dc2626] bg-[#fef2f2] border border-[#fecaca] rounded-[8px] px-2.5 py-1.5">{noteError}</p>
+                      )}
                     </div>
                   ) : selected.sav_note ? (
                     <div className="rounded-[12px] bg-[#fffbeb] border border-[#fde68a] px-3 py-2.5">
