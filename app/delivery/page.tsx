@@ -3266,7 +3266,11 @@ function SavView() {
         body: JSON.stringify({ sav_note: noteValue.trim() || null }),
       })
       const data = await r.json()
-      if (!r.ok) throw new Error(data.error ?? `Erreur ${r.status}`)
+      if (!r.ok) {
+        const err = data.error
+        const msg = typeof err === 'string' ? err : err?.message ?? JSON.stringify(err) ?? `Erreur ${r.status}`
+        throw new Error(msg)
+      }
       const note = noteValue.trim() || null
       setEntries(prev => prev.map(e => e.id === stopId ? { ...e, sav_note: note } : e))
       setSelected(prev => prev?.id === stopId ? { ...prev, sav_note: note } : prev)
