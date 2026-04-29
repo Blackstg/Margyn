@@ -25,34 +25,30 @@ const panelSlots   = (t: string, qty: number) => {
 }
 
 interface ShopifyLineItem {
-  id:            string
-  title:         string
-  variant_title: string | null
-  quantity:      number
-  sku:           string
-  variant_id:    number | null
+  id:               string
+  title:            string
+  variant_title:    string | null
+  quantity:         number
+  current_quantity: number  // remaining after refunds + fulfillments — use this
+  sku:              string
+  variant_id:       number | null
 }
-
-interface ShopifyFulfillmentLineItem { id: string; quantity: number }
-interface ShopifyFulfillment { id: string; status: string; line_items: ShopifyFulfillmentLineItem[] }
 
 interface ShopifyOrder {
   id:           string
   name:         string
   line_items:   ShopifyLineItem[]
-  fulfillments: ShopifyFulfillment[]
+  fulfillments: never[]  // kept for API compat but not needed
 }
 
+// current_quantity is provided by Shopify and already accounts for both
+// partial fulfillments AND refunds. Using it avoids the bug where a
+// refund (e.g. qty 5 → 4) was ignored because it doesn't appear in
+// fulfillments[], only in refunds[].
 function remainingLineItems(order: ShopifyOrder): ShopifyLineItem[] {
-  const fulfilledQty = new Map<string, number>()
-  for (const f of (order.fulfillments ?? [])) {
-    for (const li of (f.line_items ?? [])) {
-      fulfilledQty.set(li.id, (fulfilledQty.get(li.id) ?? 0) + li.quantity)
-    }
-  }
   return order.line_items
-    .map((li) => ({ ...li, quantity: li.quantity - (fulfilledQty.get(li.id) ?? 0) }))
-    .filter((li) => li.quantity > 0)
+    .map(li => ({ ...li, quantity: li.current_quantity }))
+    .filter(li => li.quantity > 0)
 }
 
 export async function POST(

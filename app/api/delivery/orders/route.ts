@@ -83,12 +83,13 @@ interface ShopifyFulfillment {
 }
 
 interface ShopifyLineItem {
-  id:            string
-  title:         string
-  variant_title: string | null
-  quantity:      number
-  sku:           string
-  variant_id:    number | null
+  id:               string
+  title:            string
+  variant_title:    string | null
+  quantity:         number
+  current_quantity: number  // remaining after refunds + fulfillments
+  sku:              string
+  variant_id:       number | null
 }
 
 interface ShopifyShippingAddress {
@@ -151,19 +152,15 @@ async function fetchShopifyOrders(shop: string, token: string): Promise<ShopifyO
   )
 }
 
-// ─── Remaining quantities after Shopify fulfillments ─────────────────────────
-// Bug 2 fix (Shopify side): for partially-shipped orders, compute which
-// line-item quantities haven't been fulfilled yet.
+// ─── Remaining quantities ─────────────────────────────────────────────────────
+// current_quantity is provided by Shopify and already accounts for both
+// partial fulfillments AND refunds. Using it avoids the bug where a refund
+// (e.g. 5 → 4 panels) was invisible because refunds only appear in
+// refunds[], not fulfillments[].
 
 function remainingLineItems(order: ShopifyOrder): ShopifyLineItem[] {
-  const fulfilledQty = new Map<string, number>()
-  for (const f of (order.fulfillments ?? [])) {
-    for (const li of (f.line_items ?? [])) {
-      fulfilledQty.set(li.id, (fulfilledQty.get(li.id) ?? 0) + li.quantity)
-    }
-  }
   return order.line_items
-    .map((li) => ({ ...li, quantity: li.quantity - (fulfilledQty.get(li.id) ?? 0) }))
+    .map((li) => ({ ...li, quantity: li.current_quantity }))
     .filter((li) => li.quantity > 0)
 }
 
