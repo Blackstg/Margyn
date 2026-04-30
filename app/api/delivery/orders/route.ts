@@ -39,7 +39,7 @@ function detectZone(zip: string): Zone {
 }
 
 // ─── Orders to log for diagnostic purposes ───────────────────────────────────
-const DEBUG_ORDER_NAMES = new Set(['#9997', '#9917', '#9767', '#9759', '#9740', '#9728', '#9718'])
+const DEBUG_ORDER_NAMES = new Set(['#10009', '#9997', '#9917', '#9767', '#9759', '#9740', '#9728', '#9718'])
 
 // ─── Internal / sample order detection ───────────────────────────────────────
 // Bug 1 fix: filter orders tagged "echantillons"/"interne" or belonging to Bowa/Steero staff
