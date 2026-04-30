@@ -10,7 +10,7 @@ export interface SavStop {
   zip: string
   customer_name: string
   order_name?: string
-  status: 'pending' | 'delivered' | 'failed'
+  status: 'pending' | 'delivered' | 'failed' | 'partial'
   delivered_at: string | null
 }
 
@@ -37,7 +37,7 @@ async function geocodeAddress(address: string, token: string): Promise<[number, 
  * Mapbox sets transform: translate3d(...) directly on the element passed as `element`.
  * Never modify that element's transform — use a child `inner` for animations instead.
  */
-function makeStopMarker(index: number, status: 'pending' | 'delivered' | 'failed'): HTMLElement {
+function makeStopMarker(index: number, status: 'pending' | 'delivered' | 'failed' | 'partial'): HTMLElement {
   const isDelivered = status === 'delivered'
   const isFailed    = status === 'failed'
 

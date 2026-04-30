@@ -3604,6 +3604,8 @@ function buildSavEmail(entry: SavEntry): string {
         : '?'
       return `Bonjour ${prenom},\n\nVotre commande ${ref} a bien été livrée le ${dateStr}. Nous espérons que vous êtes satisfait(e) de votre achat. N'hésitez pas à nous contacter pour toute question.\n\nCordialement,\nL'équipe Bowa`
     }
+    case 'partial':
+      return `Bonjour ${prenom},\n\nNotre livreur a pu déposer une partie de votre commande ${ref}. Les articles manquants seront reprogrammés dès que possible. Nous vous contacterons pour convenir d'une nouvelle date de livraison.\n\nToutes nos excuses pour la gêne occasionnée.\n\nCordialement,\nL'équipe Bowa`
   }
 }
 

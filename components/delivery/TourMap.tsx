@@ -19,7 +19,7 @@ interface MapStop {
   city: string
   zip: string
   sequence: number
-  status: 'pending' | 'delivered' | 'failed'
+  status: 'pending' | 'delivered' | 'failed' | 'partial'
   panel_details?: PanelItem[]
 }
 
