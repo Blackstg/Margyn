@@ -210,6 +210,7 @@ function PlanificateurView() {
   const [selectedOrders, setSelectedOrders] = useState<Set<string>>(new Set())
   const [zoneFilter, setZoneFilter] = useState<'all' | Zone>('all')
   const [preorderFilter, setPreorderFilter] = useState(false)
+  const [laPosteFilter,  setLaPosteFilter]  = useState(false)
   const [search, setSearch] = useState('')
   const [showNewTour, setShowNewTour] = useState(false)
   const [newTourForm, setNewTourForm] = useState({ name: '', zone: 'mixte', driver_name: '', planned_date: '' })
@@ -334,6 +335,7 @@ function PlanificateurView() {
     .filter((o) => {
       if (zoneFilter !== 'all' && o.zone !== zoneFilter) return false
       if (preorderFilter && !o.is_preorder) return false
+      if (laPosteFilter  && !o.is_accessory_only) return false
       if (search) {
         const q = search.toLowerCase()
         if (
@@ -713,6 +715,16 @@ function PlanificateurView() {
                 }`}
               >
                 Précommandes
+              </button>
+              <button
+                onClick={() => setLaPosteFilter((v) => !v)}
+                className={`px-3 py-1 rounded-full text-xs font-medium transition-all ${
+                  laPosteFilter
+                    ? 'bg-[#e0f2fe] text-[#0369a1] ring-1 ring-[#7dd3fc]'
+                    : 'bg-[#f5f5f3] text-[#6b6b63] hover:bg-[#e8e8e4]'
+                }`}
+              >
+                📦 La Poste
               </button>
             </div>
 
