@@ -82,6 +82,8 @@ interface TourStop {
   comment_at?: string | null
   sav_note?: string | null
   sav_note_at?: string | null
+  signature_url?: string | null
+  photo_url?: string | null
 }
 
 interface Tour {
@@ -1946,9 +1948,16 @@ function LivreurView() {
   const [marking, setMarking] = useState(false)
   const [checkedItems, setCheckedItems] = useState<Set<string>>(new Set())
   const [etaMap, setEtaMap] = useState<Map<string, string>>(new Map())
-  const [commentMode, setCommentMode] = useState<'none' | 'delivered' | 'failed'>('none')
+  const [commentMode, setCommentMode] = useState<'none' | 'proof' | 'failed'>('none')
   const [pendingComment, setPendingComment] = useState('')
   const [selectedChip, setSelectedChip] = useState('')
+  // Proof capture (signature + photo)
+  const signatureCanvasRef = useRef<HTMLCanvasElement>(null)
+  const sigDrawing = useRef(false)
+  const [hasSignature, setHasSignature] = useState(false)
+  const [proofPhoto, setProofPhoto] = useState<File | null>(null)
+  const [proofPhotoPreview, setProofPhotoPreview] = useState<string | null>(null)
+  const [uploadingProof, setUploadingProof] = useState(false)
   const coordsCache = useRef<Map<string, [number, number]>>(new Map())
   const [navSheet, setNavSheet] = useState(false)
   const [nearbyOrders, setNearbyOrders]   = useState<ShopifyOrder[]>([])
@@ -2077,7 +2086,23 @@ function LivreurView() {
     setCommentMode('none')
     setPendingComment('')
     setSelectedChip('')
-  }, [stopIdx])
+    clearSignature()
+    setProofPhoto(null)
+    setProofPhotoPreview(null)
+  }, [stopIdx]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Init canvas context style whenever proof mode opens
+  useEffect(() => {
+    if (commentMode !== 'proof') return
+    const canvas = signatureCanvasRef.current
+    if (!canvas) return
+    const ctx = canvas.getContext('2d')
+    if (!ctx) return
+    ctx.strokeStyle = '#1a1a2e'
+    ctx.lineWidth   = 2.5
+    ctx.lineCap     = 'round'
+    ctx.lineJoin    = 'round'
+  }, [commentMode])
 
   // Loading order: stops in REVERSE delivery order (last stop loaded first = goes deepest in truck)
   // Each stop shows its own items so the driver knows what to load for each destination
@@ -2100,25 +2125,108 @@ function LivreurView() {
     return `https://www.google.com/maps/dir/${encodeURIComponent(DEPOT)}/${waypoints.join('/')}`
   })()
 
-  async function handleMarkDelivered(comment?: string) {
+  async function handleMarkDelivered(opts: {
+    comment?: string
+    signature_url?: string
+    photo_url?: string
+  } = {}) {
     if (!currentStop) return
     setMarking(true)
     await fetch(`/api/delivery/stops/${currentStop.id}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ status: 'delivered', ...(comment ? { comment } : {}) }),
+      body: JSON.stringify({ status: 'delivered', ...opts }),
     })
     await fetchTours()
     setMarking(false)
-    // Auto-advance: use functional updater so we read the freshly-set tours state
+    // Auto-advance
     setTours(latestTours => {
       const latestTour = latestTours.find(t => t.id === selectedTourId)
       if (!latestTour) return latestTours
       const fresh = [...latestTour.stops].sort((a, b) => a.sequence - b.sequence)
       const nextIdx = fresh.findIndex((s, i) => i > stopIdx && s.status !== 'delivered' && s.status !== 'failed')
       if (nextIdx !== -1) setStopIdx(nextIdx)
-      return latestTours  // no mutation
+      return latestTours
     })
+  }
+
+  function clearSignature() {
+    const canvas = signatureCanvasRef.current
+    if (!canvas) return
+    const ctx = canvas.getContext('2d')
+    if (!ctx) return
+    ctx.clearRect(0, 0, canvas.width, canvas.height)
+    setHasSignature(false)
+  }
+
+  function getSigPos(e: React.PointerEvent<HTMLCanvasElement>) {
+    const canvas = e.currentTarget
+    const rect   = canvas.getBoundingClientRect()
+    return {
+      x: (e.clientX - rect.left) * (canvas.width  / rect.width),
+      y: (e.clientY - rect.top)  * (canvas.height / rect.height),
+    }
+  }
+
+  function onSigPointerDown(e: React.PointerEvent<HTMLCanvasElement>) {
+    e.currentTarget.setPointerCapture(e.pointerId)
+    const ctx = signatureCanvasRef.current?.getContext('2d')
+    if (!ctx) return
+    const { x, y } = getSigPos(e)
+    ctx.beginPath()
+    ctx.moveTo(x, y)
+    sigDrawing.current = true
+    setHasSignature(true)
+  }
+
+  function onSigPointerMove(e: React.PointerEvent<HTMLCanvasElement>) {
+    if (!sigDrawing.current) return
+    const ctx = signatureCanvasRef.current?.getContext('2d')
+    if (!ctx) return
+    const { x, y } = getSigPos(e)
+    ctx.lineTo(x, y)
+    ctx.stroke()
+  }
+
+  function onSigPointerUp() { sigDrawing.current = false }
+
+  async function handleConfirmDelivery() {
+    if (!currentStop) return
+    setUploadingProof(true)
+    try {
+      const form = new FormData()
+      if (hasSignature && signatureCanvasRef.current) {
+        const blob = await new Promise<Blob | null>(resolve =>
+          signatureCanvasRef.current!.toBlob(resolve, 'image/png')
+        )
+        if (blob) form.append('signature', blob, 'signature.png')
+      }
+      if (proofPhoto) form.append('photo', proofPhoto, proofPhoto.name)
+
+      let signatureUrl: string | undefined
+      let photoUrl: string | undefined
+      if (form.has('signature') || form.has('photo')) {
+        const res  = await fetch(`/api/delivery/stops/${currentStop.id}/upload`, { method: 'POST', body: form })
+        const data = await res.json()
+        signatureUrl = data.signature_url
+        photoUrl     = data.photo_url
+      }
+
+      await handleMarkDelivered({
+        ...(pendingComment.trim() ? { comment: pendingComment.trim() } : {}),
+        ...(signatureUrl ? { signature_url: signatureUrl } : {}),
+        ...(photoUrl     ? { photo_url: photoUrl }         : {}),
+      })
+
+      // Reset proof state
+      clearSignature()
+      setProofPhoto(null)
+      setProofPhotoPreview(null)
+      setPendingComment('')
+      setCommentMode('none')
+    } finally {
+      setUploadingProof(false)
+    }
   }
 
   async function handleMarkFailed(comment: string) {
@@ -3039,6 +3147,22 @@ function LivreurView() {
                   <p className="text-xs text-[#1a7f4b]">💬 {currentStop.comment}</p>
                 </div>
               )}
+              {(currentStop.signature_url || currentStop.photo_url) && (
+                <div className="flex gap-2">
+                  {currentStop.signature_url && (
+                    <a href={currentStop.signature_url} target="_blank" rel="noreferrer" className="flex-1">
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img src={currentStop.signature_url} alt="Signature" className="w-full h-16 object-contain rounded-[10px] border border-[#bbf7d0] bg-white" />
+                    </a>
+                  )}
+                  {currentStop.photo_url && (
+                    <a href={currentStop.photo_url} target="_blank" rel="noreferrer" className="flex-1">
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img src={currentStop.photo_url} alt="Photo colis" className="w-full h-16 object-cover rounded-[10px] border border-[#bbf7d0]" />
+                    </a>
+                  )}
+                </div>
+              )}
             </>
           ) : currentStop.status === 'failed' ? (
             <>
@@ -3051,34 +3175,104 @@ function LivreurView() {
                 </div>
               )}
             </>
-          ) : commentMode === 'delivered' ? (
-            <div className="space-y-2">
-              <p className="text-sm font-semibold text-[#1a1a2e]">Commentaire <span className="text-[#9b9b93] font-normal">(optionnel)</span></p>
+          ) : commentMode === 'proof' ? (
+            <div className="space-y-3">
+              <p className="text-sm font-bold text-[#1a1a2e]">Preuve de livraison</p>
+
+              {/* Signature */}
+              <div>
+                <div className="flex items-center justify-between mb-1">
+                  <p className="text-xs font-semibold text-[#6b6b63] uppercase tracking-wide">Signature client</p>
+                  {hasSignature && (
+                    <button
+                      onClick={clearSignature}
+                      className="text-[10px] text-[#c2680a] font-medium px-2 py-0.5 rounded-full bg-[#fff7ed]"
+                    >
+                      Effacer
+                    </button>
+                  )}
+                </div>
+                <div className="rounded-[12px] border-2 border-dashed border-[#d1d5db] bg-white overflow-hidden">
+                  <canvas
+                    ref={signatureCanvasRef}
+                    width={600}
+                    height={180}
+                    style={{ width: '100%', height: '120px', touchAction: 'none', display: 'block', cursor: 'crosshair' }}
+                    onPointerDown={onSigPointerDown}
+                    onPointerMove={onSigPointerMove}
+                    onPointerUp={onSigPointerUp}
+                    onPointerLeave={onSigPointerUp}
+                  />
+                </div>
+                {!hasSignature && (
+                  <p className="text-center text-[10px] text-[#9b9b93] mt-1">Faites signer le client dans le cadre ci-dessus</p>
+                )}
+              </div>
+
+              {/* Photo */}
+              <div>
+                <p className="text-xs font-semibold text-[#6b6b63] uppercase tracking-wide mb-1">Photo du colis déposé</p>
+                {proofPhotoPreview ? (
+                  <div className="relative rounded-[12px] overflow-hidden">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img src={proofPhotoPreview} alt="Preuve" className="w-full max-h-40 object-cover" />
+                    <button
+                      onClick={() => { setProofPhoto(null); setProofPhotoPreview(null) }}
+                      className="absolute top-2 right-2 bg-black/50 rounded-full p-1 text-white"
+                    >
+                      <X size={14} />
+                    </button>
+                  </div>
+                ) : (
+                  <label className="flex items-center justify-center gap-2 w-full py-4 rounded-[12px] border-2 border-dashed border-[#d1d5db] bg-white cursor-pointer active:bg-[#f9fafb]">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-[#6b6b63]">
+                      <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/>
+                      <circle cx="12" cy="13" r="4"/>
+                    </svg>
+                    <span className="text-sm font-medium text-[#6b6b63]">Prendre une photo</span>
+                    <input
+                      type="file"
+                      accept="image/*"
+                      capture="environment"
+                      className="hidden"
+                      onChange={(e) => {
+                        const file = e.target.files?.[0] ?? null
+                        setProofPhoto(file)
+                        if (file) setProofPhotoPreview(URL.createObjectURL(file))
+                      }}
+                    />
+                  </label>
+                )}
+              </div>
+
+              {/* Optional comment */}
               <textarea
                 value={pendingComment}
                 onChange={(e) => setPendingComment(e.target.value)}
-                placeholder="Tout s'est bien passé..."
+                placeholder="Commentaire (optionnel)..."
                 className="w-full px-3 py-2.5 text-sm border border-[#e8e8e4] rounded-[12px] outline-none focus:border-[#aeb0c9] resize-none"
                 rows={2}
-                autoFocus
               />
+
               <div className="flex gap-2">
                 <button
-                  onClick={() => { setCommentMode('none'); setPendingComment('') }}
+                  onClick={() => {
+                    setCommentMode('none')
+                    setPendingComment('')
+                    clearSignature()
+                    setProofPhoto(null)
+                    setProofPhotoPreview(null)
+                  }}
                   className="flex-1 py-3 rounded-[14px] border border-[#e8e8e4] bg-white text-sm font-medium text-[#6b6b63]"
                 >
                   Annuler
                 </button>
                 <button
-                  onClick={() => {
-                    handleMarkDelivered(pendingComment.trim() || undefined)
-                    setCommentMode('none')
-                    setPendingComment('')
-                  }}
-                  disabled={marking}
+                  onClick={handleConfirmDelivery}
+                  disabled={uploadingProof || marking}
                   className="flex-[2] py-3 rounded-[14px] bg-[#6b21a8] text-white font-bold text-sm disabled:opacity-60 active:bg-[#7c3aed] transition-colors"
                 >
-                  {marking ? 'Enregistrement...' : 'Confirmer ✓'}
+                  {uploadingProof ? 'Envoi...' : marking ? 'Enregistrement...' : 'Confirmer ✓'}
                 </button>
               </div>
             </div>
@@ -3132,7 +3326,7 @@ function LivreurView() {
           ) : (
             <>
               <button
-                onClick={() => setCommentMode('delivered')}
+                onClick={() => setCommentMode('proof')}
                 disabled={marking}
                 className="w-full py-5 rounded-[16px] bg-[#6b21a8] text-white font-bold text-lg disabled:opacity-60 active:bg-[#7c3aed] transition-colors"
               >

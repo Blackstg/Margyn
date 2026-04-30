@@ -174,12 +174,14 @@ export async function PATCH(
 ) {
   try {
     const body = await req.json()
-    const { status, sequence, email_sent_at, comment, sav_note } = body as {
+    const { status, sequence, email_sent_at, comment, sav_note, signature_url, photo_url } = body as {
       status?: string
       sequence?: number
       email_sent_at?: string
       comment?: string
       sav_note?: string | null
+      signature_url?: string | null
+      photo_url?: string | null
     }
 
     const updates: Record<string, unknown> = {}
@@ -199,6 +201,8 @@ export async function PATCH(
       updates.sav_note = sav_note
       updates.sav_note_at = sav_note ? new Date().toISOString() : null
     }
+    if (signature_url !== undefined) updates.signature_url = signature_url
+    if (photo_url !== undefined)     updates.photo_url = photo_url
 
     const admin = getAdmin()
     const { data, error } = await admin
