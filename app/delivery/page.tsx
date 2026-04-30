@@ -3400,6 +3400,8 @@ interface SavEntry {
   delivered_at: string | null
   comment?: string | null
   sav_note?: string | null
+  signature_url?: string | null
+  photo_url?: string | null
   sav_status: SavStatus
 }
 
@@ -3517,7 +3519,10 @@ function buildSavEntries(toursRaw: any[], ordersRaw: ShopifyOrder[]): SavEntry[]
         driver_name: tour.driver_name ?? null,
         stop_status: stop.status, stop_sequence: stop.sequence,
         delivered_at: stop.delivered_at ?? null, comment: stop.comment ?? null,
-        sav_note: stop.sav_note ?? null, sav_status,
+        sav_note: stop.sav_note ?? null,
+        signature_url: stop.signature_url ?? null,
+        photo_url: stop.photo_url ?? null,
+        sav_status,
       })
     }
   }
@@ -4198,6 +4203,33 @@ function SavView() {
                     <p className={`text-xs ${selected.stop_status === 'failed' ? 'text-[#c2680a]' : 'text-[#1a7f4b]'}`}>
                       💬 {selected.comment}
                     </p>
+                  </div>
+                </div>
+              )}
+
+              {/* ── Preuve de livraison (signature + photo) ── */}
+              {(selected.signature_url || selected.photo_url) && (
+                <div>
+                  <p className="text-[10px] font-semibold uppercase tracking-[0.08em] text-[#9b9b93] mb-1.5">Preuve de livraison</p>
+                  <div className="flex gap-2">
+                    {selected.signature_url && (
+                      <a href={selected.signature_url} target="_blank" rel="noreferrer" className="flex-1 group">
+                        <div className="rounded-[10px] border border-[#bbf7d0] bg-white overflow-hidden">
+                          {/* eslint-disable-next-line @next/next/no-img-element */}
+                          <img src={selected.signature_url} alt="Signature" className="w-full h-20 object-contain p-1 group-hover:opacity-80 transition-opacity" />
+                          <p className="text-center text-[9px] text-[#6b6b63] pb-1">Signature</p>
+                        </div>
+                      </a>
+                    )}
+                    {selected.photo_url && (
+                      <a href={selected.photo_url} target="_blank" rel="noreferrer" className="flex-1 group">
+                        <div className="rounded-[10px] border border-[#bbf7d0] overflow-hidden">
+                          {/* eslint-disable-next-line @next/next/no-img-element */}
+                          <img src={selected.photo_url} alt="Photo colis" className="w-full h-20 object-cover group-hover:opacity-80 transition-opacity" />
+                          <p className="text-center text-[9px] text-[#6b6b63] py-1">Photo colis</p>
+                        </div>
+                      </a>
+                    )}
                   </div>
                 </div>
               )}
