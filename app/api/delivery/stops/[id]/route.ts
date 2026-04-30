@@ -174,7 +174,7 @@ export async function PATCH(
 ) {
   try {
     const body = await req.json()
-    const { status, sequence, email_sent_at, comment, sav_note, signature_url, photo_url } = body as {
+    const { status, sequence, email_sent_at, comment, sav_note, signature_url, photo_url, partial_delivered } = body as {
       status?: string
       sequence?: number
       email_sent_at?: string
@@ -182,15 +182,17 @@ export async function PATCH(
       sav_note?: string | null
       signature_url?: string | null
       photo_url?: string | null
+      partial_delivered?: { sku: string; title: string; qty_ordered: number; qty_delivered: number }[] | null
     }
 
     const updates: Record<string, unknown> = {}
     if (status !== undefined) {
       updates.status = status
-      if (status === 'delivered' || status === 'failed') {
+      if (status === 'delivered' || status === 'failed' || status === 'partial') {
         updates.delivered_at = new Date().toISOString()
       }
     }
+    if (partial_delivered !== undefined) updates.partial_delivered = partial_delivered
     if (sequence !== undefined) updates.sequence = sequence
     if (email_sent_at !== undefined) updates.email_sent_at = email_sent_at
     if (comment !== undefined) {
@@ -214,7 +216,7 @@ export async function PATCH(
 
     if (error) throw error
 
-    // Send satisfaction email when stop is marked delivered
+    // Send satisfaction email only on full delivery
     if (status === 'delivered' && data.email && !data.satisfaction_sent_at) {
       sendSatisfactionEmail(
         admin,

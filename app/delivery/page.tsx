@@ -24,7 +24,7 @@ const SavPositionMap = nextDynamic(() => import('@/components/delivery/SavPositi
 
 type Zone = 'nord-est' | 'nord-ouest' | 'sud-est' | 'sud-ouest'
 type TourStatus = 'draft' | 'planned' | 'in_progress' | 'completed' | 'cancelled'
-type StopStatus = 'pending' | 'delivered' | 'failed'
+type StopStatus = 'pending' | 'delivered' | 'failed' | 'partial'
 
 const ZONE_LABEL: Record<Zone, string> = {
   'nord-est':   'Nord-Est',
@@ -85,6 +85,7 @@ interface TourStop {
   sav_note_at?: string | null
   signature_url?: string | null
   photo_url?: string | null
+  partial_delivered?: { sku: string; title: string; qty_ordered: number; qty_delivered: number }[] | null
 }
 
 interface Tour {
@@ -1805,9 +1806,10 @@ function SortableStopItem({ stop, index }: { stop: TourStop; index: number }) {
       <span className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold shrink-0 ${
         stop.status === 'delivered' ? 'bg-[#1a7f4b] text-white' :
         stop.status === 'failed'    ? 'bg-[#f97316] text-white' :
+        stop.status === 'partial'   ? 'bg-[#d97706] text-white' :
         'bg-[#1a1a2e] text-white'
       }`}>
-        {stop.status === 'delivered' ? '✓' : stop.status === 'failed' ? '✕' : index + 1}
+        {stop.status === 'delivered' ? '✓' : stop.status === 'failed' ? '✕' : stop.status === 'partial' ? '~' : index + 1}
       </span>
 
       {/* Info */}
@@ -1949,7 +1951,7 @@ function LivreurView() {
   const [marking, setMarking] = useState(false)
   const [checkedItems, setCheckedItems] = useState<Set<string>>(new Set())
   const [etaMap, setEtaMap] = useState<Map<string, string>>(new Map())
-  const [commentMode, setCommentMode] = useState<'none' | 'proof' | 'failed'>('none')
+  const [commentMode, setCommentMode] = useState<'none' | 'proof' | 'partial' | 'failed'>('none')
   const [pendingComment, setPendingComment] = useState('')
   const [selectedChip, setSelectedChip] = useState('')
   // Proof capture (signature + photo)
@@ -1959,6 +1961,10 @@ function LivreurView() {
   const [proofPhoto, setProofPhoto] = useState<File | null>(null)
   const [proofPhotoPreview, setProofPhotoPreview] = useState<string | null>(null)
   const [uploadingProof, setUploadingProof] = useState(false)
+  // Partial delivery
+  const [partialQtys, setPartialQtys] = useState<Record<number, number>>({})
+  const [partialNote, setPartialNote] = useState('')
+  const [markingPartial, setMarkingPartial] = useState(false)
   const coordsCache = useRef<Map<string, [number, number]>>(new Map())
   const [navSheet, setNavSheet] = useState(false)
   const [nearbyOrders, setNearbyOrders]   = useState<ShopifyOrder[]>([])
@@ -2090,6 +2096,8 @@ function LivreurView() {
     clearSignature()
     setProofPhoto(null)
     setProofPhotoPreview(null)
+    setPartialQtys({})
+    setPartialNote('')
   }, [stopIdx]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Init canvas context style whenever proof mode opens
@@ -2228,6 +2236,40 @@ function LivreurView() {
     } finally {
       setUploadingProof(false)
     }
+  }
+
+  async function handleMarkPartial() {
+    if (!currentStop) return
+    setMarkingPartial(true)
+    const items = currentStop.panel_details ?? []
+    const partial_delivered = items.map((item, i) => ({
+      sku:           item.sku,
+      title:         item.title,
+      qty_ordered:   item.qty,
+      qty_delivered: partialQtys[i] ?? item.qty,
+    }))
+    await fetch(`/api/delivery/stops/${currentStop.id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        status: 'partial',
+        partial_delivered,
+        ...(partialNote.trim() ? { comment: partialNote.trim() } : {}),
+      }),
+    })
+    await fetchTours()
+    setMarkingPartial(false)
+    setCommentMode('none')
+    setPartialQtys({})
+    setPartialNote('')
+    setTours(latestTours => {
+      const latestTour = latestTours.find(t => t.id === selectedTourId)
+      if (!latestTour) return latestTours
+      const fresh = [...latestTour.stops].sort((a, b) => a.sequence - b.sequence)
+      const nextIdx = fresh.findIndex((s, i) => i > stopIdx && s.status !== 'delivered' && s.status !== 'failed' && s.status !== 'partial')
+      if (nextIdx !== -1) setStopIdx(nextIdx)
+      return latestTours
+    })
   }
 
   async function handleMarkFailed(comment: string) {
@@ -3046,7 +3088,8 @@ function LivreurView() {
               className={`h-1 flex-1 rounded-full cursor-pointer transition-all ${
                 i === stopIdx ? 'bg-[#1a1a2e]'
                 : s.status === 'delivered' ? 'bg-[#4ade80]'
-                : s.status === 'failed' ? 'bg-[#f97316]'
+                : s.status === 'failed'   ? 'bg-[#f97316]'
+                : s.status === 'partial'  ? 'bg-[#fbbf24]'
                 : 'bg-[#e8e8e4]'
               }`}
             />
@@ -3174,6 +3217,29 @@ function LivreurView() {
                 </div>
               )}
             </>
+          ) : currentStop.status === 'partial' ? (
+            <>
+              <div className="w-full py-4 rounded-[16px] bg-[#fef3c7] text-[#92400e] font-bold text-center text-base">
+                ⚠ Livraison partielle — à replanifier
+              </div>
+              {currentStop.partial_delivered && (
+                <div className="space-y-1">
+                  {currentStop.partial_delivered.map((item, i) => (
+                    <div key={i} className={`flex items-center gap-2 rounded-[10px] px-3 py-2 text-xs ${item.qty_delivered < item.qty_ordered ? 'bg-[#fff7ed] border border-[#fed7aa]' : 'bg-[#f5f5f3]'}`}>
+                      <span className="flex-1 truncate text-[#1a1a2e]">{item.title}</span>
+                      <span className={`font-semibold shrink-0 ${item.qty_delivered < item.qty_ordered ? 'text-[#c2680a]' : 'text-[#1a7f4b]'}`}>
+                        {item.qty_delivered}/{item.qty_ordered}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
+              {currentStop.comment && (
+                <div className="rounded-[12px] bg-[#fff7ed] border border-[#fed7aa] px-3 py-2">
+                  <p className="text-xs text-[#c2680a]">💬 {currentStop.comment}</p>
+                </div>
+              )}
+            </>
           ) : currentStop.status === 'failed' ? (
             <>
               <div className="w-full py-4 rounded-[16px] bg-[#fff7ed] text-[#c2680a] font-bold text-center text-lg">
@@ -3286,6 +3352,70 @@ function LivreurView() {
                 </button>
               </div>
             </div>
+          ) : commentMode === 'partial' ? (
+            <div className="space-y-3">
+              <p className="text-sm font-bold text-[#1a1a2e]">Livraison partielle — quantités livrées</p>
+              <div className="space-y-2">
+                {(currentStop.panel_details ?? []).map((item, i) => {
+                  const delivered = partialQtys[i] ?? item.qty
+                  const isShort   = delivered < item.qty
+                  return (
+                    <div key={i} className={`flex items-center gap-3 rounded-[12px] px-3 py-2.5 border ${isShort ? 'bg-[#fff7ed] border-[#fed7aa]' : 'bg-[#f5f5f3] border-transparent'}`}>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-medium text-[#1a1a2e] truncate">{item.title}</p>
+                        {item.sku && <p className="text-[10px] text-[#9b9b93] font-mono">{item.sku}</p>}
+                        {isShort && <p className="text-[10px] text-[#c2680a] font-semibold">Manque {item.qty - delivered}</p>}
+                      </div>
+                      <div className="flex items-center gap-2 shrink-0">
+                        <button
+                          onClick={() => setPartialQtys(q => ({ ...q, [i]: Math.max(0, (q[i] ?? item.qty) - 1) }))}
+                          disabled={delivered <= 0}
+                          className="w-8 h-8 rounded-full border border-[#e8e8e4] bg-white text-lg font-bold leading-none disabled:opacity-30 active:bg-[#f5f5f3] flex items-center justify-center"
+                        >−</button>
+                        <span className={`w-8 text-center text-base font-bold ${isShort ? 'text-[#c2680a]' : 'text-[#1a1a2e]'}`}>{delivered}</span>
+                        <button
+                          onClick={() => setPartialQtys(q => ({ ...q, [i]: Math.min(item.qty, (q[i] ?? item.qty) + 1) }))}
+                          disabled={delivered >= item.qty}
+                          className="w-8 h-8 rounded-full border border-[#e8e8e4] bg-white text-lg font-bold leading-none disabled:opacity-30 active:bg-[#f5f5f3] flex items-center justify-center"
+                        >+</button>
+                        <span className="text-xs text-[#9b9b93]">/{item.qty}</span>
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+              <div className="flex flex-wrap gap-1.5">
+                {['Article endommagé', 'Article manquant', 'Refus partiel', 'Autre'].map((chip) => (
+                  <button
+                    key={chip}
+                    onClick={() => setPartialNote(chip)}
+                    className={`px-3 py-1.5 rounded-full text-xs font-medium transition-all ${
+                      partialNote === chip ? 'bg-[#c2680a] text-white' : 'bg-[#fff7ed] text-[#c2680a] border border-[#fed7aa]'
+                    }`}
+                  >{chip}</button>
+                ))}
+              </div>
+              <textarea
+                value={partialNote}
+                onChange={(e) => setPartialNote(e.target.value)}
+                placeholder="Précisez la situation..."
+                className="w-full px-3 py-2.5 text-sm border border-[#e8e8e4] rounded-[12px] outline-none focus:border-[#aeb0c9] resize-none"
+                rows={2}
+              />
+              <div className="flex gap-2">
+                <button
+                  onClick={() => { setCommentMode('none'); setPartialQtys({}); setPartialNote('') }}
+                  className="flex-1 py-3 rounded-[14px] border border-[#e8e8e4] bg-white text-sm font-medium text-[#6b6b63]"
+                >Annuler</button>
+                <button
+                  onClick={handleMarkPartial}
+                  disabled={markingPartial || (currentStop.panel_details ?? []).every((item, i) => (partialQtys[i] ?? item.qty) === item.qty)}
+                  className="flex-[2] py-3 rounded-[14px] bg-[#c2680a] text-white font-bold text-sm disabled:opacity-50 active:bg-[#b45309] transition-colors"
+                >
+                  {markingPartial ? 'Enregistrement...' : 'Confirmer livraison partielle'}
+                </button>
+              </div>
+            </div>
           ) : commentMode === 'failed' ? (
             <div className="space-y-2">
               <p className="text-sm font-semibold text-[#1a1a2e]">Raison <span className="text-[#c7293a]">*</span></p>
@@ -3343,9 +3473,20 @@ function LivreurView() {
                 Marquer comme livré
               </button>
               <button
+                onClick={() => {
+                  const items = currentStop?.panel_details ?? []
+                  setPartialQtys(Object.fromEntries(items.map((item, i) => [i, item.qty])))
+                  setCommentMode('partial')
+                }}
+                disabled={marking || !currentStop?.panel_details?.length}
+                className="w-full py-3 rounded-[16px] border border-[#fed7aa] bg-[#fff7ed] text-[#c2680a] font-semibold text-sm disabled:opacity-40 active:bg-[#fef3c7] transition-colors"
+              >
+                Livraison partielle
+              </button>
+              <button
                 onClick={() => setCommentMode('failed')}
                 disabled={marking}
-                className="w-full py-3 rounded-[16px] border border-[#e8e8e4] bg-white text-[#c2680a] font-semibold text-sm disabled:opacity-60 active:bg-[#fff7ed] transition-colors"
+                className="w-full py-3 rounded-[16px] border border-[#e8e8e4] bg-white text-[#6b6b63] font-semibold text-sm disabled:opacity-60 active:bg-[#f5f5f3] transition-colors"
               >
                 Non livré — reporter
               </button>
@@ -3360,7 +3501,7 @@ function LivreurView() {
 
 // ─── SAV View ─────────────────────────────────────────────────────────────────
 
-type SavStatus = 'pending' | 'planned' | 'in_progress' | 'delivered'
+type SavStatus = 'pending' | 'planned' | 'in_progress' | 'delivered' | 'partial'
 
 // SAV-only info — never included in email templates
 const DRIVER_PHONES: Record<string, string> = {
@@ -3402,6 +3543,7 @@ interface SavEntry {
   sav_note?: string | null
   signature_url?: string | null
   photo_url?: string | null
+  partial_delivered?: { sku: string; title: string; qty_ordered: number; qty_delivered: number }[] | null
   sav_status: SavStatus
 }
 
@@ -3410,6 +3552,7 @@ const SAV_STATUS_CONFIG: Record<SavStatus, { label: string; bg: string; text: st
   planned:     { label: 'Planifiée',         bg: '#ede9fe', text: '#6d28d9' },
   in_progress: { label: 'En livraison',      bg: '#dbeafe', text: '#1d4ed8' },
   delivered:   { label: 'Livrée',            bg: '#d1fae5', text: '#1a7f4b' },
+  partial:     { label: 'Partielle',         bg: '#fef3c7', text: '#92400e' },
 }
 
 const TIMELINE_STEPS: { label: string; statuses: SavStatus[] }[] = [
@@ -3500,6 +3643,7 @@ function buildSavEntries(toursRaw: any[], ordersRaw: ShopifyOrder[]): SavEntry[]
     for (const stop of stops) {
       let sav_status: SavStatus
       if (stop.status === 'delivered')        sav_status = 'delivered'
+      else if (stop.status === 'partial')     sav_status = 'partial'
       else if (tour.status === 'in_progress') sav_status = 'in_progress'
       else                                    sav_status = 'planned'
 
@@ -3522,6 +3666,7 @@ function buildSavEntries(toursRaw: any[], ordersRaw: ShopifyOrder[]): SavEntry[]
         sav_note: stop.sav_note ?? null,
         signature_url: stop.signature_url ?? null,
         photo_url: stop.photo_url ?? null,
+        partial_delivered: stop.partial_delivered ?? null,
         sav_status,
       })
     }
@@ -3844,6 +3989,7 @@ function SavView() {
               { key: 'planned',     label: 'Planifiée',   bg: '#f5f5f3', text: '#6b6b63', activeBg: '#6d28d9', activeText: '#fff' },
               { key: 'in_progress', label: 'En cours',    bg: '#f5f5f3', text: '#6b6b63', activeBg: '#1d4ed8', activeText: '#fff' },
               { key: 'delivered',   label: 'Livrée',      bg: '#f5f5f3', text: '#6b6b63', activeBg: '#1a7f4b', activeText: '#fff' },
+              { key: 'partial',     label: '⚠ Partielle', bg: '#f5f5f3', text: '#6b6b63', activeBg: '#92400e', activeText: '#fff' },
             ] as const).map(({ key, label, activeBg, activeText }) => {
               const count = key === 'all' ? entries.length : entries.filter(e => e.sav_status === key).length
               const active = statusFilter === key
@@ -4188,6 +4334,34 @@ function SavView() {
                       <p className="text-xs text-[#9b9b93]">Aucune note — cliquez sur &ldquo;+ Ajouter&rdquo;</p>
                     </div>
                   )}
+                </div>
+              )}
+
+              {/* ── Livraison partielle ── */}
+              {selected.sav_status === 'partial' && selected.partial_delivered && (
+                <div>
+                  <p className="text-[10px] font-semibold uppercase tracking-[0.08em] text-[#92400e] mb-1.5">⚠ Livraison partielle — articles à replanifier</p>
+                  <div className="space-y-1">
+                    {selected.partial_delivered.map((item, i) => {
+                      const remaining = item.qty_ordered - item.qty_delivered
+                      return (
+                        <div key={i} className={`flex items-center gap-2 rounded-[10px] px-3 py-2 text-xs ${remaining > 0 ? 'bg-[#fef3c7] border border-[#fcd34d]' : 'bg-[#f0fdf4] border border-[#bbf7d0]'}`}>
+                          <div className="flex-1 min-w-0">
+                            <span className={`font-medium ${remaining > 0 ? 'text-[#92400e]' : 'text-[#1a7f4b]'}`}>{item.title}</span>
+                            {item.sku && <span className="ml-1 font-mono text-[#9b9b93]">({item.sku})</span>}
+                          </div>
+                          <span className={`font-bold shrink-0 ${remaining > 0 ? 'text-[#c2680a]' : 'text-[#1a7f4b]'}`}>
+                            {item.qty_delivered}/{item.qty_ordered} livré{item.qty_delivered > 1 ? 's' : ''}
+                          </span>
+                          {remaining > 0 && (
+                            <span className="shrink-0 px-1.5 py-0.5 rounded-full bg-[#fed7aa] text-[#92400e] font-bold text-[10px]">
+                              −{remaining}
+                            </span>
+                          )}
+                        </div>
+                      )
+                    })}
+                  </div>
                 </div>
               )}
 
