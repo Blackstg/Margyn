@@ -42,14 +42,18 @@ function detectZone(zip: string): Zone {
 const DEBUG_ORDER_NAMES = new Set(['#10009', '#9997', '#9917', '#9767', '#9759', '#9740', '#9728', '#9718'])
 
 // ─── Internal / sample order detection ───────────────────────────────────────
-// Bug 1 fix: filter orders tagged "echantillons"/"interne" or belonging to Bowa/Steero staff
-const INTERNAL_TAGS   = /[eé]chantillons?|interne/i
+// "interne" tag or Bowa/Steero staff → always skip
+// "echantillons" tag alone does NOT mean fully internal: Hao's logistics team also
+// tags accessory-only orders (vis, colle) with this tag. We let those through and
+// rely on item-level filtering to catch pure-sample orders (all items filtered by
+// isSample → panel_details empty → skip).
+const INTERNAL_TAGS   = /interne/i
 const INTERNAL_NAMES  = /m[oō]om|mooom|steero/i
 
 function isInternalOrder(tags: string, customerName: string, email: string): boolean {
-  if (INTERNAL_TAGS.test(tags))        return true
+  if (INTERNAL_TAGS.test(tags))          return true
   if (INTERNAL_NAMES.test(customerName)) return true
-  if (INTERNAL_NAMES.test(email))      return true
+  if (INTERNAL_NAMES.test(email))        return true
   return false
 }
 
@@ -253,23 +257,24 @@ export async function GET() {
 
     // First pass: build drafts
     type OrderDraft = {
-      order_name:       string
-      shopify_order_id: string
-      customer_name:    string
-      email:            string
-      created_at:       string | null
-      is_preorder:      boolean
-      is_b2b:           boolean
-      is_leroy:         boolean
-      needs_replan:     boolean
-      address1:         string
-      address2:         string
-      city:             string
-      zip:              string
-      zone:             Zone
-      panel_count:      number
-      panel_details:    { sku: string; variant_title: string; title: string; qty: number }[]
-      _variantIds:      number[]
+      order_name:        string
+      shopify_order_id:  string
+      customer_name:     string
+      email:             string
+      created_at:        string | null
+      is_preorder:       boolean
+      is_b2b:            boolean
+      is_leroy:          boolean
+      is_accessory_only: boolean  // has accessories but no panels → ship via La Poste
+      needs_replan:      boolean
+      address1:          string
+      address2:          string
+      city:              string
+      zip:               string
+      zone:              Zone
+      panel_count:       number
+      panel_details:     { sku: string; variant_title: string; title: string; qty: number }[]
+      _variantIds:       number[]
     }
 
     // Bug 3 diagnostic: log the specific debug orders as soon as we see them
@@ -328,8 +333,12 @@ export async function GET() {
         .filter((p) => isPanel(p.title))
         .reduce((sum, p) => sum + panelSlots(p.title, p.qty), 0)
 
-      if (panel_count === 0) {
-        if (isDebug) console.log(`[delivery/orders] ${order.name} → SKIPPED (panel_count=0 after subtraction)`)
+      // panel_count = 0 means no delivery panels.
+      // If panel_details is also empty (all items were samples), skip entirely.
+      // If panel_details has items (accessories: colle, vis, etc.), include as
+      // accessory_only → will be shipped via La Poste, not put in a tour.
+      if (panel_count === 0 && panel_details.length === 0) {
+        if (isDebug) console.log(`[delivery/orders] ${order.name} → SKIPPED (only samples, panel_details empty)`)
         continue
       }
 
@@ -349,7 +358,9 @@ export async function GET() {
           `[delivery/orders] ${order.name} → INCLUDED` +
           ` | tags="${order.tags}"` +
           ` | is_preorder=${is_preorder}` +
+          ` | is_accessory_only=${panel_count === 0}` +
           ` | panel_count=${panel_count}` +
+          ` | panel_details=${panel_details.length} items` +
           ` | needs_replan=${replanOrderNames.has(order.name)}` +
           ` | fulfillments=${order.fulfillments?.length ?? 0}` +
           ` | delivered_qty_map=${deliveredByKey ? JSON.stringify(Object.fromEntries(deliveredByKey)) : 'none'}`
@@ -361,18 +372,19 @@ export async function GET() {
         .filter((id): id is number => id != null && id > 0)
 
       drafts.push({
-        order_name:       order.name,
-        shopify_order_id: String(order.id),
+        order_name:        order.name,
+        shopify_order_id:  String(order.id),
         customer_name,
-        email:            order.email ?? '',
-        created_at:       order.created_at ?? null,
+        email:             order.email ?? '',
+        created_at:        order.created_at ?? null,
         is_preorder,
         is_b2b,
         is_leroy,
-        needs_replan:     replanOrderNames.has(order.name),
-        address1:         addr?.address1 ?? '',
-        address2:         addr?.address2 ?? '',
-        city:             addr?.city ?? '',
+        is_accessory_only: panel_count === 0,
+        needs_replan:      replanOrderNames.has(order.name),
+        address1:          addr?.address1 ?? '',
+        address2:          addr?.address2 ?? '',
+        city:              addr?.city ?? '',
         zip,
         zone,
         panel_count,

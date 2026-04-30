@@ -51,6 +51,7 @@ interface ShopifyOrder {
   preorder_ready?: boolean
   is_b2b?: boolean
   is_leroy?: boolean
+  is_accessory_only?: boolean
   needs_replan?: boolean
   address1: string
   city: string
@@ -747,8 +748,10 @@ function PlanificateurView() {
               ) : filteredOrders.length === 0 ? (
                 <div className="text-center py-8 text-sm text-[#6b6b63]">Aucune commande</div>
               ) : (() => {
-                const normal    = filteredOrders.filter((o) => !o.is_preorder)
-                const preorders = filteredOrders
+                const accessoryOnly = filteredOrders.filter((o) => o.is_accessory_only)
+                const tourOrders    = filteredOrders.filter((o) => !o.is_accessory_only)
+                const normal        = tourOrders.filter((o) => !o.is_preorder)
+                const preorders     = tourOrders
                   .filter((o) => o.is_preorder)
                   .sort((a, b) => (b.preorder_ready ? 1 : 0) - (a.preorder_ready ? 1 : 0))
 
@@ -848,6 +851,52 @@ function PlanificateurView() {
                   )
                 }
 
+                function renderAccessoryCard(order: ShopifyOrder) {
+                  const daysWaiting = order.created_at
+                    ? Math.floor((Date.now() - new Date(order.created_at).getTime()) / 86_400_000)
+                    : null
+                  return (
+                    <div
+                      key={order.order_name}
+                      className="rounded-[12px] border border-[#e2e8f0] bg-[#f8fafc] overflow-hidden"
+                    >
+                      <div className="p-3">
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-1.5 flex-wrap">
+                              <span className="font-semibold text-sm text-[#1a1a2e]">{order.order_name}</span>
+                              <span className="px-2 py-0.5 rounded-full text-xs font-semibold bg-[#e0f2fe] text-[#0369a1]">
+                                📦 La Poste
+                              </span>
+                              {order.is_b2b && (
+                                <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-[#dbeafe] text-[#1d4ed8]">B2B</span>
+                              )}
+                            </div>
+                            <div className="text-xs text-[#6b6b63] mt-0.5">{order.customer_name} · {order.city} {order.zip}</div>
+                            {order.created_at && (
+                              <div className="text-[10px] text-[#9b9b93] mt-0.5">
+                                {new Date(order.created_at).toLocaleDateString('fr-FR', { day: 'numeric', month: 'short', year: 'numeric' })}
+                                {daysWaiting !== null && <span className="ml-1">({daysWaiting}j)</span>}
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                        {order.panel_details?.length > 0 && (
+                          <div className="mt-2 space-y-0.5">
+                            {order.panel_details.map((item, i) => (
+                              <div key={i} className="flex items-center gap-1.5 text-[10px]">
+                                <span className="font-mono text-[#6b6b63] bg-[#e2e8f0] px-1.5 py-0.5 rounded shrink-0">{item.sku || '—'}</span>
+                                <span className="text-[#6b6b63] truncate">{item.title}</span>
+                                <span className="font-semibold text-[#1a1a2e] shrink-0">×{item.qty}</span>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )
+                }
+
                 return (
                   <>
                     {normal.map(renderCard)}
@@ -861,6 +910,18 @@ function PlanificateurView() {
                           <div className="flex-1 h-px bg-[#e8e8e4]" />
                         </div>
                         {preorders.map(renderCard)}
+                      </>
+                    )}
+                    {accessoryOnly.length > 0 && (
+                      <>
+                        <div className="flex items-center gap-2 pt-2">
+                          <div className="flex-1 h-px bg-[#cbd5e1]" />
+                          <span className="text-[10px] font-semibold uppercase tracking-widest text-[#64748b] px-1">
+                            Accessoires La Poste ({accessoryOnly.length})
+                          </span>
+                          <div className="flex-1 h-px bg-[#cbd5e1]" />
+                        </div>
+                        {accessoryOnly.map(renderAccessoryCard)}
                       </>
                     )}
                   </>
