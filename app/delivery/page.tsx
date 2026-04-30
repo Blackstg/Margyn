@@ -67,6 +67,7 @@ interface TourStop {
   shopify_order_id?: string
   customer_name: string
   email: string
+  phone?: string | null
   address1: string
   city: string
   zip: string
@@ -3058,9 +3059,18 @@ function LivreurView() {
             <div className="flex items-center gap-2 mb-1">
               <span className="font-mono text-sm font-semibold text-[#1a1a2e] bg-[#f5f5f3] px-2 py-0.5 rounded-[6px]">{currentStop.order_name}</span>
             </div>
-            <div className="text-3xl font-bold text-[#1a1a2e] leading-tight mb-3">
+            <div className="text-3xl font-bold text-[#1a1a2e] leading-tight mb-1">
               {currentStop.customer_name}
             </div>
+            {currentStop.phone && (
+              <a
+                href={`tel:${currentStop.phone}`}
+                className="inline-flex items-center gap-1.5 text-sm font-semibold text-[#6b21a8] mb-2 active:opacity-70"
+              >
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07A19.5 19.5 0 0 1 4.69 12 19.79 19.79 0 0 1 1.61 3.44 2 2 0 0 1 3.58 1.25h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L7.91 8.81A16 16 0 0 0 16 16.91l1.27-.88a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 24 18.18v.74"/></svg>
+                {currentStop.phone}
+              </a>
+            )}
             <div className="text-lg text-[#1a1a2e] mb-1">{currentStop.address1}</div>
             <div className="text-lg text-[#6b6b63]">{currentStop.city} {currentStop.zip}</div>
             {etaMap.get(currentStop.id) && (

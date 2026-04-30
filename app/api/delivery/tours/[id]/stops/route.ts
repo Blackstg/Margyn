@@ -13,6 +13,7 @@ interface ShopifyOrderSummary {
   shopify_order_id: string
   customer_name: string
   email: string
+  phone?: string
   address1: string
   address2?: string
   city: string
@@ -49,6 +50,7 @@ export async function POST(
       shopify_order_id: s.shopify_order_id,
       customer_name: s.customer_name,
       email: s.email,
+      phone: s.phone ?? '',
       address1: s.address1,
       address2: s.address2 ?? '',
       city: s.city,

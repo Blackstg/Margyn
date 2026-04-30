@@ -103,12 +103,14 @@ interface ShopifyShippingAddress {
   address2:   string
   city:       string
   zip:        string
+  phone:      string | null
 }
 
 interface ShopifyOrder {
   id:               string
   name:             string
   email:            string
+  phone:            string | null
   created_at:       string
   tags:             string
   shipping_address: ShopifyShippingAddress | null
@@ -122,7 +124,7 @@ interface ShopifyOrder {
 
 async function fetchShopifyOrders(shop: string, token: string): Promise<ShopifyOrder[]> {
   const fields =
-    'id,name,email,created_at,tags,shipping_address,line_items,fulfillments'
+    'id,name,email,phone,created_at,tags,shipping_address,line_items,fulfillments'
 
   async function paginate(fulfillmentStatus: string): Promise<ShopifyOrder[]> {
     const result: ShopifyOrder[] = []
@@ -261,6 +263,7 @@ export async function GET() {
       shopify_order_id:  string
       customer_name:     string
       email:             string
+      phone:             string
       created_at:        string | null
       is_preorder:       boolean
       is_b2b:            boolean
@@ -376,6 +379,7 @@ export async function GET() {
         shopify_order_id:  String(order.id),
         customer_name,
         email:             order.email ?? '',
+        phone:             addr?.phone?.trim() || order.phone?.trim() || '',
         created_at:        order.created_at ?? null,
         is_preorder,
         is_b2b,
