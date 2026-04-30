@@ -2158,10 +2158,19 @@ function LivreurView() {
                 Préparer le camion
               </button>
               <button
-                onClick={() => {
+                onClick={async () => {
                   const resumeIdx = sortedStops.findIndex(s => s.status !== 'delivered' && s.status !== 'failed')
                   setStopIdx(resumeIdx !== -1 ? resumeIdx : 0)
                   setScreen('tour')
+                  // Passe la tournée en "en cours" si elle ne l'est pas déjà
+                  if (tour && tour.status !== 'in_progress') {
+                    await fetch(`/api/delivery/tours/${tour.id}`, {
+                      method: 'PATCH',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({ status: 'in_progress' }),
+                    }).catch(() => {/* best-effort */})
+                    fetchTours()
+                  }
                 }}
                 disabled={sortedStops.length === 0}
                 className="w-full flex items-center justify-center gap-3 py-5 rounded-[16px] bg-[#4ade80] text-[#1a1a2e] font-bold text-lg disabled:opacity-30 active:bg-[#22c55e] transition-colors"
