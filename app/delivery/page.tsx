@@ -2293,7 +2293,7 @@ function LivreurView() {
                 ) : (
                   <button
                     onClick={() => setConfirmComplete(true)}
-                    className="w-full flex items-center justify-center gap-3 py-4 rounded-[16px] border border-red-400/40 text-red-400 font-semibold text-base active:bg-red-400/10 transition-colors"
+                    className="w-full flex items-center justify-center gap-3 py-4 rounded-[16px] bg-red-500/20 border border-red-400/50 text-red-300 font-semibold text-base active:bg-red-500/30 transition-colors"
                   >
                     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                       <polyline points="9 11 12 14 22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/>
