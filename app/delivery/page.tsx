@@ -3499,6 +3499,66 @@ function LivreurView() {
   )
 }
 
+// ─── StepperScroll — scrollable stepper with gradient fade + pending badge ────
+
+function StepperScroll({ children, stops }: {
+  children: React.ReactNode
+  stops: { status: string }[]
+}) {
+  const scrollRef  = useRef<HTMLDivElement>(null)
+  const [leftFade,  setLeftFade]  = useState(false)
+  const [rightFade, setRightFade] = useState(false)
+
+  const pendingCount = stops.filter(s => s.status !== 'delivered' && s.status !== 'failed' && s.status !== 'partial').length
+
+  // Detect overflow on mount and whenever stops change
+  useEffect(() => {
+    const el = scrollRef.current
+    if (!el) return
+    const update = () => {
+      setLeftFade(el.scrollLeft > 8)
+      setRightFade(el.scrollLeft < el.scrollWidth - el.clientWidth - 8)
+    }
+    update()
+    // Auto-scroll to first pending stop (show context: at least one delivered stop before it)
+    const firstPendingIdx = stops.findIndex(s => s.status !== 'delivered' && s.status !== 'failed' && s.status !== 'partial')
+    if (firstPendingIdx > 1) {
+      const stopWidth = el.scrollWidth / stops.length
+      el.scrollTo({ left: Math.max(0, (firstPendingIdx - 1.5) * stopWidth), behavior: 'smooth' })
+    }
+  }, [stops]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  function onScroll() {
+    const el = scrollRef.current
+    if (!el) return
+    setLeftFade(el.scrollLeft > 8)
+    setRightFade(el.scrollLeft < el.scrollWidth - el.clientWidth - 8)
+  }
+
+  return (
+    <div className="relative">
+      {/* Left fade */}
+      {leftFade && (
+        <div className="absolute left-0 top-0 bottom-0 w-10 bg-gradient-to-r from-white to-transparent z-10 pointer-events-none" />
+      )}
+      {/* Right fade + pending badge */}
+      {rightFade && (
+        <div className="absolute right-0 top-0 bottom-0 w-16 bg-gradient-to-l from-white via-white/80 to-transparent z-10 pointer-events-none flex items-center justify-end pr-2 pb-6">
+          {pendingCount > 0 && (
+            <span className="flex items-center gap-0.5 bg-[#1a1a2e] text-white text-[9px] font-bold px-1.5 py-0.5 rounded-full shadow-sm whitespace-nowrap">
+              {pendingCount} →
+            </span>
+          )}
+        </div>
+      )}
+      <div ref={scrollRef} className="overflow-x-auto" onScroll={onScroll}
+        style={{ scrollbarWidth: 'none' }}>
+        {children}
+      </div>
+    </div>
+  )
+}
+
 // ─── SAV View ─────────────────────────────────────────────────────────────────
 
 type SavStatus = 'pending' | 'planned' | 'in_progress' | 'delivered' | 'partial'
@@ -3876,7 +3936,7 @@ function SavView() {
                 </div>
 
                 {/* Stepper */}
-                <div className="overflow-x-auto">
+                <StepperScroll stops={stops}>
                   <div className="relative" style={{ minWidth: `${Math.max(stops.length * 72, 300)}px` }}>
 
                     {/* Flex row for stops (defines the coordinate space) */}
@@ -3950,7 +4010,7 @@ function SavView() {
                       })}
                     </div>
                   </div>
-                </div>
+                </StepperScroll>
 
                 {/* Carte itinéraire complet */}
                 {(() => {
