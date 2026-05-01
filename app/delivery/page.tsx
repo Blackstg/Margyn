@@ -86,6 +86,7 @@ interface TourStop {
   signature_url?: string | null
   photo_url?: string | null
   partial_delivered?: { sku: string; title: string; qty_ordered: number; qty_delivered: number }[] | null
+  client_availability?: 'confirmed' | 'unavailable' | null
 }
 
 interface Tour {
@@ -1370,6 +1371,12 @@ function PlanificateurView() {
                                       </button>
                                       {stop.email_sent_at && (
                                         <Mail size={12} className="text-[#1a7f4b]" />
+                                      )}
+                                      {stop.client_availability === 'confirmed' && (
+                                        <span title="Client confirmé" className="text-[10px] font-bold text-[#1a7f4b] bg-[#dcfce7] px-1.5 py-0.5 rounded-full leading-none">✓ Présent</span>
+                                      )}
+                                      {stop.client_availability === 'unavailable' && (
+                                        <span title="Client indisponible" className="text-[10px] font-bold text-[#c2410c] bg-[#fff7ed] px-1.5 py-0.5 rounded-full leading-none border border-[#fed7aa]">⚠ Indispo</span>
                                       )}
                                       {stop.sav_note && (
                                         <div className="relative group/savnote">

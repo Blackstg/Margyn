@@ -22,31 +22,127 @@ function fmtDateLong(d: Date): string {
   return d.toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })
 }
 
-function buildEmailHtml(firstName: string, startDateStr: string): string {
+const APP_URL = 'https://www.steero.io'
+
+function buildEmailHtml(firstName: string, startDateStr: string, stopId: string): string {
   const start   = new Date(startDateStr + 'T00:00:00')
   const end     = addWorkingDays(startDateStr, 4)
   const startFr = fmtDateLong(start)
   const endFr   = fmtDateLong(end)
 
-  return `<div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;padding:24px;color:#1a1a2e">
-  <p>Bonjour ${firstName},</p>
+  const confirmUrl     = `${APP_URL}/api/delivery/confirm?stop=${stopId}&action=confirmed`
+  const unavailableUrl = `${APP_URL}/api/delivery/confirm?stop=${stopId}&action=unavailable`
 
-  <p>Bonne nouvelle ! 🎉 Votre commande sera livrée cette semaine.<br>
-  Notre livreur commencera sa tournée le <strong>${startFr}</strong> et passera chez vous dans les prochains jours (entre le ${startFr} et le ${endFr}).</p>
+  return `<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Votre livraison Bowa arrive cette semaine !</title>
+</head>
+<body style="margin:0;padding:0;background:#f1ebe7;font-family:'Helvetica Neue',Helvetica,Arial,sans-serif;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="background:#f1ebe7;padding:32px 16px;">
+    <tr>
+      <td align="center">
+        <table width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;">
 
-  <p>La livraison s'effectuera au pied du camion 🚛. Nous vous demandons donc de faire le nécessaire pour être accompagné(e) d'une autre personne afin de récupérer les panneaux en toute sécurité 🔧.</p>
+          <!-- Logo -->
+          <tr>
+            <td align="center" style="padding-bottom:28px;">
+              <img src="https://bowa-concept.com/cdn/shop/files/logo.png?v=1693451719"
+                alt="Bowa Concept" width="140" style="display:block;height:auto;" />
+            </td>
+          </tr>
 
-  <p>Pour garantir une livraison en toute fluidité, notre livreur vous appellera très probablement au fil de sa tournée, en fonction de l'ordre des livraisons, afin de vérifier votre disponibilité. Vous serez joint(e) depuis le numéro suivant : <strong>06 02 40 15 86</strong>.</p>
+          <!-- Card -->
+          <tr>
+            <td style="background:#ffffff;border-radius:20px;padding:40px 40px 32px;box-shadow:0 4px 24px rgba(0,0,0,0.06);">
 
-  <p>Si vous êtes indisponible, merci de nous en informer par retour de mail, afin que nous puissions reprogrammer votre livraison.</p>
+              <p style="font-size:36px;margin:0 0 8px;text-align:center;">🚛</p>
+              <h1 style="margin:0 0 24px;font-size:22px;font-weight:700;color:#1a1a2e;text-align:center;line-height:1.3;">
+                Votre livraison Bowa<br/>arrive cette semaine !
+              </h1>
 
-  <p>Nous nous réjouissons de finaliser votre livraison très prochainement ☀️.</p>
+              <p style="margin:0 0 16px;font-size:15px;color:#3a3a3a;line-height:1.6;">
+                Bonjour <strong>${firstName}</strong>,
+              </p>
+              <p style="margin:0 0 16px;font-size:15px;color:#3a3a3a;line-height:1.6;">
+                Bonne nouvelle&nbsp;! 🎉 Votre commande sera livrée cette semaine.<br/>
+                Notre livreur commencera sa tournée le <strong>${startFr}</strong> et passera chez vous dans les prochains jours (entre le ${startFr} et le ${endFr}).
+              </p>
+              <p style="margin:0 0 24px;font-size:15px;color:#3a3a3a;line-height:1.6;">
+                La livraison s'effectuera au pied du camion 🚛. Nous vous demandons donc de faire le nécessaire pour être accompagné(e) d'une autre personne afin de récupérer les panneaux en toute sécurité 🔧.
+              </p>
+              <p style="margin:0 0 28px;font-size:15px;color:#3a3a3a;line-height:1.6;">
+                Notre livreur vous appellera avant de passer, depuis le numéro suivant&nbsp;: <strong>06 02 40 15 86</strong>.
+              </p>
 
-  <p>Cordialement,<br>
-  <strong>Léa</strong><br>
-  Service client<br>
-  <img src="https://bowa-concept.com/cdn/shop/files/logo.png?v=1693451719" alt="Bowa Concept" style="height:40px;margin-top:8px" /></p>
-</div>`
+              <!-- Availability CTA -->
+              <table width="100%" cellpadding="0" cellspacing="0" style="background:#f8f4f1;border-radius:14px;padding:24px;margin-bottom:28px;">
+                <tr>
+                  <td align="center">
+                    <p style="margin:0 0 20px;font-size:15px;color:#3a3a3a;line-height:1.6;font-weight:600;">
+                      Serez-vous disponible pour réceptionner votre commande cette semaine ?
+                    </p>
+                    <table cellpadding="0" cellspacing="0">
+                      <tr>
+                        <td style="padding-right:10px;">
+                          <a href="${confirmUrl}" target="_blank"
+                            style="display:inline-block;background:#1a7f4b;color:#ffffff;font-size:14px;font-weight:700;text-decoration:none;padding:13px 24px;border-radius:50px;letter-spacing:0.2px;">
+                            ✅ Oui, je serai présent(e)
+                          </a>
+                        </td>
+                        <td>
+                          <a href="${unavailableUrl}" target="_blank"
+                            style="display:inline-block;background:#ffffff;color:#c2410c;font-size:14px;font-weight:700;text-decoration:none;padding:12px 24px;border-radius:50px;letter-spacing:0.2px;border:2px solid #fed7aa;">
+                            ❌ Je ne serai pas disponible
+                          </a>
+                        </td>
+                      </tr>
+                    </table>
+                    <p style="margin:16px 0 0;font-size:12px;color:#9ca3af;line-height:1.5;">
+                      Sans réponse de votre part, nous considérons que vous serez disponible.
+                    </p>
+                  </td>
+                </tr>
+              </table>
+
+              <hr style="border:none;border-top:1px solid #ece8e4;margin:0 0 20px;" />
+
+              <p style="margin:0 0 4px;font-size:14px;color:#3a3a3a;line-height:1.6;">
+                Nous nous réjouissons de finaliser votre livraison très prochainement ☀️
+              </p>
+              <p style="margin:0 0 16px;font-size:14px;color:#3a3a3a;line-height:1.6;">
+                Cordialement,<br/>
+                <strong>Léa</strong><br/>
+                <span style="color:#6b6b63;">Service client</span>
+              </p>
+              <p style="margin:0;font-size:12px;color:#9ca3af;line-height:1.6;">
+                Pour toute question, écrivez-nous à
+                <a href="mailto:lea@bowa-concept.com" style="color:#6b6b63;text-decoration:none;">lea@bowa-concept.com</a>
+              </p>
+
+            </td>
+          </tr>
+
+          <!-- Footer -->
+          <tr>
+            <td align="center" style="padding-top:20px;">
+              <img src="https://bowa-concept.com/cdn/shop/files/logo.png?v=1693451719"
+                alt="Bowa Concept" width="80" style="display:block;height:auto;opacity:0.4;margin-bottom:8px;" />
+              <p style="margin:0;font-size:11px;color:#a0998f;line-height:1.5;">
+                Bowa Concept — livraison de panneaux solaires en France<br/>
+                <a href="https://bowa-concept.com" style="color:#a0998f;">bowa-concept.com</a>
+              </p>
+            </td>
+          </tr>
+
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>`
 }
 
 // GET — returns list of stops (with/without email) for preview in modal
@@ -113,7 +209,7 @@ export async function POST(
     for (const stop of pendingStops) {
       try {
         if (process.env.RESEND_API_KEY) {
-          const html = buildEmailHtml(firstNameOf(stop.customer_name ?? ''), startDateStr)
+          const html = buildEmailHtml(firstNameOf(stop.customer_name ?? ''), startDateStr, stop.id)
 
           const emailRes = await fetch('https://api.resend.com/emails', {
             method: 'POST',
