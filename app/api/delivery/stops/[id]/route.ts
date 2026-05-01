@@ -33,7 +33,7 @@ function buildSatisfactionEmail(customerName: string, orderName: string): string
           <tr>
             <td align="center" style="padding-bottom:28px;">
               <img
-                src="https://bowa-concept.com/cdn/shop/files/Logo_Bowa_concept.png"
+                src="https://bowa-concept.com/cdn/shop/files/logo.png?v=1693451719"
                 alt="Bowa Concept"
                 width="140"
                 style="display:block;height:auto;"
@@ -110,7 +110,7 @@ function buildSatisfactionEmail(customerName: string, orderName: string): string
           <tr>
             <td align="center" style="padding-top:20px;">
               <img
-                src="https://bowa-concept.com/cdn/shop/files/Logo_Bowa_concept.png"
+                src="https://bowa-concept.com/cdn/shop/files/logo.png?v=1693451719"
                 alt="Bowa Concept"
                 width="80"
                 style="display:block;height:auto;opacity:0.4;margin-bottom:8px;"

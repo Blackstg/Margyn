@@ -45,7 +45,7 @@ function buildEmailHtml(firstName: string, startDateStr: string): string {
   <p>Cordialement,<br>
   <strong>Léa</strong><br>
   Service client<br>
-  <img src="https://bowa-concept.com/cdn/shop/files/Logo_Bowa_concept.png" alt="Bowa Concept" style="height:40px;margin-top:8px" /></p>
+  <img src="https://bowa-concept.com/cdn/shop/files/logo.png?v=1693451719" alt="Bowa Concept" style="height:40px;margin-top:8px" /></p>
 </div>`
 }
 
