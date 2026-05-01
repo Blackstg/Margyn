@@ -3543,7 +3543,7 @@ function StepperScroll({ children, stops }: {
       )}
       {/* Right fade + pending badge */}
       {rightFade && (
-        <div className="absolute right-0 top-0 bottom-0 w-16 bg-gradient-to-l from-white via-white/80 to-transparent z-10 pointer-events-none flex items-center justify-end pr-2 pb-6">
+        <div className="absolute right-0 top-0 bottom-0 w-16 bg-gradient-to-l from-white via-white/80 to-transparent z-30 pointer-events-none flex items-center justify-end pr-2 pb-6">
           {pendingCount > 0 && (
             <span className="flex items-center gap-0.5 bg-[#1a1a2e] text-white text-[9px] font-bold px-1.5 py-0.5 rounded-full shadow-sm whitespace-nowrap">
               {pendingCount} →
