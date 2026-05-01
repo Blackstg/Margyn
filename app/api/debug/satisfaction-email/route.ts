@@ -145,7 +145,7 @@ export async function GET(req: NextRequest) {
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({
-      from: 'Marine – Bowa Concept <hello@bowa-concept.com>',
+      from: 'Marine – Bowa Concept <notifications@notifications.bowa-concept.com>',
       to:   toEmail,
       subject: `[TEST] Votre commande Bowa est arrivée ! 🎉`,
       html,
