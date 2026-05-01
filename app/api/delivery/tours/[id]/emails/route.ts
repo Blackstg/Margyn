@@ -122,7 +122,7 @@ export async function POST(
               'Content-Type': 'application/json',
             },
             body: JSON.stringify({
-              from: 'Léa – Bowa Concept <lea@bowa-concept.com>',
+              from: 'Léa – Bowa Concept <notifications@notifications.bowa-concept.com>',
               to: stop.email,
               subject: 'BOWA CONCEPT : LIVRAISON',
               html,
