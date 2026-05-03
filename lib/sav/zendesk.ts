@@ -363,45 +363,41 @@ async function fetchComments(ticketId: number): Promise<ZendeskComment[]> {
  * Fetches comments in parallel batches of 5 to avoid rate limits.
  */
 export async function exportSolvedTickets(
-  maxTickets = 50
-): Promise<SolvedTicketData[]> {
+  maxTickets = 25,
+  resumeUrl?: string | null,
+): Promise<{ examples: SolvedTicketData[]; nextCursor: string | null }> {
   const allTickets: ZendeskTicket[] = []
-  // Sort ascending = oldest first. Old tickets are real SAV exchanges;
-  // the newest ones are skewed toward spam / collaboration requests.
-  let url: string | null =
+  let url: string | null = resumeUrl ??
     `${base()}/tickets.json?status=solved&per_page=100&sort_by=created_at&sort_order=asc`
+  let nextCursor: string | null = null
 
-  // 1. Collect solved tickets — 500ms between pages to stay within rate limits
+  // 1. Collect tickets from cursor position
   while (url && allTickets.length < maxTickets) {
     const res = await fetchWithRetry(url, { headers: authHeaders(), cache: 'no-store' })
     if (!res.ok) throw new Error(`[Zendesk] exportSolvedTickets ${res.status}: ${await res.text()}`)
     const data = await res.json() as { tickets: ZendeskTicket[]; next_page: string | null }
     allTickets.push(...data.tickets)
+    nextCursor = data.next_page
     if (allTickets.length >= maxTickets) break
     url = data.next_page
     if (url) await sleep(500)
   }
   allTickets.splice(maxTickets)
 
-  console.log(`[Zendesk] ${allTickets.length} tickets résolus — récupération des commentaires (~0.5s/ticket, ~${Math.round(allTickets.length * 0.5 / 60)} min)…`)
+  console.log(`[Zendesk] ${allTickets.length} tickets — récupération des commentaires…`)
 
-  // 2. Fetch FIRST agent comment for each ticket, one by one.
-  //    We use the first agent reply (not the last) because the last tends to be
-  //    a short "Merci pour votre retour" — the first reply is the substantive response.
+  // 2. Fetch first agent comment for each ticket
   const examples = await withConcurrency(
     allTickets,
     async (ticket): Promise<SolvedTicketData | null> => {
       console.log(`  → #${ticket.id} ${ticket.subject.slice(0, 50)}`)
       const comments = await fetchComments(ticket.id)
 
-      // First public comment from someone other than the requester = first agent reply
       const agentReply = comments.find(
         c => c.public && c.author_id !== ticket.requester_id && c.body?.trim().length > 20
       )
-
       if (!agentReply?.body?.trim()) return null
 
-      // Customer message: first public comment from the requester (richer than description for email tickets)
       const customerComment = comments.find(c => c.public && c.author_id === ticket.requester_id)
       const customerMessage = customerComment?.body?.trim() || ticket.description
 
@@ -415,5 +411,5 @@ export async function exportSolvedTickets(
     }
   )
 
-  return examples
+  return { examples, nextCursor }
 }

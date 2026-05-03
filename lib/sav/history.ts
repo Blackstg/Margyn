@@ -36,9 +36,69 @@ function saveHistory(examples: HistoryExample[]) {
   }
 }
 
+// ─── Cursor storage ───────────────────────────────────────────────────────────
+// Stores the Zendesk next_page URL so incremental imports can resume.
+
+import { createAdminClient } from '@/lib/supabase'
+
+async function loadCursor(): Promise<string | null> {
+  try {
+    const sb = createAdminClient()
+    const { data } = await sb
+      .from('sav_import_state')
+      .select('value')
+      .eq('key', 'zendesk_cursor')
+      .maybeSingle()
+    return (data as { value: string } | null)?.value ?? null
+  } catch { return null }
+}
+
+async function saveCursor(cursor: string | null): Promise<void> {
+  try {
+    const sb = createAdminClient()
+    if (cursor === null) {
+      await sb.from('sav_import_state').delete().eq('key', 'zendesk_cursor')
+    } else {
+      await sb.from('sav_import_state').upsert({ key: 'zendesk_cursor', value: cursor }, { onConflict: 'key' })
+    }
+  } catch (e) { console.warn('[SAV] saveCursor error:', e) }
+}
+
+// ─── Incremental import ───────────────────────────────────────────────────────
+// Each call imports up to `batchSize` tickets from where the last call left off.
+// Returns { done: true } when all solved tickets have been imported.
+
+export async function importHistoryBatch(batchSize = 25): Promise<{
+  imported: number
+  total: number
+  done: boolean
+  oldest: string | null
+  newest: string | null
+}> {
+  const cursor = await loadCursor()
+  const { examples: newExamples, nextCursor } = await exportSolvedTickets(batchSize, cursor)
+
+  // Merge with existing — deduplicate by ticket_id
+  const existing = loadHistory()
+  const existingIds = new Set(existing.map(e => e.ticket_id))
+  const merged = [...existing, ...newExamples.filter(e => !existingIds.has(e.ticket_id))]
+  saveHistory(merged)
+  await saveCursor(nextCursor)
+
+  const dates = merged.map(e => e.created_at).filter(Boolean).sort()
+  return {
+    imported: newExamples.length,
+    total:    merged.length,
+    done:     nextCursor === null,
+    oldest:   dates[0] ?? null,
+    newest:   dates[dates.length - 1] ?? null,
+  }
+}
+
 export async function importHistory(limit = 50): Promise<{ count: number; oldest: string | null; newest: string | null }> {
-  const examples = await exportSolvedTickets(limit)
+  const { examples, nextCursor } = await exportSolvedTickets(limit, null)
   saveHistory(examples)
+  await saveCursor(nextCursor)
   const dates = examples.map(e => e.created_at).filter(Boolean).sort()
   return {
     count:  examples.length,
