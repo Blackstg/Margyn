@@ -363,7 +363,7 @@ async function fetchComments(ticketId: number): Promise<ZendeskComment[]> {
  * Fetches comments in parallel batches of 5 to avoid rate limits.
  */
 export async function exportSolvedTickets(
-  maxTickets = 300
+  maxTickets = 50
 ): Promise<SolvedTicketData[]> {
   const allTickets: ZendeskTicket[] = []
   // Sort ascending = oldest first. Old tickets are real SAV exchanges;

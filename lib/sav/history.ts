@@ -36,8 +36,8 @@ function saveHistory(examples: HistoryExample[]) {
   }
 }
 
-export async function importHistory(): Promise<{ count: number; oldest: string | null; newest: string | null }> {
-  const examples = await exportSolvedTickets()
+export async function importHistory(limit = 50): Promise<{ count: number; oldest: string | null; newest: string | null }> {
+  const examples = await exportSolvedTickets(limit)
   saveHistory(examples)
   const dates = examples.map(e => e.created_at).filter(Boolean).sort()
   return {
