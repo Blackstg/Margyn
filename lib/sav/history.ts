@@ -36,10 +36,15 @@ function saveHistory(examples: HistoryExample[]) {
   }
 }
 
-export async function importHistory(): Promise<{ count: number }> {
+export async function importHistory(): Promise<{ count: number; oldest: string | null; newest: string | null }> {
   const examples = await exportSolvedTickets()
   saveHistory(examples)
-  return { count: examples.length }
+  const dates = examples.map(e => e.created_at).filter(Boolean).sort()
+  return {
+    count:  examples.length,
+    oldest: dates[0]            ?? null,
+    newest: dates[dates.length - 1] ?? null,
+  }
 }
 
 // ─── Keyword similarity ───────────────────────────────────────────────────────

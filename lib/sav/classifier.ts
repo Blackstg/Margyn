@@ -236,6 +236,16 @@ export async function generateReply(
     : ''
 
   const similarExamples = findSimilarExamples(subject, description, 5)
+  if (similarExamples.length > 0) {
+    console.log(
+      `[SAV] findSimilarExamples — ${similarExamples.length} exemple(s) trouvé(s) pour "${subject.slice(0, 60)}" :`,
+      similarExamples.map((ex, i) =>
+        `\n  [${i + 1}] #${ex.ticket_id} "${ex.subject.slice(0, 50)}" (${ex.created_at.slice(0, 10)})`
+      ).join('')
+    )
+  } else {
+    console.log(`[SAV] findSimilarExamples — aucun exemple similaire trouvé pour "${subject.slice(0, 60)}"`)
+  }
   const examplesBlock = similarExamples.length > 0
     ? `\nExemples de réponses SAV Mōom similaires — utilise-les comme référence de style, de ton et de structure :\n\n${
         similarExamples.map((ex, i) =>
