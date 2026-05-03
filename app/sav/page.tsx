@@ -5,7 +5,7 @@ import { createBrowserClient } from '@supabase/auth-helpers-nextjs'
 import {
   RefreshCw, Send, ArrowUpRight, Archive, Package, ExternalLink,
   Inbox, CheckCheck, ChevronDown, ChevronUp,
-  Settings, Trash2, Plus, X, Download, RotateCcw, Paperclip,
+  Settings, Trash2, Plus, X, Download, RotateCcw, Paperclip, ArrowRight,
 } from 'lucide-react'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
