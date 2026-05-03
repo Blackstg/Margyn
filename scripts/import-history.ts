@@ -15,10 +15,12 @@ dotenv.config({ path: path.resolve(__dirname, '../.env.local') })
 // Dynamic import after env is loaded
 async function main() {
   const { importHistory } = await import('../lib/sav/history')
+  const limit = parseInt(process.env.IMPORT_LIMIT ?? '500', 10)
 
-  console.log('Récupération des tickets résolus depuis Zendesk…')
-  const { count } = await importHistory()
+  console.log(`Récupération des tickets résolus depuis Zendesk (max ${limit})…`)
+  const { count, oldest, newest } = await importHistory(limit)
   console.log(`✓ ${count} exemples importés → lib/sav/history.json`)
+  console.log(`  Période : ${oldest?.slice(0,10)} → ${newest?.slice(0,10)}`)
 }
 
 main().catch((err) => {

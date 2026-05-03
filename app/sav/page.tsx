@@ -498,6 +498,7 @@ function ReplyPanel({ ticket, draft, solved, onDraftChange, onSolvedChange, onSe
   const [archiving, setArchiving]         = useState(false)
   const [regenerating, setRegenerating]   = useState(false)
   const [deciding, setDeciding]           = useState(false)
+  const [customDecision, setCustomDecision] = useState('')
   const [improving, setImproving]         = useState(false)
   const [previousDraft, setPreviousDraft] = useState<string | null>(null)
   const [error, setError]                 = useState<string | null>(null)
@@ -702,16 +703,45 @@ function ReplyPanel({ ticket, draft, solved, onDraftChange, onSolvedChange, onSe
                 <span className="text-xs text-[#9b9b93]">Rédaction en cours…</span>
               </div>
             ) : (
-              (ticket.decision_options ?? []).map(opt => (
-                <button
-                  key={opt.key}
-                  onClick={() => decide(opt)}
-                  className="flex items-center gap-2.5 px-4 py-3 rounded-xl border border-[#e8e8e4] bg-white hover:bg-[#f0efec] hover:border-[#aeb0c9] text-[12px] font-medium text-[#1a1a2e] transition-colors text-left"
-                >
-                  <span className="text-base leading-none">{opt.emoji}</span>
-                  {opt.label}
-                </button>
-              ))
+              <>
+                {(ticket.decision_options ?? []).map(opt => (
+                  <button
+                    key={opt.key}
+                    onClick={() => decide(opt)}
+                    className="flex items-center gap-2.5 px-4 py-3 rounded-xl border border-[#e8e8e4] bg-white hover:bg-[#f0efec] hover:border-[#aeb0c9] text-[12px] font-medium text-[#1a1a2e] transition-colors text-left"
+                  >
+                    <span className="text-base leading-none">{opt.emoji}</span>
+                    {opt.label}
+                  </button>
+                ))}
+
+                {/* Custom decision */}
+                <div className="mt-1 flex gap-2">
+                  <input
+                    type="text"
+                    value={customDecision}
+                    onChange={e => setCustomDecision(e.target.value)}
+                    onKeyDown={e => {
+                      if (e.key === 'Enter' && customDecision.trim()) {
+                        decide({ key: 'custom', label: customDecision.trim(), emoji: '✏️' })
+                        setCustomDecision('')
+                      }
+                    }}
+                    placeholder="Autre décision… (Entrée pour valider)"
+                    className="flex-1 px-3 py-2.5 rounded-xl border border-[#e8e8e4] bg-white text-[12px] text-[#1a1a2e] placeholder-[#9b9b93] focus:outline-none focus:border-[#aeb0c9]"
+                  />
+                  <button
+                    disabled={!customDecision.trim()}
+                    onClick={() => {
+                      decide({ key: 'custom', label: customDecision.trim(), emoji: '✏️' })
+                      setCustomDecision('')
+                    }}
+                    className="px-3 py-2 rounded-xl border border-[#e8e8e4] bg-white hover:bg-[#f0efec] disabled:opacity-30 text-[#1a1a2e] transition-colors"
+                  >
+                    <ArrowRight size={14} />
+                  </button>
+                </div>
+              </>
             )}
           </div>
         ) : (
