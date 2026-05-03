@@ -18,8 +18,10 @@ export interface RawTicketItem {
   subject:      string
   description:  string
   created_at:   string
+  updated_at:   string
   status:       'new' | 'open' | 'pending'
   requester_id: number
+  is_reopened?: boolean  // true if client replied after our last action
 }
 
 export async function getRawTicketList(): Promise<RawTicketItem[]> {
@@ -44,8 +46,10 @@ export async function getRawTicketList(): Promise<RawTicketItem[]> {
     subject:      t.subject,
     description:  t.description,
     created_at:   t.created_at,
+    updated_at:   t.updated_at,
     status:       t.status as 'new' | 'open' | 'pending',
     requester_id: t.requester_id,
+    is_reopened:  processedMap.has(t.id) && new Date(t.updated_at) > new Date(processedMap.get(t.id)!),
   }))
 }
 

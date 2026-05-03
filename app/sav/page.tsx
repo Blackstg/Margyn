@@ -45,8 +45,10 @@ interface RawTicket {
   subject:      string
   description:  string
   created_at:   string
+  updated_at:   string
   status:       'new' | 'open' | 'pending'
   requester_id: number
+  is_reopened?: boolean
 }
 
 // Full ticket after AI processing
@@ -113,7 +115,7 @@ function TicketRow({ raw, processed, selected, doneAction, isProcessing, onClick
     <button
       onClick={onClick}
       className={`w-full text-left px-4 py-3 border-b border-[#eeede9] transition-colors ${
-        selected ? 'bg-[#1a1a2e]' : 'hover:bg-[#f0efec]'
+        raw.is_reopened ? 'bg-[#fffbeb]' : selected ? 'bg-[#1a1a2e]' : 'hover:bg-[#f0efec]'
       }`}
     >
       <div className="flex items-center justify-between gap-2 mb-1">
@@ -121,24 +123,29 @@ function TicketRow({ raw, processed, selected, doneAction, isProcessing, onClick
           {raw.subject}
         </span>
         <span className={`text-[10px] shrink-0 ${selected ? 'text-white/50' : 'text-[#9b9b93]'}`}>
-          {fmtTime(raw.created_at ?? new Date().toISOString())}
+          {fmtTime(raw.updated_at ?? raw.created_at ?? new Date().toISOString())}
         </span>
       </div>
       <div className="flex items-center gap-2">
         <span className={`text-[10px] truncate flex-1 ${selected ? 'text-white/60' : 'text-[#6b6b63]'}`}>
           {email}
         </span>
-        {doneAction === 'sent' && (
+        {raw.is_reopened && (
+          <span className="inline-flex items-center gap-1 text-[10px] font-bold shrink-0 bg-[#fef3c7] text-[#b45309] px-1.5 py-0.5 rounded-full border border-[#fcd34d]">
+            💬 Nouveau message
+          </span>
+        )}
+        {!raw.is_reopened && doneAction === 'sent' && (
           <span className={`inline-flex items-center gap-1 text-[10px] font-semibold shrink-0 ${selected ? 'text-white/60' : 'text-[#1a7f4b]'}`}>
             <CheckCheck size={10} /> Envoyé
           </span>
         )}
-        {doneAction === 'escalated' && (
+        {!raw.is_reopened && doneAction === 'escalated' && (
           <span className={`inline-flex items-center gap-1 text-[10px] font-semibold shrink-0 ${selected ? 'text-white/60' : 'text-[#b45309]'}`}>
             <ArrowUpRight size={10} /> Escaladé
           </span>
         )}
-        {doneAction === 'archived' && (
+        {!raw.is_reopened && doneAction === 'archived' && (
           <span className={`inline-flex items-center gap-1 text-[10px] font-semibold shrink-0 ${selected ? 'text-white/60' : 'text-[#6b6b63]'}`}>
             <Archive size={10} /> Archivé
           </span>
@@ -1252,7 +1259,7 @@ export default function SavPage() {
   const [selectedId, setSelectedId]         = useState<number | null>(null)
   const [processingId, setProcessingId]     = useState<number | null>(null)
   const [listLoading, setListLoading]       = useState(true)
-  const [doneStatuses, setDoneStatuses]     = useState<Record<number, 'sent' | 'escalated' | 'archived'>>({})
+  const [doneStatuses, setDoneStatuses]     = useState<Record<number, { action: 'sent' | 'escalated' | 'archived'; doneAt: string }>>({})
   const [drafts, setDrafts]                 = useState<Record<number, string>>({})
   const [solvedMap, setSolvedMap]           = useState<Record<number, boolean>>({})
   const [tab, setTab]                       = useState<'pending' | 'done' | 'qualite'>('pending')
@@ -1317,6 +1324,20 @@ export default function SavPage() {
 
       setRawTickets(data.tickets)
 
+      // If a ticket marked "done" in this session has is_reopened=true (client replied
+      // after our action), pull it back to "En attente" automatically.
+      setDoneStatuses(prev => {
+        const next = { ...prev }
+        let changed = false
+        for (const t of data.tickets ?? []) {
+          if (next[t.ticket_id] && t.is_reopened) {
+            delete next[t.ticket_id]
+            changed = true
+          }
+        }
+        return changed ? next : prev
+      })
+
       if (firstLoad.current) {
         firstLoad.current = false
         // Auto-select first actionable (non-pending) ticket
@@ -1353,7 +1374,7 @@ export default function SavPage() {
   }
 
   // ── Action handlers ───────────────────────────────────────────────────────
-  function advanceSelection(excludeId: number, doneAfter: Record<number, string>) {
+  function advanceSelection(excludeId: number, doneAfter: Record<number, { action: string; doneAt: string }>) {
     const remaining = rawTickets.filter(
       t => !doneAfter[t.ticket_id] && t.ticket_id !== excludeId && t.status !== 'pending'
     )
@@ -1387,7 +1408,7 @@ export default function SavPage() {
     if (selectedId === null) return
     const status: 'escalated' | 'sent' = action === 'escalate' ? 'escalated' : 'sent'
     logAction(selectedId, status, action === 'escalate' ? null : (wasModified ?? null))
-    const doneAfter = { ...doneStatuses, [selectedId]: status }
+    const doneAfter = { ...doneStatuses, [selectedId]: { action: status, doneAt: new Date().toISOString() } }
     setDoneStatuses(doneAfter)
     advanceSelection(selectedId, doneAfter)
   }
@@ -1395,7 +1416,7 @@ export default function SavPage() {
   function handleArchive() {
     if (selectedId === null) return
     logAction(selectedId, 'archived', null)
-    const doneAfter = { ...doneStatuses, [selectedId]: 'archived' as const }
+    const doneAfter = { ...doneStatuses, [selectedId]: { action: 'archived' as const, doneAt: new Date().toISOString() } }
     setDoneStatuses(doneAfter)
     advanceSelection(selectedId, doneAfter)
   }
@@ -1525,7 +1546,7 @@ export default function SavPage() {
                   processed={processedCache[t.ticket_id]}
                   selected={t.ticket_id === selectedId}
                   isProcessing={processingId === t.ticket_id}
-                  doneAction={doneStatuses[t.ticket_id]}
+                  doneAction={doneStatuses[t.ticket_id]?.action}
                   onClick={() => handleTicketClick(t)}
                 />
               ))}
@@ -1571,7 +1592,7 @@ export default function SavPage() {
                   raw={t}
                   processed={processedCache[t.ticket_id]}
                   selected={t.ticket_id === selectedId}
-                  doneAction={doneStatuses[t.ticket_id]}
+                  doneAction={doneStatuses[t.ticket_id]?.action}
                   onClick={() => handleTicketClick(t)}
                 />
               ))}
