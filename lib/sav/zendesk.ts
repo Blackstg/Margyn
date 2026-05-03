@@ -95,53 +95,48 @@ export async function postReply(
   if (solved) {
     ticket.custom_fields = [{ id: 20652537824913, value: 'autres' }]
   }
-  const res = await fetch(`${base()}/tickets/${ticketId}.json`, {
-    method:  'PUT',
-    headers: authHeaders(),
-    body: JSON.stringify({ ticket }),
-  })
+  const res = await fetchWithRetry(
+    `${base()}/tickets/${ticketId}.json`,
+    { method: 'PUT', headers: authHeaders(), body: JSON.stringify({ ticket }) },
+    4,
+    1000,
+  )
   if (!res.ok) throw new Error(`[Zendesk] postReply ${res.status}: ${await res.text()}`)
 }
 
 // Adds one or more tags to a ticket (fire-and-forget safe)
 export async function tagTicket(ticketId: number, tags: string[]): Promise<void> {
-  const getRes = await fetch(
+  const getRes = await fetchWithRetry(
     `${base()}/tickets/${ticketId}.json`,
-    { headers: authHeaders(), cache: 'no-store' }
+    { headers: authHeaders(), cache: 'no-store' },
+    3, 1000,
   )
   if (!getRes.ok) throw new Error(`[Zendesk] tagTicket read ${getRes.status}`)
   const { ticket } = await getRes.json() as { ticket: ZendeskTicket }
 
-  const res = await fetch(`${base()}/tickets/${ticketId}.json`, {
-    method:  'PUT',
-    headers: authHeaders(),
-    body: JSON.stringify({
-      ticket: {
-        tags: [...new Set([...ticket.tags, ...tags])],
-      },
-    }),
-  })
+  const res = await fetchWithRetry(
+    `${base()}/tickets/${ticketId}.json`,
+    { method: 'PUT', headers: authHeaders(), body: JSON.stringify({ ticket: { tags: [...new Set([...ticket.tags, ...tags])] } }) },
+    3, 1000,
+  )
   if (!res.ok) throw new Error(`[Zendesk] tagTicket write ${res.status}: ${await res.text()}`)
 }
 
 // Adds the "escalade-humain" tag silently — no public reply
 export async function escalateTicket(ticketId: number): Promise<void> {
-  const getRes = await fetch(
+  const getRes = await fetchWithRetry(
     `${base()}/tickets/${ticketId}.json`,
-    { headers: authHeaders(), cache: 'no-store' }
+    { headers: authHeaders(), cache: 'no-store' },
+    3, 1000,
   )
   if (!getRes.ok) throw new Error(`[Zendesk] escalate read ${getRes.status}`)
   const { ticket } = await getRes.json() as { ticket: ZendeskTicket }
 
-  const res = await fetch(`${base()}/tickets/${ticketId}.json`, {
-    method:  'PUT',
-    headers: authHeaders(),
-    body: JSON.stringify({
-      ticket: {
-        tags: [...new Set([...ticket.tags, 'escalade-humain'])],
-      },
-    }),
-  })
+  const res = await fetchWithRetry(
+    `${base()}/tickets/${ticketId}.json`,
+    { method: 'PUT', headers: authHeaders(), body: JSON.stringify({ ticket: { tags: [...new Set([...ticket.tags, 'escalade-humain'])] } }) },
+    3, 1000,
+  )
   if (!res.ok) throw new Error(`[Zendesk] escalate write ${res.status}: ${await res.text()}`)
 }
 
@@ -149,17 +144,21 @@ export async function escalateTicket(ticketId: number): Promise<void> {
 // Sets the required "Motif de contact" field to "autres" (field 20652537824913)
 // to satisfy Zendesk's validation, and adds the "steero-archive" tag.
 export async function archiveTicket(ticketId: number): Promise<void> {
-  const res = await fetch(`${base()}/tickets/${ticketId}.json`, {
-    method:  'PUT',
-    headers: authHeaders(),
-    body: JSON.stringify({
-      ticket: {
-        status: 'solved',
-        custom_fields: [{ id: 20652537824913, value: 'autres' }],
-        tags_to_add: ['steero-archive'],
-      },
-    }),
-  })
+  const res = await fetchWithRetry(
+    `${base()}/tickets/${ticketId}.json`,
+    {
+      method: 'PUT',
+      headers: authHeaders(),
+      body: JSON.stringify({
+        ticket: {
+          status: 'solved',
+          custom_fields: [{ id: 20652537824913, value: 'autres' }],
+          tags_to_add: ['steero-archive'],
+        },
+      }),
+    },
+    4, 1000,
+  )
   if (!res.ok) throw new Error(`[Zendesk] archiveTicket ${res.status}: ${await res.text()}`)
 }
 
