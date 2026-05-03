@@ -311,7 +311,7 @@ export interface SolvedTicketData {
 async function withConcurrency<T, R>(
   items: T[],
   fn: (item: T) => Promise<R | null>,
-  pauseMs = 7000
+  pauseMs = 500
 ): Promise<R[]> {
   const results: R[] = []
   for (let i = 0; i < items.length; i++) {
@@ -363,7 +363,7 @@ async function fetchComments(ticketId: number): Promise<ZendeskComment[]> {
  * Fetches comments in parallel batches of 5 to avoid rate limits.
  */
 export async function exportSolvedTickets(
-  maxTickets = 2000
+  maxTickets = 300
 ): Promise<SolvedTicketData[]> {
   const allTickets: ZendeskTicket[] = []
   // Sort ascending = oldest first. Old tickets are real SAV exchanges;
@@ -371,7 +371,7 @@ export async function exportSolvedTickets(
   let url: string | null =
     `${base()}/tickets.json?status=solved&per_page=100&sort_by=created_at&sort_order=asc`
 
-  // 1. Collect solved tickets — cap at maxTickets, 2s between pages
+  // 1. Collect solved tickets — 500ms between pages to stay within rate limits
   while (url && allTickets.length < maxTickets) {
     const res = await fetchWithRetry(url, { headers: authHeaders(), cache: 'no-store' })
     if (!res.ok) throw new Error(`[Zendesk] exportSolvedTickets ${res.status}: ${await res.text()}`)
@@ -379,11 +379,11 @@ export async function exportSolvedTickets(
     allTickets.push(...data.tickets)
     if (allTickets.length >= maxTickets) break
     url = data.next_page
-    if (url) await sleep(2000)
+    if (url) await sleep(500)
   }
   allTickets.splice(maxTickets)
 
-  console.log(`[Zendesk] ${allTickets.length} tickets résolus — récupération des commentaires (~7s/ticket, ~${Math.round(allTickets.length * 7 / 60)} min)…`)
+  console.log(`[Zendesk] ${allTickets.length} tickets résolus — récupération des commentaires (~0.5s/ticket, ~${Math.round(allTickets.length * 0.5 / 60)} min)…`)
 
   // 2. Fetch FIRST agent comment for each ticket, one by one.
   //    We use the first agent reply (not the last) because the last tends to be
