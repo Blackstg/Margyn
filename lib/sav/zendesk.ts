@@ -367,19 +367,30 @@ export async function exportSolvedTickets(
   resumeUrl?: string | null,
 ): Promise<{ examples: SolvedTicketData[]; nextCursor: string | null }> {
   const allTickets: ZendeskTicket[] = []
+  // Use Incremental Export API (start_time=0) to get ALL historical tickets,
+  // not just recent ones. /tickets.json only returns recent tickets.
+  // The incremental API paginates via after_cursor and returns all statuses —
+  // we filter for solved/closed below.
   let url: string | null = resumeUrl ??
-    `${base()}/tickets.json?status=solved&per_page=100&sort_by=created_at&sort_order=asc`
+    `${base()}/incremental/tickets/cursor.json?start_time=0&per_page=100`
   let nextCursor: string | null = null
 
-  // 1. Collect tickets from cursor position
+  // 1. Collect tickets from cursor position, keep only solved/closed
   while (url && allTickets.length < maxTickets) {
     const res = await fetchWithRetry(url, { headers: authHeaders(), cache: 'no-store' })
     if (!res.ok) throw new Error(`[Zendesk] exportSolvedTickets ${res.status}: ${await res.text()}`)
-    const data = await res.json() as { tickets: ZendeskTicket[]; next_page: string | null }
-    allTickets.push(...data.tickets)
-    nextCursor = data.next_page
-    if (allTickets.length >= maxTickets) break
-    url = data.next_page
+    const data = await res.json() as {
+      tickets: ZendeskTicket[]
+      after_cursor: string | null
+      after_url: string | null
+      end_of_stream: boolean
+    }
+    const solved = (data.tickets ?? []).filter(t => t.status === 'solved' || t.status === 'closed')
+    allTickets.push(...solved)
+    // Incremental API uses after_url for pagination
+    nextCursor = data.end_of_stream ? null : (data.after_url ?? null)
+    if (allTickets.length >= maxTickets || data.end_of_stream) break
+    url = data.after_url ?? null
     if (url) await sleep(500)
   }
   allTickets.splice(maxTickets)
