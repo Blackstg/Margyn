@@ -366,12 +366,11 @@ export async function exportSolvedTickets(
   resumeUrl?: string | null,
 ): Promise<{ examples: SolvedTicketData[]; nextCursor: string | null }> {
   const allTickets: ZendeskTicket[] = []
-  // Use Incremental Export API (start_time=0) to get ALL historical tickets,
-  // not just recent ones. /tickets.json only returns recent tickets.
-  // The incremental API paginates via after_cursor and returns all statuses —
-  // we filter for solved/closed below.
+  // Use Incremental Export API starting from Jan 1 2025 — older tickets
+  // reflect outdated policies and are not useful as examples.
+  // Unix timestamp for 2025-01-01T00:00:00Z = 1735689600
   let url: string | null = resumeUrl ??
-    `${base()}/incremental/tickets/cursor.json?start_time=0&per_page=100`
+    `${base()}/incremental/tickets/cursor.json?start_time=1735689600&per_page=100`
   let nextCursor: string | null = null
 
   // 1. Collect tickets from cursor position, keep only solved/closed
