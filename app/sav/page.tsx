@@ -1298,6 +1298,14 @@ export default function SavPage() {
   const [importMsg, setImportMsg]           = useState<string | null>(null)
   const [commentRefreshKey, setCommentRefreshKey] = useState(0)
   const [role, setRole]                     = useState<string | null>(null)
+  // New message modal
+  const [showNewMsg, setShowNewMsg]         = useState(false)
+  const [newMsgTo, setNewMsgTo]             = useState('')
+  const [newMsgSubject, setNewMsgSubject]   = useState('')
+  const [newMsgBody, setNewMsgBody]         = useState('')
+  const [newMsgSending, setNewMsgSending]   = useState(false)
+  const [newMsgError, setNewMsgError]       = useState<string | null>(null)
+  const [newMsgSent, setNewMsgSent]         = useState(false)
   // Tracks when each ticket was first selected (for time-to-action metric)
   const ticketStartTimes = useRef<Record<number, number>>({})
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1482,6 +1490,107 @@ export default function SavPage() {
       {/* Rules overlay */}
       {showRules && <RulesPanel onClose={() => setShowRules(false)} />}
 
+      {/* New message modal */}
+      {showNewMsg && (
+        <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/30 backdrop-blur-sm">
+          <div className="bg-white rounded-2xl shadow-xl w-[520px] max-w-[95vw] flex flex-col">
+            {/* Header */}
+            <div className="flex items-center justify-between px-5 py-4 border-b border-[#e8e8e4]">
+              <p className="text-sm font-bold text-[#1a1a2e]">Nouveau message</p>
+              <button onClick={() => setShowNewMsg(false)} className="text-[#9b9b93] hover:text-[#1a1a2e] transition-colors">
+                <X size={16} />
+              </button>
+            </div>
+
+            {newMsgSent ? (
+              <div className="px-5 py-10 flex flex-col items-center gap-3 text-center">
+                <div className="w-10 h-10 rounded-full bg-[#e8f5e9] flex items-center justify-center text-[#1a7f4b] text-lg">✓</div>
+                <p className="text-sm font-semibold text-[#1a1a2e]">Message envoyé !</p>
+                <p className="text-[12px] text-[#6b6b63]">La cliente recevra un email et pourra répondre directement.</p>
+                <button
+                  onClick={() => { setShowNewMsg(false); setNewMsgTo(''); setNewMsgSubject(''); setNewMsgBody('') }}
+                  className="mt-2 px-4 py-2 rounded-xl bg-[#1a1a2e] text-white text-[12px] font-semibold hover:bg-[#2d2d4a] transition-colors"
+                >
+                  Fermer
+                </button>
+              </div>
+            ) : (
+              <div className="px-5 py-4 flex flex-col gap-3">
+                {newMsgError && (
+                  <p className="text-[11px] text-red-500 bg-red-50 rounded-lg px-3 py-2">{newMsgError}</p>
+                )}
+                <div className="flex flex-col gap-1">
+                  <label className="text-[10px] font-semibold text-[#9b9b93] uppercase tracking-wide">Email cliente</label>
+                  <input
+                    type="email"
+                    value={newMsgTo}
+                    onChange={e => setNewMsgTo(e.target.value)}
+                    placeholder="cliente@example.com"
+                    className="px-3 py-2.5 rounded-xl border border-[#e8e8e4] bg-white text-[12px] text-[#1a1a2e] placeholder-[#9b9b93] focus:outline-none focus:border-[#aeb0c9]"
+                  />
+                </div>
+                <div className="flex flex-col gap-1">
+                  <label className="text-[10px] font-semibold text-[#9b9b93] uppercase tracking-wide">Sujet</label>
+                  <input
+                    type="text"
+                    value={newMsgSubject}
+                    onChange={e => setNewMsgSubject(e.target.value)}
+                    placeholder="Objet du message…"
+                    className="px-3 py-2.5 rounded-xl border border-[#e8e8e4] bg-white text-[12px] text-[#1a1a2e] placeholder-[#9b9b93] focus:outline-none focus:border-[#aeb0c9]"
+                  />
+                </div>
+                <div className="flex flex-col gap-1">
+                  <label className="text-[10px] font-semibold text-[#9b9b93] uppercase tracking-wide">Message</label>
+                  <textarea
+                    value={newMsgBody}
+                    onChange={e => setNewMsgBody(e.target.value)}
+                    placeholder="Bonjour,&#10;&#10;…"
+                    rows={7}
+                    className="px-3 py-2.5 rounded-xl border border-[#e8e8e4] bg-white text-[12px] text-[#1a1a2e] placeholder-[#9b9b93] focus:outline-none focus:border-[#aeb0c9] resize-none leading-relaxed"
+                  />
+                </div>
+                <div className="flex justify-end gap-2 pt-1 pb-1">
+                  <button
+                    onClick={() => setShowNewMsg(false)}
+                    className="px-4 py-2 rounded-xl border border-[#e8e8e4] text-[12px] text-[#6b6b63] hover:bg-[#f0efec] transition-colors"
+                  >
+                    Annuler
+                  </button>
+                  <button
+                    disabled={!newMsgTo.trim() || !newMsgSubject.trim() || !newMsgBody.trim() || newMsgSending}
+                    onClick={async () => {
+                      setNewMsgSending(true)
+                      setNewMsgError(null)
+                      try {
+                        const res = await fetch('/api/sav/new-message', {
+                          method: 'POST',
+                          headers: { 'Content-Type': 'application/json' },
+                          body: JSON.stringify({ to_email: newMsgTo, subject: newMsgSubject, body: newMsgBody }),
+                        })
+                        const data = await res.json() as { ticket_id?: number; error?: string }
+                        if (!res.ok) throw new Error(data.error ?? 'Erreur inconnue')
+                        setNewMsgSent(true)
+                        load()
+                      } catch (err) {
+                        setNewMsgError(err instanceof Error ? err.message : 'Erreur inconnue')
+                      } finally {
+                        setNewMsgSending(false)
+                      }
+                    }}
+                    className="px-4 py-2 rounded-xl bg-[#1a1a2e] text-white text-[12px] font-semibold hover:bg-[#2d2d4a] transition-colors disabled:opacity-40 flex items-center gap-2"
+                  >
+                    {newMsgSending
+                      ? <><RefreshCw size={12} className="animate-spin" /> Envoi…</>
+                      : <><Send size={12} strokeWidth={1.8} /> Envoyer</>
+                    }
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* ── LEFT — ticket list ── */}
       <div className="w-[280px] shrink-0 flex flex-col border-r border-[#e8e8e4] bg-[#f8f7f5] overflow-hidden">
 
@@ -1492,13 +1601,23 @@ export default function SavPage() {
               <p className="text-[9px] font-semibold uppercase tracking-[0.12em] text-[#aeb0c9]">Mōom Paris</p>
               <p className="text-sm font-bold text-[#1a1a2e] mt-0.5">SAV</p>
             </div>
-            <button
-              onClick={load} disabled={listLoading}
-              className="w-7 h-7 rounded-lg flex items-center justify-center text-[#6b6b63] hover:bg-[#eeede9] transition-colors disabled:opacity-40"
-              title="Actualiser"
-            >
-              <RefreshCw size={13} strokeWidth={1.8} className={listLoading ? 'animate-spin' : ''} />
-            </button>
+            <div className="flex items-center gap-1">
+              <button
+                onClick={() => { setShowNewMsg(true); setNewMsgSent(false); setNewMsgError(null) }}
+                className="h-7 px-2.5 rounded-lg flex items-center gap-1.5 text-[11px] font-semibold text-white bg-[#1a1a2e] hover:bg-[#2d2d4a] transition-colors"
+                title="Nouveau message"
+              >
+                <Plus size={12} strokeWidth={2.5} />
+                Nouveau
+              </button>
+              <button
+                onClick={load} disabled={listLoading}
+                className="w-7 h-7 rounded-lg flex items-center justify-center text-[#6b6b63] hover:bg-[#eeede9] transition-colors disabled:opacity-40"
+                title="Actualiser"
+              >
+                <RefreshCw size={13} strokeWidth={1.8} className={listLoading ? 'animate-spin' : ''} />
+              </button>
+            </div>
           </div>
 
           {/* Tabs */}

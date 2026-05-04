@@ -79,6 +79,35 @@ export async function getRequesterEmail(requesterId: number): Promise<string> {
 // When solving, includes the required "Motif de contact" field (20652537824913)
 // to satisfy Zendesk's resolution validation.
 // uploads: optional list of Zendesk upload tokens to attach to the comment.
+// Creates a new outbound ticket — sends an email to a customer who has no existing ticket.
+// Returns the created ticket ID.
+export async function createOutboundTicket(
+  toEmail:  string,
+  subject:  string,
+  body:     string,
+): Promise<number> {
+  const res = await fetchWithRetry(
+    `${base()}/tickets.json`,
+    {
+      method:  'POST',
+      headers: authHeaders(),
+      body: JSON.stringify({
+        ticket: {
+          subject,
+          requester: { email: toEmail },
+          comment:   { body, public: true },
+          status:    'open',
+          custom_fields: [{ id: 20652537824913, value: 'autres' }],
+        },
+      }),
+    },
+    4, 1000,
+  )
+  if (!res.ok) throw new Error(`[Zendesk] createOutboundTicket ${res.status}: ${await res.text()}`)
+  const data = await res.json() as { ticket: { id: number } }
+  return data.ticket.id
+}
+
 export async function postReply(
   ticketId: number,
   body:     string,
