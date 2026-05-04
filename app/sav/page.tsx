@@ -219,6 +219,115 @@ function OrderBlock({ order }: { order: MoomOrder }) {
   )
 }
 
+// ─── Customer history ─────────────────────────────────────────────────────────
+
+interface PastTicket {
+  id: number; subject: string; status: string; created_at: string; updated_at: string
+}
+interface PastComment {
+  id: number; body: string; author_type: 'client' | 'agent'; created_at: string; attachments: unknown[]
+}
+
+function CustomerHistory({ email, currentTicketId }: { email: string; currentTicketId: number }) {
+  const [open, setOpen]             = useState(false)
+  const [tickets, setTickets]       = useState<PastTicket[]>([])
+  const [loading, setLoading]       = useState(false)
+  const [expanded, setExpanded]     = useState<number | null>(null)
+  const [comments, setComments]     = useState<Record<number, PastComment[]>>({})
+  const [loadingCom, setLoadingCom] = useState<number | null>(null)
+
+  useEffect(() => {
+    if (!open || tickets.length > 0) return
+    setLoading(true)
+    fetch(`/api/sav/customer-history?email=${encodeURIComponent(email)}&exclude=${currentTicketId}`)
+      .then(r => r.json())
+      .then((d: { tickets?: PastTicket[] }) => setTickets(d.tickets ?? []))
+      .catch(() => {})
+      .finally(() => setLoading(false))
+  }, [open, email, currentTicketId, tickets.length])
+
+  async function expandTicket(id: number) {
+    if (expanded === id) { setExpanded(null); return }
+    setExpanded(id)
+    if (comments[id]) return
+    setLoadingCom(id)
+    try {
+      const r = await fetch(`/api/sav/customer-history?email=${encodeURIComponent(email)}&comments=1&ticket_id=${id}`)
+      const d = await r.json() as { comments?: PastComment[] }
+      setComments(prev => ({ ...prev, [id]: d.comments ?? [] }))
+    } catch { /* ignore */ }
+    finally { setLoadingCom(null) }
+  }
+
+  const statusColor = (s: string) =>
+    s === 'open' ? 'text-blue-500' : s === 'solved' || s === 'closed' ? 'text-[#1a7f4b]' : 'text-[#9b9b93]'
+
+  return (
+    <div className="border-t border-[#e8e8e4] pt-4">
+      <button
+        onClick={() => setOpen(v => !v)}
+        className="flex items-center gap-2 w-full text-left group"
+      >
+        <p className="text-[10px] font-semibold uppercase tracking-[0.1em] text-[#aeb0c9] group-hover:text-[#6b6b63] transition-colors flex-1">
+          Historique cliente
+        </p>
+        {open
+          ? <ChevronUp size={12} className="text-[#aeb0c9]" />
+          : <ChevronDown size={12} className="text-[#aeb0c9]" />}
+      </button>
+
+      {open && (
+        <div className="mt-3 space-y-2">
+          {loading && <p className="text-[11px] text-[#9b9b93]">Chargement…</p>}
+          {!loading && tickets.length === 0 && (
+            <p className="text-[11px] text-[#9b9b93]">Aucun échange précédent avec cette cliente.</p>
+          )}
+          {tickets.map(t => (
+            <div key={t.id} className="rounded-xl border border-[#e8e8e4] overflow-hidden">
+              <button
+                onClick={() => expandTicket(t.id)}
+                className="w-full flex items-start gap-2 px-3 py-2.5 text-left hover:bg-[#f8f7f5] transition-colors"
+              >
+                <div className="flex-1 min-w-0">
+                  <p className="text-[11px] font-medium text-[#1a1a2e] truncate">{t.subject}</p>
+                  <p className="text-[10px] text-[#9b9b93] mt-0.5">
+                    <span className={`font-semibold ${statusColor(t.status)}`}>{t.status}</span>
+                    {' · '}{new Date(t.created_at).toLocaleDateString('fr-FR', { day: 'numeric', month: 'short', year: 'numeric' })}
+                  </p>
+                </div>
+                {loadingCom === t.id
+                  ? <RefreshCw size={11} className="animate-spin text-[#aeb0c9] shrink-0 mt-0.5" />
+                  : expanded === t.id
+                    ? <ChevronUp size={11} className="text-[#aeb0c9] shrink-0 mt-0.5" />
+                    : <ChevronDown size={11} className="text-[#aeb0c9] shrink-0 mt-0.5" />}
+              </button>
+
+              {expanded === t.id && comments[t.id] && (
+                <div className="border-t border-[#e8e8e4] bg-[#f8f7f5] px-3 py-2.5 space-y-2 max-h-60 overflow-y-auto">
+                  {comments[t.id].length === 0
+                    ? <p className="text-[11px] text-[#9b9b93]">Aucun commentaire public.</p>
+                    : comments[t.id].map(c => (
+                      <div key={c.id} className={`flex gap-2 ${c.author_type === 'agent' ? 'flex-row-reverse' : ''}`}>
+                        <div className={`px-2.5 py-1.5 rounded-lg text-[11px] leading-relaxed max-w-[85%] whitespace-pre-wrap ${
+                          c.author_type === 'client'
+                            ? 'bg-white border border-[#e8e8e4] text-[#1a1a2e]'
+                            : 'bg-[#1a1a2e] text-white'
+                        }`}>
+                          {c.body.slice(0, 400)}{c.body.length > 400 ? '…' : ''}
+                        </div>
+                      </div>
+                    ))
+                  }
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
 function ConversationThread({ ticket, refreshKey }: { ticket: ProcessedTicket; refreshKey: number }) {
   const [comments, setComments]     = useState<CommentItem[]>([])
   const [loadingCom, setLoadingCom] = useState(true)
@@ -422,6 +531,9 @@ function TicketDetail({ ticket, refreshKey }: { ticket: ProcessedTicket; refresh
             <OrderBlock order={ticket.order} />
           </div>
         )}
+
+        {/* Customer history */}
+        <CustomerHistory email={ticket.customer_email} currentTicketId={ticket.ticket_id} />
       </div>
     </div>
   )

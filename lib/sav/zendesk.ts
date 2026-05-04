@@ -62,6 +62,39 @@ export async function getNewTickets(): Promise<ZendeskTicket[]> {
   )
 }
 
+export interface CustomerTicketSummary {
+  id:          number
+  subject:     string
+  status:      string
+  created_at:  string
+  updated_at:  string
+}
+
+// Returns all solved/closed tickets from a given email, sorted newest first.
+// Used to show the full conversation history with a customer across all tickets.
+export async function getCustomerTickets(
+  email:          string,
+  excludeTicketId?: number,
+): Promise<CustomerTicketSummary[]> {
+  const query = encodeURIComponent(`type:ticket requester:${email}`)
+  const res = await fetchWithRetry(
+    `${base()}/search.json?query=${query}&sort_by=created_at&sort_order=desc&per_page=20`,
+    { headers: authHeaders(), cache: 'no-store' },
+    3, 1000,
+  )
+  if (!res.ok) throw new Error(`[Zendesk] getCustomerTickets ${res.status}: ${await res.text()}`)
+  const data = await res.json() as { results?: ZendeskTicket[] }
+  return (data.results ?? [])
+    .filter(t => t.id !== excludeTicketId)
+    .map(t => ({
+      id:         t.id,
+      subject:    t.subject,
+      status:     t.status,
+      created_at: t.created_at,
+      updated_at: t.updated_at,
+    }))
+}
+
 // Fetches the requester's email from their user ID
 export async function getRequesterEmail(requesterId: number): Promise<string> {
   const res = await fetchWithRetry(
