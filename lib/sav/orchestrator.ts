@@ -246,14 +246,23 @@ export async function processOneTicket(
   requesterId: number,
   ticketStatus: 'new' | 'open' | 'pending' = 'open',
 ): Promise<ProcessedTicket> {
-  // ─── Phishing fast-path (before any Claude call) ──────────────────────────
-  // Fetch email first — needed for sender-based phishing check.
-  const email = await getRequesterEmail(requesterId)
+  // Run email fetch + classification in parallel (email is needed for phishing
+  // check and Shopify lookup, but classification doesn't need it)
+  const [emailResult, classification] = await Promise.allSettled([
+    getRequesterEmail(requesterId),
+    classifyTicket(subject, description),
+  ])
 
+  if (emailResult.status === 'rejected') throw new Error(`[SAV] getRequesterEmail failed: ${emailResult.reason}`)
+  if (classification.status === 'rejected') throw new Error(`[SAV] classifyTicket failed: ${classification.reason}`)
+
+  const email = emailResult.value
+  const cls   = classification.value
+
+  // ─── Phishing fast-path ───────────────────────────────────────────────────
   const phishing = detectPhishing(email, subject, description)
   if (phishing) {
     console.warn(`[SAV] Phishing détecté ticket #${ticketId} — signaux:`, phishing.signals)
-    // Tag Zendesk asynchronously (fire-and-forget)
     tagTicket(ticketId, ['phishing']).catch((err) =>
       console.error('[SAV] tagTicket phishing failed:', err)
     )
@@ -277,19 +286,13 @@ export async function processOneTicket(
     }
   }
 
-  // Run classification + Shopify order fetch in parallel
-  const [classification, shopifyOrder] = await Promise.allSettled([
-    classifyTicket(subject, description),
+  // Shopify order fetch (needs email, which is now resolved)
+  const [shopifyOrder] = await Promise.allSettled([
     getMostRecentOrder(email, `${subject}\n${description}`),
   ])
 
   const order: MoomOrder | null =
     shopifyOrder.status === 'fulfilled' ? shopifyOrder.value : null
-
-  if (classification.status === 'rejected') {
-    throw new Error(`[SAV] classifyTicket failed: ${classification.reason}`)
-  }
-  const cls = classification.value
 
   // ─── Pending tickets ──────────────────────────────────────────────────────
   // "Pending" means waiting for the client to reply — no action needed from

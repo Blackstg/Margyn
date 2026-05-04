@@ -1371,11 +1371,14 @@ export default function SavPage() {
       if (firstLoad.current) {
         firstLoad.current = false
         // Auto-select first actionable (non-pending) ticket
-        const first = data.tickets.find(t => t.status !== 'pending')
+        const actionable = data.tickets.filter(t => t.status !== 'pending')
+        const [first, ...rest] = actionable
         if (first) {
           setSelectedId(first.ticket_id)
           setCommentRefreshKey(n => n + 1)
           processTicket(first)
+          // Pre-warm next 2 tickets in background so they're ready when user navigates
+          rest.slice(0, 2).forEach(t => processTicket(t))
         }
       }
     } finally { setListLoading(false) }
