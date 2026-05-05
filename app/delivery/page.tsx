@@ -1982,6 +1982,8 @@ function LivreurView() {
   // Complete tour
   const [confirmComplete, setConfirmComplete] = useState(false)
   const [completingTour, setCompletingTour]   = useState(false)
+  // Upcoming tour preview
+  const [expandedUpcomingId, setExpandedUpcomingId] = useState<string | null>(null)
 
   async function handleCompleteTour() {
     if (!tour) return
@@ -2467,26 +2469,56 @@ function LivreurView() {
             </p>
             {upcomingTours.map(t => {
               const tStops = [...t.stops].sort((a, b) => a.sequence - b.sequence)
-              const tDelivered = tStops.filter(s => s.status === 'delivered' || s.status === 'partial').length
+              const isExpanded = expandedUpcomingId === t.id
               return (
-                <button
-                  key={t.id}
-                  onClick={() => setSelectedTourId(t.id)}
-                  className="w-full flex items-center gap-4 px-5 py-4 rounded-[18px] bg-white border border-[#e8e8e4] active:bg-[#f5f5f3] transition-colors text-left"
-                >
-                  <div className="w-10 h-10 rounded-full bg-[#f0efec] flex items-center justify-center shrink-0">
-                    <Truck size={18} strokeWidth={1.8} className="text-[#6b6b63]" />
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-bold text-[#1a1a2e] truncate">{t.name}</p>
-                    <p className="text-xs text-[#9b9b93] mt-0.5 capitalize">
-                      {t.planned_date ? formatDate(t.planned_date) : 'Sans date'}
-                      {' · '}{tStops.length} arrêts
-                      {tDelivered > 0 && ` · ${tDelivered} livrés`}
-                    </p>
-                  </div>
-                  <ChevronRight size={16} className="text-[#d0cfc9] shrink-0" />
-                </button>
+                <div key={t.id} className="rounded-[18px] bg-white border border-[#e8e8e4] overflow-hidden">
+                  {/* Header row */}
+                  <button
+                    onClick={() => setExpandedUpcomingId(isExpanded ? null : t.id)}
+                    className="w-full flex items-center gap-4 px-5 py-4 active:bg-[#f5f5f3] transition-colors text-left"
+                  >
+                    <div className="w-10 h-10 rounded-full bg-[#f0efec] flex items-center justify-center shrink-0">
+                      <Truck size={18} strokeWidth={1.8} className="text-[#6b6b63]" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-bold text-[#1a1a2e] truncate">{t.name}</p>
+                      <p className="text-xs text-[#9b9b93] mt-0.5 capitalize">
+                        {t.planned_date ? formatDate(t.planned_date) : 'Sans date'}
+                        {' · '}{tStops.length} arrêts · {t.total_panels} panneaux
+                      </p>
+                    </div>
+                    {isExpanded
+                      ? <ChevronUp size={16} className="text-[#d0cfc9] shrink-0" />
+                      : <ChevronDown size={16} className="text-[#d0cfc9] shrink-0" />}
+                  </button>
+
+                  {/* Stops preview */}
+                  {isExpanded && (
+                    <div className="border-t border-[#f0efec]">
+                      {tStops.length === 0
+                        ? <p className="px-5 py-4 text-sm text-[#9b9b93]">Aucun arrêt planifié.</p>
+                        : tStops.map((s, i) => (
+                          <div
+                            key={s.id}
+                            className="flex items-start gap-3 px-5 py-3 border-b border-[#f0efec] last:border-0"
+                          >
+                            <span className="w-6 h-6 rounded-full bg-[#f0efec] flex items-center justify-center text-[10px] font-bold text-[#6b6b63] shrink-0 mt-0.5">
+                              {i + 1}
+                            </span>
+                            <div className="flex-1 min-w-0">
+                              <p className="text-sm font-semibold text-[#1a1a2e] truncate">{s.customer_name}</p>
+                              <p className="text-xs text-[#9b9b93] truncate">{s.address1}, {s.city}</p>
+                            </div>
+                            <div className="text-right shrink-0">
+                              <p className="text-sm font-bold text-[#1a1a2e]">{s.panel_count}</p>
+                              <p className="text-[10px] text-[#9b9b93]">pan.</p>
+                            </div>
+                          </div>
+                        ))
+                      }
+                    </div>
+                  )}
+                </div>
               )
             })}
           </div>
