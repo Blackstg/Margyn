@@ -575,6 +575,7 @@ export default function SavKromPage() {
 
   const [threads, setThreads]           = useState<RawThread[]>([])
   const [processedCache, setProcessedCache] = useState<Record<string, ProcessedThread>>({})
+  const [processErrors, setProcessErrors]   = useState<Record<string, string>>({})
   const [selectedId, setSelectedId]     = useState<string | null>(null)
   const [processingId, setProcessingId] = useState<string | null>(null)
   const [listLoading, setListLoading]   = useState(true)
@@ -640,6 +641,7 @@ export default function SavKromPage() {
     if (fetchingRef.current.has(raw.thread_id)) return
     fetchingRef.current.add(raw.thread_id)
     setProcessingId(raw.thread_id)
+    setProcessErrors(prev => { const n = { ...prev }; delete n[raw.thread_id]; return n })
     try {
       const res = await fetch('/api/sav-krom/process', {
         method:  'POST',
@@ -647,14 +649,21 @@ export default function SavKromPage() {
         body: JSON.stringify(raw),
       })
       const thread = await res.json() as ProcessedThread & { error?: string }
-      if (!res.ok) { console.error('[SAV-Krom] process error:', thread.error); return }
+      if (!res.ok) {
+        const msg = thread.error ?? `Erreur HTTP ${res.status}`
+        console.error('[SAV-Krom] process error:', msg)
+        setProcessErrors(prev => ({ ...prev, [raw.thread_id]: msg }))
+        return
+      }
       setProcessedCache(prev => ({ ...prev, [raw.thread_id]: thread }))
       setDrafts(prev => {
         if (raw.thread_id in prev) return prev
         return { ...prev, [raw.thread_id]: thread.draft_reply }
       })
     } catch (err) {
-      console.error('[SAV-Krom] processThread error:', err)
+      const msg = err instanceof Error ? err.message : 'Erreur réseau'
+      console.error('[SAV-Krom] processThread error:', msg)
+      setProcessErrors(prev => ({ ...prev, [raw.thread_id]: msg }))
     } finally {
       fetchingRef.current.delete(raw.thread_id)
       setProcessingId(prev => prev === raw.thread_id ? null : prev)
@@ -907,6 +916,16 @@ export default function SavKromPage() {
             <RefreshCw size={16} className="animate-spin" />
             <span className="text-sm">Analyse en cours…</span>
           </div>
+        ) : selectedId && processErrors[selectedId] && !selected ? (
+          <div className="flex flex-col items-center justify-center h-full gap-3 p-6 text-center">
+            <p className="text-xs text-[#c7293a] bg-[#fce8ea] rounded-xl px-4 py-3 max-w-xs">{processErrors[selectedId]}</p>
+            <button
+              onClick={() => { const raw = threads.find(t => t.thread_id === selectedId); if (raw) processThread(raw) }}
+              className="px-4 py-2 rounded-xl bg-[#1a1a2e] text-white text-xs font-semibold hover:bg-[#2a2a4e] transition-colors"
+            >
+              Réessayer
+            </button>
+          </div>
         ) : selected ? (
           <ThreadDetail thread={selected} />
         ) : null}
@@ -921,6 +940,10 @@ export default function SavKromPage() {
         ) : isProcessing && !selected ? (
           <div className="flex items-center justify-center h-full">
             <RefreshCw size={14} className="animate-spin text-[#aeb0c9]" />
+          </div>
+        ) : selectedId && processErrors[selectedId] && !selected ? (
+          <div className="flex items-center justify-center h-full">
+            <p className="text-[10px] text-[#c7293a]">Échec de l&apos;analyse</p>
           </div>
         ) : selected ? (
           <ReplyPanel
