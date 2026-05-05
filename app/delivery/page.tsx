@@ -98,6 +98,9 @@ interface Tour {
   status: TourStatus
   stops: TourStop[]
   total_panels: number
+  started_at?: string | null
+  completed_at?: string | null
+  total_km?: number | null
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -106,6 +109,19 @@ function formatDate(dateStr: string): string {
   if (!dateStr) return ''
   const d = new Date(dateStr + 'T00:00:00')
   return d.toLocaleDateString('fr-FR', { weekday: 'short', day: 'numeric', month: 'short' })
+}
+
+function formatDuration(ms: number): string {
+  if (ms <= 0) return '—'
+  const totalMin = Math.round(ms / 60000)
+  const days  = Math.floor(totalMin / (60 * 24))
+  const hours = Math.floor((totalMin % (60 * 24)) / 60)
+  const mins  = totalMin % 60
+  const parts: string[] = []
+  if (days  > 0) parts.push(`${days}j`)
+  if (hours > 0) parts.push(`${hours}h`)
+  if (mins  > 0 || parts.length === 0) parts.push(`${mins}min`)
+  return parts.join(' ')
 }
 
 
@@ -1251,6 +1267,38 @@ function PlanificateurView() {
                         </div>
                       </div>
 
+                      {/* Tour performance stats (admin) */}
+                      {isExpanded && tour.completed_at && (
+                        <div className="mx-3 mb-2 rounded-[10px] bg-[#f8f7f5] border border-[#e8e8e4] px-4 py-3 grid grid-cols-4 gap-3 text-center">
+                          {(() => {
+                            const durationMs = tour.started_at && tour.completed_at
+                              ? new Date(tour.completed_at).getTime() - new Date(tour.started_at).getTime()
+                              : 0
+                            const delivered = tour.stops.filter(s => s.status === 'delivered' || s.status === 'partial').length
+                            const failed    = tour.stops.filter(s => s.status === 'failed').length
+                            const panels    = tour.stops.filter(s => s.status === 'delivered' || s.status === 'partial').reduce((n, s) => n + s.panel_count, 0)
+                            return (<>
+                              <div>
+                                <p className="text-sm font-bold text-[#1a1a2e]">{formatDuration(durationMs)}</p>
+                                <p className="text-[10px] text-[#9b9b93] mt-0.5">Durée</p>
+                              </div>
+                              <div>
+                                <p className="text-sm font-bold text-[#1a7f4b]">{delivered}<span className="text-[#c7293a]">/{failed > 0 ? `${failed}✗` : ''}</span></p>
+                                <p className="text-[10px] text-[#9b9b93] mt-0.5">Livraisons</p>
+                              </div>
+                              <div>
+                                <p className="text-sm font-bold text-[#1a1a2e]">{panels}</p>
+                                <p className="text-[10px] text-[#9b9b93] mt-0.5">Panneaux</p>
+                              </div>
+                              <div>
+                                <p className="text-sm font-bold text-[#1a1a2e]">{tour.total_km ?? '—'} km</p>
+                                <p className="text-[10px] text-[#9b9b93] mt-0.5">Distance</p>
+                              </div>
+                            </>)
+                          })()}
+                        </div>
+                      )}
+
                       {/* Expanded stops + actions */}
                       {isExpanded && (
                         <div className="border-t border-[#e8e8e4] p-3">
@@ -1775,7 +1823,7 @@ function PlanificateurView() {
 
 // ─── Livreur View ─────────────────────────────────────────────────────────────
 
-type LivreurScreen = 'home' | 'loading' | 'tour' | 'map' | 'nearby' | 'reorder'
+type LivreurScreen = 'home' | 'loading' | 'tour' | 'map' | 'nearby' | 'reorder' | 'celebration'
 
 // ─── Drag-and-drop stop item ──────────────────────────────────────────────────
 
@@ -1982,6 +2030,10 @@ function LivreurView() {
   // Complete tour
   const [confirmComplete, setConfirmComplete] = useState(false)
   const [completingTour, setCompletingTour]   = useState(false)
+  // Celebration screen after tour completion
+  const [celebrationStats, setCelebrationStats] = useState<{
+    durationMs: number; delivered: number; failed: number; panels: number; totalKm: number
+  } | null>(null)
   // Upcoming tour preview
   const [expandedUpcomingId, setExpandedUpcomingId] = useState<string | null>(null)
 
@@ -1989,14 +2041,46 @@ function LivreurView() {
     if (!tour) return
     setCompletingTour(true)
     try {
+      const completedAt = new Date().toISOString()
+
+      // Calculate total km from geocoded coordinates in sequence
+      const stopsInOrder = [...tour.stops].sort((a, b) => a.sequence - b.sequence)
+      let totalKm = 0
+      for (let i = 0; i < stopsInOrder.length - 1; i++) {
+        const a = coordsCache.current.get(stopsInOrder[i].id)
+        const b = coordsCache.current.get(stopsInOrder[i + 1].id)
+        if (a && b) {
+          // Haversine distance
+          const R = 6371
+          const dLat = (b[1] - a[1]) * Math.PI / 180
+          const dLon = (b[0] - a[0]) * Math.PI / 180
+          const h = Math.sin(dLat/2)**2 + Math.cos(a[1]*Math.PI/180) * Math.cos(b[1]*Math.PI/180) * Math.sin(dLon/2)**2
+          totalKm += R * 2 * Math.atan2(Math.sqrt(h), Math.sqrt(1-h))
+        }
+      }
+      totalKm = Math.round(totalKm)
+
       const r = await fetch(`/api/delivery/tours/${tour.id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ status: 'completed' }),
+        body: JSON.stringify({ status: 'completed', completed_at: completedAt, total_km: totalKm }),
       })
       if (!r.ok) throw new Error(await r.text())
       setConfirmComplete(false)
-      await fetchTours()
+
+      // Compute stats for celebration screen
+      const delivered = stopsInOrder.filter(s => s.status === 'delivered' || s.status === 'partial').length
+      const failed    = stopsInOrder.filter(s => s.status === 'failed').length
+      const panels    = stopsInOrder
+        .filter(s => s.status === 'delivered' || s.status === 'partial')
+        .reduce((sum, s) => sum + s.panel_count, 0)
+
+      // Duration from started_at stored on tour (fetched from DB) or fallback
+      const latestTour = await fetchTours()
+      const startedAt  = (latestTour as Tour | undefined)?.started_at ?? null
+      const durationMs = startedAt ? new Date(completedAt).getTime() - new Date(startedAt).getTime() : 0
+      setCelebrationStats({ durationMs, delivered, failed, panels, totalKm })
+      setScreen('celebration')
     } catch (e) {
       console.error(e)
     } finally {
@@ -2013,7 +2097,7 @@ function LivreurView() {
     useSensor(TouchSensor, { activationConstraint: { delay: 200, tolerance: 8 } }),
   )
 
-  const fetchTours = useCallback(async () => {
+  const fetchTours = useCallback(async (returnCurrentId?: string): Promise<Tour | undefined> => {
     setLoading(true)
     try {
       const r = await fetch('/api/delivery/tours', { cache: 'no-store' })
@@ -2021,21 +2105,22 @@ function LivreurView() {
       const today = new Date().toISOString().slice(0, 10)
       const all: Tour[] = (data.tours ?? []).filter((t: Tour) => t.status !== 'cancelled')
       setTours(all)
-      // Keep the current selection if it still exists in the refreshed list.
-      // Only auto-select when there is genuinely no selection yet (first load)
-      // or the previously selected tour disappeared (e.g. deleted).
+      let selected: Tour | undefined
       setSelectedTourId(prev => {
-        if (prev && all.find((t) => t.id === prev)) return prev   // stay on current tour
-        // Priority: in_progress → today → closest upcoming → first
-        const inProgress = all.find((t: Tour) => t.status === 'in_progress')
-        if (inProgress) return inProgress.id
-        const todayTour = all.find((t: Tour) => t.planned_date === today)
-        if (todayTour) return todayTour.id
-        const upcoming = [...all]
-          .filter((t: Tour) => t.planned_date && t.planned_date >= today)
-          .sort((a: Tour, b: Tour) => a.planned_date.localeCompare(b.planned_date))[0]
-        return upcoming?.id ?? all[0]?.id ?? prev
+        const kept = prev && all.find((t) => t.id === prev) ? prev : (() => {
+          const inProgress = all.find((t: Tour) => t.status === 'in_progress')
+          if (inProgress) return inProgress.id
+          const todayTour = all.find((t: Tour) => t.planned_date === today)
+          if (todayTour) return todayTour.id
+          const upcoming = [...all]
+            .filter((t: Tour) => t.planned_date && t.planned_date >= today)
+            .sort((a: Tour, b: Tour) => a.planned_date.localeCompare(b.planned_date))[0]
+          return upcoming?.id ?? all[0]?.id ?? prev
+        })()
+        selected = all.find(t => t.id === (returnCurrentId ?? kept))
+        return kept
       })
+      return selected
     } catch (e) {
       console.error(e)
     } finally {
@@ -2306,6 +2391,51 @@ function LivreurView() {
     return <div className="text-center py-16 text-sm text-[#6b6b63]">Chargement...</div>
   }
 
+  // ── Screen: celebration ──
+  if (screen === 'celebration' && celebrationStats) {
+    const { durationMs, delivered, failed, panels, totalKm } = celebrationStats
+    return (
+      <div className="w-full flex flex-col items-center gap-6 py-8">
+        {/* Trophy */}
+        <div className="text-7xl">🏆</div>
+        <div className="text-center">
+          <p className="text-2xl font-bold text-[#1a1a2e]">Tournée terminée !</p>
+          <p className="text-sm text-[#9b9b93] mt-1">Bravo, voici le résumé de ta journée</p>
+        </div>
+
+        {/* Stats grid */}
+        <div className="w-full grid grid-cols-2 gap-3">
+          <div className="rounded-[18px] bg-[#1a1a2e] px-5 py-5 flex flex-col items-center gap-1">
+            <p className="text-3xl font-bold text-[#4ade80]">{formatDuration(durationMs)}</p>
+            <p className="text-xs text-white/50 uppercase tracking-wide">Durée</p>
+          </div>
+          <div className="rounded-[18px] bg-white border border-[#e8e8e4] px-5 py-5 flex flex-col items-center gap-1">
+            <p className="text-3xl font-bold text-[#1a1a2e]">{totalKm} km</p>
+            <p className="text-xs text-[#9b9b93] uppercase tracking-wide">Parcourus</p>
+          </div>
+          <div className="rounded-[18px] bg-white border border-[#e8e8e4] px-5 py-5 flex flex-col items-center gap-1">
+            <div className="flex items-baseline gap-2">
+              <p className="text-3xl font-bold text-[#1a1a2e]">{delivered}</p>
+              {failed > 0 && <p className="text-base font-semibold text-red-400">/ {failed} ✗</p>}
+            </div>
+            <p className="text-xs text-[#9b9b93] uppercase tracking-wide">Livraisons</p>
+          </div>
+          <div className="rounded-[18px] bg-white border border-[#e8e8e4] px-5 py-5 flex flex-col items-center gap-1">
+            <p className="text-3xl font-bold text-[#1a1a2e]">{panels}</p>
+            <p className="text-xs text-[#9b9b93] uppercase tracking-wide">Panneaux</p>
+          </div>
+        </div>
+
+        <button
+          onClick={() => { setCelebrationStats(null); setScreen('home') }}
+          className="w-full py-4 rounded-[16px] bg-[#1a1a2e] text-white font-bold text-base active:bg-[#2d2d4a] transition-colors"
+        >
+          Retour à l&apos;accueil
+        </button>
+      </div>
+    )
+  }
+
   // ── Screen: home ──
   if (screen === 'home') {
     // Only show active (non-completed, non-cancelled) tours to the driver
@@ -2391,7 +2521,7 @@ function LivreurView() {
                     await fetch(`/api/delivery/tours/${tour.id}`, {
                       method: 'PATCH',
                       headers: { 'Content-Type': 'application/json' },
-                      body: JSON.stringify({ status: 'in_progress' }),
+                      body: JSON.stringify({ status: 'in_progress', started_at: new Date().toISOString() }),
                     }).catch(() => {/* best-effort */})
                     fetchTours()
                   }
