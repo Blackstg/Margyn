@@ -2306,26 +2306,12 @@ function LivreurView() {
 
   // ── Screen: home ──
   if (screen === 'home') {
+    // Only show active (non-completed, non-cancelled) tours to the driver
+    const activeTours = tours.filter(t => t.status !== 'completed' && t.status !== 'cancelled')
+    const upcomingTours = activeTours.filter(t => t.id !== selectedTourId)
+
     return (
       <div className="w-full space-y-4">
-        {/* Tour selector */}
-        {tours.length > 1 && (
-          <div>
-            <p className="text-xs font-semibold uppercase tracking-widest text-[#6b6b63] mb-2 px-1">Ma tournée</p>
-            <select
-              value={selectedTourId}
-              onChange={(e) => setSelectedTourId(e.target.value)}
-              className="w-full px-4 py-4 text-base font-medium border border-[#e8e8e4] rounded-[14px] outline-none bg-white"
-            >
-              {tours.map((t) => (
-                <option key={t.id} value={t.id}>
-                  {t.status === 'in_progress' ? '🟢 ' : t.status === 'completed' ? '✓ ' : ''}
-                  {t.name} — {t.planned_date ? formatDate(t.planned_date) : 'sans date'}
-                </option>
-              ))}
-            </select>
-          </div>
-        )}
 
         {tour ? (
           <div className="w-full rounded-[20px] bg-[#1a1a2e] overflow-hidden">
@@ -2338,6 +2324,11 @@ function LivreurView() {
                     <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-[#4ade80]" />
                   </span>
                   <span className="text-[#4ade80] text-xs font-bold uppercase tracking-widest">Tournée en cours</span>
+                </div>
+              )}
+              {tour.status === 'planned' && (
+                <div className="flex items-center gap-2 mb-3">
+                  <span className="text-white/40 text-xs font-bold uppercase tracking-widest">Prochaine tournée</span>
                 </div>
               )}
               <div className="text-2xl font-bold leading-tight">{tour.name}</div>
@@ -2465,6 +2456,39 @@ function LivreurView() {
         ) : (
           <div className="w-full rounded-[20px] bg-white py-16 text-center text-base text-[#6b6b63]">
             Aucune tournée disponible
+          </div>
+        )}
+
+        {/* Upcoming tours */}
+        {upcomingTours.length > 0 && (
+          <div className="space-y-2">
+            <p className="text-xs font-semibold uppercase tracking-widest text-[#9b9b93] px-1">
+              Prochaines tournées
+            </p>
+            {upcomingTours.map(t => {
+              const tStops = [...t.stops].sort((a, b) => a.sequence - b.sequence)
+              const tDelivered = tStops.filter(s => s.status === 'delivered' || s.status === 'partial').length
+              return (
+                <button
+                  key={t.id}
+                  onClick={() => setSelectedTourId(t.id)}
+                  className="w-full flex items-center gap-4 px-5 py-4 rounded-[18px] bg-white border border-[#e8e8e4] active:bg-[#f5f5f3] transition-colors text-left"
+                >
+                  <div className="w-10 h-10 rounded-full bg-[#f0efec] flex items-center justify-center shrink-0">
+                    <Truck size={18} strokeWidth={1.8} className="text-[#6b6b63]" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-bold text-[#1a1a2e] truncate">{t.name}</p>
+                    <p className="text-xs text-[#9b9b93] mt-0.5 capitalize">
+                      {t.planned_date ? formatDate(t.planned_date) : 'Sans date'}
+                      {' · '}{tStops.length} arrêts
+                      {tDelivered > 0 && ` · ${tDelivered} livrés`}
+                    </p>
+                  </div>
+                  <ChevronRight size={16} className="text-[#d0cfc9] shrink-0" />
+                </button>
+              )
+            })}
           </div>
         )}
 
