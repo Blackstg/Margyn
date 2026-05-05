@@ -104,9 +104,18 @@ function extractTextFromPayload(payload: any): string {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const html = payload.parts.find((p: any) => p.mimeType === 'text/html')
     if (html) {
-      // Strip basic HTML tags for a readable preview
+      // Strip basic HTML tags and decode common HTML entities
       const raw = extractTextFromPayload(html)
-      return raw.replace(/<[^>]+>/g, ' ').replace(/\s{2,}/g, '\n').trim()
+      return raw
+        .replace(/<[^>]+>/g, ' ')
+        .replace(/&nbsp;/g, ' ')
+        .replace(/&lt;/g, '<')
+        .replace(/&gt;/g, '>')
+        .replace(/&amp;/g, '&')
+        .replace(/&quot;/g, '"')
+        .replace(/&#39;/g, "'")
+        .replace(/\s{2,}/g, '\n')
+        .trim()
     }
 
     // Recurse into all parts
@@ -119,11 +128,17 @@ function extractTextFromPayload(payload: any): string {
   return decodeBody(payload.body?.data ?? undefined)
 }
 
-// Remove quoted reply lines (lines starting with ">") and Gmail's "On ... wrote:" headers
+// Remove quoted reply content — keeps only the new part of the message.
+// Handles English ("On ... wrote:"), French ("Le ... a écrit :"), and ">" prefixes.
 function stripQuotedReply(text: string): string {
-  return text
+  // Truncate at the first quote-header line (French or English)
+  const quoteHeaderRe = /^(Le\s.+a\s[eé]crit\s*:?|On\s.+wrote:\s*|_{4,}|-{4,})/m
+  const match = text.match(quoteHeaderRe)
+  const truncated = match && match.index !== undefined ? text.slice(0, match.index) : text
+
+  return truncated
     .split('\n')
-    .filter(line => !line.startsWith('>') && !/^On .+wrote:$/.test(line.trim()))
+    .filter(line => !line.startsWith('>'))
     .join('\n')
     .replace(/\n{3,}/g, '\n\n')
     .trim()
