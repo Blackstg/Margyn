@@ -578,6 +578,7 @@ export default function SavKromPage() {
   const [selectedId, setSelectedId]     = useState<string | null>(null)
   const [processingId, setProcessingId] = useState<string | null>(null)
   const [listLoading, setListLoading]   = useState(true)
+  const [listError, setListError]       = useState<string | null>(null)
   const [doneStatuses, setDoneStatuses] = useState<Record<string, 'sent' | 'archived'>>({})
   const [drafts, setDrafts]             = useState<Record<string, string>>({})
   const [tab, setTab]                   = useState<'pending' | 'done'>('pending')
@@ -596,11 +597,14 @@ export default function SavKromPage() {
   // ── Load thread list ────────────────────────────────────────────────────
   const load = useCallback(async () => {
     setListLoading(true)
+    setListError(null)
     try {
       const res  = await fetch('/api/sav-krom/emails')
-      const data = await res.json() as { threads?: RawThread[]; error?: string }
+      const data = await res.json() as { threads?: RawThread[]; error?: string; debug?: { processed_in_db: number } }
       if (!res.ok || !Array.isArray(data.threads)) {
-        console.error('[SAV-Krom] emails API error:', data.error)
+        const errMsg = data.error ?? `Erreur HTTP ${res.status}`
+        console.error('[SAV-Krom] emails API error:', errMsg)
+        setListError(errMsg)
         return
       }
       setThreads(data.threads)
@@ -610,6 +614,9 @@ export default function SavKromPage() {
         setSelectedId(first.thread_id)
         processThread(first)
       }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Erreur réseau'
+      setListError(msg)
     } finally { setListLoading(false) }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
@@ -834,7 +841,16 @@ export default function SavKromPage() {
             </div>
           )}
 
-          {!listLoading && tab === 'pending' && (
+          {!listLoading && listError && (
+            <div className="p-4">
+              <div className="rounded-xl bg-[#fce8ea] border border-[#f5c2c7] px-3 py-3">
+                <p className="text-[10px] font-semibold text-[#c7293a] mb-1">Erreur Gmail</p>
+                <p className="text-[11px] text-[#c7293a] leading-relaxed break-words">{listError}</p>
+              </div>
+            </div>
+          )}
+
+          {!listLoading && !listError && tab === 'pending' && (
             <>
               {pending.length === 0 && (
                 <div className="flex flex-col items-center justify-center h-full gap-2 p-4 text-center">
@@ -856,7 +872,7 @@ export default function SavKromPage() {
             </>
           )}
 
-          {!listLoading && tab === 'done' && (
+          {!listLoading && !listError && tab === 'done' && (
             <>
               {done.length === 0 && (
                 <div className="flex flex-col items-center justify-center h-full gap-2 p-4 text-center">
