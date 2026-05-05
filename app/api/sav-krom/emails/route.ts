@@ -2,7 +2,6 @@
 
 import { NextResponse } from 'next/server'
 import { getRawThreadList } from '@/lib/sav-krom/orchestrator'
-import { getUnreadThreads } from '@/lib/sav-krom/gmail'
 import { createAdminClient } from '@/lib/supabase'
 
 export const dynamic = 'force-dynamic'
