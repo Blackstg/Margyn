@@ -235,7 +235,7 @@ export async function generateReply(
     ? `\nRègles obligatoires à respecter impérativement :\n${rules.map((r, i) => `IMPORTANT: ${i + 1}. ${r}`).join('\n')}\n`
     : ''
 
-  const similarExamples = findSimilarExamples(subject, description, 5)
+  const similarExamples = await findSimilarExamples(subject, description, 5)
   if (similarExamples.length > 0) {
     console.log(
       `[SAV] findSimilarExamples — ${similarExamples.length} exemple(s) trouvé(s) pour "${subject.slice(0, 60)}" :`,

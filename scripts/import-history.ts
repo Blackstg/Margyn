@@ -14,13 +14,17 @@ dotenv.config({ path: path.resolve(__dirname, '../.env.local') })
 
 // Dynamic import after env is loaded
 async function main() {
-  const { importHistory } = await import('../lib/sav/history')
-  const limit = parseInt(process.env.IMPORT_LIMIT ?? '500', 10)
+  const { importHistoryBatch } = await import('../lib/sav/history')
+  const batchSize = parseInt(process.env.IMPORT_BATCH ?? '25', 10)
 
-  console.log(`Récupération des tickets résolus depuis Zendesk (max ${limit})…`)
-  const { count, oldest, newest } = await importHistory(limit)
-  console.log(`✓ ${count} exemples importés → lib/sav/history.json`)
-  console.log(`  Période : ${oldest?.slice(0,10)} → ${newest?.slice(0,10)}`)
+  console.log(`Importation par batch de ${batchSize} tickets depuis Zendesk → Supabase…`)
+  let done = false
+  while (!done) {
+    const result = await importHistoryBatch(batchSize)
+    done = result.done
+    console.log(`  +${result.imported} tickets → total ${result.total} (${result.oldest?.slice(0,10)} → ${result.newest?.slice(0,10)})`)
+  }
+  console.log(`✓ Import terminé`)
 }
 
 main().catch((err) => {

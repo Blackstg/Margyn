@@ -1,7 +1,8 @@
-// ─── SAV History — load, save, similarity search ─────────────────────────────
+// ─── SAV History — Supabase-backed, persistent ────────────────────────────────
+// Stocke les exemples Q/A dans la table `sav_history_examples` (Supabase).
+// Remplace l'ancienne approche filesystem/tmp qui perdait les données au cold start.
 
-import fs   from 'fs'
-import path from 'path'
+import { createAdminClient } from '@/lib/supabase'
 import { exportSolvedTickets } from './zendesk'
 
 export interface HistoryExample {
@@ -12,34 +13,37 @@ export interface HistoryExample {
   created_at:       string
 }
 
-const FILE_PATH = path.join(process.cwd(), 'lib/sav/history.json')
-const TMP_PATH  = '/tmp/sav-history.json'
+// ─── Supabase read/write ──────────────────────────────────────────────────────
 
-export function loadHistory(): HistoryExample[] {
-  for (const p of [TMP_PATH, FILE_PATH]) {
-    try {
-      const data = JSON.parse(fs.readFileSync(p, 'utf-8')) as { examples: HistoryExample[] }
-      if (Array.isArray(data.examples)) return data.examples
-    } catch { /* try next */ }
+export async function loadHistory(): Promise<HistoryExample[]> {
+  try {
+    const sb = createAdminClient()
+    const { data, error } = await sb
+      .from('sav_history_examples')
+      .select('ticket_id, subject, customer_message, agent_reply, created_at')
+      .order('created_at', { ascending: true })
+    if (error) { console.warn('[SAV] loadHistory error:', error.message); return [] }
+    return (data ?? []) as HistoryExample[]
+  } catch (e) {
+    console.warn('[SAV] loadHistory exception:', e)
+    return []
   }
-  return []
 }
 
-function saveHistory(examples: HistoryExample[]) {
-  const json = JSON.stringify({ examples }, null, 2)
-  // In local dev, write back to the lib file so it's git-trackable
+async function saveHistoryBatch(examples: HistoryExample[]): Promise<void> {
+  if (examples.length === 0) return
   try {
-    fs.writeFileSync(FILE_PATH, json, 'utf-8')
-  } catch {
-    // On Vercel (read-only FS), fall back to /tmp — persists in warm instance
-    fs.writeFileSync(TMP_PATH, json, 'utf-8')
+    const sb = createAdminClient()
+    const { error } = await sb
+      .from('sav_history_examples')
+      .upsert(examples, { onConflict: 'ticket_id' })
+    if (error) console.warn('[SAV] saveHistoryBatch error:', error.message)
+  } catch (e) {
+    console.warn('[SAV] saveHistoryBatch exception:', e)
   }
 }
 
 // ─── Cursor storage ───────────────────────────────────────────────────────────
-// Stores the Zendesk next_page URL so incremental imports can resume.
-
-import { createAdminClient } from '@/lib/supabase'
 
 async function loadCursor(): Promise<string | null> {
   try {
@@ -65,45 +69,34 @@ async function saveCursor(cursor: string | null): Promise<void> {
 }
 
 // ─── Incremental import ───────────────────────────────────────────────────────
-// Each call imports up to `batchSize` tickets from where the last call left off.
-// Returns { done: true } when all solved tickets have been imported.
 
 export async function importHistoryBatch(batchSize = 25): Promise<{
   imported: number
-  total: number
-  done: boolean
-  oldest: string | null
-  newest: string | null
+  total:    number
+  done:     boolean
+  oldest:   string | null
+  newest:   string | null
 }> {
   const cursor = await loadCursor()
   const { examples: newExamples, nextCursor } = await exportSolvedTickets(batchSize, cursor)
 
-  // Merge with existing — deduplicate by ticket_id
-  const existing = loadHistory()
-  const existingIds = new Set(existing.map(e => e.ticket_id))
-  const merged = [...existing, ...newExamples.filter(e => !existingIds.has(e.ticket_id))]
-  saveHistory(merged)
+  // Upsert only the new batch — no need to load everything to deduplicate
+  await saveHistoryBatch(newExamples)
   await saveCursor(nextCursor)
 
-  const dates = merged.map(e => e.created_at).filter(Boolean).sort()
+  // Get total count from DB
+  const sb = createAdminClient()
+  const { count } = await sb
+    .from('sav_history_examples')
+    .select('ticket_id', { count: 'exact', head: true })
+
+  const dates = newExamples.map(e => e.created_at).filter(Boolean).sort()
   return {
     imported: newExamples.length,
-    total:    merged.length,
+    total:    count ?? 0,
     done:     nextCursor === null,
     oldest:   dates[0] ?? null,
     newest:   dates[dates.length - 1] ?? null,
-  }
-}
-
-export async function importHistory(limit = 50): Promise<{ count: number; oldest: string | null; newest: string | null }> {
-  const { examples, nextCursor } = await exportSolvedTickets(limit, null)
-  saveHistory(examples)
-  await saveCursor(nextCursor)
-  const dates = examples.map(e => e.created_at).filter(Boolean).sort()
-  return {
-    count:  examples.length,
-    oldest: dates[0]            ?? null,
-    newest: dates[dates.length - 1] ?? null,
   }
 }
 
@@ -122,7 +115,7 @@ function tokenize(text: string): Set<string> {
     text
       .toLowerCase()
       .normalize('NFD')
-      .replace(/[\u0300-\u036f]/g, '')   // strip accents for matching
+      .replace(/[\u0300-\u036f]/g, '')
       .replace(/[^\w\s]/g, ' ')
       .split(/\s+/)
       .filter(w => w.length > 3 && !STOP_WORDS.has(w))
@@ -137,21 +130,19 @@ function jaccardScore(a: Set<string>, b: Set<string>): number {
 }
 
 /**
- * Returns the k most similar historical examples to the given subject + message.
- * Uses Jaccard similarity on subject tokens (weight 1.0) +
- * customer_message tokens (weight 0.4).
- * Only returns examples with score > 0.
+ * Retourne les k exemples historiques les plus similaires à subject + message.
+ * Utilise la similarité Jaccard sur les tokens.
  */
-export function findSimilarExamples(
+export async function findSimilarExamples(
   subject:         string,
   customerMessage: string,
   k = 5
-): HistoryExample[] {
-  const examples = loadHistory()
+): Promise<HistoryExample[]> {
+  const examples = await loadHistory()
   if (examples.length === 0) return []
 
-  const qSubject  = tokenize(subject)
-  const qMessage  = tokenize(customerMessage)
+  const qSubject = tokenize(subject)
+  const qMessage = tokenize(customerMessage)
 
   return examples
     .map(ex => ({
