@@ -3,7 +3,7 @@
 // Remplace l'ancienne approche filesystem/tmp qui perdait les données au cold start.
 
 import { createAdminClient } from '@/lib/supabase'
-import { exportSolvedTickets } from './zendesk'
+import { exportSolvedTickets, ZendeskRateLimitError } from './zendesk'
 
 export interface HistoryExample {
   ticket_id:        number
@@ -70,21 +70,37 @@ async function saveCursor(cursor: string | null): Promise<void> {
 
 // ─── Incremental import ───────────────────────────────────────────────────────
 
-export async function importHistoryBatch(batchSize = 25): Promise<{
-  imported: number
-  total:    number
-  done:     boolean
-  oldest:   string | null
-  newest:   string | null
+export async function importHistoryBatch(batchSize = 10): Promise<{
+  imported:      number
+  total:         number
+  done:          boolean
+  rate_limited?: boolean
+  oldest:        string | null
+  newest:        string | null
 }> {
   const cursor = await loadCursor()
-  const { examples: newExamples, nextCursor } = await exportSolvedTickets(batchSize, cursor)
 
-  // Upsert only the new batch — no need to load everything to deduplicate
-  await saveHistoryBatch(newExamples)
-  await saveCursor(nextCursor)
+  let newExamples: Awaited<ReturnType<typeof exportSolvedTickets>>['examples'] = []
+  let nextCursor: string | null = cursor
 
-  // Get total count from DB
+  try {
+    const result = await exportSolvedTickets(batchSize, cursor)
+    newExamples = result.examples
+    nextCursor  = result.nextCursor
+
+    await saveHistoryBatch(newExamples)
+    await saveCursor(nextCursor)
+  } catch (err) {
+    if (err instanceof ZendeskRateLimitError) {
+      // Rate limited — cursor unchanged, next cron call will retry
+      console.warn('[SAV] importHistoryBatch: rate limited, skipping batch')
+      const sb = createAdminClient()
+      const { count } = await sb.from('sav_history_examples').select('ticket_id', { count: 'exact', head: true })
+      return { imported: 0, total: count ?? 0, done: false, rate_limited: true, oldest: null, newest: null }
+    }
+    throw err
+  }
+
   const sb = createAdminClient()
   const { count } = await sb
     .from('sav_history_examples')

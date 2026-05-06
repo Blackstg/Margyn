@@ -411,8 +411,20 @@ async function fetchWithRetry(
   throw new Error('[Zendesk] Too many retries after repeated 429')
 }
 
+// Same as fetchWithRetry but throws a special error on 429 instead of waiting.
+// Used by the import cron so Vercel functions don't timeout waiting for rate limits.
+export class ZendeskRateLimitError extends Error {
+  constructor() { super('ZENDESK_RATE_LIMITED') }
+}
+
+async function fetchNoWait429(url: string, opts: RequestInit): Promise<Response> {
+  const res = await fetch(url, opts)
+  if (res.status === 429) throw new ZendeskRateLimitError()
+  return res
+}
+
 async function fetchComments(ticketId: number): Promise<ZendeskComment[]> {
-  const res = await fetchWithRetry(
+  const res = await fetchNoWait429(
     `${base()}/tickets/${ticketId}/comments.json`,
     { headers: authHeaders(), cache: 'no-store' }
   )
@@ -440,7 +452,7 @@ export async function exportSolvedTickets(
 
   // 1. Collect tickets from cursor position, keep only solved/closed
   while (url && allTickets.length < maxTickets) {
-    const res = await fetchWithRetry(url, { headers: authHeaders(), cache: 'no-store' })
+    const res = await fetchNoWait429(url, { headers: authHeaders(), cache: 'no-store' })
     if (!res.ok) throw new Error(`[Zendesk] exportSolvedTickets ${res.status}: ${await res.text()}`)
     const data = await res.json() as {
       tickets: ZendeskTicket[]
