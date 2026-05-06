@@ -1,15 +1,13 @@
 // POST /api/sav/import-history
-// Fetches all solved Zendesk tickets, extracts Q/A pairs,
-// saves them to lib/sav/history.json (or /tmp on Vercel).
+// Fetches solved Zendesk tickets (batch of 10), extracts Q/A pairs, saves to Supabase.
+// Call repeatedly until { done: true }.
+// Batch size kept at 10 to stay within 60s Vercel Hobby function limit.
 
 import { NextRequest, NextResponse } from 'next/server'
 import { importHistoryBatch } from '@/lib/sav/history'
 
 export const dynamic = 'force-dynamic'
-export const maxDuration = 120
-
-// Each call imports one batch (~25 tickets) and saves cursor to DB.
-// Call repeatedly until { done: true }.
+export const maxDuration = 60
 
 async function runBatch(batchSize: number) {
   const result = await importHistoryBatch(batchSize)
@@ -17,7 +15,7 @@ async function runBatch(batchSize: number) {
 }
 
 export async function GET(req: NextRequest) {
-  const batch = parseInt(req.nextUrl.searchParams.get('batch') ?? '25', 10)
+  const batch = parseInt(req.nextUrl.searchParams.get('batch') ?? '10', 10)
   try { return await runBatch(batch) }
   catch (err) {
     console.error('[SAV] importHistoryBatch error:', err)
@@ -30,7 +28,7 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   const body = await req.json().catch(() => ({}))
-  const batch = parseInt(body?.batch ?? '25', 10)
+  const batch = parseInt(body?.batch ?? '10', 10)
   try { return await runBatch(batch) }
   catch (err) {
     console.error('[SAV] importHistoryBatch error:', err)
