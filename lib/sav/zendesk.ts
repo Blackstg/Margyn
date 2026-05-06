@@ -369,18 +369,21 @@ export interface SolvedTicketData {
 
 // Processes items one by one with a fixed pause between each.
 // Zendesk trial plans allow ~10 req/min → 7s between requests is safe.
+// Runs fn on all items in parallel batches of `concurrency` to respect rate limits.
 async function withConcurrency<T, R>(
   items: T[],
   fn: (item: T) => Promise<R | null>,
-  pauseMs = 500
+  concurrency = 5
 ): Promise<R[]> {
   const results: R[] = []
-  for (let i = 0; i < items.length; i++) {
-    try {
-      const val = await fn(items[i])
-      if (val !== null) results.push(val)
-    } catch { /* skip failed items */ }
-    if (i < items.length - 1) await sleep(pauseMs)
+  for (let i = 0; i < items.length; i += concurrency) {
+    const batch = items.slice(i, i + concurrency)
+    const settled = await Promise.allSettled(batch.map(fn))
+    for (const r of settled) {
+      if (r.status === 'fulfilled' && r.value !== null) results.push(r.value)
+    }
+    // Brief pause between batches to respect Zendesk rate limit (100 req/min)
+    if (i + concurrency < items.length) await sleep(300)
   }
   return results
 }
