@@ -442,16 +442,17 @@ export async function exportSolvedTickets(
   maxTickets = 25,
   resumeUrl?: string | null,
 ): Promise<{ examples: SolvedTicketData[]; nextCursor: string | null }> {
-  const allTickets: ZendeskTicket[] = []
-  // Use Incremental Export API starting from Jan 1 2025 — older tickets
-  // reflect outdated policies and are not useful as examples.
-  // Unix timestamp for 2025-01-01T00:00:00Z = 1735689600
+  // maxPages = how many Zendesk pages to fetch per call (each page ~100 tickets)
+  // We take ALL solved tickets from each page — never skip any.
+  const maxPages = maxTickets  // parameter is reused as page count
   let url: string | null = resumeUrl ??
     `${base()}/incremental/tickets/cursor.json?start_time=1735689600&per_page=100`
   let nextCursor: string | null = null
+  const allTickets: ZendeskTicket[] = []
+  let pagesRead = 0
 
-  // 1. Collect tickets from cursor position, keep only solved/closed
-  while (url && allTickets.length < maxTickets) {
+  // 1. Fetch up to maxPages pages, collect ALL solved/closed tickets from each
+  while (url && pagesRead < maxPages) {
     const res = await fetchNoWait429(url, { headers: authHeaders(), cache: 'no-store' })
     if (!res.ok) throw new Error(`[Zendesk] exportSolvedTickets ${res.status}: ${await res.text()}`)
     const data = await res.json() as {
@@ -460,15 +461,14 @@ export async function exportSolvedTickets(
       after_url: string | null
       end_of_stream: boolean
     }
+    // Take ALL solved/closed from this page — no artificial limit
     const solved = (data.tickets ?? []).filter(t => t.status === 'solved' || t.status === 'closed')
     allTickets.push(...solved)
-    // Incremental API uses after_url for pagination
     nextCursor = data.end_of_stream ? null : (data.after_url ?? null)
-    if (allTickets.length >= maxTickets || data.end_of_stream) break
+    pagesRead++
+    if (data.end_of_stream) break
     url = data.after_url ?? null
-    if (url) await sleep(500)
   }
-  allTickets.splice(maxTickets)
 
   console.log(`[Zendesk] ${allTickets.length} tickets — récupération des commentaires…`)
 
