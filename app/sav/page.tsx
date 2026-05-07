@@ -398,67 +398,60 @@ function ConversationThread({ ticket, refreshKey }: { ticket: ProcessedTicket; r
 
         const attachments = c.attachments ?? []
         return (
-          <div key={c.id ?? i} className={`rounded-xl px-4 py-3 border-l-[3px] ${
-            isAgent
-              ? 'bg-[#f0f4ff] border-[#aeb0c9]'
-              : 'bg-[#f8f7f5] border-[#e0cfc9]'
-          }`}>
-            <div className="flex items-center justify-between gap-2 mb-1.5">
-              <span className={`text-[10px] font-bold uppercase tracking-[0.08em] ${
-                isAgent ? 'text-[#4527a0]' : 'text-[#b45309]'
-              }`}>
-                {isAgent ? 'Agent' : 'Client'}
-              </span>
-              <span className="text-[10px] text-[#aeb0c9]">{dateStr}</span>
+          <div key={c.id ?? i} className={`flex flex-col gap-1 ${isAgent ? 'items-start' : 'items-end'}`}>
+            <span className="text-[10px] text-[#aeb0c9] px-1">{isAgent ? 'Agent' : 'Client'} · {dateStr}</span>
+            <div className={`max-w-[82%] px-3.5 py-2.5 rounded-2xl text-xs leading-relaxed ${
+              isAgent
+                ? 'bg-[#eeeeff] text-[#1a1a2e] rounded-tl-sm'
+                : 'bg-[#1a1a2e] text-white rounded-tr-sm'
+            }`}>
+              {c.body && (
+                <p className="whitespace-pre-wrap break-words">{c.body}</p>
+              )}
+              {attachments.length > 0 && (
+                <div className={`flex flex-col gap-2 ${c.body ? 'mt-2.5' : ''}`}>
+                  {attachments.map(a => {
+                    const isImage = a.content_type.startsWith('image/')
+                    const isPdf   = a.content_type === 'application/pdf'
+                    const sizeKb  = Math.round(a.size / 1024)
+                    return (
+                      <div key={a.id}>
+                        {isImage ? (
+                          <a href={a.content_url} target="_blank" rel="noopener noreferrer" title={a.file_name}>
+                            {/* eslint-disable-next-line @next/next/no-img-element */}
+                            <img
+                              src={a.content_url}
+                              alt={a.file_name}
+                              className="max-w-full max-h-48 rounded-lg object-contain border border-[#e8e8e4] cursor-pointer hover:opacity-90 transition-opacity"
+                            />
+                            <p className="text-[10px] text-[#9b9b93] mt-1">{a.file_name} · {sizeKb} Ko</p>
+                          </a>
+                        ) : (
+                          <a
+                            href={a.content_url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            download={a.file_name}
+                            className="inline-flex items-center gap-2 px-3 py-2 rounded-lg bg-white/20 border border-white/30 hover:bg-white/30 transition-colors group"
+                          >
+                            <span className="text-base leading-none">
+                              {isPdf ? '📄' : '📎'}
+                            </span>
+                            <div className="min-w-0">
+                              <p className="text-[11px] font-medium truncate">
+                                {a.file_name}
+                              </p>
+                              <p className="text-[10px] opacity-70">{sizeKb} Ko</p>
+                            </div>
+                            <ExternalLink size={11} strokeWidth={1.8} className="opacity-50 shrink-0 ml-1" />
+                          </a>
+                        )}
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
             </div>
-            {c.body && (
-              <p className="text-xs text-[#1a1a2e] leading-relaxed whitespace-pre-wrap break-words">
-                {c.body}
-              </p>
-            )}
-            {attachments.length > 0 && (
-              <div className={`flex flex-col gap-2 ${c.body ? 'mt-2.5' : ''}`}>
-                {attachments.map(a => {
-                  const isImage = a.content_type.startsWith('image/')
-                  const isPdf   = a.content_type === 'application/pdf'
-                  const sizeKb  = Math.round(a.size / 1024)
-                  return (
-                    <div key={a.id}>
-                      {isImage ? (
-                        <a href={a.content_url} target="_blank" rel="noopener noreferrer" title={a.file_name}>
-                          {/* eslint-disable-next-line @next/next/no-img-element */}
-                          <img
-                            src={a.content_url}
-                            alt={a.file_name}
-                            className="max-w-full max-h-48 rounded-lg object-contain border border-[#e8e8e4] cursor-pointer hover:opacity-90 transition-opacity"
-                          />
-                          <p className="text-[10px] text-[#9b9b93] mt-1">{a.file_name} · {sizeKb} Ko</p>
-                        </a>
-                      ) : (
-                        <a
-                          href={a.content_url}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          download={a.file_name}
-                          className="inline-flex items-center gap-2 px-3 py-2 rounded-lg bg-white border border-[#e8e8e4] hover:border-[#aeb0c9] transition-colors group"
-                        >
-                          <span className="text-base leading-none">
-                            {isPdf ? '📄' : '📎'}
-                          </span>
-                          <div className="min-w-0">
-                            <p className="text-[11px] font-medium text-[#1a1a2e] truncate group-hover:text-[#4527a0] transition-colors">
-                              {a.file_name}
-                            </p>
-                            <p className="text-[10px] text-[#9b9b93]">{sizeKb} Ko</p>
-                          </div>
-                          <ExternalLink size={11} strokeWidth={1.8} className="text-[#aeb0c9] shrink-0 ml-1" />
-                        </a>
-                      )}
-                    </div>
-                  )
-                })}
-              </div>
-            )}
           </div>
         )
       })}
