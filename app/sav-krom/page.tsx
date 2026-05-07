@@ -45,6 +45,7 @@ interface GmailMessage {
   is_client:     boolean
   attachments:   GmailAttachment[]
   zipchat_chat?: ZipchatMessage[]
+  raw_html?:     string
 }
 
 interface RawThread {
@@ -546,6 +547,27 @@ function ThreadDetail({ thread }: { thread: ProcessedThread }) {
           </div>
         ) : [...messages].reverse().map((msg, i) => {
           const isClient = msg.is_client
+
+          // Rich HTML email (orders, notifications) — render in sandboxed iframe
+          if (msg.raw_html && !msg.zipchat_chat) {
+            return (
+              <div key={msg.message_id || i} className="rounded-xl border border-[#e8e8e4] overflow-hidden">
+                <div className="flex items-center justify-between px-4 py-2 bg-[#f5f4f2] border-b border-[#e8e8e4]">
+                  <span className={`text-[10px] font-bold uppercase tracking-[0.08em] ${isClient ? 'text-[#b45309]' : 'text-[#3730a3]'}`}>
+                    {isClient ? (msg.sender_name || msg.sender_email.split('@')[0]) : 'Krom Water'}
+                  </span>
+                  <span className="text-[10px] text-[#aeb0c9]">{fmtTime(msg.received_at)}</span>
+                </div>
+                <iframe
+                  srcDoc={msg.raw_html}
+                  sandbox="allow-same-origin"
+                  className="w-full border-0 bg-white"
+                  style={{ height: '420px' }}
+                  title="Email"
+                />
+              </div>
+            )
+          }
 
           // Zipchat transcript — render as chat bubbles
           if (msg.zipchat_chat && msg.zipchat_chat.length > 0) {

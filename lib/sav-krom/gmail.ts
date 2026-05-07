@@ -67,6 +67,7 @@ export interface GmailMessage {
   is_client:     boolean         // true si expéditeur ≠ hello@krom-water.com
   attachments:   GmailAttachment[]
   zipchat_chat?: ZipchatMessage[] // présent si l'email est un transcript Zipchat
+  raw_html?:     string           // HTML brut pour les emails riches (commandes, etc.)
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -350,6 +351,8 @@ export async function getThreadMessages(threadId: string): Promise<GmailMessage[
       ? zipchatToPlainText(zipchat)
       : stripQuotedReply(extractTextFromPayload(msg.payload ?? {}))
     const attachments = extractAttachments(msg.id ?? '', msg.payload)
+    // Store raw HTML for rich emails (not Zipchat — those use bubble rendering)
+    const isRichHtml = !zipchat && rawHtml && rawHtml.length > 800
     return {
       message_id:    msg.id ?? '',
       thread_id:     threadId,
@@ -360,6 +363,7 @@ export async function getThreadMessages(threadId: string): Promise<GmailMessage[
       is_client:     email !== KROM_EMAIL,
       attachments,
       zipchat_chat:  zipchat ?? undefined,
+      raw_html:      isRichHtml ? rawHtml : undefined,
     }
   })
 }
