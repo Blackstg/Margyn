@@ -71,12 +71,13 @@ async function saveCursor(cursor: string | null): Promise<void> {
 // ─── Incremental import ───────────────────────────────────────────────────────
 
 export async function importHistoryBatch(batchSize = 10): Promise<{
-  imported:      number
-  total:         number
-  done:          boolean
-  rate_limited?: boolean
-  oldest:        string | null
-  newest:        string | null
+  imported:           number
+  total:              number
+  done:               boolean
+  rate_limited?:      boolean
+  retry_after_secs?:  number
+  oldest:             string | null
+  newest:             string | null
 }> {
   const cursor = await loadCursor()
 
@@ -93,10 +94,10 @@ export async function importHistoryBatch(batchSize = 10): Promise<{
   } catch (err) {
     if (err instanceof ZendeskRateLimitError) {
       // Rate limited — cursor unchanged, next cron call will retry
-      console.warn('[SAV] importHistoryBatch: rate limited, skipping batch')
+      console.warn(`[SAV] importHistoryBatch: rate limited, retry after ${err.retryAfterSeconds}s`)
       const sb = createAdminClient()
       const { count } = await sb.from('sav_history_examples').select('ticket_id', { count: 'exact', head: true })
-      return { imported: 0, total: count ?? 0, done: false, rate_limited: true, oldest: null, newest: null }
+      return { imported: 0, total: count ?? 0, done: false, rate_limited: true, retry_after_secs: err.retryAfterSeconds, oldest: null, newest: null }
     }
     throw err
   }

@@ -414,12 +414,19 @@ async function fetchWithRetry(
 // Same as fetchWithRetry but throws a special error on 429 instead of waiting.
 // Used by the import cron so Vercel functions don't timeout waiting for rate limits.
 export class ZendeskRateLimitError extends Error {
-  constructor() { super('ZENDESK_RATE_LIMITED') }
+  retryAfterSeconds: number
+  constructor(retryAfterSeconds = 60) {
+    super('ZENDESK_RATE_LIMITED')
+    this.retryAfterSeconds = retryAfterSeconds
+  }
 }
 
 async function fetchNoWait429(url: string, opts: RequestInit): Promise<Response> {
   const res = await fetch(url, opts)
-  if (res.status === 429) throw new ZendeskRateLimitError()
+  if (res.status === 429) {
+    const retryAfter = Number(res.headers.get('Retry-After') ?? 60)
+    throw new ZendeskRateLimitError(retryAfter)
+  }
   return res
 }
 
