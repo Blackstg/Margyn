@@ -30,15 +30,21 @@ interface GmailAttachment {
   size:          number
 }
 
+interface ZipchatMessage {
+  role: 'customer' | 'assistant'
+  html: string
+}
+
 interface GmailMessage {
-  message_id:   string
-  thread_id:    string
-  body:         string
-  sender_email: string
-  sender_name:  string
-  received_at:  string
-  is_client:    boolean
-  attachments:  GmailAttachment[]
+  message_id:    string
+  thread_id:     string
+  body:          string
+  sender_email:  string
+  sender_name:   string
+  received_at:   string
+  is_client:     boolean
+  attachments:   GmailAttachment[]
+  zipchat_chat?: ZipchatMessage[]
 }
 
 interface RawThread {
@@ -540,6 +546,34 @@ function ThreadDetail({ thread }: { thread: ProcessedThread }) {
           </div>
         ) : [...messages].reverse().map((msg, i) => {
           const isClient = msg.is_client
+
+          // Zipchat transcript — render as chat bubbles
+          if (msg.zipchat_chat && msg.zipchat_chat.length > 0) {
+            return (
+              <div key={msg.message_id || i} className="rounded-xl border border-[#e8e8e4] overflow-hidden">
+                <div className="flex items-center gap-2 px-4 py-2 bg-[#f5f4f2] border-b border-[#e8e8e4]">
+                  <span className="text-[10px] font-bold uppercase tracking-[0.08em] text-[#6b6b63]">💬 Conversation Zipchat</span>
+                  <span className="text-[10px] text-[#aeb0c9]">· {fmtTime(msg.received_at)}</span>
+                </div>
+                <div className="px-4 py-3 space-y-2 bg-white">
+                  {msg.zipchat_chat.map((bubble, bi) => (
+                    <div key={bi} className={`flex ${bubble.role === 'customer' ? 'justify-end' : 'justify-start'}`}>
+                      <div
+                        className={`max-w-[80%] px-3 py-2 rounded-2xl text-xs leading-relaxed ${
+                          bubble.role === 'customer'
+                            ? 'bg-[#f0f0f0] text-[#1a1a2e]'
+                            : 'bg-[#3c81f5] text-white'
+                        }`}
+                        dangerouslySetInnerHTML={{ __html: bubble.html }}
+                      />
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )
+          }
+
+          // Regular email message
           return (
             <div
               key={msg.message_id || i}

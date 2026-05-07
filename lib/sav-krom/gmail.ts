@@ -52,15 +52,21 @@ export interface GmailAttachment {
   size:          number
 }
 
+export interface ZipchatMessage {
+  role: 'customer' | 'assistant'
+  html: string  // inner HTML of the bubble (may contain <strong>, <br />, <a>, etc.)
+}
+
 export interface GmailMessage {
-  message_id:   string
-  thread_id:    string
-  body:         string
-  sender_email: string
-  sender_name:  string
-  received_at:  string
-  is_client:    boolean         // true si expéditeur ≠ hello@krom-water.com
-  attachments:  GmailAttachment[]
+  message_id:    string
+  thread_id:     string
+  body:          string
+  sender_email:  string
+  sender_name:   string
+  received_at:   string
+  is_client:     boolean         // true si expéditeur ≠ hello@krom-water.com
+  attachments:   GmailAttachment[]
+  zipchat_chat?: ZipchatMessage[] // présent si l'email est un transcript Zipchat
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -128,6 +134,61 @@ function extractTextFromPayload(payload: any): string {
   return decodeBody(payload.body?.data ?? undefined)
 }
 
+// ─── Zipchat HTML parsing ─────────────────────────────────────────────────────
+// Zipchat emails embed the full chat transcript as HTML bubbles.
+// Customer bubbles: background-color #f0f0f0, text-align right
+// Assistant bubbles: background-color #3c81f5, text-align left
+
+function extractHtmlFromPayload(payload: unknown): string {
+  if (!payload || typeof payload !== 'object') return ''
+  const p = payload as Record<string, unknown>
+  if (p['mimeType'] === 'text/html' && p['body'] && typeof p['body'] === 'object') {
+    const body = p['body'] as Record<string, unknown>
+    if (typeof body['data'] === 'string') return decodeBody(body['data'])
+  }
+  if (Array.isArray(p['parts'])) {
+    for (const part of p['parts']) {
+      const html = extractHtmlFromPayload(part)
+      if (html) return html
+    }
+  }
+  return ''
+}
+
+function parseZipchatHtml(html: string): ZipchatMessage[] | null {
+  if (!html.includes('zipchat') && !html.includes('Zipchat')) return null
+  const messages: ZipchatMessage[] = []
+  // Match inner bubble divs by their background color
+  const bubbleRe = /background-color:\s*(#f0f0f0|#3c81f5)[^>]*>([\s\S]*?)<\/div>/gi
+  let match: RegExpExecArray | null
+  while ((match = bubbleRe.exec(html)) !== null) {
+    const color = match[1].toLowerCase()
+    const innerHtml = match[2].trim()
+    if (!innerHtml) continue
+    messages.push({
+      role: color === '#3c81f5' ? 'assistant' : 'customer',
+      html: innerHtml,
+    })
+  }
+  return messages.length > 0 ? messages : null
+}
+
+function zipchatToPlainText(messages: ZipchatMessage[]): string {
+  return messages
+    .map(m => {
+      const text = m.html
+        .replace(/<br\s*\/?>/gi, '\n')
+        .replace(/<[^>]+>/g, '')
+        .replace(/&nbsp;/g, ' ')
+        .replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&')
+        .trim()
+      const label = m.role === 'customer' ? 'Client' : 'Zipchat AI'
+      return `${label}: ${text}`
+    })
+    .join('\n\n')
+}
+
+// ─── Remove quoted reply content ──────────────────────────────────────────────
 // Remove quoted reply content — keeps only the new part of the message.
 // Handles English ("On ... wrote:"), French ("Le ... a écrit :"), and ">" prefixes.
 function stripQuotedReply(text: string): string {
@@ -200,7 +261,11 @@ async function fetchThread(threadId: string): Promise<GmailThread | null> {
   const { name: senderName, email: senderEmail } = parseEmailAddress(fromRaw)
   const dateStr      = headerVal(headers, 'Date')
   const received_at  = dateStr ? new Date(dateStr).toISOString() : new Date().toISOString()
-  const body         = stripQuotedReply(extractTextFromPayload(last.payload ?? {}))
+  const rawHtml      = extractHtmlFromPayload(last.payload ?? {})
+  const zipchat      = rawHtml ? parseZipchatHtml(rawHtml) : null
+  const body         = zipchat
+    ? zipchatToPlainText(zipchat)
+    : stripQuotedReply(extractTextFromPayload(last.payload ?? {}))
 
   const labelIds = last.labelIds ?? []
   const is_unread = labelIds.includes('UNREAD')
@@ -266,17 +331,22 @@ export async function getThreadMessages(threadId: string): Promise<GmailMessage[
     const fromRaw    = headerVal(headers, 'From')
     const { name, email } = parseEmailAddress(fromRaw)
     const dateStr    = headerVal(headers, 'Date')
-    const body       = stripQuotedReply(extractTextFromPayload(msg.payload ?? {}))
+    const rawHtml    = extractHtmlFromPayload(msg.payload ?? {})
+    const zipchat    = rawHtml ? parseZipchatHtml(rawHtml) : null
+    const body       = zipchat
+      ? zipchatToPlainText(zipchat)
+      : stripQuotedReply(extractTextFromPayload(msg.payload ?? {}))
     const attachments = extractAttachments(msg.id ?? '', msg.payload)
     return {
-      message_id:   msg.id ?? '',
-      thread_id:    threadId,
+      message_id:    msg.id ?? '',
+      thread_id:     threadId,
       body,
-      sender_email: email,
-      sender_name:  name,
-      received_at:  dateStr ? new Date(dateStr).toISOString() : new Date().toISOString(),
-      is_client:    email !== KROM_EMAIL,
+      sender_email:  email,
+      sender_name:   name,
+      received_at:   dateStr ? new Date(dateStr).toISOString() : new Date().toISOString(),
+      is_client:     email !== KROM_EMAIL,
       attachments,
+      zipchat_chat:  zipchat ?? undefined,
     }
   })
 }
