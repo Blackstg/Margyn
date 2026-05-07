@@ -608,27 +608,33 @@ function ReplyPanel({ ticket, draft, solved, onDraftChange, onSolvedChange, onSe
   const [previousDraft, setPreviousDraft] = useState<string | null>(null)
   const [error, setError]                 = useState<string | null>(null)
   const [showReason, setShowReason]       = useState(false)
-  const [attachment, setAttachment]       = useState<AttachmentState | null>(null)
+  const [attachments, setAttachments]     = useState<AttachmentState[]>([])
   const [uploading, setUploading]         = useState(false)
   const fileInputRef                      = useRef<HTMLInputElement>(null)
 
   async function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0]
-    if (!file) return
-    // Reset so the same file can be re-selected after removal
+    const files = Array.from(e.target.files ?? [])
+    if (files.length === 0) return
     e.target.value = ''
 
     setUploading(true); setError(null)
     try {
-      const form = new FormData()
-      form.append('file', file)
-      const res = await fetch('/api/sav/upload', { method: 'POST', body: form })
-      const d   = await res.json() as { token?: string; filename?: string; error?: string }
-      if (!res.ok) throw new Error(d.error ?? `HTTP ${res.status}`)
-      setAttachment({ filename: d.filename ?? file.name, token: d.token! })
+      const uploaded = await Promise.all(files.map(async file => {
+        const form = new FormData()
+        form.append('file', file)
+        const res = await fetch('/api/sav/upload', { method: 'POST', body: form })
+        const d   = await res.json() as { token?: string; filename?: string; error?: string }
+        if (!res.ok) throw new Error(d.error ?? `HTTP ${res.status}`)
+        return { filename: d.filename ?? file.name, token: d.token! }
+      }))
+      setAttachments(prev => [...prev, ...uploaded])
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Erreur upload')
     } finally { setUploading(false) }
+  }
+
+  function removeAttachment(token: string) {
+    setAttachments(prev => prev.filter(a => a.token !== token))
   }
 
   async function regenerate() {
@@ -659,7 +665,7 @@ function ReplyPanel({ ticket, draft, solved, onDraftChange, onSolvedChange, onSe
   async function send(action: ReplyAction) {
     setSending(true); setError(null)
     try {
-      const uploads = attachment ? [attachment.token] : []
+      const uploads = attachments.map(a => a.token)
       const res = await fetch('/api/sav/send', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -667,7 +673,7 @@ function ReplyPanel({ ticket, draft, solved, onDraftChange, onSolvedChange, onSe
       })
       if (!res.ok) { const d = await res.json(); throw new Error(d.error ?? `HTTP ${res.status}`) }
       const wasModified = draft.trim() !== ticket.draft_reply.trim()
-      setAttachment(null)
+      setAttachments([])
       onSent(action, wasModified)
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Erreur inconnue')
@@ -869,60 +875,65 @@ function ReplyPanel({ ticket, draft, solved, onDraftChange, onSolvedChange, onSe
         <input
           ref={fileInputRef}
           type="file"
+          multiple
           className="hidden"
           onChange={handleFileChange}
           accept=".pdf,.jpg,.jpeg,.png,.gif,.webp,.zip,.doc,.docx,.xls,.xlsx"
         />
 
-        {attachment ? (
-          /* File already attached — show chip */
-          <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-[#f0efec] border border-[#e0deda]">
-            <Paperclip size={12} strokeWidth={1.8} className="text-[#6b6b63] shrink-0" />
-            <span className="text-[11px] text-[#1a1a2e] truncate flex-1 font-medium">{attachment.filename}</span>
-            <button onClick={() => setAttachment(null)} className="shrink-0 text-[#9b9b93] hover:text-[#c7293a] transition-colors">
-              <X size={13} strokeWidth={2} />
-            </button>
-          </div>
-        ) : (
-          /* Action buttons row */
-          <div className="flex items-center gap-2">
-            {/* Joindre un fichier */}
-            <button
-              onClick={() => fileInputRef.current?.click()}
-              disabled={uploading || sending || archiving}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-[#e0deda] bg-white text-[11px] font-medium text-[#6b6b63] hover:bg-[#f0efec] hover:border-[#c8c6c0] transition-colors disabled:opacity-40"
-            >
-              {uploading
-                ? <RefreshCw size={11} strokeWidth={1.8} className="animate-spin" />
-                : <Paperclip size={11} strokeWidth={1.8} />}
-              {uploading ? 'Upload…' : 'Joindre'}
-            </button>
-
-            {/* Améliorer ma réponse */}
-            {!showDecisionPanel && draft.trim() && (
-              <button
-                onClick={improve}
-                disabled={improving || sending || archiving || deciding}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-[#e0d4f7] bg-[#faf5ff] text-[11px] font-medium text-[#7c3aed] hover:bg-[#f3e8ff] hover:border-[#c4b5fd] transition-colors disabled:opacity-40"
-              >
-                {improving
-                  ? <RefreshCw size={11} strokeWidth={1.8} className="animate-spin" />
-                  : <span className="text-[12px] leading-none">✨</span>}
-                {improving ? 'Amélioration…' : 'Améliorer'}
-              </button>
-            )}
-
-            {/* Undo amélioration */}
-            {previousDraft !== null && !improving && (
-              <button
-                onClick={undoImprove}
-                className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-[#e0deda] bg-white text-[11px] font-medium text-[#9b9b93] hover:bg-[#f0efec] hover:text-[#6b6b63] transition-colors"
-              >
-                ↩ Annuler
-              </button>
-            )}
+        {/* Attached files chips */}
+        {attachments.length > 0 && (
+          <div className="flex flex-col gap-1.5">
+            {attachments.map(att => (
+              <div key={att.token} className="flex items-center gap-2 px-3 py-2 rounded-lg bg-[#f0efec] border border-[#e0deda]">
+                <Paperclip size={12} strokeWidth={1.8} className="text-[#6b6b63] shrink-0" />
+                <span className="text-[11px] text-[#1a1a2e] truncate flex-1 font-medium">{att.filename}</span>
+                <button onClick={() => removeAttachment(att.token)} className="shrink-0 text-[#9b9b93] hover:text-[#c7293a] transition-colors">
+                  <X size={13} strokeWidth={2} />
+                </button>
+              </div>
+            ))}
           </div>
         )}
+
+        {/* Action buttons row */}
+        <div className="flex items-center gap-2">
+          {/* Joindre un fichier */}
+          <button
+            onClick={() => fileInputRef.current?.click()}
+            disabled={uploading || sending || archiving}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-[#e0deda] bg-white text-[11px] font-medium text-[#6b6b63] hover:bg-[#f0efec] hover:border-[#c8c6c0] transition-colors disabled:opacity-40"
+          >
+            {uploading
+              ? <RefreshCw size={11} strokeWidth={1.8} className="animate-spin" />
+              : <Paperclip size={11} strokeWidth={1.8} />}
+            {uploading ? 'Upload…' : 'Joindre'}
+          </button>
+
+          {/* Améliorer ma réponse */}
+          {!showDecisionPanel && draft.trim() && (
+            <button
+              onClick={improve}
+              disabled={improving || sending || archiving || deciding}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-[#e0d4f7] bg-[#faf5ff] text-[11px] font-medium text-[#7c3aed] hover:bg-[#f3e8ff] hover:border-[#c4b5fd] transition-colors disabled:opacity-40"
+            >
+              {improving
+                ? <RefreshCw size={11} strokeWidth={1.8} className="animate-spin" />
+                : <span className="text-[12px] leading-none">✨</span>}
+              {improving ? 'Amélioration…' : 'Améliorer'}
+            </button>
+          )}
+
+          {/* Undo amélioration */}
+          {previousDraft !== null && !improving && (
+            <button
+              onClick={undoImprove}
+              className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-[#e0deda] bg-white text-[11px] font-medium text-[#9b9b93] hover:bg-[#f0efec] hover:text-[#6b6b63] transition-colors"
+            >
+              ↩ Annuler
+            </button>
+          )}
+        </div>
 
         {/* Bon de retour — auto-attach indicator */}
         {ticket.category === 'retour_remboursement' && (
