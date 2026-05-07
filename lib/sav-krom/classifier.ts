@@ -6,6 +6,12 @@ import type { GmailMessage } from './gmail'
 
 const client = new Anthropic()
 
+function parseJsonSafe<T>(raw: string): T {
+  // Strip markdown code fences the model sometimes adds despite instructions
+  const cleaned = raw.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim()
+  return JSON.parse(cleaned) as T
+}
+
 // ─── Rules loader ─────────────────────────────────────────────────────────────
 
 async function loadRules(): Promise<string[]> {
@@ -124,7 +130,7 @@ Règles pour "decision_options" (seulement si needs_decision=true, 2 à 4 option
   })
 
   const text = (msg.content[0] as { type: string; text: string }).text.trim()
-  const result = JSON.parse(text) as KromClassification
+  const result = parseJsonSafe<KromClassification>(text)
   if (!result.decision_options) result.decision_options = []
   return result
 }
@@ -221,7 +227,7 @@ Réponds UNIQUEMENT avec un objet JSON valide (sans markdown, sans backticks) :
   })
 
   const text = (msg.content[0] as { type: string; text: string }).text.trim()
-  const result = JSON.parse(text) as KromReplyResult
+  const result = parseJsonSafe<KromReplyResult>(text)
   console.log(`[SAV-Krom] generateReply — situation: "${result.situation_detectee}"`)
   return result
 }
