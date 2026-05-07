@@ -179,7 +179,7 @@ export async function sendValidatedReply(
   replyBody:   string,
 ): Promise<void> {
   await sendReply(threadId, toEmail, subject, replyBody)
-  await markThreadRead(threadId)
+  await archiveThread(threadId)  // archive from inbox after sending
 }
 
 // ─── Log action ───────────────────────────────────────────────────────────────
