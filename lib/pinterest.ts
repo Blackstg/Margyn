@@ -217,9 +217,25 @@ export async function fetchPinterestInsights(
   return rows
     .filter((r) => r.CAMPAIGN_ID && r.DATE && (r.SPEND_IN_MICRO_DOLLAR ?? 0) > 0)
     .map((r) => {
-      const spend       = round((r.SPEND_IN_MICRO_DOLLAR ?? 0) / 1_000_000)
-      const revenue     = round((r.TOTAL_WEB_CHECKOUT_VALUE_IN_MICRO_DOLLAR ?? 0) / 1_000_000)
-      const conversions = Math.round(r.TOTAL_WEB_CHECKOUT ?? 0)
+      const spend            = round((r.SPEND_IN_MICRO_DOLLAR ?? 0) / 1_000_000)
+      const checkoutRevenue  = round((r.TOTAL_WEB_CHECKOUT_VALUE_IN_MICRO_DOLLAR ?? 0) / 1_000_000)
+      const checkoutRoas     = r.CHECKOUT_ROAS ?? 0
+      const conversions      = Math.round(r.TOTAL_WEB_CHECKOUT ?? 0)
+
+      // If Pinterest returns CHECKOUT_ROAS but revenue field is 0 (conversion event mismatch),
+      // back-calculate revenue from ROAS so the dashboard shows the correct figure.
+      const revenue = checkoutRevenue > 0
+        ? checkoutRevenue
+        : checkoutRoas > 0
+          ? round(checkoutRoas * spend)
+          : 0
+
+      const roas = spend > 0 && revenue > 0
+        ? round(revenue / spend)
+        : checkoutRoas > 0
+          ? round(checkoutRoas)
+          : null
+
       return {
         external_id: String(r.CAMPAIGN_ID),
         date:        r.DATE!,
@@ -229,7 +245,7 @@ export async function fetchPinterestInsights(
         conversions,
         revenue,
         cpa:  conversions > 0 ? round(spend / conversions) : null,
-        roas: spend > 0 && revenue > 0 ? round(revenue / spend) : null,
+        roas,
       }
     })
 }
