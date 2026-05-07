@@ -1191,9 +1191,11 @@ function QualitePanel() {
 interface QualiteMetrics {
   total: number; sent: number; escalated: number; archived: number
   pct_sent: number; pct_escalated: number; pct_archived: number
-  pct_unmodified: number | null
-  avg_time_ms: number | null
-  full_auto_score: number | null
+  avg_time_ms:     number | null
+  sessions_count:  number
+  visits_per_day:  number
+  avg_session_ms:  number | null
+  active_hours:    Record<number, number>
   by_category: Record<string, { total: number; sent: number; escalated: number }>
 }
 
@@ -1236,13 +1238,6 @@ function QualiteDashboard() {
       .catch(e => setError(e instanceof Error ? e.message : 'Erreur'))
       .finally(() => setLoading(false))
   }, [days])
-
-  const fullAutoColor = (score: number | null) => {
-    if (score === null) return '#d0cfc9'
-    if (score >= 70) return '#1a7f4b'
-    if (score >= 40) return '#b45309'
-    return '#c7293a'
-  }
 
   return (
     <div className="flex flex-col h-full overflow-y-auto px-8 py-6 gap-6">
@@ -1293,7 +1288,7 @@ function QualiteDashboard() {
             </div>
           ) : (
             <>
-              {/* KPI grid */}
+              {/* KPI grid — 4 cards */}
               <div className="grid grid-cols-2 gap-3">
                 <div className="rounded-2xl bg-[#f8f7f5] border border-[#e8e8e4] px-5 py-4">
                   <p className="text-[10px] font-semibold uppercase tracking-[0.1em] text-[#aeb0c9]">Tickets traités</p>
@@ -1302,52 +1297,54 @@ function QualiteDashboard() {
                 </div>
 
                 <div className="rounded-2xl bg-[#f8f7f5] border border-[#e8e8e4] px-5 py-4">
-                  <p className="text-[10px] font-semibold uppercase tracking-[0.1em] text-[#aeb0c9]">Temps moyen</p>
+                  <p className="text-[10px] font-semibold uppercase tracking-[0.1em] text-[#aeb0c9]">Tps moyen / ticket</p>
                   <p className="text-3xl font-bold text-[#1a1a2e] mt-1">
                     {metrics.avg_time_ms !== null ? fmtMs(metrics.avg_time_ms) : '—'}
                   </p>
-                  <p className="text-[10px] text-[#9b9b93] mt-0.5">du ticket à l&apos;action</p>
+                  <p className="text-[10px] text-[#9b9b93] mt-0.5">de la sélection à l&apos;envoi</p>
                 </div>
 
                 <div className="rounded-2xl bg-[#f8f7f5] border border-[#e8e8e4] px-5 py-4">
-                  <p className="text-[10px] font-semibold uppercase tracking-[0.1em] text-[#aeb0c9]">Réponses envoyées</p>
-                  <p className="text-3xl font-bold text-[#1a1a2e] mt-1">{metrics.pct_sent}%</p>
-                  <p className="text-[10px] text-[#9b9b93] mt-0.5">{metrics.sent} / {metrics.total} tickets</p>
-                </div>
-
-                <div className="rounded-2xl bg-[#f8f7f5] border border-[#e8e8e4] px-5 py-4">
-                  <p className="text-[10px] font-semibold uppercase tracking-[0.1em] text-[#aeb0c9]">Draft non modifié</p>
+                  <p className="text-[10px] font-semibold uppercase tracking-[0.1em] text-[#aeb0c9]">Visites / jour</p>
                   <p className="text-3xl font-bold text-[#1a1a2e] mt-1">
-                    {metrics.pct_unmodified !== null ? `${metrics.pct_unmodified}%` : '—'}
+                    {metrics.sessions_count > 0 ? metrics.visits_per_day : '—'}
                   </p>
-                  <p className="text-[10px] text-[#9b9b93] mt-0.5">des réponses Claude acceptées telles quelles</p>
+                  <p className="text-[10px] text-[#9b9b93] mt-0.5">{metrics.sessions_count} ouvertures sur {days}j</p>
+                </div>
+
+                <div className="rounded-2xl bg-[#f8f7f5] border border-[#e8e8e4] px-5 py-4">
+                  <p className="text-[10px] font-semibold uppercase tracking-[0.1em] text-[#aeb0c9]">Durée session moy.</p>
+                  <p className="text-3xl font-bold text-[#1a1a2e] mt-1">
+                    {metrics.avg_session_ms !== null ? fmtMs(metrics.avg_session_ms) : '—'}
+                  </p>
+                  <p className="text-[10px] text-[#9b9b93] mt-0.5">temps actif par visite</p>
                 </div>
               </div>
 
-              {/* Full-auto readiness gauge */}
-              <div className="rounded-2xl bg-[#f8f7f5] border border-[#e8e8e4] px-5 py-5">
-                <div className="flex items-center justify-between mb-3">
-                  <div>
-                    <p className="text-[10px] font-semibold uppercase tracking-[0.1em] text-[#aeb0c9]">Prêt pour full-auto</p>
-                    <p className="text-[11px] text-[#6b6b63] mt-0.5">Tickets envoyés sans modification avec confiance ≥ 85%</p>
+              {/* Heures d'activité */}
+              {Object.keys(metrics.active_hours).length > 0 && (
+                <div className="rounded-2xl bg-[#f8f7f5] border border-[#e8e8e4] px-5 py-5">
+                  <p className="text-[10px] font-semibold uppercase tracking-[0.1em] text-[#aeb0c9] mb-4">Heures d&apos;activité</p>
+                  <div className="flex items-end gap-1 h-14">
+                    {Array.from({ length: 24 }, (_, h) => {
+                      const count = metrics.active_hours[h] ?? 0
+                      const max   = Math.max(...Object.values(metrics.active_hours), 1)
+                      const pct   = Math.round((count / max) * 100)
+                      return (
+                        <div key={h} className="flex-1 flex flex-col items-center gap-1" title={`${h}h : ${count} visite${count > 1 ? 's' : ''}`}>
+                          <div
+                            className="w-full rounded-sm transition-all"
+                            style={{ height: `${Math.max(pct, count > 0 ? 8 : 0)}%`, backgroundColor: count > 0 ? '#1a1a2e' : '#e8e8e4' }}
+                          />
+                          {(h % 6 === 0) && (
+                            <span className="text-[8px] text-[#aeb0c9]">{h}h</span>
+                          )}
+                        </div>
+                      )
+                    })}
                   </div>
-                  <p className="text-2xl font-bold" style={{ color: fullAutoColor(metrics.full_auto_score) }}>
-                    {metrics.full_auto_score !== null ? `${metrics.full_auto_score}%` : '—'}
-                  </p>
                 </div>
-                {metrics.full_auto_score !== null && (
-                  <>
-                    <GaugeBar value={metrics.full_auto_score} color={fullAutoColor(metrics.full_auto_score)} />
-                    <p className="text-[10px] text-[#9b9b93] mt-2">
-                      {metrics.full_auto_score >= 70
-                        ? '✓ Le modèle est prêt pour le mode automatique'
-                        : metrics.full_auto_score >= 40
-                        ? 'En progression — quelques ajustements des règles peuvent aider'
-                        : 'Trop de modifications manuelles — affiner les règles Claude'}
-                    </p>
-                  </>
-                )}
-              </div>
+              )}
 
               {/* Action breakdown */}
               <div className="rounded-2xl bg-[#f8f7f5] border border-[#e8e8e4] px-5 py-5">
@@ -1432,6 +1429,27 @@ export default function SavPage() {
   const firstLoad  = useRef(true)
   // Tracks in-flight process requests to avoid duplicate fetches
   const fetchingRef = useRef<Set<number>>(new Set())
+
+  // ── Session tracking ──────────────────────────────────────────────────────
+  useEffect(() => {
+    const sessionStart = Date.now()
+    fetch('/api/sav/actions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'session_start', ticket_id: 0 }),
+    }).catch(() => {})
+
+    function handleUnload() {
+      const duration = Date.now() - sessionStart
+      const blob = new Blob(
+        [JSON.stringify({ action: 'session_end', ticket_id: 0, time_to_action_ms: duration })],
+        { type: 'application/json' }
+      )
+      navigator.sendBeacon('/api/sav/actions', blob)
+    }
+    window.addEventListener('beforeunload', handleUnload)
+    return () => window.removeEventListener('beforeunload', handleUnload)
+  }, [])
 
   // ── On-demand AI processing for a single ticket ───────────────────────────
   async function processTicket(raw: RawTicket) {

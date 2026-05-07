@@ -1,5 +1,6 @@
 // ─── /api/sav/actions — log agent actions + fetch quality metrics ─────────────
 // POST { ticket_id, action, was_modified, category, confidence, time_to_action_ms }
+//   action can also be 'session_start' | 'session_end' with ticket_id: 0
 // GET  ?days=7  →  { metrics }
 
 import { NextRequest, NextResponse } from 'next/server'
@@ -10,7 +11,7 @@ import { createAdminClient } from '@/lib/supabase'
 export async function POST(req: NextRequest) {
   const body = await req.json() as {
     ticket_id:          number
-    action:             'sent' | 'escalated' | 'archived'
+    action:             string
     was_modified?:      boolean | null
     category?:          string | null
     confidence?:        number | null
@@ -53,7 +54,7 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: error.message }, { status: 500 })
   }
 
-  const rows = (data ?? []) as {
+  const allRows = (data ?? []) as {
     action: string
     was_modified: boolean | null
     category: string | null
@@ -62,14 +63,36 @@ export async function GET(req: NextRequest) {
     created_at: string
   }[]
 
+  // Split session events from ticket events
+  const sessionStarts = allRows.filter(r => r.action === 'session_start')
+  const sessionEnds   = allRows.filter(r => r.action === 'session_end')
+  const rows = allRows.filter(r => r.action !== 'session_start' && r.action !== 'session_end')
+
+  // ── Session metrics ───────────────────────────────────────────────────────
+  const sessions_count = sessionStarts.length
+  const visits_per_day = days > 0 ? Math.round((sessions_count / days) * 10) / 10 : 0
+
+  const sessionDurations = sessionEnds
+    .map(r => r.time_to_action_ms)
+    .filter((v): v is number => v !== null && v > 5000)  // ignore <5s (accidental loads)
+  const avg_session_ms = sessionDurations.length > 0
+    ? Math.round(sessionDurations.reduce((a, b) => a + b, 0) / sessionDurations.length)
+    : null
+
+  // Active hours: count session_starts by hour of day
+  const active_hours: Record<number, number> = {}
+  for (const s of sessionStarts) {
+    const h = new Date(s.created_at).getHours()
+    active_hours[h] = (active_hours[h] ?? 0) + 1
+  }
+
   if (rows.length === 0) {
     return NextResponse.json({
       metrics: {
         total: 0, sent: 0, escalated: 0, archived: 0,
         pct_sent: 0, pct_escalated: 0, pct_archived: 0,
-        pct_unmodified: null,
         avg_time_ms: null,
-        full_auto_score: null,
+        sessions_count, visits_per_day, avg_session_ms, active_hours,
         by_category: {},
       }
     })
@@ -79,23 +102,10 @@ export async function GET(req: NextRequest) {
   const escalated = rows.filter(r => r.action === 'escalated')
   const archived  = rows.filter(r => r.action === 'archived')
 
-  // Only replies (sent) have was_modified meaningful
-  const withModified = sent.filter(r => r.was_modified !== null)
-  const unmodified   = withModified.filter(r => r.was_modified === false)
-  const pct_unmodified = withModified.length > 0
-    ? Math.round((unmodified.length / withModified.length) * 100)
-    : null
-
-  // Average time to action (all actions where we have timing)
+  // Average time to action per ticket (all ticket actions with timing)
   const timed = rows.filter(r => r.time_to_action_ms !== null)
   const avg_time_ms = timed.length > 0
     ? Math.round(timed.reduce((s, r) => s + (r.time_to_action_ms ?? 0), 0) / timed.length)
-    : null
-
-  // Full-auto score: % of sent tickets that were NOT modified AND had confidence >= 0.85
-  const highConf = sent.filter(r => (r.confidence ?? 0) >= 0.85 && r.was_modified === false)
-  const full_auto_score = sent.length > 0
-    ? Math.round((highConf.length / rows.length) * 100)
     : null
 
   // Breakdown by category
@@ -117,9 +127,11 @@ export async function GET(req: NextRequest) {
       pct_sent:       Math.round((sent.length / rows.length) * 100),
       pct_escalated:  Math.round((escalated.length / rows.length) * 100),
       pct_archived:   Math.round((archived.length / rows.length) * 100),
-      pct_unmodified,
       avg_time_ms,
-      full_auto_score,
+      sessions_count,
+      visits_per_day,
+      avg_session_ms,
+      active_hours,
       by_category,
     }
   })
