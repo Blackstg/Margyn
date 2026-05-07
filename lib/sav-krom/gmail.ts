@@ -92,13 +92,24 @@ function decodeBody(data?: string): string {
   }
 }
 
+/** Remove CSS blocks that appear in some email plain-text parts (e.g. Shopify notifications) */
+function stripCssFromText(text: string): string {
+  // Remove @media blocks (potentially multi-line)
+  text = text.replace(/@media[^{]*\{[\s\S]*?\}\s*\}/g, '')
+  // Remove single-line CSS rules: "selector { property: value; }"
+  text = text.replace(/^[^{}\n]+\{[^{}]*\}\s*$/gm, '')
+  // Remove orphan closing braces left behind
+  text = text.replace(/^\s*\}\s*$/gm, '')
+  return text.replace(/\n{3,}/g, '\n\n').trim()
+}
+
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function extractTextFromPayload(payload: any): string {
   if (!payload) return ''
 
   // Plain text part — preferred
   if (payload.mimeType === 'text/plain' && payload.body?.data) {
-    return decodeBody(payload.body.data)
+    return stripCssFromText(decodeBody(payload.body.data))
   }
 
   // Multipart: recurse into parts, prefer text/plain
@@ -113,6 +124,8 @@ function extractTextFromPayload(payload: any): string {
       // Strip basic HTML tags and decode common HTML entities
       const raw = extractTextFromPayload(html)
       return raw
+        .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')   // remove <style> blocks first
+        .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')  // remove <script> blocks
         .replace(/<[^>]+>/g, ' ')
         .replace(/&nbsp;/g, ' ')
         .replace(/&lt;/g, '<')
