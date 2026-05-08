@@ -20,6 +20,18 @@ const NAV = [
   { href: '/settings',  icon: Settings,        label: 'Paramètres',  brand: null   },
 ]
 
+const BRAND_LOGOS: Record<string, string> = {
+  bowa: 'https://cdn.shopify.com/s/files/1/0617/2806/3648/files/profil.png?v=1693451968',
+  moom: 'https://cdn.shopify.com/s/files/1/0506/0689/9391/files/moom-profil.png?v=1682403928',
+  krom: 'https://cdn.shopify.com/s/files/1/0590/8755/2558/files/favicon.png?v=1764213860',
+}
+
+const BRAND_LABELS: Record<string, string> = {
+  bowa: 'Bowa',
+  moom: 'Mōom',
+  krom: 'Krom Water',
+}
+
 export default function Sidebar({ isOpen, onToggle }: { isOpen: boolean; onToggle: () => void }) {
   const pathname = usePathname()
   const router   = useRouter()
@@ -33,6 +45,16 @@ export default function Sidebar({ isOpen, onToggle }: { isOpen: boolean; onToggl
     if (typeof window !== 'undefined') return localStorage.getItem('bowa_role')
     return null
   })
+  const [currentBrand, setCurrentBrandState] = useState<string>(() => {
+    if (typeof window !== 'undefined') return localStorage.getItem('steero_brand') ?? 'bowa'
+    return 'bowa'
+  })
+
+  function selectBrand(b: string) {
+    setCurrentBrandState(b)
+    localStorage.setItem('steero_brand', b)
+    window.dispatchEvent(new CustomEvent('steero:brand', { detail: b }))
+  }
 
   useEffect(() => {
     supabase.auth.getUser().then(({ data }) => {
@@ -62,9 +84,11 @@ export default function Sidebar({ isOpen, onToggle }: { isOpen: boolean; onToggl
     router.refresh()
   }
 
+  const showBrandSelector = role !== 'delivery' && role !== 'sav' && allowedBrands && allowedBrands.length > 1
+
   return (
     <aside className={`fixed top-0 left-0 h-screen w-[72px] bg-[#1a1a2e] flex-col items-center py-5 z-30 ${isOpen ? 'flex' : 'hidden'}`}>
-      {/* Logo + toggle (toggle hidden for delivery role) */}
+      {/* Logo + toggle */}
       <div className="mb-2 flex flex-col items-center w-full gap-2">
         <span
           className="select-none text-white"
@@ -81,6 +105,40 @@ export default function Sidebar({ isOpen, onToggle }: { isOpen: boolean; onToggl
           </button>
         )}
       </div>
+
+      {/* Brand selector */}
+      {showBrandSelector && (
+        <>
+          <div className="w-9 h-px bg-white/10 mb-3" />
+          <div className="flex flex-col items-center gap-2 mb-3">
+            {allowedBrands!.map((b) => (
+              <button
+                key={b}
+                onClick={() => selectBrand(b)}
+                className="group relative flex items-center justify-center"
+              >
+                <div className={`w-9 h-9 rounded-full overflow-hidden ring-2 transition-all ${
+                  currentBrand === b
+                    ? 'ring-[#aeb0c9] opacity-100 scale-100'
+                    : 'ring-transparent opacity-30 hover:opacity-60 hover:scale-105'
+                }`}>
+                  {BRAND_LOGOS[b] ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img src={BRAND_LOGOS[b]} alt={b} className="w-full h-full object-cover" />
+                  ) : (
+                    <span className="w-full h-full bg-[#aeb0c9]/30 flex items-center justify-center text-white text-xs font-bold">
+                      {b[0].toUpperCase()}
+                    </span>
+                  )}
+                </div>
+                <span className="pointer-events-none absolute left-full ml-3 px-2.5 py-1.5 bg-[#1a1a2e] border border-white/10 text-white text-xs font-medium rounded-lg opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap shadow-lg z-50">
+                  {BRAND_LABELS[b] ?? b}
+                </span>
+              </button>
+            ))}
+          </div>
+        </>
+      )}
 
       {/* Divider */}
       <div className="w-9 h-px bg-white/10 mb-5" />

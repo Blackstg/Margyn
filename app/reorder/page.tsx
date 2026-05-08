@@ -205,27 +205,19 @@ const BRAND_LABELS: Record<string, string> = { bowa: 'Bowa', moom: 'Mōom Paris'
 export default function ReapproPage() {
   // ── Brand ─────────────────────────────────────────────────────────────────
   const [brand, setBrandState] = useState<'bowa' | 'moom' | 'krom'>('moom')
-  const [allowedBrands, setAllowedBrands] = useState<('bowa' | 'moom' | 'krom')[] | null>(null)
-
-  function setBrand(b: 'bowa' | 'moom' | 'krom') {
-    setBrandState(b)
-    localStorage.setItem('steero_brand', b)
-  }
 
   useEffect(() => {
-    // Restore brand from localStorage
+    // Restore brand from localStorage on mount
     const stored = localStorage.getItem('steero_brand')
-    if (stored === 'moom' || stored === 'krom' || stored === 'bowa') {
-      setBrandState(stored)
+    if (stored === 'moom' || stored === 'krom' || stored === 'bowa') setBrandState(stored)
+
+    // React to sidebar brand selector
+    function onBrandChange(e: Event) {
+      const b = (e as CustomEvent<string>).detail
+      if (b === 'moom' || b === 'krom' || b === 'bowa') setBrandState(b)
     }
-    supabase.from('user_brands').select('brand').then(({ data }) => {
-      if (data && data.length > 0) {
-        const brands = data.map((r: { brand: string }) => r.brand) as ('bowa' | 'moom' | 'krom')[]
-        setAllowedBrands(brands)
-        if (!brands.includes(brand)) setBrand(brands[0])
-      }
-    })
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    window.addEventListener('steero:brand', onBrandChange)
+    return () => window.removeEventListener('steero:brand', onBrandChange)
   }, [])
 
   // ── Settings ──────────────────────────────────────────────────────────────
@@ -557,20 +549,6 @@ Stock faible:\n${lowLines || 'Aucun'}`
             <p className="text-sm text-[#6b6b63] mt-0.5">{BRAND_LABELS[brand]} — Calcul des commandes par variant</p>
           </div>
           <div className="flex items-center gap-2 shrink-0">
-            {/* Brand selector */}
-            {(['bowa', 'moom', 'krom'] as const).filter(b => allowedBrands?.includes(b) ?? false).map((b) => (
-              <button
-                key={b}
-                onClick={() => setBrand(b)}
-                className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition-colors ${
-                  brand === b
-                    ? 'bg-[#1a1a2e] text-white'
-                    : 'bg-white border border-[#e8e4e0] text-[#6b6b63] hover:border-[#aeb0c9]'
-                }`}
-              >
-                {BRAND_LABELS[b]}
-              </button>
-            ))}
             {/* Bon de commande button with badge */}
             <button
               onClick={() => setSidebarOpen(true)}

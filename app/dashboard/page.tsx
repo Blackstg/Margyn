@@ -863,12 +863,6 @@ function DashboardPage() {
     return params
   }
 
-  function setBrand(b: Brand) {
-    setBrandState(b)
-    try { localStorage.setItem('steero_brand', b) } catch {}
-    router.replace(`${pathname}?${buildParams(b, period, selectedMonth).toString()}`)
-  }
-
   function setPeriod(p: Period) {
     setPeriodState(p)
     setSelectedMonthState(null)
@@ -897,29 +891,28 @@ function DashboardPage() {
   const syncAttempted                             = useRef<Set<string>>(new Set())
   const [annualData, setAnnualData]               = useState<MonthPoint[]>([])
   const [annualLoading, setAnnualLoading]         = useState(true)
-  const [brandLogos] = useState<Record<Brand, string | null>>({
-    bowa: 'https://cdn.shopify.com/s/files/1/0617/2806/3648/files/profil.png?v=1693451968',
-    moom: 'https://cdn.shopify.com/s/files/1/0506/0689/9391/files/moom-profil.png?v=1682403928',
-    krom: 'https://cdn.shopify.com/s/files/1/0590/8755/2558/files/favicon.png?v=1764213860',
-  })
-
   const [allowedBrands, setAllowedBrands] = useState<Brand[] | null>(null)
 
   useEffect(() => {
-    // Restore brand from localStorage if no brand in URL
-    if (!searchParams.get('brand')) {
-      const stored = localStorage.getItem('steero_brand') as Brand | null
-      if (stored === 'moom' || stored === 'krom' || stored === 'bowa') {
-        setBrandState(stored)
-      }
+    // Restore brand from localStorage on mount
+    const stored = localStorage.getItem('steero_brand') as Brand | null
+    if (stored === 'moom' || stored === 'krom' || stored === 'bowa') setBrandState(stored)
+
+    // React to sidebar brand selector
+    function onBrandChange(e: Event) {
+      const b = (e as CustomEvent<string>).detail as Brand
+      if (b === 'moom' || b === 'krom' || b === 'bowa') setBrandState(b)
     }
+    window.addEventListener('steero:brand', onBrandChange)
+
     supabase.from('user_brands').select('brand').then(({ data }) => {
       if (data && data.length > 0) {
         const brands = data.map((r: { brand: string }) => r.brand) as Brand[]
         setAllowedBrands(brands)
-        if (!brands.includes(brand)) setBrand(brands[0])
       }
     })
+
+    return () => window.removeEventListener('steero:brand', onBrandChange)
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
@@ -1003,13 +996,6 @@ function DashboardPage() {
     }
   }, [])
 
-  const ALL_BRAND_TABS: { id: Brand; label: string }[] = [
-    { id: 'bowa', label: 'Bowa' },
-    { id: 'moom', label: 'Mōom' },
-    { id: 'krom', label: 'Krom' },
-  ]
-  const brandTabs = allowedBrands === null ? [] : ALL_BRAND_TABS.filter(t => allowedBrands.includes(t.id))
-
   const periodTabs: { id: Period; label: string }[] = [
     { id: '7j',   label: '7 j'    },
     { id: '30j',  label: '30 j'   },
@@ -1086,33 +1072,7 @@ Stock faible (<20 unités): ${lowStock || 'Aucun'}`
         )}
 
         {/* Filters */}
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <div className="inline-flex items-center bg-white shadow-[0_2px_16px_rgba(0,0,0,0.06)] rounded-xl p-1 gap-0.5">
-            {brandTabs.map((tab) => {
-              const logo = brandLogos[tab.id]
-              return (
-                <button
-                  key={tab.id}
-                  onClick={() => setBrand(tab.id)}
-                  className={`flex items-center gap-2 px-4 py-1.5 rounded-lg text-sm font-semibold transition-all ${
-                    brand === tab.id ? 'bg-[#1a1a2e] text-white' : 'text-[#6b6b63] hover:text-[#1a1a2e]'
-                  }`}
-                >
-                  {logo ? (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img src={logo} alt={tab.label} className="w-6 h-6 rounded-full object-cover shrink-0" />
-                  ) : (
-                    <span className={`w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-bold shrink-0 ${
-                      brand === tab.id ? 'bg-white/20 text-white' : 'bg-[#e8e8e4] text-[#6b6b63]'
-                    }`}>
-                      {tab.label[0]}
-                    </span>
-                  )}
-                  {tab.label}
-                </button>
-              )
-            })}
-          </div>
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-end">
           <div className="flex items-center gap-2">
             <div className="inline-flex items-center bg-white shadow-[0_2px_16px_rgba(0,0,0,0.06)] rounded-xl p-1 gap-0.5">
               {periodTabs.map((tab) => (
