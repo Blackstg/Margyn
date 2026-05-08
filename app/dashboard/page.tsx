@@ -842,7 +842,12 @@ function DashboardPage() {
 
   const [brand, setBrandState] = useState<Brand>(() => {
     const b = searchParams.get('brand')
-    return b === 'moom' ? 'moom' : b === 'krom' ? 'krom' : 'bowa'
+    if (b === 'moom' || b === 'krom' || b === 'bowa') return b
+    try {
+      const stored = localStorage.getItem('steero_brand')
+      if (stored === 'moom' || stored === 'krom' || stored === 'bowa') return stored
+    } catch {}
+    return 'bowa'
   })
   const [period, setPeriodState] = useState<Period>(() =>
     urlToPeriod(searchParams.get('period'))
@@ -865,6 +870,7 @@ function DashboardPage() {
 
   function setBrand(b: Brand) {
     setBrandState(b)
+    try { localStorage.setItem('steero_brand', b) } catch {}
     router.replace(`${pathname}?${buildParams(b, period, selectedMonth).toString()}`)
   }
 

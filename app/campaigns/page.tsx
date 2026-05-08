@@ -106,7 +106,12 @@ function CampaignsPage() {
   const searchParams = useSearchParams()
 
   function urlToBrand(b: string | null): Brand {
-    return b === 'moom' ? 'moom' : b === 'krom' ? 'krom' : 'bowa'
+    if (b === 'moom' || b === 'krom' || b === 'bowa') return b
+    try {
+      const stored = localStorage.getItem('steero_brand')
+      if (stored === 'moom' || stored === 'krom' || stored === 'bowa') return stored
+    } catch {}
+    return 'bowa'
   }
   function urlToPeriod(p: string | null): Period {
     if (p === '30d')   return '30j'
@@ -133,6 +138,7 @@ function CampaignsPage() {
 
   function setBrand(b: Brand) {
     setBrandState(b)
+    try { localStorage.setItem('steero_brand', b) } catch {}
     const params = new URLSearchParams()
     params.set('brand', b)
     params.set('period', period === '30j' ? '30d' : period === 'mois' ? 'month' : '7d')
