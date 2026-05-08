@@ -23,6 +23,11 @@ export default function ConditionalLayout({ children }: { children: React.ReactN
     return true
   })
 
+  const [collapsed, setCollapsed] = useState(() => {
+    if (typeof window !== 'undefined') return localStorage.getItem('sidebar_collapsed') === 'true'
+    return false
+  })
+
   useEffect(() => {
     if (isAuthPage) return
     const supabase = createBrowserClient(
@@ -44,18 +49,32 @@ export default function ConditionalLayout({ children }: { children: React.ReactN
     })
   }
 
+  function toggleCollapsed() {
+    setCollapsed((prev) => {
+      const next = !prev
+      localStorage.setItem('sidebar_collapsed', String(next))
+      return next
+    })
+  }
+
   if (isAuthPage) {
     return <div className="min-h-screen">{children}</div>
   }
 
   const isDelivery = role === 'delivery'
   const showSidebar = isDelivery || sidebarOpen
+  const sidebarWidth = showSidebar ? (collapsed ? 72 : 240) : 0
 
   return (
     <>
-      <Sidebar isOpen={showSidebar} onToggle={toggleSidebar} />
+      <Sidebar
+        isOpen={showSidebar}
+        onToggle={toggleSidebar}
+        collapsed={collapsed}
+        onToggleCollapse={toggleCollapsed}
+      />
 
-      {/* Floating burger when sidebar is closed (never for delivery role) */}
+      {/* Floating burger when sidebar is closed */}
       {!isDelivery && !sidebarOpen && (
         <button
           onClick={toggleSidebar}
@@ -65,7 +84,10 @@ export default function ConditionalLayout({ children }: { children: React.ReactN
         </button>
       )}
 
-      <div className={`${showSidebar ? 'pl-[72px]' : ''} min-h-screen`}>
+      <div
+        className="min-h-screen transition-all duration-200"
+        style={{ paddingLeft: sidebarWidth }}
+      >
         {children}
       </div>
     </>
