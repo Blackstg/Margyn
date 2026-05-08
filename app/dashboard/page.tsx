@@ -891,8 +891,6 @@ function DashboardPage() {
   const syncAttempted                             = useRef<Set<string>>(new Set())
   const [annualData, setAnnualData]               = useState<MonthPoint[]>([])
   const [annualLoading, setAnnualLoading]         = useState(true)
-  const [allowedBrands, setAllowedBrands] = useState<Brand[] | null>(null)
-
   useEffect(() => {
     // Restore brand from localStorage on mount
     const stored = localStorage.getItem('steero_brand') as Brand | null
@@ -904,13 +902,6 @@ function DashboardPage() {
       if (b === 'moom' || b === 'krom' || b === 'bowa') setBrandState(b)
     }
     window.addEventListener('steero:brand', onBrandChange)
-
-    supabase.from('user_brands').select('brand').then(({ data }) => {
-      if (data && data.length > 0) {
-        const brands = data.map((r: { brand: string }) => r.brand) as Brand[]
-        setAllowedBrands(brands)
-      }
-    })
 
     return () => window.removeEventListener('steero:brand', onBrandChange)
   // eslint-disable-next-line react-hooks/exhaustive-deps
