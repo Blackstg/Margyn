@@ -204,21 +204,20 @@ const BRAND_LABELS: Record<string, string> = { bowa: 'Bowa', moom: 'Mōom Paris'
 
 export default function ReapproPage() {
   // ── Brand ─────────────────────────────────────────────────────────────────
-  const [brand, setBrandState] = useState<'bowa' | 'moom' | 'krom'>(() => {
-    try {
-      const stored = localStorage.getItem('steero_brand')
-      if (stored === 'moom' || stored === 'krom' || stored === 'bowa') return stored
-    } catch {}
-    return 'moom'
-  })
+  const [brand, setBrandState] = useState<'bowa' | 'moom' | 'krom'>('moom')
   const [allowedBrands, setAllowedBrands] = useState<('bowa' | 'moom' | 'krom')[] | null>(null)
 
   function setBrand(b: 'bowa' | 'moom' | 'krom') {
     setBrandState(b)
-    try { localStorage.setItem('steero_brand', b) } catch {}
+    localStorage.setItem('steero_brand', b)
   }
 
   useEffect(() => {
+    // Restore brand from localStorage
+    const stored = localStorage.getItem('steero_brand')
+    if (stored === 'moom' || stored === 'krom' || stored === 'bowa') {
+      setBrandState(stored)
+    }
     supabase.from('user_brands').select('brand').then(({ data }) => {
       if (data && data.length > 0) {
         const brands = data.map((r: { brand: string }) => r.brand) as ('bowa' | 'moom' | 'krom')[]

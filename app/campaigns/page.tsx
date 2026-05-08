@@ -106,12 +106,7 @@ function CampaignsPage() {
   const searchParams = useSearchParams()
 
   function urlToBrand(b: string | null): Brand {
-    if (b === 'moom' || b === 'krom' || b === 'bowa') return b
-    try {
-      const stored = localStorage.getItem('steero_brand')
-      if (stored === 'moom' || stored === 'krom' || stored === 'bowa') return stored
-    } catch {}
-    return 'bowa'
+    return b === 'moom' ? 'moom' : b === 'krom' ? 'krom' : 'bowa'
   }
   function urlToPeriod(p: string | null): Period {
     if (p === '30d')   return '30j'
@@ -166,6 +161,13 @@ function CampaignsPage() {
   const [allowedBrands, setAllowedBrands] = useState<Brand[] | null>(null)
 
   useEffect(() => {
+    // Restore brand from localStorage if no brand in URL
+    if (!searchParams.get('brand')) {
+      const stored = localStorage.getItem('steero_brand') as Brand | null
+      if (stored === 'moom' || stored === 'krom' || stored === 'bowa') {
+        setBrandState(stored)
+      }
+    }
     supabase.from('user_brands').select('brand').then(({ data }) => {
       if (data && data.length > 0) {
         const brands = data.map((r: { brand: string }) => r.brand) as Brand[]
