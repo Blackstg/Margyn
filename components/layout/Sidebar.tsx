@@ -100,6 +100,23 @@ export default function Sidebar({ isOpen, collapsed, onToggleCollapse }: Sidebar
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
+  // Auto-sync brand from URL when navigating to brand-specific pages
+  useEffect(() => {
+    if (pathname.startsWith('/sav-krom')) {
+      if (currentBrand !== 'krom') selectBrand('krom')
+    } else if (pathname.startsWith('/delivery')) {
+      if (currentBrand !== 'bowa') selectBrand('bowa')
+    } else if (
+      pathname.startsWith('/stock') ||
+      pathname.startsWith('/invoices') ||
+      pathname.startsWith('/products') ||
+      (pathname.startsWith('/sav') && !pathname.startsWith('/sav-krom'))
+    ) {
+      if (currentBrand !== 'moom') selectBrand('moom')
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pathname])
+
   useEffect(() => {
     fetch('/api/reconciliation/history')
       .then(r => r.json())
