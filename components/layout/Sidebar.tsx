@@ -203,7 +203,10 @@ export default function Sidebar({ isOpen, collapsed, onToggleCollapse }: Sidebar
           const items = section.items.filter(({ href, brand }) => {
             if (role === 'delivery') return href === '/delivery'
             if (role === 'sav')     return href === '/sav' || href === '/sav-krom' || href === '/delivery'
-            return brand === null || allowedBrands === null || allowedBrands.includes(brand)
+            // brand:null = page multi-brand, toujours visible
+            // brand spécifique = seulement si c'est la brand sélectionnée (et accessible)
+            if (brand === null) return true
+            return brand === currentBrand && (allowedBrands === null || allowedBrands.includes(brand))
           })
           if (items.length === 0) return null
 
