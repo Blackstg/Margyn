@@ -280,39 +280,32 @@ export async function POST(req: NextRequest) {
       if (dbErr) throw new Error(`fetch creatives: ${dbErr.message}`)
       const idMap = new Map((dbCreatives ?? []).map(c => [c.meta_ad_id, c.id as string]))
 
-      // ── 4. Fetch ad-level insights (chunked par 14j, filtré sur les ads connus) ─
-      const adIds = ads.map(a => a.id)
-      const chunks = chunkDateRange(dateFrom, dateTo, 14)
+      // ── 4. Fetch ad-level insights (chunked par 7j, spend>0 uniquement) ─────────
+      const chunks = chunkDateRange(dateFrom, dateTo, 7)
       const insights: MetaInsightRaw[] = []
       for (const chunk of chunks) {
-        // Batch les ad_ids par 50 pour rester sous la limite Meta
-        const AD_BATCH = 50
-        for (let b = 0; b < adIds.length; b += AD_BATCH) {
-          const batchIds = adIds.slice(b, b + AD_BATCH)
-          const chunkData = await metaGetAll<MetaInsightRaw>(
-            `${store.adAccountId}/insights`,
-            {
-              level: 'ad',
-              fields: [
-                'ad_id', 'ad_name',
-                'spend', 'impressions', 'reach', 'clicks', 'ctr', 'cpc', 'cpm',
-                'actions', 'action_values',
-                'video_play_actions',
-                'video_p75_watched_actions',
-              ].join(','),
-              time_range:  JSON.stringify({ since: chunk.from, until: chunk.to }),
-              time_increment: '1',
-              filtering: JSON.stringify([
-                { field: 'ad.id', operator: 'IN', value: batchIds },
-                { field: 'spend', operator: 'GREATER_THAN', value: '0' },
-              ]),
-              action_attribution_windows: JSON.stringify(['7d_click', '1d_view']),
-              limit: '500',
-            },
-            store.accessToken
-          )
-          insights.push(...chunkData)
-        }
+        const chunkData = await metaGetAll<MetaInsightRaw>(
+          `${store.adAccountId}/insights`,
+          {
+            level: 'ad',
+            fields: [
+              'ad_id', 'ad_name',
+              'spend', 'impressions', 'reach', 'clicks', 'ctr', 'cpm',
+              'actions', 'action_values',
+              'video_play_actions',
+              'video_p75_watched_actions',
+            ].join(','),
+            time_range:  JSON.stringify({ since: chunk.from, until: chunk.to }),
+            time_increment: '1',
+            filtering: JSON.stringify([
+              { field: 'spend', operator: 'GREATER_THAN', value: '0' },
+            ]),
+            action_attribution_windows: JSON.stringify(['7d_click', '1d_view']),
+            limit: '500',
+          },
+          store.accessToken
+        )
+        insights.push(...chunkData)
       }
 
       // ── 5. Build & upsert creative_stats ────────────────────────────────────
