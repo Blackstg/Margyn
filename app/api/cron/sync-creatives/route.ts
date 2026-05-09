@@ -139,20 +139,6 @@ function detectFormat(ad: MetaAdRaw): 'image' | 'video' | 'carousel' {
   return 'image'
 }
 
-function extractCopy(ad: MetaAdRaw) {
-  const spec = ad.creative?.object_story_spec
-  const linkData  = spec?.link_data
-  const videoData = spec?.video_data
-  return {
-    primary_text: linkData?.message || videoData?.message || '',
-    headline:     linkData?.name    || videoData?.title    || '',
-    description:  linkData?.description || videoData?.link_description || '',
-    cta_type:     linkData?.call_to_action?.type || videoData?.call_to_action?.type || '',
-    landing_url:  linkData?.link || linkData?.call_to_action?.value?.link
-                  || videoData?.call_to_action?.value?.link || '',
-  }
-}
-
 // ─── GET — Vercel cron (7 derniers jours, tourne 2×/jour) ─────────────────────
 
 export async function GET(req: NextRequest) {
@@ -202,15 +188,14 @@ export async function POST(req: NextRequest) {
 
   await Promise.all(stores.map(async (store) => {
     try {
-      // ── 1. Fetch ads with creative details (ACTIVE + PAUSED uniquement) ────────
+      // ── 1. Fetch ads avec creative minimal (sans object_story_spec qui est trop lourd) ──
       const ads = await metaGetAll<MetaAdRaw>(
         `${store.adAccountId}/ads`,
         {
           fields: [
             'id', 'name', 'status',
-            'adset_id', 'adset{name}',
-            'campaign_id', 'campaign{name}',
-            'creative{id,thumbnail_url,image_url,video_id,object_story_spec}',
+            'adset_id', 'campaign_id',
+            'creative{id,thumbnail_url,image_url,video_id}',
           ].join(','),
           effective_status: JSON.stringify(['ACTIVE', 'PAUSED']),
           limit: '500',
@@ -225,7 +210,6 @@ export async function POST(req: NextRequest) {
 
       // ── 2. Upsert ad_creatives ───────────────────────────────────────────────
       const creativeRows = ads.map(ad => {
-        const copy = extractCopy(ad)
         const format = detectFormat(ad)
         const thumb = ad.creative?.thumbnail_url || ad.creative?.image_url || null
         return {
@@ -233,19 +217,14 @@ export async function POST(req: NextRequest) {
           meta_creative_id:  ad.creative?.id ?? null,
           ad_name:           ad.name,
           campaign_id:       ad.campaign_id,
-          campaign_name:     ad.campaign?.name ?? null,
+          campaign_name:     null,
           adset_id:          ad.adset_id,
-          adset_name:        ad.adset?.name ?? null,
+          adset_name:        null,
           brand:             store.brand,
           format,
           status:            ad.status.toLowerCase(),
           thumbnail_url:     thumb,
-          video_url:         null, // enriched separately if needed
-          primary_text:      copy.primary_text,
-          headline:          copy.headline,
-          description:       copy.description,
-          cta_type:          copy.cta_type,
-          landing_url:       copy.landing_url,
+          video_url:         null,
           updated_at:        new Date().toISOString(),
           last_active_at:    ad.status === 'ACTIVE' ? new Date().toISOString() : undefined,
         }
