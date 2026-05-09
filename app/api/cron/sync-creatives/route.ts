@@ -82,13 +82,11 @@ interface MetaInsightRaw {
   ctr?: string
   cpc?: string
   cpm?: string
-  actions?: MetaAction[]
-  action_values?: MetaAction[]
+  // Direct ROAS field (much smaller than action_values)
+  website_purchase_roas?: MetaAction[]
+  // Video metrics (2 fields only)
   video_play_actions?: MetaAction[]
-  video_p25_watched_actions?: MetaAction[]
-  video_p50_watched_actions?: MetaAction[]
   video_p75_watched_actions?: MetaAction[]
-  video_p100_watched_actions?: MetaAction[]
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -107,19 +105,6 @@ function isAuthorized(req: NextRequest): boolean {
 }
 
 function fmtDate(d: Date) { return d.toISOString().slice(0, 10) }
-
-const PURCHASE_TYPES = new Set([
-  'offsite_conversion.fb_pixel_purchase',
-  'onsite_conversion.purchase',
-  'purchase',
-  'omni_purchase',
-])
-
-function sumActions(actions: MetaAction[] = [], types?: Set<string>): number {
-  return (actions ?? [])
-    .filter(a => !types || types.has(a.action_type))
-    .reduce((s, a) => s + parseFloat(a.value ?? '0'), 0)
-}
 
 function firstActionValue(actions: MetaAction[] = []): number {
   return parseFloat(actions?.[0]?.value ?? '0')
@@ -291,7 +276,7 @@ export async function POST(req: NextRequest) {
             fields: [
               'ad_id', 'ad_name',
               'spend', 'impressions', 'reach', 'clicks', 'ctr', 'cpm',
-              'actions', 'action_values',
+              'website_purchase_roas',
               'video_play_actions',
               'video_p75_watched_actions',
             ].join(','),
@@ -317,10 +302,9 @@ export async function POST(req: NextRequest) {
 
         const spend       = parseFloat(row.spend       ?? '0')
         const impressions = parseInt(row.impressions   ?? '0')
-        const purchases   = sumActions(row.actions, PURCHASE_TYPES)
-        const purchaseVal = sumActions(row.action_values, PURCHASE_TYPES)
         const video3s     = firstActionValue(row.video_play_actions)
         const vidP75      = firstActionValue(row.video_p75_watched_actions)
+        const roas        = firstActionValue(row.website_purchase_roas)
 
         statsRows.push({
           creative_id:    creativeId,
@@ -334,10 +318,7 @@ export async function POST(req: NextRequest) {
           cpm:            row.cpm ? parseFloat(row.cpm) : null,
           video_3s_plays: video3s > 0 ? Math.round(video3s) : null,
           video_p75:      vidP75  > 0 ? Math.round(vidP75)  : null,
-          purchases:      Math.round(purchases),
-          purchase_value: Math.round(purchaseVal * 100) / 100,
-          roas:           spend > 0 && purchaseVal > 0 ? Math.round((purchaseVal / spend) * 100) / 100 : null,
-          cpa:            purchases > 0 ? Math.round((spend / purchases) * 100) / 100 : null,
+          roas:           roas > 0 ? Math.round(roas * 100) / 100 : null,
         })
       }
 
