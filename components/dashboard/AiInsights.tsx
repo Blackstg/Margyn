@@ -9,7 +9,7 @@ export interface AiRecommendation {
 }
 
 interface Props {
-  type: 'dashboard' | 'campaigns' | 'reapprovisionnement'
+  type: 'dashboard' | 'campaigns' | 'reapprovisionnement' | 'creatives'
   brand: string
   context: string | null   // null = not ready yet, triggers load when it becomes truthy
   className?: string

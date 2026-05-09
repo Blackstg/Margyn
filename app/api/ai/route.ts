@@ -73,6 +73,9 @@ function buildUserPrompt(type: string, context: string): string {
     case 'reapprovisionnement':
       return `Voici l'état des stocks et besoins en réapprovisionnement :\n\n${context}\n\nDonne 3 recommandations de réapprovisionnement urgentes : ruptures imminentes, produits à commander en priorité. Format JSON avec link="/reapprovisionnement" si pertinent.`
 
+    case 'creatives':
+      return `Voici les performances des créatives publicitaires Meta (Facebook/Instagram) :\n\n${context}\n\nRéponds à 3 questions : (1) Quels formats performent le mieux ? (2) Y a-t-il des créas en fatigue qui consomment du budget ? (3) Quels angles/hooks ressortent comme gagnants ? Format JSON avec link="/creatives" si pertinent.`
+
     default:
       return `${context}\n\nDonne 3 recommandations actionnables. Format JSON.`
   }

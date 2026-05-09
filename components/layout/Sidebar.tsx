@@ -4,7 +4,7 @@ import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
 import {
   LayoutDashboard, BarChart2, PackageOpen, Settings, LogOut,
-  Boxes, FileText, Tag, Truck, Headphones, ChevronLeft, ChevronRight,
+  Boxes, FileText, Tag, Truck, Headphones, ChevronLeft, ChevronRight, Sparkles,
 } from 'lucide-react'
 import { createBrowserClient } from '@supabase/auth-helpers-nextjs'
 import { useState, useEffect } from 'react'
@@ -16,8 +16,9 @@ const NAV_SECTIONS = [
   {
     label: 'Analyse',
     items: [
-      { href: '/dashboard', icon: LayoutDashboard, label: 'Dashboard',  brand: null   },
-      { href: '/campaigns', icon: BarChart2,       label: 'Campagnes',  brand: null   },
+      { href: '/dashboard',  icon: LayoutDashboard, label: 'Dashboard',  brand: null },
+      { href: '/campaigns',  icon: BarChart2,        label: 'Campagnes',  brand: null },
+      { href: '/creatives',  icon: Sparkles,         label: 'Créatives',  brand: null },
     ],
   },
   {
