@@ -1,9 +1,9 @@
-import { NextRequest, NextResponse } from 'next/server'
+import { NextResponse } from 'next/server'
 export const dynamic = 'force-dynamic'
 
 const META_BASE = 'https://graph.facebook.com/v21.0'
 
-export async function GET(req: NextRequest) {
+export async function GET() {
   const token    = process.env.META_BOWA_ACCESS_TOKEN!
   const account  = process.env.META_BOWA_AD_ACCOUNT_ID!
 
