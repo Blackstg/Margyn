@@ -13,6 +13,7 @@ const STORE_IDS: Record<string, string> = {
 }
 
 export const maxDuration = 120
+export const dynamic = 'force-dynamic'
 
 export async function GET(req: NextRequest) {
   const auth = req.headers.get('authorization') ?? ''
@@ -116,5 +117,8 @@ export async function GET(req: NextRequest) {
     }
   })
 
-  return NextResponse.json({ brand, dateFrom, dateTo, rows_count: rows.length, summary, raw: rows })
+  return NextResponse.json(
+    { brand, dateFrom, dateTo, rows_count: rows.length, summary, raw: rows },
+    { headers: { 'Cache-Control': 'no-store, no-cache' } }
+  )
 }

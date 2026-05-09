@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 
 export const maxDuration = 300
+export const dynamic = 'force-dynamic'
 
 function fmtDate(d: Date) {
   return d.toISOString().slice(0, 10)
@@ -62,5 +63,8 @@ export async function POST(req: NextRequest) {
   }
 
   const ok = results.meta.ok && results.shopify.ok && results.google.ok && results.pinterest.ok
-  return NextResponse.json({ ok, results }, { status: ok ? 200 : 207 })
+  return NextResponse.json(
+    { ok, results },
+    { status: ok ? 200 : 207, headers: { 'Cache-Control': 'no-store, no-cache' } }
+  )
 }

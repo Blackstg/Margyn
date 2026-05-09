@@ -3,6 +3,7 @@ import { createClient } from '@supabase/supabase-js'
 
 // Reports API polling can take up to ~60s per brand; allow headroom for 2 brands in parallel
 export const maxDuration = 300
+export const dynamic = 'force-dynamic'
 
 import {
   fetchPinterestCampaigns,
@@ -39,14 +40,16 @@ function fmtDate(d: Date): string {
 }
 
 // ─── Cron entry-point (GET) ───────────────────────────────────────────────────
+// Syncs last 7 days (not just yesterday) so conversions attributed with a delay
+// (Pinterest uses 30-day view window) are recaptured on subsequent cron runs.
 
 export async function GET(req: NextRequest) {
-  const today     = new Date()
-  const yesterday = new Date(today)
-  yesterday.setDate(yesterday.getDate() - 1)
+  const today = new Date()
+  const from  = new Date(today)
+  from.setDate(from.getDate() - 7)
 
   const url = new URL(req.url)
-  url.searchParams.set('from', fmtDate(yesterday))
+  url.searchParams.set('from', fmtDate(from))
   url.searchParams.set('to',   fmtDate(today))
 
   return POST(new NextRequest(url, { headers: req.headers }))
@@ -191,6 +194,9 @@ export async function POST(req: NextRequest) {
   const hasErrors = Object.values(results).some((r) => r.error)
   return NextResponse.json(
     { ok: !hasErrors, range: { from: dateFrom, to: dateTo }, results },
-    { status: hasErrors ? 207 : 200 }
+    {
+      status: hasErrors ? 207 : 200,
+      headers: { 'Cache-Control': 'no-store, no-cache' },
+    }
   )
 }
