@@ -62,7 +62,7 @@ export default function ConditionalLayout({ children }: { children: React.ReactN
   }
 
   const isDelivery = role === 'delivery'
-  const showSidebar = isDelivery || sidebarOpen
+  const showSidebar = !isDelivery && sidebarOpen
   const sidebarWidth = showSidebar ? (collapsed ? 72 : 240) : 0
 
   return (

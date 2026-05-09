@@ -2075,9 +2075,10 @@ function LivreurView() {
         .filter(s => s.status === 'delivered' || s.status === 'partial')
         .reduce((sum, s) => sum + s.panel_count, 0)
 
-      // Duration from started_at stored on tour (fetched from DB) or fallback
-      const latestTour = await fetchTours()
-      const startedAt  = (latestTour as Tour | undefined)?.started_at ?? null
+      // Duration from started_at stored on tour (fetched from DB) — pass the
+      // current tour ID so fetchTours returns THIS tour, not a different one.
+      const latestTour = await fetchTours(tour.id)
+      const startedAt  = latestTour?.started_at ?? null
       const durationMs = startedAt ? new Date(completedAt).getTime() - new Date(startedAt).getTime() : 0
       setCelebrationStats({ durationMs, delivered, failed, panels, totalKm })
       setScreen('celebration')
