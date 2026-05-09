@@ -50,11 +50,18 @@ export async function GET(req: NextRequest) {
         'SPEND_IN_MICRO_DOLLAR',
         'PAID_IMPRESSION',
         'CLICKTHROUGH_1',
+        // Web only
         'TOTAL_WEB_CHECKOUT',
         'TOTAL_WEB_CHECKOUT_VALUE_IN_MICRO_DOLLAR',
+        // All sources (web + offline + inapp)
+        'TOTAL_CHECKOUT',
+        'TOTAL_CHECKOUT_VALUE_IN_MICRO_DOLLAR',
+        // ROAS columns
         'CHECKOUT_ROAS',
+        'WEB_CHECKOUT_ROAS',
+        // Aggregate conversions
         'TOTAL_CONVERSIONS',
-        'TOTAL_CONVERSION_VALUE_IN_MICRO_DOLLAR',
+        'TOTAL_CONVERSIONS_VALUE_IN_MICRO_DOLLAR',
       ],
     }),
     cache: 'no-store',
@@ -90,18 +97,22 @@ export async function GET(req: NextRequest) {
   // 4. Human-readable summary
   const summary = rows.map((r: unknown) => {
     const row = r as Record<string, unknown>
-    const spend   = Number(row['SPEND_IN_MICRO_DOLLAR'] ?? 0) / 1_000_000
-    const revenue = Number(row['TOTAL_WEB_CHECKOUT_VALUE_IN_MICRO_DOLLAR'] ?? 0) / 1_000_000
-    const totalConvValue = Number(row['TOTAL_CONVERSION_VALUE_IN_MICRO_DOLLAR'] ?? 0) / 1_000_000
+    const spend = Number(row['SPEND_IN_MICRO_DOLLAR'] ?? 0) / 1_000_000
     return {
-      campaign:          row['CAMPAIGN_NAME'],
-      spend_eur:         spend.toFixed(2),
-      checkout_revenue:  revenue.toFixed(2),
-      total_conv_value:  totalConvValue.toFixed(2),
-      checkout_roas:     row['CHECKOUT_ROAS'],
-      conversions:       row['TOTAL_WEB_CHECKOUT'],
-      total_conversions: row['TOTAL_CONVERSIONS'],
-      impressions:       row['PAID_IMPRESSION'],
+      campaign:                   row['CAMPAIGN_NAME'],
+      spend_eur:                  spend.toFixed(2),
+      // Web checkout
+      web_checkout_qty:           row['TOTAL_WEB_CHECKOUT'],
+      web_checkout_revenue:       (Number(row['TOTAL_WEB_CHECKOUT_VALUE_IN_MICRO_DOLLAR'] ?? 0) / 1_000_000).toFixed(2),
+      // All-source checkout
+      total_checkout_qty:         row['TOTAL_CHECKOUT'],
+      total_checkout_revenue:     (Number(row['TOTAL_CHECKOUT_VALUE_IN_MICRO_DOLLAR'] ?? 0) / 1_000_000).toFixed(2),
+      // ROAS (native Pinterest calculation)
+      checkout_roas:              row['CHECKOUT_ROAS'],
+      web_checkout_roas:          row['WEB_CHECKOUT_ROAS'],
+      // Aggregate conversions
+      total_conversions:          row['TOTAL_CONVERSIONS'],
+      total_conversions_value:    (Number(row['TOTAL_CONVERSIONS_VALUE_IN_MICRO_DOLLAR'] ?? 0) / 1_000_000).toFixed(2),
     }
   })
 
