@@ -1,15 +1,15 @@
 'use client'
 export const dynamic = 'force-dynamic'
 
-import { Suspense, useState, useEffect, useCallback, useMemo, useRef } from 'react'
+import { Suspense, useState, useEffect, useCallback, useMemo } from 'react'
 import { createBrowserClient } from '@supabase/auth-helpers-nextjs'
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip,
   ResponsiveContainer,
 } from 'recharts'
 import {
-  Grid3x3, List, X, ChevronLeft, ChevronRight, Copy, RefreshCw,
-  Play, Image as ImageIcon, LayoutGrid, TrendingDown, Trophy, AlertTriangle,
+  Grid3x3, List, X, ChevronRight, Copy, RefreshCw,
+  Play, Image as ImageIcon, TrendingDown, AlertTriangle,
   ExternalLink, Sparkles,
 } from 'lucide-react'
 import AiInsights from '@/components/dashboard/AiInsights'
@@ -123,8 +123,6 @@ function fmtK(n: number) {
 function aggregateStats(
   creatives: AdCreative[],
   stats: CreativeStat[],
-  from: string,
-  to: string
 ): CreativeAgg[] {
   const statsByCreative = new Map<string, CreativeStat[]>()
   for (const s of stats) {
@@ -528,7 +526,7 @@ function AiCreativeSuggestions({ agg }: { agg: CreativeAgg }) {
 
 // ─── Drawer ───────────────────────────────────────────────────────────────────
 
-function CreativeDrawer({ agg, onClose, period }: { agg: CreativeAgg; onClose: () => void; period: Period }) {
+function CreativeDrawer({ agg, onClose }: { agg: CreativeAgg; onClose: () => void }) {
   const { creative, spend, impressions, clicks, ctr, cpm, roas, cpa, hook_rate, hold_rate, dailyStats, fatigue } = agg
 
   // Chart data
@@ -538,9 +536,6 @@ function CreativeDrawer({ agg, onClose, period }: { agg: CreativeAgg; onClose: (
     spend: d.spend,
     ctr:   d.ctr != null ? Math.round(d.ctr * 10000) / 100 : null,
   }))
-
-  // Carousel navigation
-  const [carouselIdx, setCarouselIdx] = useState(0)
 
   return (
     <div className="fixed inset-0 z-50 flex">
@@ -801,12 +796,10 @@ function CreativesPage() {
 
   useEffect(() => { load() }, [load])
 
-  const { from, to } = getRange(period)
-
   // Aggregate
   const allAggs = useMemo(
-    () => aggregateStats(creatives, stats, from, to),
-    [creatives, stats, from, to]
+    () => aggregateStats(creatives, stats),
+    [creatives, stats]
   )
 
   // Filter
@@ -1061,7 +1054,6 @@ function CreativesPage() {
       {drawer && (
         <CreativeDrawer
           agg={drawer}
-          period={period}
           onClose={() => setDrawer(null)}
         />
       )}
