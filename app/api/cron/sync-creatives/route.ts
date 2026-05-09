@@ -186,7 +186,8 @@ export async function POST(req: NextRequest) {
   const supabase = getSupabase()
   const results: Record<string, { ads?: number; stats?: number; error?: string }> = {}
 
-  await Promise.all(stores.map(async (store) => {
+  // Séquentiel pour éviter le rate limiting Meta (parallel = 2 comptes en même temps)
+  for (const store of stores) {
     try {
       // ── 1. Fetch ads avec creative minimal (sans object_story_spec qui est trop lourd) ──
       const ads = await metaGetAll<MetaAdRaw>(
@@ -331,7 +332,7 @@ export async function POST(req: NextRequest) {
       console.error(`[${store.brand}] sync-creatives error:`, msg)
       results[store.brand] = { error: msg }
     }
-  }))
+  }
 
   const hasErrors = Object.values(results).some(r => r.error)
   return NextResponse.json(
