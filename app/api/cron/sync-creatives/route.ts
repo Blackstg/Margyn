@@ -217,7 +217,7 @@ export async function POST(req: NextRequest) {
 
   await Promise.all(stores.map(async (store) => {
     try {
-      // ── 1. Fetch ads with creative details ───────────────────────────────────
+      // ── 1. Fetch ads with creative details (ACTIVE + PAUSED uniquement) ────────
       const ads = await metaGetAll<MetaAdRaw>(
         `${store.adAccountId}/ads`,
         {
@@ -227,8 +227,8 @@ export async function POST(req: NextRequest) {
             'campaign_id', 'campaign{name}',
             'creative{id,thumbnail_url,image_url,video_id,object_story_spec}',
           ].join(','),
-          effective_status: JSON.stringify(['ACTIVE', 'PAUSED', 'ARCHIVED']),
-          limit: '200',
+          effective_status: JSON.stringify(['ACTIVE', 'PAUSED']),
+          limit: '500',
         },
         store.accessToken
       )
@@ -280,32 +280,39 @@ export async function POST(req: NextRequest) {
       if (dbErr) throw new Error(`fetch creatives: ${dbErr.message}`)
       const idMap = new Map((dbCreatives ?? []).map(c => [c.meta_ad_id, c.id as string]))
 
-      // ── 4. Fetch ad-level insights (chunked par 28j pour respecter la limite Meta) ─
-      const chunks = chunkDateRange(dateFrom, dateTo, 28)
+      // ── 4. Fetch ad-level insights (chunked par 14j, filtré sur les ads connus) ─
+      const adIds = ads.map(a => a.id)
+      const chunks = chunkDateRange(dateFrom, dateTo, 14)
       const insights: MetaInsightRaw[] = []
       for (const chunk of chunks) {
-        const chunkData = await metaGetAll<MetaInsightRaw>(
-          `${store.adAccountId}/insights`,
-          {
-            level: 'ad',
-            fields: [
-              'ad_id', 'ad_name',
-              'spend', 'impressions', 'reach', 'clicks', 'ctr', 'cpc', 'cpm',
-              'actions', 'action_values',
-              'video_play_actions',
-              'video_p25_watched_actions',
-              'video_p50_watched_actions',
-              'video_p75_watched_actions',
-              'video_p100_watched_actions',
-            ].join(','),
-            time_range:  JSON.stringify({ since: chunk.from, until: chunk.to }),
-            time_increment: '1',
-            action_attribution_windows: JSON.stringify(['7d_click', '1d_view']),
-            limit: '500',
-          },
-          store.accessToken
-        )
-        insights.push(...chunkData)
+        // Batch les ad_ids par 50 pour rester sous la limite Meta
+        const AD_BATCH = 50
+        for (let b = 0; b < adIds.length; b += AD_BATCH) {
+          const batchIds = adIds.slice(b, b + AD_BATCH)
+          const chunkData = await metaGetAll<MetaInsightRaw>(
+            `${store.adAccountId}/insights`,
+            {
+              level: 'ad',
+              fields: [
+                'ad_id', 'ad_name',
+                'spend', 'impressions', 'reach', 'clicks', 'ctr', 'cpc', 'cpm',
+                'actions', 'action_values',
+                'video_play_actions',
+                'video_p75_watched_actions',
+              ].join(','),
+              time_range:  JSON.stringify({ since: chunk.from, until: chunk.to }),
+              time_increment: '1',
+              filtering: JSON.stringify([
+                { field: 'ad.id', operator: 'IN', value: batchIds },
+                { field: 'spend', operator: 'GREATER_THAN', value: '0' },
+              ]),
+              action_attribution_windows: JSON.stringify(['7d_click', '1d_view']),
+              limit: '500',
+            },
+            store.accessToken
+          )
+          insights.push(...chunkData)
+        }
       }
 
       // ── 5. Build & upsert creative_stats ────────────────────────────────────
@@ -320,10 +327,7 @@ export async function POST(req: NextRequest) {
         const purchases   = sumActions(row.actions, PURCHASE_TYPES)
         const purchaseVal = sumActions(row.action_values, PURCHASE_TYPES)
         const video3s     = firstActionValue(row.video_play_actions)
-        const vidP25      = firstActionValue(row.video_p25_watched_actions)
-        const vidP50      = firstActionValue(row.video_p50_watched_actions)
         const vidP75      = firstActionValue(row.video_p75_watched_actions)
-        const vidP100     = firstActionValue(row.video_p100_watched_actions)
 
         statsRows.push({
           creative_id:    creativeId,
@@ -336,10 +340,7 @@ export async function POST(req: NextRequest) {
           cpc:            row.cpc ? parseFloat(row.cpc) : null,
           cpm:            row.cpm ? parseFloat(row.cpm) : null,
           video_3s_plays: video3s > 0 ? Math.round(video3s) : null,
-          video_p25:      vidP25  > 0 ? Math.round(vidP25)  : null,
-          video_p50:      vidP50  > 0 ? Math.round(vidP50)  : null,
           video_p75:      vidP75  > 0 ? Math.round(vidP75)  : null,
-          video_p100:     vidP100 > 0 ? Math.round(vidP100) : null,
           purchases:      Math.round(purchases),
           purchase_value: Math.round(purchaseVal * 100) / 100,
           roas:           spend > 0 && purchaseVal > 0 ? Math.round((purchaseVal / spend) * 100) / 100 : null,
