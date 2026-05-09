@@ -113,14 +113,16 @@ function firstActionValue(actions: MetaAction[] = []): number {
 async function metaGetAll<T>(
   path: string,
   params: Record<string, string>,
-  accessToken: string
+  accessToken: string,
+  maxPages = 20
 ): Promise<T[]> {
   const results: T[] = []
   const init = new URL(`${META_BASE}/${path}`)
   for (const [k, v] of Object.entries(params)) init.searchParams.set(k, v)
   init.searchParams.set('access_token', accessToken)
   let url: string | null = init.toString()
-  while (url) {
+  let page = 0
+  while (url && page < maxPages) {
     const res = await fetch(url, { cache: 'no-store' })
     const data = await res.json() as {
       data?: T[]; error?: { message: string }; paging?: { next?: string }
@@ -128,6 +130,7 @@ async function metaGetAll<T>(
     if (!res.ok || data.error) throw new Error(`Meta API: ${data.error?.message ?? res.status}`)
     if (data.data) results.push(...data.data)
     url = data.paging?.next ?? null
+    page++
   }
   return results
 }
@@ -199,7 +202,7 @@ export async function POST(req: NextRequest) {
             'creative{id,thumbnail_url,image_url,video_id}',
           ].join(','),
           effective_status: JSON.stringify(['ACTIVE', 'PAUSED']),
-          limit: '500',
+          limit: '200',
         },
         store.accessToken
       )
