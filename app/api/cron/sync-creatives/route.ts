@@ -265,32 +265,36 @@ export async function POST(req: NextRequest) {
       if (dbErr) throw new Error(`fetch creatives: ${dbErr.message}`)
       const idMap = new Map((dbCreatives ?? []).map(c => [c.meta_ad_id, c.id as string]))
 
-      // ── 4. Fetch ad-level insights (chunked par 7j, spend>0 uniquement) ─────────
-      const chunks = chunkDateRange(dateFrom, dateTo, 7)
+      // ── 4. Fetch ad-level insights (1 jour à la fois pour éviter la pagination) ─
       const insights: MetaInsightRaw[] = []
-      for (const chunk of chunks) {
-        const chunkData = await metaGetAll<MetaInsightRaw>(
-          `${store.adAccountId}/insights`,
-          {
-            level: 'ad',
-            fields: [
-              'ad_id', 'ad_name',
-              'spend', 'impressions', 'reach', 'clicks', 'ctr', 'cpm',
-              'website_purchase_roas',
-              'video_play_actions',
-              'video_p75_watched_actions',
-            ].join(','),
-            time_range:  JSON.stringify({ since: chunk.from, until: chunk.to }),
-            time_increment: '1',
-            filtering: JSON.stringify([
-              { field: 'spend', operator: 'GREATER_THAN', value: '0' },
-            ]),
-            action_attribution_windows: JSON.stringify(['7d_click', '1d_view']),
-            limit: '500',
-          },
-          store.accessToken
-        )
-        insights.push(...chunkData)
+      const days = chunkDateRange(dateFrom, dateTo, 1)
+      for (const day of days) {
+        // 1 jour = 1 seule page de résultats, pas de pagination nécessaire
+        const url = new URL(`https://graph.facebook.com/v21.0/${store.adAccountId}/insights`)
+        const params: Record<string, string> = {
+          level: 'ad',
+          fields: [
+            'ad_id', 'ad_name',
+            'spend', 'impressions', 'reach', 'clicks', 'ctr', 'cpm',
+            'website_purchase_roas',
+            'video_play_actions',
+            'video_p75_watched_actions',
+          ].join(','),
+          time_range:  JSON.stringify({ since: day.from, until: day.to }),
+          filtering: JSON.stringify([
+            { field: 'spend', operator: 'GREATER_THAN', value: '0' },
+          ]),
+          action_attribution_windows: JSON.stringify(['7d_click', '1d_view']),
+          limit: '1000',
+          access_token: store.accessToken,
+        }
+        for (const [k, v] of Object.entries(params)) url.searchParams.set(k, v)
+        const res = await fetch(url.toString(), { cache: 'no-store' })
+        const data = await res.json() as { data?: MetaInsightRaw[]; error?: { message: string } }
+        if (!res.ok || data.error) throw new Error(`Meta API (insights ${day.from}): ${data.error?.message ?? res.status}`)
+        for (const row of data.data ?? []) {
+          insights.push({ ...row, date_start: day.from })
+        }
       }
 
       // ── 5. Build & upsert creative_stats ────────────────────────────────────
