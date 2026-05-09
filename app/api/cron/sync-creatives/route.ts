@@ -168,17 +168,33 @@ function extractCopy(ad: MetaAdRaw) {
   }
 }
 
-// ─── GET — Vercel cron ─────────────────────────────────────────────────────────
+// ─── GET — Vercel cron (7 derniers jours, tourne 2×/jour) ─────────────────────
 
 export async function GET(req: NextRequest) {
   const today = new Date()
-  const from  = new Date(today); from.setDate(from.getDate() - 90)
+  const from  = new Date(today); from.setDate(from.getDate() - 7)
 
   const url = new URL(req.url)
   url.searchParams.set('from', fmtDate(from))
   url.searchParams.set('to',   fmtDate(today))
 
   return POST(new NextRequest(url, { headers: req.headers }))
+}
+
+// ─── Chunk a date range into 30-day segments ────────────────────────────────
+
+function chunkDateRange(from: string, to: string, chunkDays = 28): Array<{ from: string; to: string }> {
+  const chunks: Array<{ from: string; to: string }> = []
+  let cursor = new Date(from)
+  const end  = new Date(to)
+  while (cursor <= end) {
+    const chunkEnd = new Date(cursor)
+    chunkEnd.setDate(chunkEnd.getDate() + chunkDays - 1)
+    chunks.push({ from: fmtDate(cursor), to: fmtDate(chunkEnd > end ? end : chunkEnd) })
+    cursor = new Date(chunkEnd)
+    cursor.setDate(cursor.getDate() + 1)
+  }
+  return chunks
 }
 
 // ─── POST — manual or cron ─────────────────────────────────────────────────────
@@ -264,28 +280,33 @@ export async function POST(req: NextRequest) {
       if (dbErr) throw new Error(`fetch creatives: ${dbErr.message}`)
       const idMap = new Map((dbCreatives ?? []).map(c => [c.meta_ad_id, c.id as string]))
 
-      // ── 4. Fetch ad-level insights ───────────────────────────────────────────
-      const insights = await metaGetAll<MetaInsightRaw>(
-        `${store.adAccountId}/insights`,
-        {
-          level: 'ad',
-          fields: [
-            'ad_id', 'ad_name',
-            'spend', 'impressions', 'reach', 'clicks', 'ctr', 'cpc', 'cpm',
-            'actions', 'action_values',
-            'video_play_actions',
-            'video_p25_watched_actions',
-            'video_p50_watched_actions',
-            'video_p75_watched_actions',
-            'video_p100_watched_actions',
-          ].join(','),
-          time_range:  JSON.stringify({ since: dateFrom, until: dateTo }),
-          time_increment: '1',
-          action_attribution_windows: JSON.stringify(['7d_click', '1d_view']),
-          limit: '500',
-        },
-        store.accessToken
-      )
+      // ── 4. Fetch ad-level insights (chunked par 28j pour respecter la limite Meta) ─
+      const chunks = chunkDateRange(dateFrom, dateTo, 28)
+      const insights: MetaInsightRaw[] = []
+      for (const chunk of chunks) {
+        const chunkData = await metaGetAll<MetaInsightRaw>(
+          `${store.adAccountId}/insights`,
+          {
+            level: 'ad',
+            fields: [
+              'ad_id', 'ad_name',
+              'spend', 'impressions', 'reach', 'clicks', 'ctr', 'cpc', 'cpm',
+              'actions', 'action_values',
+              'video_play_actions',
+              'video_p25_watched_actions',
+              'video_p50_watched_actions',
+              'video_p75_watched_actions',
+              'video_p100_watched_actions',
+            ].join(','),
+            time_range:  JSON.stringify({ since: chunk.from, until: chunk.to }),
+            time_increment: '1',
+            action_attribution_windows: JSON.stringify(['7d_click', '1d_view']),
+            limit: '500',
+          },
+          store.accessToken
+        )
+        insights.push(...chunkData)
+      }
 
       // ── 5. Build & upsert creative_stats ────────────────────────────────────
       const statsRows: Record<string, unknown>[] = []
