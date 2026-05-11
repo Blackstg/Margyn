@@ -207,7 +207,7 @@ export async function POST(req: NextRequest) {
       const videoPictureMap = new Map<string, string>()  // video_id → HD thumbnail
       const adVideos = await metaGetAll<{ id: string; source?: string; picture?: string }>(
         `${store.adAccountId}/advideos`,
-        { fields: 'id,source,picture', limit: '200' },
+        { fields: 'id,source,picture', limit: '50' },
         store.accessToken
       )
       for (const v of adVideos) {
@@ -257,12 +257,13 @@ export async function POST(req: NextRequest) {
       if (dbErr) throw new Error(`fetch creatives: ${dbErr.message}`)
       const idMap = new Map((dbCreatives ?? []).map(c => [c.meta_ad_id, c.id as string]))
 
-      // ── 5. Fetch ad-level insights (1 jour à la fois pour éviter la pagination) ─
+      // ── 5. Fetch ad-level insights (1 jour à la fois, paginé) ────────────────
       const insights: MetaInsightRaw[] = []
       const days = chunkDateRange(dateFrom, dateTo, 1)
       for (const day of days) {
-        // 1 jour = 1 seule page de résultats, pas de pagination nécessaire
-        const url = new URL(`https://graph.facebook.com/v21.0/${store.adAccountId}/insights`)
+        // Paginé avec limit=200 pour éviter "reduce the amount of data" sur les gros comptes
+        let nextUrl: string | null = null
+        const initUrl = new URL(`https://graph.facebook.com/v21.0/${store.adAccountId}/insights`)
         const params: Record<string, string> = {
           level: 'ad',
           fields: [
@@ -278,15 +279,21 @@ export async function POST(req: NextRequest) {
             { field: 'spend', operator: 'GREATER_THAN', value: '0' },
           ]),
           action_attribution_windows: JSON.stringify(['7d_click', '1d_view']),
-          limit: '1000',
+          limit: '200',
           access_token: store.accessToken,
         }
-        for (const [k, v] of Object.entries(params)) url.searchParams.set(k, v)
-        const res = await fetch(url.toString(), { cache: 'no-store' })
-        const data = await res.json() as { data?: MetaInsightRaw[]; error?: { message: string } }
-        if (!res.ok || data.error) throw new Error(`Meta API (insights ${day.from}): ${data.error?.message ?? res.status}`)
-        for (const row of data.data ?? []) {
-          insights.push({ ...row, date_start: day.from })
+        for (const [k, v] of Object.entries(params)) initUrl.searchParams.set(k, v)
+        nextUrl = initUrl.toString()
+        let page = 0
+        while (nextUrl && page < 20) {
+          const res = await fetch(nextUrl, { cache: 'no-store' })
+          const data = await res.json() as { data?: MetaInsightRaw[]; error?: { message: string }; paging?: { next?: string } }
+          if (!res.ok || data.error) throw new Error(`Meta API (insights ${day.from} p${page}): ${data.error?.message ?? res.status}`)
+          for (const row of data.data ?? []) {
+            insights.push({ ...row, date_start: day.from })
+          }
+          nextUrl = data.paging?.next ?? null
+          page++
         }
       }
 
