@@ -220,6 +220,7 @@ export async function POST(req: NextRequest) {
         return {
           meta_ad_id:        ad.id,
           meta_creative_id:  ad.creative?.id ?? null,
+          meta_video_id:     ad.creative?.video_id ?? null,
           ad_name:           ad.name,
           campaign_id:       ad.campaign_id,
           campaign_name:     null,
