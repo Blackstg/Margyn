@@ -747,6 +747,7 @@ function CreativesPage() {
   const [loading, setLoading]     = useState(true)
 
   const [drawer, setDrawer] = useState<CreativeAgg | null>(null)
+  const [loadError, setLoadError] = useState<string | null>(null)
 
   // Sync brand from sidebar
   useEffect(() => {
@@ -763,19 +764,22 @@ function CreativesPage() {
 
   const load = useCallback(async () => {
     setLoading(true)
+    setLoadError(null)
     try {
       const { from, to } = getRange(period)
       const brands = brand === 'all' ? ['bowa', 'moom'] : [brand]
 
-      const { data: cData } = await supabase
+      const { data: cData, error: cErr } = await supabase
         .from('ad_creatives')
         .select('*')
         .in('brand', brands)
         .order('first_seen_at', { ascending: false })
 
+      if (cErr) { setLoadError(`ad_creatives: ${cErr.message}`); return }
+
       const ids = (cData ?? []).map(c => c.id)
 
-      const { data: sData } = ids.length > 0
+      const { data: sData, error: sErr } = ids.length > 0
         ? await supabase
             .from('creative_stats')
             .select('*')
@@ -783,12 +787,14 @@ function CreativesPage() {
             .gte('date', from)
             .lte('date', to)
             .limit(50000)
-        : { data: [] }
+        : { data: [], error: null }
+
+      if (sErr) { setLoadError(`creative_stats: ${sErr.message}`); return }
 
       setCreatives(cData ?? [])
       setStats(sData ?? [])
     } catch (e) {
-      console.error(e)
+      setLoadError(String(e))
     } finally {
       setLoading(false)
     }
@@ -1007,8 +1013,15 @@ function CreativesPage() {
           </div>
         )}
 
+        {/* Error */}
+        {loadError && (
+          <div className="py-8 text-center">
+            <p className="text-xs text-red-500 font-mono bg-red-50 rounded-xl px-4 py-3 inline-block text-left max-w-xl">{loadError}</p>
+          </div>
+        )}
+
         {/* Empty */}
-        {!loading && filtered.length === 0 && (
+        {!loading && !loadError && filtered.length === 0 && (
           <div className="py-16 text-center space-y-2">
             <p className="text-4xl">🎨</p>
             <p className="text-sm font-medium text-[#1a1a2e]">Aucune créative trouvée</p>
