@@ -247,6 +247,7 @@ function PlanificateurView() {
   const [tourSearch, setTourSearch] = useState('')
   const [renamingTourId, setRenamingTourId] = useState<string | null>(null)
   const [renameValue, setRenameValue] = useState('')
+  const [editingDateTourId, setEditingDateTourId] = useState<string | null>(null)
   const [showHistory, setShowHistory] = useState(false)
   const [ordersViewMode, setOrdersViewMode] = useState<'list' | 'map'>('list')
   const [syncingStopId, setSyncingStopId] = useState<string | null>(null)
@@ -503,6 +504,16 @@ function PlanificateurView() {
       body: JSON.stringify({ name }),
     })
     setRenamingTourId(null)
+    await fetchTours()
+  }
+
+  async function handleUpdateTourDate(tourId: string, planned_date: string) {
+    setEditingDateTourId(null)
+    await fetch(`/api/delivery/tours/${tourId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ planned_date: planned_date || null }),
+    })
     await fetchTours()
   }
 
@@ -1230,9 +1241,27 @@ function PlanificateurView() {
                                 </span>
                               )}
                             </div>
-                            {tour.planned_date && (
-                              <div className="text-xs text-[#6b6b63] mt-0.5 capitalize">
-                                {formatDate(tour.planned_date)}
+                            {editingDateTourId === tour.id ? (
+                              <div className="mt-0.5" onClick={e => e.stopPropagation()}>
+                                <input
+                                  type="date"
+                                  defaultValue={tour.planned_date ?? ''}
+                                  autoFocus
+                                  className="text-xs border border-[#d4d4c9] rounded-md px-1.5 py-0.5 bg-white text-[#1a1a2e] focus:outline-none focus:ring-1 focus:ring-[#1a1a2e]"
+                                  onChange={e => handleUpdateTourDate(tour.id, e.target.value)}
+                                  onBlur={e => handleUpdateTourDate(tour.id, e.target.value)}
+                                  onKeyDown={e => { if (e.key === 'Escape') setEditingDateTourId(null) }}
+                                />
+                              </div>
+                            ) : (
+                              <div
+                                className="flex items-center gap-1 mt-0.5 group/date cursor-pointer"
+                                onClick={e => { e.stopPropagation(); setEditingDateTourId(tour.id) }}
+                              >
+                                <span className="text-xs text-[#6b6b63] capitalize">
+                                  {tour.planned_date ? formatDate(tour.planned_date) : <span className="italic opacity-50">Aucune date</span>}
+                                </span>
+                                <Pencil size={10} className="text-[#6b6b63] opacity-0 group-hover/date:opacity-60 transition-opacity" />
                               </div>
                             )}
                             {tour.driver_name && (
