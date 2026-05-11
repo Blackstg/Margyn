@@ -6,7 +6,7 @@ import { useState, useEffect, useCallback, useRef, useMemo, Suspense } from 'rea
 import nextDynamic from 'next/dynamic'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { createBrowserClient } from '@supabase/auth-helpers-nextjs'
-import { ChevronDown, ChevronUp, ChevronLeft, ChevronRight, Trash2, Mail, Plus, X, MapPin, Package, Truck, Map as MapIcon, Search, Pencil, Check, MessageSquare, GripVertical, Printer, RefreshCw } from 'lucide-react'
+import { ChevronDown, ChevronUp, ChevronLeft, ChevronRight, Trash2, Mail, Plus, X, MapPin, Package, Truck, Map as MapIcon, Search, Pencil, Check, MessageSquare, GripVertical, Printer, RefreshCw, Clock } from 'lucide-react'
 import {
   DndContext, DragEndEvent, DragOverlay, DragStartEvent,
   PointerSensor, TouchSensor, closestCenter, useSensor, useSensors,
@@ -249,6 +249,10 @@ function PlanificateurView() {
   const [renameValue, setRenameValue] = useState('')
   const [editingDateTourId, setEditingDateTourId] = useState<string | null>(null)
   const [showHistory, setShowHistory] = useState(false)
+  // Deferred orders
+  const [deferredOrders, setDeferredOrders] = useState<Map<string, { deferred_until: string | null; note: string | null }>>(new Map())
+  const [deferPopover, setDeferPopover] = useState<{ orderName: string; date: string; note: string } | null>(null)
+  const [showDeferredSection, setShowDeferredSection] = useState(false)
   const [ordersViewMode, setOrdersViewMode] = useState<'list' | 'map'>('list')
   const [syncingStopId, setSyncingStopId] = useState<string | null>(null)
 
@@ -306,6 +310,16 @@ function PlanificateurView() {
     }
   }
 
+  const fetchDeferredOrders = useCallback(async () => {
+    try {
+      const r = await fetch('/api/delivery/deferred-orders', { cache: 'no-store' })
+      const data = await r.json() as { deferred?: { order_name: string; deferred_until: string | null; note: string | null }[] }
+      const map = new Map<string, { deferred_until: string | null; note: string | null }>()
+      for (const d of data.deferred ?? []) map.set(d.order_name, { deferred_until: d.deferred_until, note: d.note })
+      setDeferredOrders(map)
+    } catch (e) { console.error(e) }
+  }, [])
+
   const fetchOrders = useCallback(async () => {
     setLoadingOrders(true)
     try {
@@ -340,7 +354,8 @@ function PlanificateurView() {
   useEffect(() => {
     fetchOrders()
     fetchTours()
-  }, [fetchOrders, fetchTours])
+    fetchDeferredOrders()
+  }, [fetchOrders, fetchTours, fetchDeferredOrders])
 
   useEffect(() => {
     if (!tourDropdownOpen) return
@@ -355,6 +370,7 @@ function PlanificateurView() {
 
   const filteredOrders = shopifyOrders
     .filter((o) => {
+      if (deferredOrders.has(o.order_name)) return false  // hide deferred from main list
       if (zoneFilter !== 'all' && o.zone !== zoneFilter) return false
       if (preorderFilter && !o.is_preorder) return false
       if (laPosteFilter  && !o.is_accessory_only) return false
@@ -374,6 +390,8 @@ function PlanificateurView() {
       if (!b.created_at) return -1
       return a.created_at.localeCompare(b.created_at)
     })
+
+  const deferredOrdersList = shopifyOrders.filter((o) => deferredOrders.has(o.order_name))
 
   // Panels per zone across all unfiltered orders (for the zone badges)
   const panelsByZone = (['nord-est', 'nord-ouest', 'sud-est', 'sud-ouest'] as Zone[]).reduce<Record<Zone, number>>(
@@ -515,6 +533,25 @@ function PlanificateurView() {
       body: JSON.stringify({ planned_date: planned_date || null }),
     })
     await fetchTours()
+  }
+
+  async function handleDeferOrder(orderName: string, date: string, note: string) {
+    setDeferPopover(null)
+    await fetch('/api/delivery/deferred-orders', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ order_name: orderName, deferred_until: date || null, note: note || null }),
+    })
+    setDeferredOrders(prev => new Map(prev).set(orderName, { deferred_until: date || null, note: note || null }))
+  }
+
+  async function handleUndeferOrder(orderName: string) {
+    await fetch('/api/delivery/deferred-orders', {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ order_name: orderName }),
+    })
+    setDeferredOrders(prev => { const m = new Map(prev); m.delete(orderName); return m })
   }
 
   async function handleUpdateTourStatus(tourId: string, status: TourStatus) {
@@ -871,13 +908,25 @@ function PlanificateurView() {
                               </div>
                             )}
                           </div>
-                          <input
-                            type="checkbox"
-                            readOnly
-                            checked={selected}
-                            className="mt-1 accent-[#aeb0c9] cursor-pointer shrink-0"
-                            onClick={(e) => e.stopPropagation()}
-                          />
+                          <div className="flex items-center gap-1.5 shrink-0">
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                setDeferPopover({ orderName: order.order_name, date: '', note: '' })
+                              }}
+                              title="Planifier plus tard"
+                              className="p-1 rounded-md text-[#9b9b93] hover:text-[#d97706] hover:bg-[#fff7ed] transition-colors"
+                            >
+                              <Clock size={14} />
+                            </button>
+                            <input
+                              type="checkbox"
+                              readOnly
+                              checked={selected}
+                              className="mt-1 accent-[#aeb0c9] cursor-pointer shrink-0"
+                              onClick={(e) => e.stopPropagation()}
+                            />
+                          </div>
                         </div>
                         {order.panel_details?.length > 0 && (
                           <div className="mt-2 space-y-0.5">
@@ -972,6 +1021,60 @@ function PlanificateurView() {
                 )
               })()}
             </div>
+            )}
+
+            {/* Deferred orders section */}
+            {deferredOrdersList.length > 0 && (
+              <div className="mt-3">
+                <button
+                  onClick={() => setShowDeferredSection(v => !v)}
+                  className="w-full flex items-center gap-2 px-1 py-1.5 text-left"
+                >
+                  <div className="flex-1 h-px bg-[#fde68a]" />
+                  <span className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-widest text-[#b45309] px-1 whitespace-nowrap">
+                    <Clock size={11} />
+                    En attente ({deferredOrdersList.length})
+                  </span>
+                  <div className="flex-1 h-px bg-[#fde68a]" />
+                  {showDeferredSection ? <ChevronUp size={12} className="text-[#b45309]" /> : <ChevronDown size={12} className="text-[#b45309]" />}
+                </button>
+
+                {showDeferredSection && (
+                  <div className="space-y-2 mt-1">
+                    {deferredOrdersList.map((order) => {
+                      const info = deferredOrders.get(order.order_name)
+                      return (
+                        <div key={order.order_name} className="rounded-[12px] border border-[#fde68a] bg-[#fffbeb] overflow-hidden">
+                          <div className="p-3">
+                            <div className="flex items-start justify-between gap-2">
+                              <div className="flex-1 min-w-0">
+                                <div className="flex items-center gap-1.5 flex-wrap">
+                                  <span className="font-semibold text-sm text-[#1a1a2e]">{order.order_name}</span>
+                                  <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-[#fef9c3] text-[#92400e]">
+                                    <Clock size={9} className="inline mr-0.5" />
+                                    {info?.deferred_until
+                                      ? `Dispo le ${new Date(info.deferred_until).toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' })}`
+                                      : 'À planifier plus tard'}
+                                  </span>
+                                </div>
+                                <div className="text-xs text-[#6b6b63] mt-0.5">{order.customer_name} · {order.city} {order.zip}</div>
+                                {info?.note && <div className="text-[10px] text-[#92400e] mt-0.5 italic">{info.note}</div>}
+                              </div>
+                              <button
+                                onClick={() => handleUndeferOrder(order.order_name)}
+                                title="Remettre dans la liste"
+                                className="p-1.5 rounded-md text-[#b45309] hover:bg-[#fde68a] transition-colors shrink-0 text-xs font-medium"
+                              >
+                                <X size={13} />
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                      )
+                    })}
+                  </div>
+                )}
+              </div>
             )}
           </div>
         </div>
@@ -1613,6 +1716,70 @@ function PlanificateurView() {
         </div>
       )}
     </div>
+
+    {/* ── Modale reporter une commande ── */}
+    {deferPopover && (
+      <div
+        className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm"
+        onClick={() => setDeferPopover(null)}
+      >
+        <div
+          className="bg-white rounded-[20px] shadow-2xl p-6 w-full max-w-sm mx-4"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <div className="flex items-center gap-2 mb-4">
+            <div className="w-8 h-8 rounded-full bg-[#fff7ed] flex items-center justify-center shrink-0">
+              <Clock size={16} className="text-[#d97706]" />
+            </div>
+            <div>
+              <div className="font-semibold text-[#1a1a2e] text-sm">Planifier plus tard</div>
+              <div className="text-xs text-[#6b6b63]">{deferPopover.orderName}</div>
+            </div>
+          </div>
+
+          <div className="space-y-3">
+            <div>
+              <label className="block text-xs font-medium text-[#6b6b63] mb-1">
+                Client disponible à partir du <span className="font-normal">(optionnel)</span>
+              </label>
+              <input
+                type="date"
+                value={deferPopover.date}
+                onChange={(e) => setDeferPopover(p => p ? { ...p, date: e.target.value } : p)}
+                className="w-full px-3 py-2 text-sm border border-[#e8e8e4] rounded-[10px] outline-none focus:border-[#d97706] transition-colors"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-[#6b6b63] mb-1">
+                Note <span className="font-normal">(optionnel)</span>
+              </label>
+              <textarea
+                rows={2}
+                placeholder="Ex: rappeler la semaine du 20, client en vacances..."
+                value={deferPopover.note}
+                onChange={(e) => setDeferPopover(p => p ? { ...p, note: e.target.value } : p)}
+                className="w-full px-3 py-2 text-sm border border-[#e8e8e4] rounded-[10px] outline-none focus:border-[#d97706] transition-colors resize-none"
+              />
+            </div>
+          </div>
+
+          <div className="flex gap-2 mt-4">
+            <button
+              onClick={() => setDeferPopover(null)}
+              className="flex-1 px-4 py-2 rounded-[10px] border border-[#e8e8e4] text-sm text-[#6b6b63] hover:bg-[#f5f5f3] transition-colors"
+            >
+              Annuler
+            </button>
+            <button
+              onClick={() => handleDeferOrder(deferPopover.orderName, deferPopover.date, deferPopover.note)}
+              className="flex-1 px-4 py-2 rounded-[10px] bg-[#d97706] text-white text-sm font-medium hover:bg-[#b45309] transition-colors"
+            >
+              Mettre en attente
+            </button>
+          </div>
+        </div>
+      </div>
+    )}
 
     {/* ── Modale Notifier les clients ── */}
     {notifModal && (() => {
