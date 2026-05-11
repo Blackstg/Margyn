@@ -193,7 +193,8 @@ export async function POST(req: NextRequest) {
           effective_status: JSON.stringify(['ACTIVE', 'PAUSED']),
           limit: '25',
         },
-        store.accessToken
+        store.accessToken,
+        80  // 80 pages × 25 = 2000 ads max
       )
 
       if (ads.length === 0) {
