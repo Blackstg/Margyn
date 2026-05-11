@@ -7,6 +7,12 @@ const TOKENS: Record<string, string | undefined> = {
   krom: process.env.META_KROM_ACCESS_TOKEN,
 }
 
+const AD_ACCOUNTS: Record<string, string | undefined> = {
+  bowa: process.env.META_BOWA_AD_ACCOUNT_ID,
+  moom: process.env.META_MOOM_AD_ACCOUNT_ID,
+  krom: process.env.META_KROM_AD_ACCOUNT_ID,
+}
+
 export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url)
   const videoId = searchParams.get('video_id')
@@ -14,25 +20,31 @@ export async function GET(req: NextRequest) {
 
   if (!videoId) return NextResponse.json({ error: 'Missing video_id' }, { status: 400 })
 
-  const token = TOKENS[brand]
-  if (!token) return NextResponse.json({ error: 'No token for brand' }, { status: 400 })
+  const token     = TOKENS[brand]
+  const adAccount = AD_ACCOUNTS[brand]
+  if (!token || !adAccount) return NextResponse.json({ error: 'No config for brand' }, { status: 400 })
 
   try {
-    const res = await fetch(
-      `https://graph.facebook.com/v21.0/${videoId}?fields=source&access_token=${token}`,
-      { cache: 'no-store' }
-    )
-    const data = await res.json() as { source?: string; error?: { message: string } }
+    // Query via advideos — direct video object endpoint requires broader permissions
+    const url = new URL(`https://graph.facebook.com/v21.0/${adAccount}/advideos`)
+    url.searchParams.set('fields', 'id,source')
+    url.searchParams.set('filtering', JSON.stringify([{ field: 'id', operator: 'EQUAL', value: videoId }]))
+    url.searchParams.set('limit', '1')
+    url.searchParams.set('access_token', token)
+
+    const res  = await fetch(url.toString(), { cache: 'no-store' })
+    const data = await res.json() as { data?: { id: string; source?: string }[]; error?: { message: string } }
 
     if (!res.ok || data.error) {
       return NextResponse.json({ error: data.error?.message ?? 'Meta API error' }, { status: 502 })
     }
 
-    if (!data.source) {
+    const source = data.data?.[0]?.source
+    if (!source) {
       return NextResponse.json({ error: 'No video source available' }, { status: 404 })
     }
 
-    return NextResponse.json({ url: data.source }, {
+    return NextResponse.json({ url: source }, {
       headers: { 'Cache-Control': 'private, max-age=300' }
     })
   } catch (e) {
