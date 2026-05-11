@@ -52,21 +52,8 @@ interface MetaAdRaw {
     image_url?: string
     video_id?: string
     object_story_spec?: {
-      link_data?: {
-        message?: string
-        name?: string
-        description?: string
-        call_to_action?: { type: string; value?: { link?: string } }
-        child_attachments?: unknown[]
-        link?: string
-      }
-      video_data?: {
-        message?: string
-        title?: string
-        call_to_action?: { type: string; value?: { link?: string } }
-        video_id?: string
-        link_description?: string
-      }
+      link_data?: { child_attachments?: unknown[] }
+      video_data?: { video_id?: string }
     }
   }
 }
@@ -192,14 +179,14 @@ export async function POST(req: NextRequest) {
   // Séquentiel pour éviter le rate limiting Meta (parallel = 2 comptes en même temps)
   for (const store of stores) {
     try {
-      // ── 1. Fetch ads avec creative minimal (sans object_story_spec qui est trop lourd) ──
+      // ── 1. Fetch ads avec creative minimal (object_story_spec réduit au strict nécessaire) ──
       const ads = await metaGetAll<MetaAdRaw>(
         `${store.adAccountId}/ads`,
         {
           fields: [
             'id', 'name', 'status',
             'adset_id', 'campaign_id',
-            'creative{id,thumbnail_url,image_url,video_id}',
+            'creative{id,thumbnail_url,image_url,video_id,object_story_spec{video_data{video_id},link_data{child_attachments}}}',
           ].join(','),
           effective_status: JSON.stringify(['ACTIVE', 'PAUSED']),
           limit: '200',
@@ -220,7 +207,7 @@ export async function POST(req: NextRequest) {
         return {
           meta_ad_id:        ad.id,
           meta_creative_id:  ad.creative?.id ?? null,
-          meta_video_id:     ad.creative?.video_id ?? null,
+          meta_video_id:     ad.creative?.video_id || ad.creative?.object_story_spec?.video_data?.video_id || null,
           ad_name:           ad.name,
           campaign_id:       ad.campaign_id,
           campaign_name:     null,
