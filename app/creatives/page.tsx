@@ -528,31 +528,16 @@ function AiCreativeSuggestions({ agg }: { agg: CreativeAgg }) {
 
 // ─── VideoPlayer ──────────────────────────────────────────────────────────────
 
-function VideoPlayer({ videoId, brand, thumbnail }: { videoId: string; brand: string; thumbnail: string | null }) {
-  const [videoUrl, setVideoUrl] = useState<string | null>(null)
-  const [loading, setLoading]   = useState(false)
-  const [error, setError]       = useState(false)
-  const [playing, setPlaying]   = useState(false)
+function VideoPlayer({ videoUrl, thumbnail }: { videoUrl: string; thumbnail: string | null }) {
+  const [playing, setPlaying] = useState(false)
 
-  async function fetchAndPlay() {
-    setLoading(true)
-    try {
-      const res = await fetch(`/api/meta-video?video_id=${videoId}&brand=${brand}`)
-      const data = await res.json() as { url?: string; error?: string }
-      if (data.url) { setVideoUrl(data.url); setPlaying(true) }
-      else setError(true)
-    } catch { setError(true) }
-    finally { setLoading(false) }
-  }
-
-  if (playing && videoUrl) {
+  if (playing) {
     return (
       <video
         src={videoUrl}
         controls
         autoPlay
         className="w-full h-full object-contain bg-black"
-        onError={() => setError(true)}
       />
     )
   }
@@ -562,18 +547,13 @@ function VideoPlayer({ videoId, brand, thumbnail }: { videoId: string; brand: st
       {thumbnail && (
         <img src={thumbnail} alt="" className="w-full h-full object-contain" />
       )}
-      <div className="absolute inset-0 flex flex-col items-center justify-center gap-2">
+      <div className="absolute inset-0 flex items-center justify-center">
         <button
-          onClick={fetchAndPlay}
-          disabled={loading}
-          className="w-14 h-14 rounded-full bg-white/90 hover:bg-white flex items-center justify-center shadow-lg transition-all hover:scale-105 disabled:opacity-60"
+          onClick={() => setPlaying(true)}
+          className="w-14 h-14 rounded-full bg-white/90 hover:bg-white flex items-center justify-center shadow-lg transition-all hover:scale-105"
         >
-          {loading
-            ? <div className="w-5 h-5 border-2 border-[#1a1a2e] border-t-transparent rounded-full animate-spin" />
-            : <Play size={22} className="text-[#1a1a2e] ml-0.5" />
-          }
+          <Play size={22} className="text-[#1a1a2e] ml-0.5" />
         </button>
-        {error && <p className="text-xs text-white/60 bg-black/40 px-3 py-1 rounded-full">Vidéo indisponible</p>}
       </div>
     </div>
   )
@@ -617,8 +597,8 @@ function CreativeDrawer({ agg, onClose }: { agg: CreativeAgg; onClose: () => voi
         <div className="p-5 space-y-5">
           {/* Preview */}
           <div className="rounded-2xl overflow-hidden bg-[#1a1a2e] aspect-[4/3] relative">
-            {creative.format === 'video' && creative.meta_video_id ? (
-              <VideoPlayer videoId={creative.meta_video_id} brand={creative.brand} thumbnail={creative.thumbnail_url} />
+            {creative.format === 'video' && creative.video_url ? (
+              <VideoPlayer videoUrl={creative.video_url} thumbnail={creative.thumbnail_url} />
             ) : creative.thumbnail_url ? (
               <img src={creative.thumbnail_url} alt="" className="w-full h-full object-contain" />
             ) : (

@@ -199,15 +199,28 @@ export async function POST(req: NextRequest) {
         return
       }
 
-      // ── 2. Upsert ad_creatives ───────────────────────────────────────────────
+      // ── 2. Fetch video source URLs from advideos (paginated) ────────────────
+      const videoSourceMap = new Map<string, string>()
+      const adVideos = await metaGetAll<{ id: string; source?: string }>(
+        `${store.adAccountId}/advideos`,
+        { fields: 'id,source', limit: '200' },
+        store.accessToken
+      )
+      for (const v of adVideos) {
+        if (v.source) videoSourceMap.set(v.id, v.source)
+      }
+
+      // ── 3. Upsert ad_creatives ───────────────────────────────────────────────
       const creativeRows = ads.map(ad => {
-        const format = detectFormat(ad)
+        const format   = detectFormat(ad)
+        const videoId  = ad.creative?.video_id || ad.creative?.object_story_spec?.video_data?.video_id || null
         // image_url = haute résolution images, thumbnail_url = miniature vidéo (basse résolution, limitation Meta)
-        const thumb = ad.creative?.image_url || ad.creative?.thumbnail_url || null
+        const thumb    = ad.creative?.image_url || ad.creative?.thumbnail_url || null
+        const videoUrl = videoId ? (videoSourceMap.get(videoId) ?? null) : null
         return {
           meta_ad_id:        ad.id,
           meta_creative_id:  ad.creative?.id ?? null,
-          meta_video_id:     ad.creative?.video_id || ad.creative?.object_story_spec?.video_data?.video_id || null,
+          meta_video_id:     videoId,
           ad_name:           ad.name,
           campaign_id:       ad.campaign_id,
           campaign_name:     null,
@@ -217,7 +230,7 @@ export async function POST(req: NextRequest) {
           format,
           status:            ad.status.toLowerCase(),
           thumbnail_url:     thumb,
-          video_url:         null,
+          video_url:         videoUrl,
           updated_at:        new Date().toISOString(),
           last_active_at:    ad.status === 'ACTIVE' ? new Date().toISOString() : undefined,
         }
@@ -228,7 +241,7 @@ export async function POST(req: NextRequest) {
         .upsert(creativeRows, { onConflict: 'meta_ad_id', ignoreDuplicates: false })
       if (upsertErr) throw new Error(`ad_creatives upsert: ${upsertErr.message}`)
 
-      // ── 3. Resolve internal IDs ──────────────────────────────────────────────
+      // ── 4. Resolve internal IDs ──────────────────────────────────────────────
       const metaAdIds = ads.map(a => a.id)
       const { data: dbCreatives, error: dbErr } = await supabase
         .from('ad_creatives')
@@ -237,7 +250,7 @@ export async function POST(req: NextRequest) {
       if (dbErr) throw new Error(`fetch creatives: ${dbErr.message}`)
       const idMap = new Map((dbCreatives ?? []).map(c => [c.meta_ad_id, c.id as string]))
 
-      // ── 4. Fetch ad-level insights (1 jour à la fois pour éviter la pagination) ─
+      // ── 5. Fetch ad-level insights (1 jour à la fois pour éviter la pagination) ─
       const insights: MetaInsightRaw[] = []
       const days = chunkDateRange(dateFrom, dateTo, 1)
       for (const day of days) {
@@ -269,7 +282,7 @@ export async function POST(req: NextRequest) {
         }
       }
 
-      // ── 5. Build & upsert creative_stats ────────────────────────────────────
+      // ── 6. Build & upsert creative_stats ────────────────────────────────────
       const statsRows: Record<string, unknown>[] = []
 
       for (const row of insights) {
