@@ -215,7 +215,8 @@ export async function POST(req: NextRequest) {
       // ── 2. Upsert ad_creatives ───────────────────────────────────────────────
       const creativeRows = ads.map(ad => {
         const format = detectFormat(ad)
-        const thumb = ad.creative?.thumbnail_url || ad.creative?.image_url || null
+        // image_url = haute résolution, thumbnail_url = petite miniature vidéo
+        const thumb = ad.creative?.image_url || ad.creative?.thumbnail_url || null
         return {
           meta_ad_id:        ad.id,
           meta_creative_id:  ad.creative?.id ?? null,
