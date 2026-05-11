@@ -779,17 +779,21 @@ function CreativesPage() {
 
       const ids = (cData ?? []).map(c => c.id)
 
-      const { data: sData, error: sErr } = ids.length > 0
-        ? await supabase
-            .from('creative_stats')
-            .select('*')
-            .in('creative_id', ids)
-            .gte('date', from)
-            .lte('date', to)
-            .limit(50000)
-        : { data: [], error: null }
-
-      if (sErr) { setLoadError(`creative_stats: ${sErr.message}`); return }
+      // Chunk IDs par 200 pour éviter la limite URL de Supabase
+      const CHUNK = 200
+      const statsChunks: CreativeStat[][] = []
+      for (let i = 0; i < ids.length; i += CHUNK) {
+        const { data: chunk, error: chunkErr } = await supabase
+          .from('creative_stats')
+          .select('*')
+          .in('creative_id', ids.slice(i, i + CHUNK))
+          .gte('date', from)
+          .lte('date', to)
+          .limit(20000)
+        if (chunkErr) { setLoadError(`creative_stats: ${chunkErr.message}`); return }
+        if (chunk) statsChunks.push(chunk)
+      }
+      const sData = statsChunks.flat()
 
       setCreatives(cData ?? [])
       setStats(sData ?? [])
