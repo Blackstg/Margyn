@@ -202,23 +202,27 @@ export async function POST(req: NextRequest) {
         return
       }
 
-      // ── 2. Fetch video source URLs from advideos (paginated) ────────────────
-      const videoSourceMap = new Map<string, string>()
-      const adVideos = await metaGetAll<{ id: string; source?: string }>(
+      // ── 2. Fetch video source URLs + HD thumbnails from advideos (paginated) ──
+      const videoSourceMap  = new Map<string, string>()  // video_id → mp4 url
+      const videoPictureMap = new Map<string, string>()  // video_id → HD thumbnail
+      const adVideos = await metaGetAll<{ id: string; source?: string; picture?: string }>(
         `${store.adAccountId}/advideos`,
-        { fields: 'id,source', limit: '200' },
+        { fields: 'id,source,picture', limit: '200' },
         store.accessToken
       )
       for (const v of adVideos) {
-        if (v.source) videoSourceMap.set(v.id, v.source)
+        if (v.source)  videoSourceMap.set(v.id, v.source)
+        if (v.picture) videoPictureMap.set(v.id, v.picture)
       }
 
       // ── 3. Upsert ad_creatives ───────────────────────────────────────────────
       const creativeRows = ads.map(ad => {
         const format   = detectFormat(ad)
         const videoId  = ad.creative?.video_id || ad.creative?.object_story_spec?.video_data?.video_id || null
-        // image_url = haute résolution images, thumbnail_url = miniature vidéo (basse résolution, limitation Meta)
-        const thumb    = ad.creative?.image_url || ad.creative?.thumbnail_url || null
+        // For images: image_url (HD). For videos: HD picture from advideos, fallback to thumbnail_url
+        const thumb    = format === 'video' && videoId
+          ? (videoPictureMap.get(videoId) ?? ad.creative?.thumbnail_url ?? null)
+          : (ad.creative?.image_url ?? ad.creative?.thumbnail_url ?? null)
         const videoUrl = videoId ? (videoSourceMap.get(videoId) ?? null) : null
         return {
           meta_ad_id:        ad.id,
