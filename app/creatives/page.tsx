@@ -270,14 +270,25 @@ function CreativeCard({ agg, onClick }: { agg: CreativeAgg; onClick: () => void 
       className="group relative bg-white rounded-[20px] shadow-[0_2px_16px_rgba(0,0,0,0.06)] overflow-hidden cursor-pointer hover:shadow-[0_4px_24px_rgba(0,0,0,0.1)] hover:-translate-y-0.5 transition-all duration-200"
     >
       {/* Thumbnail */}
-      <div className="relative aspect-[4/3] bg-[#f4f4f2] overflow-hidden">
+      <div className="relative aspect-[4/3] bg-[#1a1a2e] overflow-hidden">
         {creative.thumbnail_url ? (
-          <img
-            src={creative.thumbnail_url}
-            alt={creative.ad_name}
-            className="w-full h-full object-cover"
-            loading="lazy"
-          />
+          <>
+            {/* Fond flouté pour les vidéos (thumbnail basse résolution) */}
+            {creative.format === 'video' && (
+              <img
+                src={creative.thumbnail_url}
+                alt=""
+                aria-hidden
+                className="absolute inset-0 w-full h-full object-cover scale-110 blur-lg opacity-60"
+              />
+            )}
+            <img
+              src={creative.thumbnail_url}
+              alt={creative.ad_name}
+              className="relative w-full h-full object-contain"
+              loading="lazy"
+            />
+          </>
         ) : (
           <div className="w-full h-full flex items-center justify-center">
             <ImageIcon size={32} className="text-[#d0d0cc]" />
@@ -561,9 +572,14 @@ function CreativeDrawer({ agg, onClose }: { agg: CreativeAgg; onClose: () => voi
 
         <div className="p-5 space-y-5">
           {/* Preview */}
-          <div className="rounded-2xl overflow-hidden bg-[#f4f4f2] aspect-[4/3] relative">
+          <div className="rounded-2xl overflow-hidden bg-[#1a1a2e] aspect-[4/3] relative">
             {creative.thumbnail_url ? (
-              <img src={creative.thumbnail_url} alt="" className="w-full h-full object-contain" />
+              <>
+                {creative.format === 'video' && (
+                  <img src={creative.thumbnail_url} alt="" aria-hidden className="absolute inset-0 w-full h-full object-cover scale-110 blur-xl opacity-50" />
+                )}
+                <img src={creative.thumbnail_url} alt="" className="relative w-full h-full object-contain" />
+              </>
             ) : (
               <div className="w-full h-full flex items-center justify-center">
                 <ImageIcon size={48} className="text-[#d0d0cc]" />
