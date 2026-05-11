@@ -190,7 +190,7 @@ export async function POST(req: NextRequest) {
             'adset_id', 'campaign_id',
             'creative{id,thumbnail_url,image_url,video_id,object_story_spec{video_data{video_id},link_data{child_attachments}}}',
           ].join(','),
-          effective_status: JSON.stringify(['ACTIVE', 'PAUSED', 'DELETED', 'ARCHIVED']),
+          effective_status: JSON.stringify(['ACTIVE', 'PAUSED', 'ARCHIVED']),
           limit: '25',
         },
         store.accessToken,
