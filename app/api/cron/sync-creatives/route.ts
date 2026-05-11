@@ -190,7 +190,7 @@ export async function POST(req: NextRequest) {
             'adset_id', 'campaign_id',
             'creative{id,thumbnail_url,image_url,video_id,object_story_spec{video_data{video_id},link_data{child_attachments}}}',
           ].join(','),
-          effective_status: JSON.stringify(['ACTIVE', 'PAUSED']),
+          effective_status: JSON.stringify(['ACTIVE', 'PAUSED', 'DELETED', 'ARCHIVED']),
           limit: '25',
         },
         store.accessToken,
@@ -248,12 +248,12 @@ export async function POST(req: NextRequest) {
         .upsert(creativeRows, { onConflict: 'meta_ad_id', ignoreDuplicates: false })
       if (upsertErr) throw new Error(`ad_creatives upsert: ${upsertErr.message}`)
 
-      // ── 4. Resolve internal IDs ──────────────────────────────────────────────
-      const metaAdIds = ads.map(a => a.id)
+      // ── 4. Resolve internal IDs — ALL ads for this brand (incl. deleted/archived)
+      // so insights from paused/deleted ads aren't silently dropped
       const { data: dbCreatives, error: dbErr } = await supabase
         .from('ad_creatives')
         .select('id, meta_ad_id')
-        .in('meta_ad_id', metaAdIds)
+        .eq('brand', store.brand)
       if (dbErr) throw new Error(`fetch creatives: ${dbErr.message}`)
       const idMap = new Map((dbCreatives ?? []).map(c => [c.meta_ad_id, c.id as string]))
 
