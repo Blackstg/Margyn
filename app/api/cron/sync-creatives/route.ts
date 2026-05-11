@@ -50,6 +50,7 @@ interface MetaAdRaw {
     id: string
     thumbnail_url?: string
     image_url?: string
+    picture?: string
     video_id?: string
     object_story_spec?: {
       link_data?: {
@@ -199,7 +200,7 @@ export async function POST(req: NextRequest) {
           fields: [
             'id', 'name', 'status',
             'adset_id', 'campaign_id',
-            'creative{id,thumbnail_url,image_url,video_id}',
+            'creative{id,thumbnail_url,image_url,picture,video_id}',
           ].join(','),
           effective_status: JSON.stringify(['ACTIVE', 'PAUSED']),
           limit: '200',
@@ -215,8 +216,8 @@ export async function POST(req: NextRequest) {
       // ── 2. Upsert ad_creatives ───────────────────────────────────────────────
       const creativeRows = ads.map(ad => {
         const format = detectFormat(ad)
-        // image_url = haute résolution, thumbnail_url = petite miniature vidéo
-        const thumb = ad.creative?.image_url || ad.creative?.thumbnail_url || null
+        // image_url = haute résolution images, picture = haute résolution vidéos, thumbnail_url = fallback basse résolution
+        const thumb = ad.creative?.image_url || ad.creative?.picture || ad.creative?.thumbnail_url || null
         return {
           meta_ad_id:        ad.id,
           meta_creative_id:  ad.creative?.id ?? null,
