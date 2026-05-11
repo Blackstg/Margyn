@@ -74,6 +74,8 @@ interface MetaInsightRaw {
   // Video metrics (2 fields only)
   video_play_actions?: MetaAction[]
   video_p75_watched_actions?: MetaAction[]
+  // Cost per action type (purchase CPA)
+  cost_per_action_type?: MetaAction[]
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -262,6 +264,7 @@ export async function POST(req: NextRequest) {
             'ad_id', 'ad_name',
             'spend', 'impressions', 'reach', 'clicks', 'ctr', 'cpm',
             'website_purchase_roas',
+            'cost_per_action_type',
             'video_play_actions',
             'video_p75_watched_actions',
           ].join(','),
@@ -294,20 +297,28 @@ export async function POST(req: NextRequest) {
         const video3s     = firstActionValue(row.video_play_actions)
         const vidP75      = firstActionValue(row.video_p75_watched_actions)
         const roas        = firstActionValue(row.website_purchase_roas)
+        // CPA: extract purchase cost from cost_per_action_type
+        const cpaPurchase = (row.cost_per_action_type ?? [])
+          .find(a => a.action_type === 'omni_purchase' || a.action_type === 'purchase' || a.action_type === 'onsite_conversion.purchase')
+        const cpa = cpaPurchase ? parseFloat(cpaPurchase.value) : null
+        // purchase_value derived from ROAS × spend
+        const purchaseValue = roas > 0 ? Math.round(roas * spend * 100) / 100 : 0
 
         statsRows.push({
-          creative_id:    creativeId,
-          date:           row.date_start,
+          creative_id:     creativeId,
+          date:            row.date_start,
           spend,
           impressions,
-          reach:          parseInt(row.reach   ?? '0'),
-          clicks:         parseInt(row.clicks  ?? '0'),
-          ctr:            row.ctr ? parseFloat(row.ctr) / 100 : null,
-          cpc:            row.cpc ? parseFloat(row.cpc) : null,
-          cpm:            row.cpm ? parseFloat(row.cpm) : null,
-          video_3s_plays: video3s > 0 ? Math.round(video3s) : null,
-          video_p75:      vidP75  > 0 ? Math.round(vidP75)  : null,
-          roas:           roas > 0 ? Math.round(roas * 100) / 100 : null,
+          reach:           parseInt(row.reach   ?? '0'),
+          clicks:          parseInt(row.clicks  ?? '0'),
+          ctr:             row.ctr ? parseFloat(row.ctr) / 100 : null,
+          cpc:             row.cpc ? parseFloat(row.cpc) : null,
+          cpm:             row.cpm ? parseFloat(row.cpm) : null,
+          video_3s_plays:  video3s > 0 ? Math.round(video3s) : null,
+          video_p75:       vidP75  > 0 ? Math.round(vidP75)  : null,
+          roas:            roas > 0 ? Math.round(roas * 100) / 100 : null,
+          purchase_value:  purchaseValue,
+          cpa:             cpa != null && cpa > 0 ? Math.round(cpa * 100) / 100 : null,
         })
       }
 

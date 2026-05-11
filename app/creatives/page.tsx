@@ -139,15 +139,24 @@ function aggregateStats(
     const totalSpend  = rows.reduce((s,r) => s + (r.spend        ?? 0), 0)
     const totalImpr   = rows.reduce((s,r) => s + (r.impressions  ?? 0), 0)
     const totalClicks = rows.reduce((s,r) => s + (r.clicks       ?? 0), 0)
-    const totalPurch  = rows.reduce((s,r) => s + (r.purchases    ?? 0), 0)
-    const totalPVal   = rows.reduce((s,r) => s + (r.purchase_value ?? 0), 0)
     const totalV3s    = rows.reduce((s,r) => s + (r.video_3s_plays ?? 0), 0)
     const totalV75    = rows.reduce((s,r) => s + (r.video_p75      ?? 0), 0)
 
-    const roas = totalSpend > 0 && totalPVal > 0 ? Math.round((totalPVal / totalSpend) * 100) / 100 : null
     const ctr  = totalImpr  > 0 ? totalClicks / totalImpr : null
     const cpm  = totalImpr  > 0 ? (totalSpend / totalImpr) * 1000 : null
-    const cpa  = totalPurch > 0 ? totalSpend / totalPurch : null
+
+    // ROAS & CPA : spend-weighted average from stored daily values
+    const roasRows = rows.filter(r => (r.roas ?? 0) > 0)
+    const roasSpend = roasRows.reduce((s,r) => s + r.spend, 0)
+    const roas = roasSpend > 0
+      ? Math.round(roasRows.reduce((s,r) => s + (r.roas ?? 0) * r.spend, 0) / roasSpend * 100) / 100
+      : null
+
+    const cpaRows  = rows.filter(r => (r.cpa ?? 0) > 0)
+    const cpaSpend = cpaRows.reduce((s,r) => s + r.spend, 0)
+    const cpa = cpaSpend > 0
+      ? Math.round(cpaRows.reduce((s,r) => s + (r.cpa ?? 0) * r.spend, 0) / cpaSpend * 100) / 100
+      : null
 
     // hook_rate = 3s plays / impressions
     const hookRaw  = totalImpr > 0 && totalV3s > 0 ? (totalV3s / totalImpr) * 100 : null
@@ -180,8 +189,8 @@ function aggregateStats(
       spend:        Math.round(totalSpend * 100) / 100,
       impressions:  totalImpr,
       clicks:       totalClicks,
-      purchases:    totalPurch,
-      purchase_value: Math.round(totalPVal * 100) / 100,
+      purchases:    0,
+      purchase_value: 0,
       ctr:          ctr != null ? Math.round(ctr * 10000) / 10000 : null,
       cpm:          cpm != null ? Math.round(cpm * 100) / 100 : null,
       roas,
