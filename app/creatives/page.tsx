@@ -626,13 +626,6 @@ function CreativeDrawer({ agg, onClose }: { agg: CreativeAgg; onClose: () => voi
                 <ImageIcon size={48} className="text-[#555]" />
               </div>
             )}
-            {creative.format === 'video' && (
-              <div className="absolute inset-0 flex items-center justify-center">
-                <div className="w-14 h-14 rounded-full bg-black/40 flex items-center justify-center">
-                  <Play size={24} className="text-white ml-1" />
-                </div>
-              </div>
-            )}
           </div>
 
           {/* Copy */}
