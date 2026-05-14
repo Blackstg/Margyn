@@ -773,7 +773,11 @@ function KpiCard({ label, value, loading }: { label: string; value: string; load
 // ─── Main page ────────────────────────────────────────────────────────────────
 
 function CreativesPage() {
-  const [brand, setBrand]   = useState<Brand>('bowa')
+  const [brand, setBrand]   = useState<Brand>(() => {
+    if (typeof window === 'undefined') return 'bowa'
+    const stored = localStorage.getItem('steero_brand')
+    return (stored === 'bowa' || stored === 'moom') ? stored : 'bowa'
+  })
   const [period, setPeriod] = useState<Period>('30j')
   const [format, setFormat] = useState<Format>('all')
   const [statusF, setStatusF] = useState<StatusFilter>('all')
@@ -788,10 +792,8 @@ function CreativesPage() {
   const [drawer, setDrawer] = useState<CreativeAgg | null>(null)
   const [loadError, setLoadError] = useState<string | null>(null)
 
-  // Sync brand from sidebar
+  // Sync brand from sidebar events
   useEffect(() => {
-    const stored = localStorage.getItem('steero_brand')
-    if (stored === 'bowa' || stored === 'moom') setBrand(stored)
     function onBrand(e: Event) {
       const b = (e as CustomEvent<string>).detail
       if (b === 'bowa' || b === 'moom') setBrand(b)
