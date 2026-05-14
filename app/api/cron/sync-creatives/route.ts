@@ -204,15 +204,24 @@ export async function POST(req: NextRequest) {
 
       // ── 2. Fetch video source URLs + HD thumbnails from advideos (paginated) ──
       const videoSourceMap  = new Map<string, string>()  // video_id → mp4 url
-      const videoPictureMap = new Map<string, string>()  // video_id → HD thumbnail
-      const adVideos = await metaGetAll<{ id: string; source?: string; picture?: string }>(
+      const videoPictureMap = new Map<string, string>()  // video_id → best thumbnail url
+      const adVideos = await metaGetAll<{
+        id: string
+        source?: string
+        picture?: string
+        thumbnails?: { data: Array<{ uri: string; width: number; height: number }> }
+      }>(
         `${store.adAccountId}/advideos`,
-        { fields: 'id,source,picture', limit: '100' },
+        { fields: 'id,source,picture,thumbnails{uri,width,height}', limit: '100' },
         store.accessToken
       )
       for (const v of adVideos) {
-        if (v.source)  videoSourceMap.set(v.id, v.source)
-        if (v.picture) videoPictureMap.set(v.id, v.picture)
+        if (v.source) videoSourceMap.set(v.id, v.source)
+        // Pick highest-res thumbnail: prefer thumbnails[] (multiple sizes) over picture (single, often low-res)
+        const bestThumb = v.thumbnails?.data?.length
+          ? v.thumbnails.data.reduce((best, t) => (t.width * t.height > best.width * best.height ? t : best)).uri
+          : v.picture
+        if (bestThumb) videoPictureMap.set(v.id, bestThumb)
       }
 
       // ── 3. Upsert ad_creatives ───────────────────────────────────────────────
@@ -364,7 +373,14 @@ export async function POST(req: NextRequest) {
         }
       }
 
-      console.log(`[${store.brand}] sync-creatives: ${ads.length} ads, ${statsRows.length} stat rows`)
+      const videoAds = ads.filter(a => detectFormat(a) === 'video')
+      const withUrl  = videoAds.filter(a => {
+        const vs = a.creative?.object_story_spec?.video_data?.video_id ?? null
+        const vc = a.creative?.video_id ?? null
+        return videoSourceMap.has(vs ?? '') || videoSourceMap.has(vc ?? '')
+      })
+      console.log(`[${store.brand}] sync-creatives: ${ads.length} ads, ${statsRows.length} stat rows | advideos: ${adVideos.length} (sources: ${videoSourceMap.size}, thumbs: ${videoPictureMap.size}) | video ads: ${videoAds.length}, with_url: ${withUrl.length}`)
+
       results[store.brand] = { ads: ads.length, stats: statsRows.length }
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err)
