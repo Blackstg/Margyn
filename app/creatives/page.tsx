@@ -274,7 +274,15 @@ function CreativeCard({ agg, onClick }: { agg: CreativeAgg; onClick: () => void 
     >
       {/* Thumbnail */}
       <div className="relative aspect-[4/3] bg-[#1a1a2e] overflow-hidden">
-        {creative.thumbnail_url ? (
+        {creative.format === 'video' && creative.video_url ? (
+          <video
+            src={creative.video_url}
+            preload="metadata"
+            muted
+            playsInline
+            className="w-full h-full object-cover"
+          />
+        ) : creative.thumbnail_url ? (
           <img
             src={creative.thumbnail_url}
             alt={creative.ad_name}
