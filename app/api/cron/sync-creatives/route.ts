@@ -240,9 +240,10 @@ export async function POST(req: NextRequest) {
         const hdThumb  = lookupPicture(videoIdSpec) ?? lookupPicture(videoIdCreative)
         const videoUrl = lookupSource(videoIdSpec)  ?? lookupSource(videoIdCreative) ?? null
 
-        // For images: image_url (HD). For videos: HD picture from advideos, fallback to thumbnail_url
+        // For images: image_url (HD). For videos: creative thumbnail_url first (~600px from Meta),
+        // then advideos hdThumb as fallback (often 64px — avoid unless nothing else available)
         const thumb = format === 'video'
-          ? (hdThumb ?? ad.creative?.thumbnail_url ?? null)
+          ? (ad.creative?.thumbnail_url ?? hdThumb ?? null)
           : (ad.creative?.image_url ?? ad.creative?.thumbnail_url ?? null)
         return {
           meta_ad_id:        ad.id,
