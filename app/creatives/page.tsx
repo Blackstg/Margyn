@@ -836,6 +836,7 @@ function CreativesPage() {
       }
       const sData = statsChunks.flat()
 
+      console.log('[creatives] load done:', { brand, from, to, creatives: cData?.length, stats: sData?.length, statChunks: statsChunks.map(c => c.length) })
       setCreatives(cData ?? [])
       setStats(sData ?? [])
     } catch (e) {
@@ -855,7 +856,9 @@ function CreativesPage() {
 
   // Filter
   const filtered = useMemo(() => {
-    let list = allAggs.filter(a => a.spend > 0)
+    const withSpend = allAggs.filter(a => a.spend > 0)
+    console.log('[creatives] filter:', { allAggs: allAggs.length, withSpend: withSpend.length, brand })
+    let list = withSpend
     if (format !== 'all') list = list.filter(a => a.creative.format === format)
     if (statusF === 'active') list = list.filter(a => a.creative.status === 'active')
     if (statusF === 'paused') list = list.filter(a => a.creative.status !== 'active')
