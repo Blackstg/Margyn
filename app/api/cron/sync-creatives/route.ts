@@ -202,48 +202,67 @@ export async function POST(req: NextRequest) {
         return
       }
 
-      // ── 2. Fetch video source URLs + HD thumbnails from advideos (paginated) ──
-      const videoSourceMap  = new Map<string, string>()  // video_id → mp4 url
-      const videoPictureMap = new Map<string, string>()  // video_id → best thumbnail url
-      const adVideos = await metaGetAll<{
-        id: string
-        source?: string
-        picture?: string
-        thumbnails?: { data: Array<{ uri: string; width: number; height: number }> }
-      }>(
+      // ── 2. Fetch video source URLs from advideos (paginated) ──────────────────
+      const videoSourceMap = new Map<string, string>()  // video_id → mp4 url
+      const adVideos = await metaGetAll<{ id: string; source?: string }>(
         `${store.adAccountId}/advideos`,
-        { fields: 'id,source,picture,thumbnails{uri,width,height}', limit: '100' },
+        { fields: 'id,source', limit: '100' },
         store.accessToken
       )
       for (const v of adVideos) {
         if (v.source) videoSourceMap.set(v.id, v.source)
-        // Pick highest-res thumbnail: prefer thumbnails[] (multiple sizes) over picture (single, often low-res)
-        const bestThumb = v.thumbnails?.data?.length
-          ? v.thumbnails.data.reduce((best, t) => (t.width * t.height > best.width * best.height ? t : best)).uri
-          : v.picture
-        if (bestThumb) videoPictureMap.set(v.id, bestThumb)
+      }
+
+      // ── 2b. Batch-fetch HD thumbnails via standalone video objects ────────────
+      // /{video_id}?fields=thumbnails{uri,width,height} returns up to 1280px
+      // (much larger than advideos picture/thumbnails subfield which caps at 64px)
+      const videoHdThumbMap = new Map<string, string>()  // video_id → HD thumbnail url
+      const uniqueVideoIds = new Set<string>()
+      for (const ad of ads) {
+        const vs = ad.creative?.object_story_spec?.video_data?.video_id
+        const vc = ad.creative?.video_id
+        if (vs) uniqueVideoIds.add(vs)
+        if (vc) uniqueVideoIds.add(vc)
+      }
+      const videoIdsArr = [...uniqueVideoIds]
+      const VID_CHUNK = 50  // Meta multi-ID endpoint limit
+      for (let i = 0; i < videoIdsArr.length; i += VID_CHUNK) {
+        const ids = videoIdsArr.slice(i, i + VID_CHUNK).join(',')
+        const url = `${META_BASE}?ids=${encodeURIComponent(ids)}&fields=thumbnails%7Buri%2Cwidth%2Cheight%7D&access_token=${encodeURIComponent(store.accessToken)}`
+        try {
+          const res = await fetch(url, { cache: 'no-store' })
+          const data = await res.json() as Record<string, {
+            thumbnails?: { data: Array<{ uri: string; width: number; height: number }> }
+            error?: { message: string }
+          }>
+          for (const [id, video] of Object.entries(data)) {
+            if (video.thumbnails?.data?.length) {
+              const best = video.thumbnails.data.reduce((a, b) =>
+                a.width * a.height > b.width * b.height ? a : b
+              )
+              videoHdThumbMap.set(id, best.uri)
+            }
+          }
+        } catch { /* non-blocking — fallback to creative thumbnail_url */ }
       }
 
       // ── 3. Upsert ad_creatives ───────────────────────────────────────────────
       const creativeRows = ads.map(ad => {
         const format = detectFormat(ad)
-        // creative.video_id et spec.video_data.video_id sont deux IDs différents —
-        // advideos est indexé par spec.video_data.video_id, donc on essaie les deux.
         const videoIdCreative = ad.creative?.video_id ?? null
         const videoIdSpec     = ad.creative?.object_story_spec?.video_data?.video_id ?? null
         const videoId         = videoIdCreative ?? videoIdSpec
 
-        const lookupPicture = (id: string | null) => (id ? videoPictureMap.get(id) : undefined)
+        const lookupHdThumb = (id: string | null) => (id ? videoHdThumbMap.get(id) : undefined)
         const lookupSource  = (id: string | null) => (id ? videoSourceMap.get(id)  : undefined)
 
-        // Cherche dans les deux IDs : spec d'abord (souvent dans advideos), puis creative
-        const hdThumb  = lookupPicture(videoIdSpec) ?? lookupPicture(videoIdCreative)
+        // HD thumbnail: batch-fetched standalone video thumbnails (up to 1280px),
+        // fallback to creative.thumbnail_url (~600px), never use advideos picture (64px)
+        const hdThumb  = lookupHdThumb(videoIdSpec) ?? lookupHdThumb(videoIdCreative)
         const videoUrl = lookupSource(videoIdSpec)  ?? lookupSource(videoIdCreative) ?? null
 
-        // For images: image_url (HD). For videos: creative thumbnail_url first (~600px from Meta),
-        // then advideos hdThumb as fallback (often 64px — avoid unless nothing else available)
         const thumb = format === 'video'
-          ? (ad.creative?.thumbnail_url ?? hdThumb ?? null)
+          ? (hdThumb ?? ad.creative?.thumbnail_url ?? null)
           : (ad.creative?.image_url ?? ad.creative?.thumbnail_url ?? null)
         return {
           meta_ad_id:        ad.id,
@@ -380,7 +399,7 @@ export async function POST(req: NextRequest) {
         const vc = a.creative?.video_id ?? null
         return videoSourceMap.has(vs ?? '') || videoSourceMap.has(vc ?? '')
       })
-      console.log(`[${store.brand}] sync-creatives: ${ads.length} ads, ${statsRows.length} stat rows | advideos: ${adVideos.length} (sources: ${videoSourceMap.size}, thumbs: ${videoPictureMap.size}) | video ads: ${videoAds.length}, with_url: ${withUrl.length}`)
+      console.log(`[${store.brand}] sync-creatives: ${ads.length} ads, ${statsRows.length} stat rows | advideos: ${adVideos.length} (sources: ${videoSourceMap.size}) | video ads: ${videoAds.length}, with_url: ${withUrl.length}, hd_thumbs: ${videoHdThumbMap.size}`)
 
       results[store.brand] = { ads: ads.length, stats: statsRows.length }
     } catch (err) {
