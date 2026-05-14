@@ -278,7 +278,7 @@ function CreativeCard({ agg, onClick }: { agg: CreativeAgg; onClick: () => void 
           <img
             src={creative.thumbnail_url}
             alt={creative.ad_name}
-            className="w-full h-full object-contain"
+            className="w-full h-full object-cover"
             loading="lazy"
           />
         ) : (
@@ -546,7 +546,7 @@ function VideoPlayer({ videoUrl, thumbnail }: { videoUrl: string; thumbnail: str
   return (
     <div className="relative w-full h-full">
       {thumbnail && (
-        <img src={thumbnail} alt="" className="w-full h-full object-contain" />
+        <img src={thumbnail} alt="" className="w-full h-full object-cover" />
       )}
       <div className="absolute inset-0 flex items-center justify-center">
         <button
@@ -597,7 +597,7 @@ function CreativeDrawer({ agg, onClose }: { agg: CreativeAgg; onClose: () => voi
 
         <div className="p-5 space-y-5">
           {/* Preview */}
-          <div className="rounded-2xl overflow-hidden bg-[#1a1a2e] aspect-[4/3] relative">
+          <div className={`rounded-2xl overflow-hidden bg-[#1a1a2e] relative ${creative.format === 'video' ? 'aspect-[9/16] max-h-[480px]' : 'aspect-[4/3]'}`}>
             {creative.format === 'video' && creative.video_url ? (
               <VideoPlayer videoUrl={creative.video_url} thumbnail={creative.thumbnail_url} />
             ) : creative.thumbnail_url ? (
