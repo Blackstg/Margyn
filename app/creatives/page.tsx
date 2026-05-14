@@ -2,7 +2,6 @@
 export const dynamic = 'force-dynamic'
 
 import { Suspense, useState, useEffect, useCallback, useMemo } from 'react'
-import { createBrowserClient } from '@supabase/auth-helpers-nextjs'
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip,
   ResponsiveContainer,
@@ -13,13 +12,6 @@ import {
   ExternalLink, Sparkles,
 } from 'lucide-react'
 import AiInsights from '@/components/dashboard/AiInsights'
-
-// ─── Supabase ─────────────────────────────────────────────────────────────────
-
-const supabase = createBrowserClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-)
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -808,37 +800,12 @@ function CreativesPage() {
     setLoadError(null)
     try {
       const { from, to } = getRange(period)
-      const brands = brand === 'all' ? ['bowa', 'moom'] : [brand]
-
-      const { data: cData, error: cErr } = await supabase
-        .from('ad_creatives')
-        .select('*')
-        .in('brand', brands)
-        .order('first_seen_at', { ascending: false })
-
-      if (cErr) { setLoadError(`ad_creatives: ${cErr.message}`); return }
-
-      const ids = (cData ?? []).map(c => c.id)
-
-      // Chunk IDs par 200 pour éviter la limite URL de Supabase
-      const CHUNK = 200
-      const statsChunks: CreativeStat[][] = []
-      for (let i = 0; i < ids.length; i += CHUNK) {
-        const { data: chunk, error: chunkErr } = await supabase
-          .from('creative_stats')
-          .select('*')
-          .in('creative_id', ids.slice(i, i + CHUNK))
-          .gte('date', from)
-          .lte('date', to)
-          .limit(20000)
-        if (chunkErr) { setLoadError(`creative_stats: ${chunkErr.message}`); return }
-        if (chunk) statsChunks.push(chunk)
-      }
-      const sData = statsChunks.flat()
-
-      console.log('[creatives] load done:', { brand, from, to, creatives: cData?.length, stats: sData?.length, statChunks: statsChunks.map(c => c.length) })
-      setCreatives(cData ?? [])
-      setStats(sData ?? [])
+      const res = await fetch(`/api/creatives?brand=${brand}&from=${from}&to=${to}`, { cache: 'no-store' })
+      if (!res.ok) { setLoadError(`Erreur ${res.status}`); return }
+      const data = await res.json() as { creatives?: AdCreative[]; stats?: CreativeStat[]; error?: string }
+      if (data.error) { setLoadError(data.error); return }
+      setCreatives(data.creatives ?? [])
+      setStats(data.stats ?? [])
     } catch (e) {
       setLoadError(String(e))
     } finally {
@@ -856,9 +823,7 @@ function CreativesPage() {
 
   // Filter
   const filtered = useMemo(() => {
-    const withSpend = allAggs.filter(a => a.spend > 0)
-    console.log('[creatives] filter:', { allAggs: allAggs.length, withSpend: withSpend.length, brand })
-    let list = withSpend
+    let list = allAggs.filter(a => a.spend > 0)
     if (format !== 'all') list = list.filter(a => a.creative.format === format)
     if (statusF === 'active') list = list.filter(a => a.creative.status === 'active')
     if (statusF === 'paused') list = list.filter(a => a.creative.status !== 'active')
