@@ -207,7 +207,7 @@ export async function POST(req: NextRequest) {
       const videoPictureMap = new Map<string, string>()  // video_id → HD thumbnail
       const adVideos = await metaGetAll<{ id: string; source?: string; picture?: string }>(
         `${store.adAccountId}/advideos`,
-        { fields: 'id,source,picture', limit: '50' },
+        { fields: 'id,source,picture', limit: '100' },
         store.accessToken
       )
       for (const v of adVideos) {
@@ -217,13 +217,24 @@ export async function POST(req: NextRequest) {
 
       // ── 3. Upsert ad_creatives ───────────────────────────────────────────────
       const creativeRows = ads.map(ad => {
-        const format   = detectFormat(ad)
-        const videoId  = ad.creative?.video_id || ad.creative?.object_story_spec?.video_data?.video_id || null
+        const format = detectFormat(ad)
+        // creative.video_id et spec.video_data.video_id sont deux IDs différents —
+        // advideos est indexé par spec.video_data.video_id, donc on essaie les deux.
+        const videoIdCreative = ad.creative?.video_id ?? null
+        const videoIdSpec     = ad.creative?.object_story_spec?.video_data?.video_id ?? null
+        const videoId         = videoIdCreative ?? videoIdSpec
+
+        const lookupPicture = (id: string | null) => (id ? videoPictureMap.get(id) : undefined)
+        const lookupSource  = (id: string | null) => (id ? videoSourceMap.get(id)  : undefined)
+
+        // Cherche dans les deux IDs : spec d'abord (souvent dans advideos), puis creative
+        const hdThumb  = lookupPicture(videoIdSpec) ?? lookupPicture(videoIdCreative)
+        const videoUrl = lookupSource(videoIdSpec)  ?? lookupSource(videoIdCreative) ?? null
+
         // For images: image_url (HD). For videos: HD picture from advideos, fallback to thumbnail_url
-        const thumb    = format === 'video' && videoId
-          ? (videoPictureMap.get(videoId) ?? ad.creative?.thumbnail_url ?? null)
+        const thumb = format === 'video'
+          ? (hdThumb ?? ad.creative?.thumbnail_url ?? null)
           : (ad.creative?.image_url ?? ad.creative?.thumbnail_url ?? null)
-        const videoUrl = videoId ? (videoSourceMap.get(videoId) ?? null) : null
         return {
           meta_ad_id:        ad.id,
           meta_creative_id:  ad.creative?.id ?? null,
