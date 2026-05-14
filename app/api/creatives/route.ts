@@ -60,7 +60,7 @@ export async function GET(req: NextRequest) {
     )
 
     // 2. creative_stats pour ces IDs et la période (paginé par 1000)
-    const ids = creatives.map((c: Record<string, unknown>) => c.id as string)
+    const ids = (creatives as Record<string, unknown>[]).map(c => c.id as string)
     const CHUNK = 500
     const stats: unknown[] = []
 
