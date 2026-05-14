@@ -773,11 +773,8 @@ function KpiCard({ label, value, loading }: { label: string; value: string; load
 // ─── Main page ────────────────────────────────────────────────────────────────
 
 function CreativesPage() {
-  const [brand, setBrand]   = useState<Brand>(() => {
-    if (typeof window === 'undefined') return 'bowa'
-    const stored = localStorage.getItem('steero_brand')
-    return (stored === 'bowa' || stored === 'moom') ? stored : 'bowa'
-  })
+  const [brand, setBrand]         = useState<Brand>('bowa')
+  const [brandReady, setBrandReady] = useState(false)
   const [period, setPeriod] = useState<Period>('30j')
   const [format, setFormat] = useState<Format>('all')
   const [statusF, setStatusF] = useState<StatusFilter>('all')
@@ -792,8 +789,11 @@ function CreativesPage() {
   const [drawer, setDrawer] = useState<CreativeAgg | null>(null)
   const [loadError, setLoadError] = useState<string | null>(null)
 
-  // Sync brand from sidebar events
+  // Lire la brand depuis localStorage au mount (côté client uniquement), puis écouter les events sidebar
   useEffect(() => {
+    const stored = localStorage.getItem('steero_brand')
+    if (stored === 'bowa' || stored === 'moom') setBrand(stored)
+    setBrandReady(true)
     function onBrand(e: Event) {
       const b = (e as CustomEvent<string>).detail
       if (b === 'bowa' || b === 'moom') setBrand(b)
@@ -845,7 +845,7 @@ function CreativesPage() {
     }
   }, [brand, period])
 
-  useEffect(() => { load() }, [load])
+  useEffect(() => { if (brandReady) load() }, [load, brandReady])
 
   // Aggregate
   const allAggs = useMemo(
