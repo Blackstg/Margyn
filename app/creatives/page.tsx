@@ -15,7 +15,7 @@ import AiInsights from '@/components/dashboard/AiInsights'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-type Brand  = 'bowa' | 'moom' | 'all'
+type Brand  = 'bowa' | 'moom' | 'krom' | 'all'
 type Period = '7j' | '30j' | '90j' | 'mois'
 type Format = 'all' | 'image' | 'video' | 'carousel'
 type StatusFilter = 'all' | 'active' | 'paused'
@@ -816,12 +816,11 @@ function CreativesPage() {
   // Lire la brand depuis localStorage au mount (côté client uniquement), puis écouter les events sidebar
   useEffect(() => {
     const stored = localStorage.getItem('steero_brand')
-    if (stored === 'bowa' || stored === 'moom') setBrand(stored)
+    if (stored === 'bowa' || stored === 'moom' || stored === 'krom') setBrand(stored)
     setBrandReady(true)
     function onBrand(e: Event) {
       const b = (e as CustomEvent<string>).detail
-      if (b === 'bowa' || b === 'moom') setBrand(b)
-      else if (b === 'krom') setBrand('bowa')
+      if (b === 'bowa' || b === 'moom' || b === 'krom') setBrand(b)
     }
     window.addEventListener('steero:brand', onBrand)
     return () => window.removeEventListener('steero:brand', onBrand)
@@ -962,7 +961,7 @@ function CreativesPage() {
         </div>
 
         {/* AI Insights */}
-        <AiInsights type="creatives" brand={brand === 'all' ? 'bowa' : brand} context={aiContext} />
+        <AiInsights type="creatives" brand={brand === 'all' ? 'bowa' : (brand as string)} context={aiContext} />
 
         {/* Filters */}
         <div className="flex flex-wrap gap-2 items-center">

@@ -53,7 +53,7 @@ export async function GET(req: NextRequest) {
       'ad_creatives',
       (sb, f, t) => sb.from('ad_creatives')
         .select('*')
-        .in('brand', brand === 'all' ? ['bowa', 'moom'] : [brand])
+        .in('brand', brand === 'all' ? ['bowa', 'moom', 'krom'] : [brand])
         .order('first_seen_at', { ascending: false })
         .range(f, t) as unknown as Promise<{ data: unknown[] | null; error: unknown }>,
       admin
