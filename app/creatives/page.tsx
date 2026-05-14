@@ -282,6 +282,18 @@ function CreativeCard({ agg, onClick }: { agg: CreativeAgg; onClick: () => void 
             playsInline
             className="w-full h-full object-cover"
           />
+        ) : creative.format === 'video' && !creative.video_url ? (
+          /* Vidéo sans source dispo (permissions Meta limitées) — placeholder propre */
+          <div className="w-full h-full flex flex-col items-center justify-center bg-gradient-to-br from-[#1a1a2e] to-[#2d2d4e]">
+            {creative.thumbnail_url && (
+              <img
+                src={creative.thumbnail_url}
+                alt=""
+                className="absolute inset-0 w-full h-full object-cover opacity-30 blur-sm scale-110"
+                loading="lazy"
+              />
+            )}
+          </div>
         ) : creative.thumbnail_url ? (
           <img
             src={creative.thumbnail_url}
@@ -608,6 +620,18 @@ function CreativeDrawer({ agg, onClose }: { agg: CreativeAgg; onClose: () => voi
           <div className={`rounded-2xl overflow-hidden bg-[#1a1a2e] relative ${creative.format === 'video' ? 'aspect-[9/16] max-h-[480px]' : 'aspect-[4/3]'}`}>
             {creative.format === 'video' && creative.video_url ? (
               <VideoPlayer videoUrl={creative.video_url} thumbnail={creative.thumbnail_url} />
+            ) : creative.format === 'video' && !creative.video_url ? (
+              <div className="w-full h-full flex flex-col items-center justify-center bg-gradient-to-br from-[#1a1a2e] to-[#2d2d4e]">
+                {creative.thumbnail_url && (
+                  <img src={creative.thumbnail_url} alt="" className="absolute inset-0 w-full h-full object-cover opacity-25 blur-md scale-110" />
+                )}
+                <div className="relative z-10 flex flex-col items-center gap-3">
+                  <div className="w-16 h-16 rounded-full bg-white/10 flex items-center justify-center">
+                    <Play size={28} className="text-white ml-1" />
+                  </div>
+                  <p className="text-[11px] text-white/40">Aperçu non disponible</p>
+                </div>
+              </div>
             ) : creative.thumbnail_url ? (
               <img src={creative.thumbnail_url} alt="" className="w-full h-full object-contain" />
             ) : (
