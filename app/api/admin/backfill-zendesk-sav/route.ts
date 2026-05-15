@@ -181,7 +181,6 @@ export async function GET(req: NextRequest) {
   await upsertExamples(examples)
 
   // Advance cursor: if we processed fewer than 100 tickets, move to next page or next window
-  const processedAll = batch.length === tickets.length && tickets.length < 100
   const isLastBatchOnPage = batch.length >= tickets.length
   let nextCursor: Cursor
 
