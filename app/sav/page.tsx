@@ -328,6 +328,30 @@ function CustomerHistory({ email, currentTicketId }: { email: string; currentTic
   )
 }
 
+// ─── Zipchat transcript parser ────────────────────────────────────────────────
+// Zipchat sends chat sessions to Zendesk as a plain-text transcript where each
+// line is prefixed with the speaker name (e.g. "Visiteur: ..." / "Zipchat: ...").
+// We detect that pattern and re-render as chat bubbles.
+
+interface ZipchatLine { role: 'customer' | 'agent'; text: string }
+
+const ZIPCHAT_CUSTOMER_RE = /^(Visiteur|Visitor|Client|Customer|User)\s*:\s*/i
+const ZIPCHAT_EITHER_RE   = /^(Visiteur|Visitor|Client|Customer|User|Zipchat|Bot|Agent|Assistant|IA|Steero|Moom|Mōom)\s*:\s*/i
+
+function parseZipchatTranscript(body: string): ZipchatLine[] | null {
+  const lines = body.split('\n').map(l => l.trim()).filter(Boolean)
+  const matchingLines = lines.filter(l => ZIPCHAT_EITHER_RE.test(l))
+  // Require at least 2 speaker-labelled lines AND ≥40% of non-empty lines matching
+  // to avoid false positives on tickets that happen to contain a ":" on one line.
+  if (matchingLines.length < 2 || matchingLines.length / lines.length < 0.4) return null
+  return matchingLines
+    .map(line => ({
+      role: ZIPCHAT_CUSTOMER_RE.test(line) ? ('customer' as const) : ('agent' as const),
+      text: line.replace(ZIPCHAT_EITHER_RE, '').trim(),
+    }))
+    .filter(m => m.text.length > 0)
+}
+
 function ConversationThread({ ticket, refreshKey }: { ticket: ProcessedTicket; refreshKey: number }) {
   const [comments, setComments]     = useState<CommentItem[]>([])
   const [loadingCom, setLoadingCom] = useState(true)
@@ -397,6 +421,33 @@ function ConversationThread({ ticket, refreshKey }: { ticket: ProcessedTicket; r
             d.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })
 
         const attachments = c.attachments ?? []
+
+        // Zipchat transcript — render as chat bubbles
+        const zipchatMessages = c.body ? parseZipchatTranscript(c.body) : null
+        if (zipchatMessages && zipchatMessages.length >= 2) {
+          return (
+            <div key={c.id ?? i} className="rounded-xl border border-[#e8e8e4] overflow-hidden">
+              <div className="flex items-center gap-2 px-4 py-2 bg-[#f5f4f2] border-b border-[#e8e8e4]">
+                <span className="text-[10px] font-bold uppercase tracking-[0.08em] text-[#6b6b63]">💬 Conversation Zipchat</span>
+                <span className="text-[10px] text-[#aeb0c9]">· {dateStr}</span>
+              </div>
+              <div className="px-4 py-3 space-y-2 bg-white">
+                {zipchatMessages.map((bubble, bi) => (
+                  <div key={bi} className={`flex ${bubble.role === 'customer' ? 'justify-end' : 'justify-start'}`}>
+                    <div className={`max-w-[80%] px-3 py-2 rounded-2xl text-xs leading-relaxed ${
+                      bubble.role === 'customer'
+                        ? 'bg-[#f0f0f0] text-[#1a1a2e]'
+                        : 'bg-[#3c81f5] text-white'
+                    }`}>
+                      {bubble.text}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )
+        }
+
         return (
           <div key={c.id ?? i} className={`flex flex-col gap-1 ${isAgent ? 'items-start' : 'items-end'}`}>
             <span className="text-[10px] text-[#aeb0c9] px-1">{isAgent ? 'Agent' : 'Client'} · {dateStr}</span>
