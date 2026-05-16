@@ -7,14 +7,15 @@ function fmtDate(d: Date) {
   return d.toISOString().slice(0, 10)
 }
 
-// Vercel cron entry-point (GET) — syncs yesterday + today for all platforms.
+// Vercel cron entry-point (GET) — syncs last 3 days for all platforms.
+// 3 days covers Meta attribution delay (up to 48h for 7d-click window).
 export async function GET(req: NextRequest) {
-  const today     = new Date()
-  const yesterday = new Date(today)
-  yesterday.setDate(yesterday.getDate() - 1)
+  const today = new Date()
+  const from  = new Date(today)
+  from.setDate(from.getDate() - 2)  // J-2 → today
 
   const url = new URL(req.url)
-  url.searchParams.set('from', fmtDate(yesterday))
+  url.searchParams.set('from', fmtDate(from))
   url.searchParams.set('to',   fmtDate(today))
 
   return POST(new NextRequest(url, { headers: req.headers }))
@@ -29,11 +30,11 @@ export async function POST(req: NextRequest) {
   const secret  = process.env.CRON_SECRET ?? ''
   const brand   = new URL(req.url).searchParams.get('brand') ?? ''
 
-  const today     = new Date()
-  const yesterday = new Date(today)
-  yesterday.setDate(yesterday.getDate() - 1)
+  const today = new Date()
+  const from  = new Date(today)
+  from.setDate(from.getDate() - 2)  // J-2 → today (covers Meta 48h attribution delay)
 
-  const dateParams  = `from=${fmtDate(yesterday)}&to=${fmtDate(today)}`
+  const dateParams  = `from=${fmtDate(from)}&to=${fmtDate(today)}`
   const brandParam  = brand ? `&brand=${brand}` : ''
   const params      = `${dateParams}${brandParam}`
   const headers     = { Authorization: `Bearer ${secret}` }

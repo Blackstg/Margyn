@@ -201,6 +201,8 @@ export default function DataFreshness() {
                     try {
                       await fetch('/api/sync-all', { method: 'POST' })
                       await load()
+                      // Signal all pages to reload their data
+                      window.dispatchEvent(new CustomEvent('steero:sync-done'))
                     } catch { /* ignore */ } finally {
                       setSyncing(false)
                     }

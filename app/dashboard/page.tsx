@@ -940,6 +940,13 @@ function DashboardPage() {
 
   useEffect(() => { load() }, [load])
 
+  // Reload data when a manual sync completes (fired by DataFreshness "Sync maintenant")
+  useEffect(() => {
+    function onSyncDone() { load() }
+    window.addEventListener('steero:sync-done', onSyncDone)
+    return () => window.removeEventListener('steero:sync-done', onSyncDone)
+  }, [load])
+
   // Auto-sync once when yesterday's snapshot is missing — 1 attempt per brand+date
   useEffect(() => {
     if (loading || snapshot !== null) return
