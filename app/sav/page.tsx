@@ -1239,6 +1239,8 @@ function QualitePanel() {
 
 // ─── Qualité SAV — main dashboard ────────────────────────────────────────────
 
+interface DailyEntry { date: string; sessions: number; tickets: number }
+
 interface QualiteMetrics {
   total: number; sent: number; escalated: number; archived: number
   pct_sent: number; pct_escalated: number; pct_archived: number
@@ -1249,6 +1251,8 @@ interface QualiteMetrics {
   avg_session_ms:    number | null
   total_session_ms:  number | null
   active_hours:      Record<number, number>
+  active_weekdays:   Record<number, number>  // 1=Lun…7=Dim
+  daily_timeline:    DailyEntry[]
   by_category: Record<string, { total: number; sent: number; escalated: number }>
 }
 
@@ -1424,6 +1428,69 @@ function QualiteDashboard() {
                       return `Pic d'activité : ${peak[0]}h`
                     })()}
                   </p>
+                </div>
+              )}
+
+              {/* Jours de la semaine */}
+              <div className="rounded-2xl bg-[#f8f7f5] border border-[#e8e8e4] px-5 py-5">
+                <p className="text-[10px] font-semibold uppercase tracking-[0.1em] text-[#aeb0c9] mb-4">Jours de la semaine</p>
+                <div className="flex items-end gap-2 h-16">
+                  {[1, 2, 3, 4, 5, 6, 7].map(d => {
+                    const LABELS = ['', 'Lun', 'Mar', 'Mer', 'Jeu', 'Ven', 'Sam', 'Dim']
+                    const count  = metrics.active_weekdays[d] ?? 0
+                    const max    = Math.max(...Object.values(metrics.active_weekdays), 1)
+                    const pct    = Math.round((count / max) * 100)
+                    const isWE   = d >= 6
+                    return (
+                      <div key={d} className="flex-1 flex flex-col items-center gap-1.5" title={`${LABELS[d]} : ${count} session${count > 1 ? 's' : ''}`}>
+                        <div
+                          className="w-full rounded-md transition-all"
+                          style={{
+                            height: `${Math.max(pct, count > 0 ? 8 : 0)}%`,
+                            backgroundColor: count > 0 ? (isWE ? '#aeb0c9' : '#1a1a2e') : '#e8e8e4',
+                          }}
+                        />
+                        <span className={`text-[9px] font-medium ${isWE ? 'text-[#aeb0c9]' : 'text-[#6b6b63]'}`}>{LABELS[d]}</span>
+                      </div>
+                    )
+                  })}
+                </div>
+                {Object.keys(metrics.active_weekdays).length > 0 && (() => {
+                  const peak = Object.entries(metrics.active_weekdays).reduce((a, b) => b[1] > a[1] ? b : a)
+                  const LABELS = ['', 'Lundi', 'Mardi', 'Mercredi', 'Jeudi', 'Vendredi', 'Samedi', 'Dimanche']
+                  return <p className="text-[9px] text-[#aeb0c9] mt-2 text-center">Jour le plus actif : {LABELS[Number(peak[0])]}</p>
+                })()}
+              </div>
+
+              {/* Timeline journalière */}
+              {metrics.daily_timeline.length > 0 && (
+                <div className="rounded-2xl bg-[#f8f7f5] border border-[#e8e8e4] px-5 py-5">
+                  <p className="text-[10px] font-semibold uppercase tracking-[0.1em] text-[#aeb0c9] mb-3">Activité par jour</p>
+                  <div className="space-y-2">
+                    {metrics.daily_timeline.map(entry => {
+                      const d = new Date(entry.date + 'T12:00:00')
+                      const label = d.toLocaleDateString('fr-FR', { weekday: 'short', day: 'numeric', month: 'short' })
+                      const maxTickets = Math.max(...metrics.daily_timeline.map(e => e.tickets), 1)
+                      const pct = Math.round((entry.tickets / maxTickets) * 100)
+                      return (
+                        <div key={entry.date} className="flex items-center gap-3">
+                          <span className="text-[10px] text-[#6b6b63] w-24 shrink-0 capitalize">{label}</span>
+                          <div className="flex-1 h-2 bg-[#e8e8e4] rounded-full overflow-hidden">
+                            <div
+                              className="h-full bg-[#1a1a2e] rounded-full transition-all"
+                              style={{ width: `${pct}%` }}
+                            />
+                          </div>
+                          <div className="flex items-center gap-2 shrink-0 text-right">
+                            {entry.tickets > 0 && (
+                              <span className="text-[10px] text-[#1a1a2e] font-semibold w-12">{entry.tickets} ticket{entry.tickets > 1 ? 's' : ''}</span>
+                            )}
+                            <span className="text-[9px] text-[#aeb0c9] w-14">{entry.sessions} session{entry.sessions > 1 ? 's' : ''}</span>
+                          </div>
+                        </div>
+                      )
+                    })}
+                  </div>
                 </div>
               )}
 

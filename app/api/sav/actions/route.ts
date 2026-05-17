@@ -101,6 +101,32 @@ export async function GET(req: NextRequest) {
     active_hours[h] = (active_hours[h] ?? 0) + 1
   }
 
+  // Day-of-week breakdown: 1=Lun … 7=Dim (ISO, Paris timezone)
+  // Also build a daily timeline: { date: 'YYYY-MM-DD', sessions, tickets }[]
+  const active_weekdays: Record<number, number> = {}  // 1–7
+  const dailyMap: Record<string, { sessions: number; tickets: number }> = {}
+
+  function getParisDayISO(iso: string): { weekday: number; date: string } {
+    const d = new Date(iso)
+    const parisStr = d.toLocaleString('en-US', { timeZone: 'Europe/Paris' })
+    const p = new Date(parisStr)
+    // JS getDay() = 0 (Sun)–6 (Sat) → convert to ISO 1 (Mon)–7 (Sun)
+    const weekday = p.getDay() === 0 ? 7 : p.getDay()
+    const date = [
+      p.getFullYear(),
+      String(p.getMonth() + 1).padStart(2, '0'),
+      String(p.getDate()).padStart(2, '0'),
+    ].join('-')
+    return { weekday, date }
+  }
+
+  for (const s of sessionStarts) {
+    const { weekday, date } = getParisDayISO(s.created_at)
+    active_weekdays[weekday] = (active_weekdays[weekday] ?? 0) + 1
+    if (!dailyMap[date]) dailyMap[date] = { sessions: 0, tickets: 0 }
+    dailyMap[date].sessions++
+  }
+
   // ── Ticket metrics ────────────────────────────────────────────────────────
 
   if (rows.length === 0) {
@@ -110,7 +136,8 @@ export async function GET(req: NextRequest) {
         pct_sent: 0, pct_escalated: 0, pct_archived: 0,
         avg_time_ms: null,
         modification_rate: null,
-        sessions_count, visits_per_day, avg_session_ms, total_session_ms, active_hours,
+        sessions_count, visits_per_day, avg_session_ms, total_session_ms,
+        active_hours, active_weekdays, daily_timeline: [],
         by_category: {},
       }
     })
@@ -130,6 +157,18 @@ export async function GET(req: NextRequest) {
   const modification_rate = sent.length > 0
     ? Math.round((sent.filter(r => r.was_modified === true).length / sent.length) * 100)
     : null
+
+  // Count tickets per day
+  for (const r of rows) {
+    const { date } = getParisDayISO(r.created_at)
+    if (!dailyMap[date]) dailyMap[date] = { sessions: 0, tickets: 0 }
+    dailyMap[date].tickets++
+  }
+
+  // Build sorted daily timeline array
+  const daily_timeline = Object.entries(dailyMap)
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([date, v]) => ({ date, ...v }))
 
   // Breakdown by category
   const by_category: Record<string, { total: number; sent: number; escalated: number }> = {}
@@ -157,6 +196,8 @@ export async function GET(req: NextRequest) {
       avg_session_ms,
       total_session_ms,
       active_hours,
+      active_weekdays,
+      daily_timeline,
       by_category,
     }
   })
