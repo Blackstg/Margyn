@@ -1242,11 +1242,13 @@ function QualitePanel() {
 interface QualiteMetrics {
   total: number; sent: number; escalated: number; archived: number
   pct_sent: number; pct_escalated: number; pct_archived: number
-  avg_time_ms:     number | null
-  sessions_count:  number
-  visits_per_day:  number
-  avg_session_ms:  number | null
-  active_hours:    Record<number, number>
+  avg_time_ms:       number | null
+  modification_rate: number | null
+  sessions_count:    number
+  visits_per_day:    number
+  avg_session_ms:    number | null
+  total_session_ms:  number | null
+  active_hours:      Record<number, number>
   by_category: Record<string, { total: number; sent: number; escalated: number }>
 }
 
@@ -1258,7 +1260,10 @@ const CAT_LABELS_FR: Record<string, string> = {
 
 function fmtMs(ms: number) {
   if (ms < 60_000) return `${Math.round(ms / 1000)}s`
-  return `${Math.round(ms / 60_000)}min`
+  if (ms < 3_600_000) return `${Math.round(ms / 60_000)}min`
+  const h = Math.floor(ms / 3_600_000)
+  const m = Math.round((ms % 3_600_000) / 60_000)
+  return m > 0 ? `${h}h${m}min` : `${h}h`
 }
 
 function GaugeBar({ value, color }: { value: number; color: string }) {
@@ -1339,8 +1344,9 @@ function QualiteDashboard() {
             </div>
           ) : (
             <>
-              {/* KPI grid — 4 cards */}
+              {/* KPI grid — 6 cards, 2 colonnes */}
               <div className="grid grid-cols-2 gap-3">
+                {/* Ligne 1 — tickets */}
                 <div className="rounded-2xl bg-[#f8f7f5] border border-[#e8e8e4] px-5 py-4">
                   <p className="text-[10px] font-semibold uppercase tracking-[0.1em] text-[#aeb0c9]">Tickets traités</p>
                   <p className="text-3xl font-bold text-[#1a1a2e] mt-1">{metrics.total}</p>
@@ -1355,45 +1361,69 @@ function QualiteDashboard() {
                   <p className="text-[10px] text-[#9b9b93] mt-0.5">de la sélection à l&apos;envoi</p>
                 </div>
 
+                {/* Ligne 2 — temps dans Steero */}
+                <div className="col-span-2 rounded-2xl bg-[#1a1a2e] px-5 py-4">
+                  <p className="text-[10px] font-semibold uppercase tracking-[0.1em] text-white/40">Temps total dans Steero</p>
+                  <p className="text-3xl font-bold text-white mt-1">
+                    {metrics.total_session_ms !== null ? fmtMs(metrics.total_session_ms) : '—'}
+                  </p>
+                  <p className="text-[10px] text-white/40 mt-0.5">
+                    {metrics.sessions_count} session{metrics.sessions_count > 1 ? 's' : ''} · moy.{' '}
+                    {metrics.avg_session_ms !== null ? fmtMs(metrics.avg_session_ms) : '?'} par visite
+                  </p>
+                </div>
+
+                {/* Ligne 3 — brouillons & visites */}
                 <div className="rounded-2xl bg-[#f8f7f5] border border-[#e8e8e4] px-5 py-4">
-                  <p className="text-[10px] font-semibold uppercase tracking-[0.1em] text-[#aeb0c9]">Visites / jour</p>
+                  <p className="text-[10px] font-semibold uppercase tracking-[0.1em] text-[#aeb0c9]">Brouillons modifiés</p>
+                  <p className="text-3xl font-bold text-[#1a1a2e] mt-1">
+                    {metrics.modification_rate !== null ? `${metrics.modification_rate}%` : '—'}
+                  </p>
+                  <p className="text-[10px] text-[#9b9b93] mt-0.5">des réponses envoyées retouchées</p>
+                </div>
+
+                <div className="rounded-2xl bg-[#f8f7f5] border border-[#e8e8e4] px-5 py-4">
+                  <p className="text-[10px] font-semibold uppercase tracking-[0.1em] text-[#aeb0c9]">Ouvertures / jour</p>
                   <p className="text-3xl font-bold text-[#1a1a2e] mt-1">
                     {metrics.sessions_count > 0 ? metrics.visits_per_day : '—'}
                   </p>
                   <p className="text-[10px] text-[#9b9b93] mt-0.5">{metrics.sessions_count} ouvertures sur {days}j</p>
                 </div>
-
-                <div className="rounded-2xl bg-[#f8f7f5] border border-[#e8e8e4] px-5 py-4">
-                  <p className="text-[10px] font-semibold uppercase tracking-[0.1em] text-[#aeb0c9]">Durée session moy.</p>
-                  <p className="text-3xl font-bold text-[#1a1a2e] mt-1">
-                    {metrics.avg_session_ms !== null ? fmtMs(metrics.avg_session_ms) : '—'}
-                  </p>
-                  <p className="text-[10px] text-[#9b9b93] mt-0.5">temps actif par visite</p>
-                </div>
               </div>
 
-              {/* Heures d'activité */}
+              {/* Heures d'activité — heure Paris */}
               {Object.keys(metrics.active_hours).length > 0 && (
                 <div className="rounded-2xl bg-[#f8f7f5] border border-[#e8e8e4] px-5 py-5">
-                  <p className="text-[10px] font-semibold uppercase tracking-[0.1em] text-[#aeb0c9] mb-4">Heures d&apos;activité</p>
-                  <div className="flex items-end gap-1 h-14">
+                  <div className="flex items-center justify-between mb-4">
+                    <p className="text-[10px] font-semibold uppercase tracking-[0.1em] text-[#aeb0c9]">Heures d&apos;activité</p>
+                    <span className="text-[9px] text-[#aeb0c9]">heure Paris</span>
+                  </div>
+                  <div className="flex items-end gap-0.5 h-16">
                     {Array.from({ length: 24 }, (_, h) => {
                       const count = metrics.active_hours[h] ?? 0
                       const max   = Math.max(...Object.values(metrics.active_hours), 1)
                       const pct   = Math.round((count / max) * 100)
                       return (
-                        <div key={h} className="flex-1 flex flex-col items-center gap-1" title={`${h}h : ${count} visite${count > 1 ? 's' : ''}`}>
+                        <div key={h} className="flex-1 flex flex-col items-center gap-1" title={`${h}h : ${count} session${count > 1 ? 's' : ''}`}>
                           <div
                             className="w-full rounded-sm transition-all"
-                            style={{ height: `${Math.max(pct, count > 0 ? 8 : 0)}%`, backgroundColor: count > 0 ? '#1a1a2e' : '#e8e8e4' }}
+                            style={{ height: `${Math.max(pct, count > 0 ? 6 : 0)}%`, backgroundColor: count > 0 ? '#1a1a2e' : '#e8e8e4' }}
                           />
-                          {(h % 6 === 0) && (
-                            <span className="text-[8px] text-[#aeb0c9]">{h}h</span>
+                          {(h % 3 === 0) && (
+                            <span className="text-[7px] text-[#aeb0c9] tabular-nums">{h}</span>
                           )}
                         </div>
                       )
                     })}
                   </div>
+                  <p className="text-[9px] text-[#aeb0c9] mt-2 text-center">
+                    {(() => {
+                      const entries = Object.entries(metrics.active_hours)
+                      if (entries.length === 0) return null
+                      const peak = entries.reduce((a, b) => b[1] > a[1] ? b : a)
+                      return `Pic d'activité : ${peak[0]}h`
+                    })()}
+                  </p>
                 </div>
               )}
 
@@ -1481,25 +1511,54 @@ export default function SavPage() {
   // Tracks in-flight process requests to avoid duplicate fetches
   const fetchingRef = useRef<Set<number>>(new Set())
 
-  // ── Session tracking ──────────────────────────────────────────────────────
+  // ── Session tracking (temps actif uniquement, hors onglet en arrière-plan) ──
+  // On accumule le temps visible + on envoie via sendBeacon à la fermeture.
+  // pagehide + beforeunload en double pour couvrir tous les navigateurs.
   useEffect(() => {
-    const sessionStart = Date.now()
+    let visibleSince  = Date.now()   // quand l'onglet est devenu visible
+    let accumulatedMs = 0             // temps actif accumulé avant la dernière mise en bg
+    let sent = false                  // garde contre le double-envoi
+
     fetch('/api/sav/actions', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ action: 'session_start', ticket_id: 0 }),
     }).catch(() => {})
 
-    function handleUnload() {
-      const duration = Date.now() - sessionStart
-      const blob = new Blob(
+    function activeMs() {
+      // Si l'onglet est visible, ajouter le temps depuis visibleSince
+      return accumulatedMs + (document.hidden ? 0 : Date.now() - visibleSince)
+    }
+
+    function handleVisibility() {
+      if (document.hidden) {
+        // L'onglet passe en arrière-plan — figer le compteur
+        accumulatedMs += Date.now() - visibleSince
+      } else {
+        // L'onglet redevient actif — relancer le compteur
+        visibleSince = Date.now()
+      }
+    }
+
+    function sendEnd() {
+      if (sent) return
+      sent = true
+      const duration = activeMs()
+      if (duration < 5_000) return  // ignorer les chargements accidentels
+      navigator.sendBeacon('/api/sav/actions', new Blob(
         [JSON.stringify({ action: 'session_end', ticket_id: 0, time_to_action_ms: duration })],
         { type: 'application/json' }
-      )
-      navigator.sendBeacon('/api/sav/actions', blob)
+      ))
     }
-    window.addEventListener('beforeunload', handleUnload)
-    return () => window.removeEventListener('beforeunload', handleUnload)
+
+    document.addEventListener('visibilitychange', handleVisibility)
+    window.addEventListener('pagehide', sendEnd)
+    window.addEventListener('beforeunload', sendEnd)
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibility)
+      window.removeEventListener('pagehide', sendEnd)
+      window.removeEventListener('beforeunload', sendEnd)
+    }
   }, [])
 
   // ── On-demand AI processing for a single ticket ───────────────────────────
