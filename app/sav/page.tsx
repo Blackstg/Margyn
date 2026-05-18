@@ -1396,71 +1396,88 @@ function QualiteDashboard() {
               </div>
 
               {/* Heures d'activité — heure Paris */}
-              {Object.keys(metrics.active_hours).length > 0 && (
-                <div className="rounded-2xl bg-[#f8f7f5] border border-[#e8e8e4] px-5 py-5">
-                  <div className="flex items-center justify-between mb-4">
-                    <p className="text-[10px] font-semibold uppercase tracking-[0.1em] text-[#aeb0c9]">Heures d&apos;activité</p>
-                    <span className="text-[9px] text-[#aeb0c9]">heure Paris</span>
-                  </div>
-                  <div className="flex items-end gap-0.5 h-16">
-                    {Array.from({ length: 24 }, (_, h) => {
-                      const count = metrics.active_hours[h] ?? 0
-                      const max   = Math.max(...Object.values(metrics.active_hours), 1)
-                      const pct   = Math.round((count / max) * 100)
-                      return (
-                        <div key={h} className="flex-1 flex flex-col items-center gap-1" title={`${h}h : ${count} session${count > 1 ? 's' : ''}`}>
+              {Object.keys(metrics.active_hours).length > 0 && (() => {
+                const BAR_H = 44  // px — hauteur max des barres
+                const max   = Math.max(...Object.values(metrics.active_hours), 1)
+                const peak  = Object.entries(metrics.active_hours).reduce((a, b) => b[1] > a[1] ? b : a)
+                return (
+                  <div className="rounded-2xl bg-[#f8f7f5] border border-[#e8e8e4] px-5 py-5">
+                    <div className="flex items-center justify-between mb-3">
+                      <p className="text-[10px] font-semibold uppercase tracking-[0.1em] text-[#aeb0c9]">Heures d&apos;activité</p>
+                      <span className="text-[9px] text-[#aeb0c9]">heure Paris · pic : {peak[0]}h</span>
+                    </div>
+                    {/* Barres — hauteur px explicite, alignées en bas */}
+                    <div className="flex items-end gap-px" style={{ height: BAR_H }}>
+                      {Array.from({ length: 24 }, (_, h) => {
+                        const count = metrics.active_hours[h] ?? 0
+                        const barH  = count > 0 ? Math.max(Math.round((count / max) * BAR_H), 3) : 2
+                        return (
                           <div
-                            className="w-full rounded-sm transition-all"
-                            style={{ height: `${Math.max(pct, count > 0 ? 6 : 0)}%`, backgroundColor: count > 0 ? '#1a1a2e' : '#e8e8e4' }}
+                            key={h}
+                            className="flex-1 rounded-sm transition-all"
+                            style={{ height: barH, backgroundColor: count > 0 ? '#1a1a2e' : '#e8e8e4' }}
+                            title={`${h}h : ${count} session${count > 1 ? 's' : ''}`}
                           />
-                          {(h % 3 === 0) && (
-                            <span className="text-[7px] text-[#aeb0c9] tabular-nums">{h}</span>
-                          )}
+                        )
+                      })}
+                    </div>
+                    {/* Labels — rangée séparée */}
+                    <div className="flex gap-px mt-1">
+                      {Array.from({ length: 24 }, (_, h) => (
+                        <div key={h} className="flex-1 flex justify-center">
+                          {h % 6 === 0 && <span className="text-[7px] text-[#aeb0c9] tabular-nums">{h}h</span>}
                         </div>
-                      )
-                    })}
+                      ))}
+                    </div>
                   </div>
-                  <p className="text-[9px] text-[#aeb0c9] mt-2 text-center">
-                    {(() => {
-                      const entries = Object.entries(metrics.active_hours)
-                      if (entries.length === 0) return null
-                      const peak = entries.reduce((a, b) => b[1] > a[1] ? b : a)
-                      return `Pic d'activité : ${peak[0]}h`
-                    })()}
-                  </p>
-                </div>
-              )}
+                )
+              })()}
 
               {/* Jours de la semaine */}
-              <div className="rounded-2xl bg-[#f8f7f5] border border-[#e8e8e4] px-5 py-5">
-                <p className="text-[10px] font-semibold uppercase tracking-[0.1em] text-[#aeb0c9] mb-4">Jours de la semaine</p>
-                <div className="flex items-end gap-2 h-16">
-                  {[1, 2, 3, 4, 5, 6, 7].map(d => {
-                    const LABELS = ['', 'Lun', 'Mar', 'Mer', 'Jeu', 'Ven', 'Sam', 'Dim']
-                    const count  = metrics.active_weekdays[d] ?? 0
-                    const max    = Math.max(...Object.values(metrics.active_weekdays), 1)
-                    const pct    = Math.round((count / max) * 100)
-                    const isWE   = d >= 6
-                    return (
-                      <div key={d} className="flex-1 flex flex-col items-center gap-1.5" title={`${LABELS[d]} : ${count} session${count > 1 ? 's' : ''}`}>
-                        <div
-                          className="w-full rounded-md transition-all"
-                          style={{
-                            height: `${Math.max(pct, count > 0 ? 8 : 0)}%`,
-                            backgroundColor: count > 0 ? (isWE ? '#aeb0c9' : '#1a1a2e') : '#e8e8e4',
-                          }}
-                        />
-                        <span className={`text-[9px] font-medium ${isWE ? 'text-[#aeb0c9]' : 'text-[#6b6b63]'}`}>{LABELS[d]}</span>
-                      </div>
-                    )
-                  })}
-                </div>
-                {Object.keys(metrics.active_weekdays).length > 0 && (() => {
-                  const peak = Object.entries(metrics.active_weekdays).reduce((a, b) => b[1] > a[1] ? b : a)
-                  const LABELS = ['', 'Lundi', 'Mardi', 'Mercredi', 'Jeudi', 'Vendredi', 'Samedi', 'Dimanche']
-                  return <p className="text-[9px] text-[#aeb0c9] mt-2 text-center">Jour le plus actif : {LABELS[Number(peak[0])]}</p>
-                })()}
-              </div>
+              {(() => {
+                const DAY_LABELS = ['', 'Lun', 'Mar', 'Mer', 'Jeu', 'Ven', 'Sam', 'Dim']
+                const DAY_FULL   = ['', 'Lundi', 'Mardi', 'Mercredi', 'Jeudi', 'Vendredi', 'Samedi', 'Dimanche']
+                const BAR_H = 48
+                const max   = Math.max(...Object.values(metrics.active_weekdays), 1)
+                const hasDays = Object.keys(metrics.active_weekdays).length > 0
+                const peak  = hasDays
+                  ? Object.entries(metrics.active_weekdays).reduce((a, b) => b[1] > a[1] ? b : a)
+                  : null
+                return (
+                  <div className="rounded-2xl bg-[#f8f7f5] border border-[#e8e8e4] px-5 py-5">
+                    <div className="flex items-center justify-between mb-3">
+                      <p className="text-[10px] font-semibold uppercase tracking-[0.1em] text-[#aeb0c9]">Jours de la semaine</p>
+                      {peak && <span className="text-[9px] text-[#aeb0c9]">pic : {DAY_FULL[Number(peak[0])]}</span>}
+                    </div>
+                    {/* Barres */}
+                    <div className="flex items-end gap-2" style={{ height: BAR_H }}>
+                      {[1, 2, 3, 4, 5, 6, 7].map(d => {
+                        const count = metrics.active_weekdays[d] ?? 0
+                        const barH  = count > 0 ? Math.max(Math.round((count / max) * BAR_H), 4) : 2
+                        const isWE  = d >= 6
+                        return (
+                          <div
+                            key={d}
+                            className="flex-1 rounded-md transition-all"
+                            style={{ height: barH, backgroundColor: count > 0 ? (isWE ? '#aeb0c9' : '#1a1a2e') : '#e8e8e4' }}
+                            title={`${DAY_LABELS[d]} : ${count} session${count > 1 ? 's' : ''}`}
+                          />
+                        )
+                      })}
+                    </div>
+                    {/* Labels */}
+                    <div className="flex gap-2 mt-1.5">
+                      {[1, 2, 3, 4, 5, 6, 7].map(d => (
+                        <div key={d} className="flex-1 flex justify-center">
+                          <span className={`text-[9px] font-medium ${d >= 6 ? 'text-[#aeb0c9]' : 'text-[#6b6b63]'}`}>
+                            {DAY_LABELS[d]}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )
+              })()}
 
               {/* Timeline journalière */}
               {metrics.daily_timeline.length > 0 && (
