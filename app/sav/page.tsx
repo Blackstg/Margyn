@@ -1397,35 +1397,58 @@ function QualiteDashboard() {
 
               {/* Heures d'activité — heure Paris */}
               {Object.keys(metrics.active_hours).length > 0 && (() => {
-                const BAR_H = 44  // px — hauteur max des barres
+                const BAR_H = 52
                 const max   = Math.max(...Object.values(metrics.active_hours), 1)
                 const peak  = Object.entries(metrics.active_hours).reduce((a, b) => b[1] > a[1] ? b : a)
+                // Couleur : intensité → dégradé violet clair → indigo foncé
+                function hourColor(count: number) {
+                  if (count === 0) return '#ede9fe'
+                  const r = count / max
+                  if (r < 0.35) return '#a5b4fc'  // indigo-300
+                  if (r < 0.7)  return '#6366f1'  // indigo-500
+                  return '#4338ca'                 // indigo-700
+                }
                 return (
-                  <div className="rounded-2xl bg-[#f8f7f5] border border-[#e8e8e4] px-5 py-5">
+                  <div className="rounded-2xl bg-[#f5f3ff] border border-[#e0e7ff] px-5 py-5">
                     <div className="flex items-center justify-between mb-3">
-                      <p className="text-[10px] font-semibold uppercase tracking-[0.1em] text-[#aeb0c9]">Heures d&apos;activité</p>
-                      <span className="text-[9px] text-[#aeb0c9]">heure Paris · pic : {peak[0]}h</span>
+                      <p className="text-[10px] font-semibold uppercase tracking-[0.1em] text-[#6366f1]">Heures d&apos;activité</p>
+                      <span className="text-[9px] text-[#a5b4fc]">heure Paris · pic : {peak[0]}h ({peak[1]} sess.)</span>
                     </div>
-                    {/* Barres — hauteur px explicite, alignées en bas */}
+                    {/* Compteurs au-dessus des barres actives */}
+                    <div className="flex gap-px mb-1" style={{ height: 12 }}>
+                      {Array.from({ length: 24 }, (_, h) => {
+                        const count = metrics.active_hours[h] ?? 0
+                        return (
+                          <div key={h} className="flex-1 flex justify-center items-center">
+                            {count > 0 && (
+                              <span className="text-[7px] font-bold tabular-nums" style={{ color: hourColor(count) }}>
+                                {count}
+                              </span>
+                            )}
+                          </div>
+                        )
+                      })}
+                    </div>
+                    {/* Barres */}
                     <div className="flex items-end gap-px" style={{ height: BAR_H }}>
                       {Array.from({ length: 24 }, (_, h) => {
                         const count = metrics.active_hours[h] ?? 0
-                        const barH  = count > 0 ? Math.max(Math.round((count / max) * BAR_H), 3) : 2
+                        const barH  = count > 0 ? Math.max(Math.round((count / max) * BAR_H), 4) : 2
                         return (
                           <div
                             key={h}
                             className="flex-1 rounded-sm transition-all"
-                            style={{ height: barH, backgroundColor: count > 0 ? '#1a1a2e' : '#e8e8e4' }}
+                            style={{ height: barH, backgroundColor: hourColor(count) }}
                             title={`${h}h : ${count} session${count > 1 ? 's' : ''}`}
                           />
                         )
                       })}
                     </div>
-                    {/* Labels — rangée séparée */}
-                    <div className="flex gap-px mt-1">
+                    {/* Labels heures */}
+                    <div className="flex gap-px mt-1.5">
                       {Array.from({ length: 24 }, (_, h) => (
                         <div key={h} className="flex-1 flex justify-center">
-                          {h % 6 === 0 && <span className="text-[7px] text-[#aeb0c9] tabular-nums">{h}h</span>}
+                          {h % 6 === 0 && <span className="text-[7px] text-[#a5b4fc] tabular-nums">{h}h</span>}
                         </div>
                       ))}
                     </div>
@@ -1437,79 +1460,119 @@ function QualiteDashboard() {
               {(() => {
                 const DAY_LABELS = ['', 'Lun', 'Mar', 'Mer', 'Jeu', 'Ven', 'Sam', 'Dim']
                 const DAY_FULL   = ['', 'Lundi', 'Mardi', 'Mercredi', 'Jeudi', 'Vendredi', 'Samedi', 'Dimanche']
-                const BAR_H = 48
+                const BAR_H = 64
                 const max   = Math.max(...Object.values(metrics.active_weekdays), 1)
                 const hasDays = Object.keys(metrics.active_weekdays).length > 0
                 const peak  = hasDays
                   ? Object.entries(metrics.active_weekdays).reduce((a, b) => b[1] > a[1] ? b : a)
                   : null
+                // Couleur : semaine = vert émeraude, WE = gris bleu
+                function dayColor(d: number, count: number) {
+                  if (count === 0) return '#e2e8f0'
+                  if (d >= 6) return '#94a3b8'      // slate-400 pour WE
+                  const r = count / max
+                  if (r < 0.35) return '#6ee7b7'    // emerald-300
+                  if (r < 0.7)  return '#10b981'    // emerald-500
+                  return '#059669'                   // emerald-600
+                }
                 return (
-                  <div className="rounded-2xl bg-[#f8f7f5] border border-[#e8e8e4] px-5 py-5">
-                    <div className="flex items-center justify-between mb-3">
-                      <p className="text-[10px] font-semibold uppercase tracking-[0.1em] text-[#aeb0c9]">Jours de la semaine</p>
-                      {peak && <span className="text-[9px] text-[#aeb0c9]">pic : {DAY_FULL[Number(peak[0])]}</span>}
+                  <div className="rounded-2xl bg-[#f0fdf4] border border-[#d1fae5] px-5 py-5">
+                    <div className="flex items-center justify-between mb-1">
+                      <p className="text-[10px] font-semibold uppercase tracking-[0.1em] text-[#10b981]">Jours de la semaine</p>
+                      {peak && <span className="text-[9px] text-[#6ee7b7]">pic : {DAY_FULL[Number(peak[0])]}</span>}
+                    </div>
+                    {/* Compteur + label au-dessus de chaque barre */}
+                    <div className="flex gap-2 mb-2">
+                      {[1, 2, 3, 4, 5, 6, 7].map(d => {
+                        const count = metrics.active_weekdays[d] ?? 0
+                        return (
+                          <div key={d} className="flex-1 flex flex-col items-center gap-0.5">
+                            <span className="text-[10px] font-bold tabular-nums" style={{ color: count > 0 ? dayColor(d, count) : '#cbd5e1' }}>
+                              {count > 0 ? count : '—'}
+                            </span>
+                            <span className="text-[8px]" style={{ color: count > 0 ? (d >= 6 ? '#94a3b8' : '#34d399') : '#cbd5e1' }}>
+                              sess.
+                            </span>
+                          </div>
+                        )
+                      })}
                     </div>
                     {/* Barres */}
                     <div className="flex items-end gap-2" style={{ height: BAR_H }}>
                       {[1, 2, 3, 4, 5, 6, 7].map(d => {
                         const count = metrics.active_weekdays[d] ?? 0
-                        const barH  = count > 0 ? Math.max(Math.round((count / max) * BAR_H), 4) : 2
-                        const isWE  = d >= 6
+                        const barH  = count > 0 ? Math.max(Math.round((count / max) * BAR_H), 6) : 3
                         return (
                           <div
                             key={d}
-                            className="flex-1 rounded-md transition-all"
-                            style={{ height: barH, backgroundColor: count > 0 ? (isWE ? '#aeb0c9' : '#1a1a2e') : '#e8e8e4' }}
+                            className="flex-1 rounded-lg transition-all"
+                            style={{ height: barH, backgroundColor: dayColor(d, count) }}
                             title={`${DAY_LABELS[d]} : ${count} session${count > 1 ? 's' : ''}`}
                           />
                         )
                       })}
                     </div>
-                    {/* Labels */}
-                    <div className="flex gap-2 mt-1.5">
-                      {[1, 2, 3, 4, 5, 6, 7].map(d => (
-                        <div key={d} className="flex-1 flex justify-center">
-                          <span className={`text-[9px] font-medium ${d >= 6 ? 'text-[#aeb0c9]' : 'text-[#6b6b63]'}`}>
-                            {DAY_LABELS[d]}
-                          </span>
-                        </div>
-                      ))}
+                    {/* Labels jours */}
+                    <div className="flex gap-2 mt-2">
+                      {[1, 2, 3, 4, 5, 6, 7].map(d => {
+                        const count = metrics.active_weekdays[d] ?? 0
+                        return (
+                          <div key={d} className="flex-1 flex justify-center">
+                            <span className="text-[9px] font-semibold" style={{ color: count > 0 ? (d >= 6 ? '#94a3b8' : '#059669') : '#cbd5e1' }}>
+                              {DAY_LABELS[d]}
+                            </span>
+                          </div>
+                        )
+                      })}
                     </div>
                   </div>
                 )
               })()}
 
               {/* Timeline journalière */}
-              {metrics.daily_timeline.length > 0 && (
-                <div className="rounded-2xl bg-[#f8f7f5] border border-[#e8e8e4] px-5 py-5">
-                  <p className="text-[10px] font-semibold uppercase tracking-[0.1em] text-[#aeb0c9] mb-3">Activité par jour</p>
-                  <div className="space-y-2">
-                    {metrics.daily_timeline.map(entry => {
-                      const d = new Date(entry.date + 'T12:00:00')
-                      const label = d.toLocaleDateString('fr-FR', { weekday: 'short', day: 'numeric', month: 'short' })
-                      const maxTickets = Math.max(...metrics.daily_timeline.map(e => e.tickets), 1)
-                      const pct = Math.round((entry.tickets / maxTickets) * 100)
-                      return (
-                        <div key={entry.date} className="flex items-center gap-3">
-                          <span className="text-[10px] text-[#6b6b63] w-24 shrink-0 capitalize">{label}</span>
-                          <div className="flex-1 h-2 bg-[#e8e8e4] rounded-full overflow-hidden">
-                            <div
-                              className="h-full bg-[#1a1a2e] rounded-full transition-all"
-                              style={{ width: `${pct}%` }}
-                            />
+              {metrics.daily_timeline.length > 0 && (() => {
+                const maxTickets = Math.max(...metrics.daily_timeline.map(e => e.tickets), 1)
+                return (
+                  <div className="rounded-2xl bg-[#fafaf9] border border-[#e8e8e4] px-5 py-5">
+                    <p className="text-[10px] font-semibold uppercase tracking-[0.1em] text-[#aeb0c9] mb-3">Activité par jour</p>
+                    <div className="space-y-2.5">
+                      {metrics.daily_timeline.map(entry => {
+                        const d   = new Date(entry.date + 'T12:00:00')
+                        const label = d.toLocaleDateString('fr-FR', { weekday: 'short', day: 'numeric', month: 'short' })
+                        const isWE = d.getDay() === 0 || d.getDay() === 6
+                        const pct  = Math.round((entry.tickets / maxTickets) * 100)
+                        const active = entry.sessions > 0
+                        return (
+                          <div key={entry.date} className="flex items-center gap-3">
+                            <span className={`text-[10px] w-20 shrink-0 capitalize font-medium ${isWE ? 'text-[#94a3b8]' : active ? 'text-[#1a1a2e]' : 'text-[#aeb0c9]'}`}>
+                              {label}
+                            </span>
+                            <div className="flex-1 h-2.5 bg-[#e8e8e4] rounded-full overflow-hidden">
+                              {entry.tickets > 0 && (
+                                <div
+                                  className="h-full rounded-full transition-all"
+                                  style={{
+                                    width: `${pct}%`,
+                                    backgroundColor: isWE ? '#94a3b8' : '#6366f1',
+                                  }}
+                                />
+                              )}
+                            </div>
+                            <div className="flex items-center gap-2 shrink-0">
+                              <span className={`text-[10px] font-bold w-16 text-right tabular-nums ${entry.tickets > 0 ? (isWE ? 'text-[#94a3b8]' : 'text-[#6366f1]') : 'text-[#d0cfc9]'}`}>
+                                {entry.tickets > 0 ? `${entry.tickets} ticket${entry.tickets > 1 ? 's' : ''}` : '—'}
+                              </span>
+                              <span className="text-[9px] text-[#aeb0c9] w-14 tabular-nums">
+                                {active ? `${entry.sessions} sess.` : 'absent'}
+                              </span>
+                            </div>
                           </div>
-                          <div className="flex items-center gap-2 shrink-0 text-right">
-                            {entry.tickets > 0 && (
-                              <span className="text-[10px] text-[#1a1a2e] font-semibold w-12">{entry.tickets} ticket{entry.tickets > 1 ? 's' : ''}</span>
-                            )}
-                            <span className="text-[9px] text-[#aeb0c9] w-14">{entry.sessions} session{entry.sessions > 1 ? 's' : ''}</span>
-                          </div>
-                        </div>
-                      )
-                    })}
+                        )
+                      })}
+                    </div>
                   </div>
-                </div>
-              )}
+                )
+              })()}
 
               {/* Action breakdown */}
               <div className="rounded-2xl bg-[#f8f7f5] border border-[#e8e8e4] px-5 py-5">
