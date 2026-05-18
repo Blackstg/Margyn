@@ -1253,6 +1253,7 @@ interface QualiteMetrics {
   active_hours:      Record<number, number>
   active_weekdays:   Record<number, number>  // 1=Lun…7=Dim
   daily_timeline:    DailyEntry[]
+  distinct_users:    string[]
   by_category: Record<string, { total: number; sent: number; escalated: number }>
 }
 
@@ -1282,14 +1283,17 @@ function GaugeBar({ value, color }: { value: number; color: string }) {
 }
 
 function QualiteDashboard() {
-  const [metrics, setMetrics]   = useState<QualiteMetrics | null>(null)
-  const [loading, setLoading]   = useState(true)
-  const [error, setError]       = useState<string | null>(null)
-  const [days, setDays]         = useState(7)
+  const [metrics, setMetrics]       = useState<QualiteMetrics | null>(null)
+  const [loading, setLoading]       = useState(true)
+  const [error, setError]           = useState<string | null>(null)
+  const [days, setDays]             = useState(7)
+  const [selectedUser, setSelectedUser] = useState<string>('')  // '' = tous
 
   useEffect(() => {
     setLoading(true); setError(null)
-    fetch(`/api/sav/actions?days=${days}`)
+    const params = new URLSearchParams({ days: String(days) })
+    if (selectedUser) params.set('user_email', selectedUser)
+    fetch(`/api/sav/actions?${params}`)
       .then(r => r.json())
       .then(d => {
         if (d.error) throw new Error(d.error)
@@ -1297,30 +1301,65 @@ function QualiteDashboard() {
       })
       .catch(e => setError(e instanceof Error ? e.message : 'Erreur'))
       .finally(() => setLoading(false))
-  }, [days])
+  }, [days, selectedUser])
 
   return (
     <div className="flex flex-col h-full overflow-y-auto px-8 py-6 gap-6">
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex items-start justify-between gap-4">
         <div>
           <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-[#aeb0c9]">Admin · SAV Mōom</p>
           <h2 className="text-base font-bold text-[#1a1a2e] mt-0.5">Qualité SAV</h2>
         </div>
-        <div className="flex gap-1.5">
-          {[7, 30].map(d => (
-            <button
-              key={d}
-              onClick={() => setDays(d)}
-              className={`px-3 py-1.5 rounded-lg text-[11px] font-semibold transition-colors ${
-                days === d
-                  ? 'bg-[#1a1a2e] text-white'
-                  : 'bg-[#f3f3f1] text-[#6b6b63] hover:bg-[#eeede9]'
-              }`}
-            >
-              {d}j
-            </button>
-          ))}
+        <div className="flex flex-col items-end gap-2">
+          {/* Filtre période */}
+          <div className="flex gap-1.5">
+            {[7, 30].map(d => (
+              <button
+                key={d}
+                onClick={() => setDays(d)}
+                className={`px-3 py-1.5 rounded-lg text-[11px] font-semibold transition-colors ${
+                  days === d
+                    ? 'bg-[#1a1a2e] text-white'
+                    : 'bg-[#f3f3f1] text-[#6b6b63] hover:bg-[#eeede9]'
+                }`}
+              >
+                {d}j
+              </button>
+            ))}
+          </div>
+          {/* Filtre utilisateur — affiché dès que plusieurs emails détectés */}
+          {metrics && metrics.distinct_users.length > 0 && (
+            <div className="flex flex-wrap gap-1 justify-end">
+              <button
+                onClick={() => setSelectedUser('')}
+                className={`px-2.5 py-1 rounded-lg text-[10px] font-semibold transition-colors ${
+                  selectedUser === ''
+                    ? 'bg-[#1a1a2e] text-white'
+                    : 'bg-[#f3f3f1] text-[#6b6b63] hover:bg-[#eeede9]'
+                }`}
+              >
+                Tous
+              </button>
+              {metrics.distinct_users.map(email => {
+                const short = email.split('@')[0]
+                return (
+                  <button
+                    key={email}
+                    onClick={() => setSelectedUser(email)}
+                    title={email}
+                    className={`px-2.5 py-1 rounded-lg text-[10px] font-semibold transition-colors ${
+                      selectedUser === email
+                        ? 'bg-[#6366f1] text-white'
+                        : 'bg-[#f3f3f1] text-[#6b6b63] hover:bg-[#eeede9]'
+                    }`}
+                  >
+                    {short}
+                  </button>
+                )
+              })}
+            </div>
+          )}
         </div>
       </div>
 
@@ -1658,42 +1697,42 @@ export default function SavPage() {
   // Tracks in-flight process requests to avoid duplicate fetches
   const fetchingRef = useRef<Set<number>>(new Set())
 
-  // ── Session tracking (temps actif uniquement, hors onglet en arrière-plan) ──
-  // On accumule le temps visible + on envoie via sendBeacon à la fermeture.
-  // pagehide + beforeunload en double pour couvrir tous les navigateurs.
+  // ── Auth + session tracking ───────────────────────────────────────────────
+  // On récupère l'email de l'utilisateur AVANT de loguer session_start,
+  // pour pouvoir distinguer Satiana de l'admin dans les métriques.
+  // L'email est stocké dans le champ `category` des events de session.
   useEffect(() => {
-    let visibleSince  = Date.now()   // quand l'onglet est devenu visible
-    let accumulatedMs = 0             // temps actif accumulé avant la dernière mise en bg
-    let sent = false                  // garde contre le double-envoi
+    let visibleSince  = Date.now()
+    let accumulatedMs = 0
+    let sent          = false
+    let userEmail     = ''   // rempli dès que getUser() répond
 
-    fetch('/api/sav/actions', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action: 'session_start', ticket_id: 0 }),
-    }).catch(() => {})
+    supabase.auth.getUser().then(({ data }) => {
+      const r = (data.user?.user_metadata?.role as string | undefined) ?? 'admin'
+      setRole(r)
+      userEmail = data.user?.email ?? ''
+
+      fetch('/api/sav/actions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'session_start', ticket_id: 0, category: userEmail }),
+      }).catch(() => {})
+    })
 
     function activeMs() {
-      // Si l'onglet est visible, ajouter le temps depuis visibleSince
       return accumulatedMs + (document.hidden ? 0 : Date.now() - visibleSince)
     }
-
     function handleVisibility() {
-      if (document.hidden) {
-        // L'onglet passe en arrière-plan — figer le compteur
-        accumulatedMs += Date.now() - visibleSince
-      } else {
-        // L'onglet redevient actif — relancer le compteur
-        visibleSince = Date.now()
-      }
+      if (document.hidden) { accumulatedMs += Date.now() - visibleSince }
+      else                 { visibleSince = Date.now() }
     }
-
     function sendEnd() {
       if (sent) return
       sent = true
       const duration = activeMs()
-      if (duration < 5_000) return  // ignorer les chargements accidentels
+      if (duration < 5_000) return
       navigator.sendBeacon('/api/sav/actions', new Blob(
-        [JSON.stringify({ action: 'session_end', ticket_id: 0, time_to_action_ms: duration })],
+        [JSON.stringify({ action: 'session_end', ticket_id: 0, time_to_action_ms: duration, category: userEmail })],
         { type: 'application/json' }
       ))
     }
@@ -1706,6 +1745,7 @@ export default function SavPage() {
       window.removeEventListener('pagehide', sendEnd)
       window.removeEventListener('beforeunload', sendEnd)
     }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   // ── On-demand AI processing for a single ticket ───────────────────────────
@@ -1785,14 +1825,6 @@ export default function SavPage() {
   }, [])
 
   useEffect(() => { load() }, [load])
-
-  useEffect(() => {
-    supabase.auth.getUser().then(({ data }) => {
-      const r = (data.user?.user_metadata?.role as string | undefined) ?? 'admin'
-      setRole(r)
-    })
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
 
   // ── Ticket click ──────────────────────────────────────────────────────────
   function handleTicketClick(raw: RawTicket) {

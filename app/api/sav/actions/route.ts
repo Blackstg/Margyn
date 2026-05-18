@@ -46,7 +46,8 @@ function getParisHour(iso: string): number {
 }
 
 export async function GET(req: NextRequest) {
-  const days = parseInt(req.nextUrl.searchParams.get('days') ?? '7', 10)
+  const days      = parseInt(req.nextUrl.searchParams.get('days') ?? '7', 10)
+  const userEmail = req.nextUrl.searchParams.get('user_email') ?? ''
 
   const sb = createAdminClient()
   const since = new Date()
@@ -70,9 +71,21 @@ export async function GET(req: NextRequest) {
     created_at: string
   }[]
 
+  // Distinct users: emails stored in `category` of session_start events
+  const allSessionStarts = allRows.filter(r => r.action === 'session_start')
+  const distinct_users = [...new Set(
+    allSessionStarts.map(r => r.category).filter((e): e is string => !!e && e.includes('@'))
+  )].sort()
+
+  // Apply user filter if provided
+  function matchesUser(r: typeof allRows[0]) {
+    if (!userEmail) return true
+    return r.category === userEmail
+  }
+
   // Split session events from ticket events
-  const sessionStarts = allRows.filter(r => r.action === 'session_start')
-  const sessionEnds   = allRows.filter(r => r.action === 'session_end')
+  const sessionStarts = allRows.filter(r => r.action === 'session_start' && matchesUser(r))
+  const sessionEnds   = allRows.filter(r => r.action === 'session_end'   && matchesUser(r))
   const rows = allRows.filter(
     r => r.action !== 'session_start' && r.action !== 'session_end' && r.action !== 'heartbeat'
   )
@@ -138,6 +151,7 @@ export async function GET(req: NextRequest) {
         modification_rate: null,
         sessions_count, visits_per_day, avg_session_ms, total_session_ms,
         active_hours, active_weekdays, daily_timeline: [],
+        distinct_users,
         by_category: {},
       }
     })
@@ -198,6 +212,7 @@ export async function GET(req: NextRequest) {
       active_hours,
       active_weekdays,
       daily_timeline,
+      distinct_users,
       by_category,
     }
   })
