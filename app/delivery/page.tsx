@@ -2262,6 +2262,12 @@ function LivreurView() {
         body: JSON.stringify({ status: 'completed', completed_at: completedAt, total_km: totalKm }),
       })
       if (!r.ok) throw new Error(await r.text())
+
+      // started_at est déjà dans l'état React (chargé au démarrage de la tournée).
+      // Le PATCH retourne aussi le tour mis à jour — on le lit pour être sûr.
+      const patchData = await r.json() as { tour?: { started_at?: string | null } }
+      const startedAt = patchData.tour?.started_at ?? tour.started_at ?? null
+
       setConfirmComplete(false)
 
       // Compute stats for celebration screen
@@ -2271,13 +2277,12 @@ function LivreurView() {
         .filter(s => s.status === 'delivered' || s.status === 'partial')
         .reduce((sum, s) => sum + s.panel_count, 0)
 
-      // Duration from started_at stored on tour (fetched from DB) — pass the
-      // current tour ID so fetchTours returns THIS tour, not a different one.
-      const latestTour = await fetchTours(tour.id)
-      const startedAt  = latestTour?.started_at ?? null
       const durationMs = startedAt ? new Date(completedAt).getTime() - new Date(startedAt).getTime() : 0
       setCelebrationStats({ durationMs, delivered, failed, panels, totalKm })
       setScreen('celebration')
+
+      // Rafraîchir la liste des tournées en arrière-plan
+      fetchTours()
     } catch (e) {
       console.error(e)
     } finally {
