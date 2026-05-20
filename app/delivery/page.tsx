@@ -19,6 +19,7 @@ import { CSS } from '@dnd-kit/utilities'
 const TourMap        = nextDynamic(() => import('@/components/delivery/TourMap'),        { ssr: false })
 const OrdersMap      = nextDynamic(() => import('@/components/delivery/OrdersMap'),      { ssr: false })
 const SavPositionMap = nextDynamic(() => import('@/components/delivery/SavPositionMap'), { ssr: false })
+const StatsView      = nextDynamic(() => import('@/components/delivery/StatsView'),      { ssr: false })
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -144,8 +145,15 @@ export default function DeliveryPage() {
   )
 }
 
-type DeliveryView = 'planificateur' | 'livreur' | 'sav'
+type DeliveryView = 'planificateur' | 'livreur' | 'sav' | 'stats'
 const ALL_VIEWS: DeliveryView[] = ['planificateur', 'livreur', 'sav']
+
+const TAB_LABELS: Record<DeliveryView, string> = {
+  planificateur: 'Planificateur',
+  livreur:       'Livreur',
+  sav:           'SAV',
+  stats:         'Stats',
+}
 
 function DeliveryPageInner() {
   const router = useRouter()
@@ -158,17 +166,22 @@ function DeliveryPageInner() {
       process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
     )
     supabase.auth.getUser().then(({ data }) => {
-      const meta = data.user?.user_metadata
+      const meta  = data.user?.user_metadata
       const views = meta?.delivery_views as string[] | undefined
-      setAllowedViews(
-        views ? views.filter((v): v is DeliveryView => ALL_VIEWS.includes(v as DeliveryView)) : ALL_VIEWS
-      )
+      const base: DeliveryView[] = views
+        ? views.filter((v): v is DeliveryView => ALL_VIEWS.includes(v as DeliveryView))
+        : ALL_VIEWS
+      // Stats tab is only shown to users who have planificateur access
+      const withStats: DeliveryView[] = base.includes('planificateur')
+        ? [...base, 'stats']
+        : base
+      setAllowedViews(withStats)
     })
   }, [])
 
   const rawView = searchParams.get('view')
   const activeTab: DeliveryView =
-    rawView === 'livreur' || rawView === 'sav' || rawView === 'planificateur'
+    rawView === 'livreur' || rawView === 'sav' || rawView === 'planificateur' || rawView === 'stats'
       ? rawView
       : 'planificateur'
 
@@ -188,6 +201,29 @@ function DeliveryPageInner() {
   if (!allowedViews) return null
 
   const effectiveTab = allowedViews.includes(activeTab) ? activeTab : allowedViews[0]
+
+  // Stats is full-screen, no outer padding
+  if (effectiveTab === 'stats') {
+    return (
+      <div className="md:pl-[88px] bg-[#f5f5f3] min-h-screen">
+        <div className="flex items-center gap-2 px-4 pt-4 pb-0">
+          {allowedViews.filter(v => v !== 'stats').map((tab) => (
+            <button
+              key={tab}
+              onClick={() => setActiveTab(tab)}
+              className="px-3 py-1.5 rounded-[8px] text-sm text-[#6b6b63] hover:text-[#1a1a2e] hover:bg-white transition-all"
+            >
+              {TAB_LABELS[tab]}
+            </button>
+          ))}
+          <button className="px-3 py-1.5 rounded-[8px] text-sm font-semibold bg-[#1a1a2e] text-white">
+            Stats
+          </button>
+        </div>
+        <StatsView />
+      </div>
+    )
+  }
 
   return (
     <div className="px-3 md:pl-[88px] py-4 md:p-6 bg-[#f5f5f3] min-h-screen">
@@ -209,7 +245,7 @@ function DeliveryPageInner() {
                     : 'text-[#6b6b63] hover:text-[#1a1a2e]'
                 }`}
               >
-                {tab === 'planificateur' ? 'Planificateur' : tab === 'livreur' ? 'Livreur' : 'SAV'}
+                {TAB_LABELS[tab]}
               </button>
             ))}
           </div>
