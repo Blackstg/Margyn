@@ -272,8 +272,8 @@ export default function StatsView() {
           </div>
         ) : (
           <>
-            {/* Total recap at the top — only when multiple drivers */}
-            {data.drivers.length > 1 && (
+            {/* Total recap at the top */}
+            {(
               <div className="bg-[#1a1a2e] rounded-[18px] px-5 py-5 shadow-sm">
                 <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-white/50 mb-4">
                   Total — {data.month !== 'all' ? fmtMonth(data.month) : 'toute période'}
@@ -295,8 +295,8 @@ export default function StatsView() {
                   ))}
                 </div>
 
-                {/* Per-driver comparison table */}
-                <div className="border-t border-white/10 pt-4 space-y-2">
+                {/* Per-driver comparison table — only when multiple drivers */}
+                {data.drivers.length > 1 && <div className="border-t border-white/10 pt-4 space-y-2">
                   {data.drivers.map(d => (
                     <div key={d.driver_name} className="flex items-center gap-3 text-sm">
                       <div className="w-7 h-7 rounded-full bg-white/10 text-white flex items-center justify-center font-bold text-xs shrink-0">
@@ -309,7 +309,7 @@ export default function StatsView() {
                       <span className="text-white/60 w-16 text-right">{fmtDuration(d.total_duration_ms)}</span>
                     </div>
                   ))}
-                </div>
+                </div>}
               </div>
             )}
 
