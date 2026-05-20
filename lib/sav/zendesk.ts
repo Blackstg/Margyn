@@ -115,10 +115,14 @@ export async function getRequesterEmail(requesterId: number): Promise<string> {
 // Creates a new outbound ticket — sends an email to a customer who has no existing ticket.
 // Returns the created ticket ID.
 export async function createOutboundTicket(
-  toEmail:  string,
-  subject:  string,
-  body:     string,
+  toEmail:      string,
+  subject:      string,
+  body:         string,
+  customerName?: string,
 ): Promise<number> {
+  // Zendesk requires requester.name (min 1 char) — fall back to the email prefix
+  const requesterName = customerName?.trim() || toEmail.split('@')[0]
+
   const res = await fetchWithRetry(
     `${base()}/tickets.json`,
     {
@@ -127,7 +131,7 @@ export async function createOutboundTicket(
       body: JSON.stringify({
         ticket: {
           subject,
-          requester: { email: toEmail },
+          requester: { email: toEmail, name: requesterName },
           comment:   { body, public: true },
           status:    'open',
           custom_fields: [{ id: 20652537824913, value: 'autres' }],

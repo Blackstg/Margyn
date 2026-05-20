@@ -9,17 +9,18 @@ export const dynamic = 'force-dynamic'
 
 export async function POST(req: NextRequest) {
   try {
-    const { to_email, subject, body } = await req.json() as {
-      to_email: string
-      subject:  string
-      body:     string
+    const { to_email, subject, body, customer_name } = await req.json() as {
+      to_email:      string
+      subject:       string
+      body:          string
+      customer_name?: string
     }
 
     if (!to_email || !subject || !body) {
       return NextResponse.json({ error: 'to_email, subject et body sont requis' }, { status: 400 })
     }
 
-    const ticketId = await createOutboundTicket(to_email.trim(), subject.trim(), body.trim())
+    const ticketId = await createOutboundTicket(to_email.trim(), subject.trim(), body.trim(), customer_name?.trim())
     return NextResponse.json({ ticket_id: ticketId })
   } catch (err) {
     console.error('[SAV] new-message error:', err)
