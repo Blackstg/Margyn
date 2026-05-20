@@ -78,6 +78,7 @@ export async function GET(req: NextRequest) {
       toDate = `${nextMonth}-01`
     }
 
+    // Fetch filtered tours + all available months in parallel
     let query = admin
       .from('delivery_tours')
       .select('id, name, driver_name, planned_date, started_at, completed_at, total_km, delivery_stops(status, panel_count, panel_details)')
@@ -88,13 +89,22 @@ export async function GET(req: NextRequest) {
     if (fromDate) query = query.gte('planned_date', fromDate)
     if (toDate)   query = query.lt('planned_date', toDate)
 
-    const { data: tours, error } = await query
+    const [{ data: tours, error }, { data: allDates }] = await Promise.all([
+      query,
+      // Lightweight query to get all months — only fetch planned_date
+      admin
+        .from('delivery_tours')
+        .select('planned_date')
+        .eq('brand', 'bowa')
+        .eq('status', 'completed')
+        .not('planned_date', 'is', null),
+    ])
 
     if (error) throw error
 
-    // Collect all distinct months for the picker
+    // Collect all distinct months for the picker (from full history, not filtered slice)
     const monthSet = new Set<string>()
-    for (const t of tours ?? []) {
+    for (const t of allDates ?? []) {
       if (t.planned_date) monthSet.add(t.planned_date.slice(0, 7))
     }
     const months = [...monthSet].sort().reverse()
