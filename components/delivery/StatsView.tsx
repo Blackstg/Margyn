@@ -8,10 +8,13 @@ import type { StatsResponse, DriverStats, TourStat } from '@/app/api/delivery/st
 
 function fmtDuration(ms: number | null): string {
   if (ms == null || ms <= 0) return '—'
-  const h = Math.floor(ms / 3_600_000)
-  const m = Math.floor((ms % 3_600_000) / 60_000)
-  if (h === 0) return `${m}min`
-  return m > 0 ? `${h}h${String(m).padStart(2, '0')}` : `${h}h`
+  const totalMin = Math.round(ms / 60_000)
+  const days  = Math.floor(totalMin / 1440)
+  const hours = Math.floor((totalMin % 1440) / 60)
+  const mins  = totalMin % 60
+  if (days > 0) return hours > 0 ? `${days}j ${hours}h` : `${days}j`
+  if (hours === 0) return `${mins}min`
+  return mins > 0 ? `${hours}h${String(mins).padStart(2, '0')}` : `${hours}h`
 }
 
 function fmtDate(iso: string): string {
@@ -269,18 +272,13 @@ export default function StatsView() {
           </div>
         ) : (
           <>
-            {/* One card per driver — all open by default */}
-            {data.drivers.map((driver) => (
-              <DriverCard key={driver.driver_name} driver={driver} defaultOpen />
-            ))}
-
-            {/* Total recap — only when multiple drivers */}
+            {/* Total recap at the top — only when multiple drivers */}
             {data.drivers.length > 1 && (
               <div className="bg-[#1a1a2e] rounded-[18px] px-5 py-5 shadow-sm">
                 <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-white/50 mb-4">
                   Total — {data.month !== 'all' ? fmtMonth(data.month) : 'toute période'}
                 </p>
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
                   {[
                     { label: 'Panneaux livrés', value: String(totalPanels), icon: <Package size={15} /> },
                     { label: 'Tournées',         value: String(totalTours),  icon: <BarChart2 size={15} /> },
@@ -297,8 +295,8 @@ export default function StatsView() {
                   ))}
                 </div>
 
-                {/* Per-driver summary table */}
-                <div className="mt-4 border-t border-white/10 pt-4 space-y-2">
+                {/* Per-driver comparison table */}
+                <div className="border-t border-white/10 pt-4 space-y-2">
                   {data.drivers.map(d => (
                     <div key={d.driver_name} className="flex items-center gap-3 text-sm">
                       <div className="w-7 h-7 rounded-full bg-white/10 text-white flex items-center justify-center font-bold text-xs shrink-0">
@@ -314,6 +312,11 @@ export default function StatsView() {
                 </div>
               </div>
             )}
+
+            {/* One card per driver */}
+            {data.drivers.map((driver) => (
+              <DriverCard key={driver.driver_name} driver={driver} defaultOpen />
+            ))}
           </>
         )}
       </div>
