@@ -257,23 +257,7 @@ export default function StatsView() {
         </div>
       </div>
 
-      <div className="max-w-4xl mx-auto px-4 sm:px-6 pt-5 space-y-5">
-        {/* Global summary */}
-        {!loading && data && data.drivers.length > 0 && (
-          <div className="bg-white border border-[#e8e8e4] rounded-[18px] px-5 py-4 shadow-sm">
-            <p className="text-[10px] font-semibold uppercase tracking-[0.1em] text-[#9b9b93] mb-3">
-              Synthèse — {data.month !== 'all' ? fmtMonth(data.month) : 'toute période'}
-            </p>
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-              <StatBadge icon={<Package size={16} />} label="Panneaux livrés" value={String(totalPanels)} />
-              <StatBadge icon={<BarChart2 size={16} />} label="Tournées" value={String(totalTours)} />
-              <StatBadge icon={<Route size={16} />} label="Km total" value={totalKm != null ? `${totalKm} km` : '—'} />
-              <StatBadge icon={<Clock size={16} />} label="Temps total" value={fmtDuration(totalDuration)} />
-            </div>
-          </div>
-        )}
-
-        {/* Driver cards */}
+      <div className="max-w-4xl mx-auto px-4 sm:px-6 pt-5 space-y-4">
         {loading ? (
           <div className="flex items-center justify-center py-20">
             <p className="text-sm text-[#9b9b93]">Chargement…</p>
@@ -284,13 +268,53 @@ export default function StatsView() {
             <p className="text-sm text-[#9b9b93] mt-1">sur {data?.month ? fmtMonth(data.month) : 'cette période'}</p>
           </div>
         ) : (
-          data.drivers.map((driver, i) => (
-            <DriverCard
-              key={driver.driver_name}
-              driver={driver}
-              defaultOpen={i === 0}
-            />
-          ))
+          <>
+            {/* One card per driver — all open by default */}
+            {data.drivers.map((driver) => (
+              <DriverCard key={driver.driver_name} driver={driver} defaultOpen />
+            ))}
+
+            {/* Total recap — only when multiple drivers */}
+            {data.drivers.length > 1 && (
+              <div className="bg-[#1a1a2e] rounded-[18px] px-5 py-5 shadow-sm">
+                <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-white/50 mb-4">
+                  Total — {data.month !== 'all' ? fmtMonth(data.month) : 'toute période'}
+                </p>
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                  {[
+                    { label: 'Panneaux livrés', value: String(totalPanels), icon: <Package size={15} /> },
+                    { label: 'Tournées',         value: String(totalTours),  icon: <BarChart2 size={15} /> },
+                    { label: 'Km parcourus',     value: totalKm != null ? `${totalKm} km` : '—', icon: <Route size={15} /> },
+                    { label: 'Temps cumulé',     value: fmtDuration(totalDuration), icon: <Clock size={15} /> },
+                  ].map(({ label, value, icon }) => (
+                    <div key={label} className="bg-white/8 rounded-[12px] px-4 py-3">
+                      <div className="flex items-center gap-1.5 mb-1 text-white/50">
+                        {icon}
+                        <p className="text-[10px] font-semibold uppercase tracking-[0.07em]">{label}</p>
+                      </div>
+                      <p className="text-2xl font-bold text-white leading-tight">{value}</p>
+                    </div>
+                  ))}
+                </div>
+
+                {/* Per-driver summary table */}
+                <div className="mt-4 border-t border-white/10 pt-4 space-y-2">
+                  {data.drivers.map(d => (
+                    <div key={d.driver_name} className="flex items-center gap-3 text-sm">
+                      <div className="w-7 h-7 rounded-full bg-white/10 text-white flex items-center justify-center font-bold text-xs shrink-0">
+                        {d.driver_name.charAt(0).toUpperCase()}
+                      </div>
+                      <span className="flex-1 font-medium text-white">{d.driver_name}</span>
+                      <span className="text-white/60 text-xs">{d.total_tours} tournée{d.total_tours > 1 ? 's' : ''}</span>
+                      <span className="font-semibold text-white w-20 text-right">{d.total_panels} pan.</span>
+                      <span className="text-white/60 w-16 text-right">{d.total_km != null ? `${d.total_km} km` : '—'}</span>
+                      <span className="text-white/60 w-16 text-right">{fmtDuration(d.total_duration_ms)}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </>
         )}
       </div>
     </div>

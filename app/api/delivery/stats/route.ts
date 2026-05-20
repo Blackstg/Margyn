@@ -145,7 +145,13 @@ export async function GET(req: NextRequest) {
         stops_total:     stops.length,
       }
 
-      const driver = tour.driver_name?.trim() || 'Inconnu'
+      // Normalize name: trim + title-case so "khalid" and "Khalid " merge into "Khalid"
+      const rawName = tour.driver_name?.trim() || 'Inconnu'
+      const driver = rawName
+        .toLowerCase()
+        .split(/\s+/)
+        .map((w: string) => w.charAt(0).toUpperCase() + w.slice(1))
+        .join(' ')
       if (!driverMap.has(driver)) driverMap.set(driver, [])
       driverMap.get(driver)!.push(stat)
     }
