@@ -22,6 +22,7 @@ interface TrackingResult {
   tour_status:       string | null
   tour_name:         string | null
   tour_planned_date: string | null
+  tour_started_at:   string | null
   stop_status:       string | null
   delivered_at:      string | null
   step:              number
@@ -357,9 +358,10 @@ export default function TrackingPage() {
                               {date}
                             </p>
                           )}
-                          {(i === 3 || i === 4) && result.tour_name && isCurrent && (
-                            <p style={{ fontSize: 12, marginTop: 4, color: 'rgba(0,0,0,0.45)' }}>
-                              Tournée : <span style={{ fontWeight: 600 }}>{result.tour_name}</span>
+                          {i === 4 && isCurrent && result.tour_started_at && (
+                            <p style={{ fontSize: 12, marginTop: 6, color: 'rgba(0,0,0,0.5)', background: 'rgba(0,0,0,0.04)', borderRadius: 8, padding: '6px 10px', lineHeight: 1.5 }}>
+                              🚛 Départ de la tournée le <strong>{fmtDate(result.tour_started_at)}</strong>.<br />
+                              <span style={{ color: 'rgba(0,0,0,0.4)' }}>La livraison aura lieu dans les prochains jours — notre livreur vous appellera avant de passer.</span>
                             </p>
                           )}
                         </div>

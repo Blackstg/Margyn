@@ -137,12 +137,12 @@ export async function POST(req: NextRequest) {
       id: string
       status: string
       delivered_at: string | null
-      delivery_tours: { id: string; status: string; planned_date: string | null; name: string } | null
+      delivery_tours: { id: string; status: string; planned_date: string | null; name: string; started_at: string | null } | null
     }
 
     const { data: stopRows } = await admin
       .from('delivery_stops')
-      .select('id, status, delivered_at, delivery_tours(id, status, planned_date, name)')
+      .select('id, status, delivered_at, delivery_tours(id, status, planned_date, name, started_at)')
       .eq('order_name', normalizedName)
       .order('created_at', { ascending: false })
 
@@ -155,9 +155,10 @@ export async function POST(req: NextRequest) {
     const active = typedRows.find((s) => s.delivery_tours?.status !== 'cancelled')
     const best   = delivered ?? activePending ?? active ?? typedRows[0] ?? null
 
-    const tourStatus  = best?.delivery_tours?.status       ?? null
-    const tourName    = best?.delivery_tours?.name         ?? null
-    const tourDate    = best?.delivery_tours?.planned_date ?? null
+    const tourStatus    = best?.delivery_tours?.status       ?? null
+    const tourName      = best?.delivery_tours?.name         ?? null
+    const tourDate      = best?.delivery_tours?.planned_date ?? null
+    const tourStartedAt = best?.delivery_tours?.started_at   ?? null
     const stopStatus  = best?.status                       ?? null
     const deliveredAt = best?.delivered_at                 ?? null
 
@@ -190,6 +191,7 @@ export async function POST(req: NextRequest) {
       tour_status:       tourStatus,
       tour_name:         tourName,
       tour_planned_date: tourDate,
+      tour_started_at:   tourStartedAt,
       stop_status:       stopStatus,
       delivered_at:      deliveredAt,
       step,
