@@ -2333,9 +2333,21 @@ function LivreurView() {
   const fetchNearbyOrders = useCallback(async () => {
     setNearbyLoading(true)
     try {
-      const r = await fetch('/api/delivery/orders', { cache: 'no-store' })
-      const data = await r.json()
-      setNearbyOrders(data.orders ?? [])
+      const [ordersRes, deferredRes] = await Promise.all([
+        fetch('/api/delivery/orders', { cache: 'no-store' }),
+        fetch('/api/delivery/deferred-orders', { cache: 'no-store' }),
+      ])
+      const [ordersData, deferredData] = await Promise.all([
+        ordersRes.json(),
+        deferredRes.json(),
+      ])
+      const deferredSet = new Set<string>(
+        (deferredData.deferred ?? []).map((d: { order_name: string }) => d.order_name)
+      )
+      const orders = (ordersData.orders ?? []).filter(
+        (o: { order_name: string }) => !deferredSet.has(o.order_name)
+      )
+      setNearbyOrders(orders)
     } catch { /* best-effort — nearby feature is optional */ } finally {
       setNearbyLoading(false)
     }
