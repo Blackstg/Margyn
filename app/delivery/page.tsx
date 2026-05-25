@@ -200,7 +200,26 @@ function DeliveryPageInner() {
   // Don't render until we know which views are allowed
   if (!allowedViews) return null
 
-  const effectiveTab = allowedViews.includes(activeTab) ? activeTab : allowedViews[0]
+  const effectiveTab  = allowedViews.includes(activeTab) ? activeTab : allowedViews[0]
+  const isLivreurOnly = allowedViews.length === 1 && allowedViews[0] === 'livreur'
+
+  // Livreur-only users: truly full-screen native app, no admin chrome
+  if (isLivreurOnly) {
+    return (
+      <div
+        className="bg-[#f5f5f3]"
+        style={{
+          minHeight: '100svh',
+          paddingTop:    'env(safe-area-inset-top)',
+          paddingBottom: 'env(safe-area-inset-bottom)',
+          paddingLeft:   'env(safe-area-inset-left)',
+          paddingRight:  'env(safe-area-inset-right)',
+        }}
+      >
+        <LivreurView />
+      </div>
+    )
+  }
 
   // Stats is full-screen, no outer padding
   if (effectiveTab === 'stats') {
@@ -2693,7 +2712,7 @@ function LivreurView() {
     const upcomingTours = activeTours.filter(t => t.id !== selectedTourId)
 
     return (
-      <div className="w-full space-y-4">
+      <div className="w-full space-y-4 px-4 py-4">
 
         {tour ? (
           <div className="w-full rounded-[20px] bg-[#1a1a2e] overflow-hidden">
@@ -3020,7 +3039,7 @@ function LivreurView() {
     }
 
     return (
-      <div className="w-full pb-8">
+      <div className="w-full px-4 py-4 pb-8">
         {/* Header */}
         <div className="flex items-center gap-3 mb-4">
           <button
@@ -3178,7 +3197,7 @@ function LivreurView() {
     }
 
     return (
-      <div className="w-full pb-10">
+      <div className="w-full px-4 py-4 pb-10">
         {/* Header */}
         <div className="flex items-center gap-3 mb-5">
           <button
@@ -3252,7 +3271,7 @@ function LivreurView() {
     }
 
     return (
-      <div className="w-full pb-28">
+      <div className="w-full px-4 py-4 pb-28">
         <div className="flex items-center gap-3 mb-2">
           <button
             onClick={() => setScreen('home')}
@@ -3493,7 +3512,7 @@ function LivreurView() {
         </div>
       </div>
     )}
-    <div className="w-full flex flex-col" style={{ minHeight: 'calc(100vh - 110px)' }}>
+    <div className="w-full flex flex-col px-4 py-4" style={{ minHeight: '100svh' }}>
       {/* Top bar: back + Maps */}
       <div className="flex items-center justify-between mb-4">
         <button

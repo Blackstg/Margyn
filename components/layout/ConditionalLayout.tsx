@@ -35,9 +35,14 @@ export default function ConditionalLayout({ children }: { children: React.ReactN
       process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
     )
     supabase.auth.getUser().then(({ data }) => {
-      const r = (data.user?.user_metadata?.role as string | undefined) ?? 'admin'
-      setRole(r)
-      localStorage.setItem('bowa_role', r)
+      const meta          = data.user?.user_metadata
+      const r             = (meta?.role as string | undefined) ?? 'admin'
+      const deliveryViews = meta?.delivery_views as string[] | undefined
+      // Treat as delivery (no sidebar) if role is 'delivery' OR if user only has livreur view
+      const livreurOnly   = Array.isArray(deliveryViews) && deliveryViews.length === 1 && deliveryViews[0] === 'livreur'
+      const effectiveRole = (r === 'delivery' || livreurOnly) ? 'delivery' : r
+      setRole(effectiveRole)
+      localStorage.setItem('bowa_role', effectiveRole)
     })
   }, [isAuthPage])
 
@@ -61,8 +66,16 @@ export default function ConditionalLayout({ children }: { children: React.ReactN
     return <div className="min-h-screen">{children}</div>
   }
 
-  const isDelivery = role === 'delivery'
-  const showSidebar = !isDelivery && sidebarOpen
+  // Livreurs get a completely clean full-screen layout — no sidebar, no padding
+  const isDelivery  = role === 'delivery'
+  // While role is loading, assume delivery if on /delivery to avoid sidebar flash
+  const likelyDelivery = role === null && pathname === '/delivery'
+
+  if (isDelivery || likelyDelivery) {
+    return <div className="min-h-screen">{children}</div>
+  }
+
+  const showSidebar  = sidebarOpen
   const sidebarWidth = showSidebar ? (collapsed ? 72 : 240) : 0
 
   return (
@@ -75,7 +88,7 @@ export default function ConditionalLayout({ children }: { children: React.ReactN
       />
 
       {/* Floating burger when sidebar is closed */}
-      {!isDelivery && !sidebarOpen && (
+      {!sidebarOpen && (
         <button
           onClick={toggleSidebar}
           className="fixed top-4 left-4 z-40 w-9 h-9 bg-[#1a1a2e] rounded-xl flex items-center justify-center text-white/60 hover:text-white transition-colors shadow-lg"
