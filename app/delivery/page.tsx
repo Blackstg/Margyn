@@ -2295,6 +2295,24 @@ function LivreurView() {
   const [selectedTourId, setSelectedTourId] = useState('')
   const [loading, setLoading] = useState(true)
 
+  // ── Vérification permission GPS ──────────────────────────────────────────
+  const [gpsPermission, setGpsPermission] = useState<'granted' | 'denied' | 'prompt' | null>(null)
+
+  useEffect(() => {
+    navigator.permissions?.query({ name: 'geolocation' }).then(result => {
+      setGpsPermission(result.state)
+      result.onchange = () => setGpsPermission(result.state)
+    })
+  }, [])
+
+  function requestGps() {
+    navigator.geolocation.getCurrentPosition(
+      () => setGpsPermission('granted'),
+      () => setGpsPermission('denied'),
+      { enableHighAccuracy: true }
+    )
+  }
+
   // ── GPS tracking silencieux ───────────────────────────────────────────────
   useEffect(() => {
     if (!navigator?.geolocation) return
@@ -2797,6 +2815,22 @@ function LivreurView() {
 
     return (
       <div className="w-full space-y-4 px-4 py-4">
+
+        {/* Bandeau GPS non autorisé */}
+        {gpsPermission !== 'granted' && gpsPermission !== null && (
+          <button
+            onClick={requestGps}
+            className="w-full flex items-start gap-3 bg-[#fff7ed] border border-[#fed7aa] rounded-[14px] px-4 py-3 text-left"
+          >
+            <span className="text-xl mt-0.5">⚠️</span>
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-semibold text-[#c2410c]">Optimisation de tournée limitée</p>
+              <p className="text-xs text-[#9a3412] mt-0.5 leading-snug">
+                Steero ne peut pas accéder au GPS de ton téléphone. Appuie ici pour l&apos;autoriser.
+              </p>
+            </div>
+          </button>
+        )}
 
         {tour ? (
           <div className="w-full rounded-[20px] bg-[#1a1a2e] overflow-hidden">
