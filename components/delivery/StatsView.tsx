@@ -480,6 +480,11 @@ function DriverMonthCalendar({ driver, month }: { driver: DriverStats; month: st
             {idleDays}j repos
           </span>
         )}
+        {(halfWorkDays + fewHoursDays) > 0 && (
+          <span className="text-[10px] font-bold text-[#b91c1c] bg-[#fee2e2] px-1.5 py-0.5 rounded-full">
+            {halfWorkDays + fewHoursDays} demi-j repos
+          </span>
+        )}
       </div>
 
       {/* Day-of-week header */}
