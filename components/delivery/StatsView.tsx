@@ -1,8 +1,8 @@
 'use client'
 
 import { useState, useEffect, useCallback } from 'react'
-import { BarChart2, TrendingUp, Clock, Route, Package, ChevronDown, ChevronRight } from 'lucide-react'
-import type { StatsResponse, DriverStats, TourStat } from '@/app/api/delivery/stats/route'
+import { BarChart2, TrendingUp, Clock, Route, Package, ChevronDown, ChevronRight, AlertTriangle, Calendar, MapPin } from 'lucide-react'
+import type { StatsResponse, DriverStats, TourStat, DayActivity, StopEvent } from '@/app/api/delivery/stats/route'
 
 // ── Formatters ────────────────────────────────────────────────────────────────
 
@@ -19,6 +19,26 @@ function fmtDuration(ms: number | null): string {
 
 function fmtDate(iso: string): string {
   return new Date(iso).toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' })
+}
+
+function fmtDateTime(iso: string): string {
+  return new Date(iso).toLocaleString('fr-FR', {
+    timeZone: 'Europe/Paris',
+    day: 'numeric', month: 'short',
+    hour: '2-digit', minute: '2-digit',
+  })
+}
+
+function fmtTime(iso: string): string {
+  return new Date(iso).toLocaleTimeString('fr-FR', {
+    timeZone: 'Europe/Paris',
+    hour: '2-digit', minute: '2-digit',
+  })
+}
+
+function fmtDayLabel(yyyymmdd: string): string {
+  const [y, m, d] = yyyymmdd.split('-').map(Number)
+  return new Date(y, m - 1, d).toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'short' })
 }
 
 function fmtMonth(ym: string): string {
@@ -48,11 +68,64 @@ function StatBadge({ icon, label, value, sub }: {
   )
 }
 
+function StopLine({ stop, showTime = true }: { stop: StopEvent; showTime?: boolean }) {
+  const color = stop.status === 'delivered' ? '#15803d'
+    : stop.status === 'partial' ? '#a16207'
+    : stop.status === 'failed'  ? '#b91c1c'
+    : '#6b7280'
+
+  return (
+    <div className="flex items-start gap-2 py-1.5">
+      <div className="w-1.5 h-1.5 rounded-full mt-1.5 shrink-0" style={{ background: color }} />
+      <div className="flex-1 min-w-0">
+        <div className="flex items-center gap-2 flex-wrap">
+          {showTime && stop.delivered_at && (
+            <span className="text-[10px] font-mono text-[#9b9b93] shrink-0">{fmtTime(stop.delivered_at)}</span>
+          )}
+          <span className="text-xs font-semibold text-[#1a1a2e] truncate">{stop.customer_name || stop.order_name}</span>
+          {stop.city && <span className="text-[10px] text-[#9b9b93] shrink-0">— {stop.city}</span>}
+        </div>
+        <div className="flex items-center gap-2 mt-0.5 flex-wrap">
+          <span className="text-[10px] text-[#9b9b93]">{stop.order_name}</span>
+          {stop.panels > 0 && (
+            <span className="text-[10px] font-medium" style={{ color }}>
+              {stop.panels} panneau{stop.panels > 1 ? 'x' : ''}
+            </span>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function DayBlock({ day }: { day: DayActivity }) {
+  return (
+    <div className="mb-3">
+      <div className="flex items-center gap-2 mb-1">
+        <Calendar size={11} className="text-[#9b9b93]" />
+        <span className="text-[10px] font-semibold uppercase tracking-[0.07em] text-[#9b9b93]">
+          {fmtDayLabel(day.date)}
+        </span>
+        <span className="text-[10px] text-[#9b9b93]">— {day.deliveries.length} livraison{day.deliveries.length > 1 ? 's' : ''}</span>
+      </div>
+      <div className="pl-3 border-l-2 border-[#e8e8e4]">
+        {day.deliveries.map((s, i) => (
+          <StopLine key={`${s.order_name}-${i}`} stop={s} showTime />
+        ))}
+      </div>
+    </div>
+  )
+}
+
 function TourRow({ tour }: { tour: TourStat }) {
-  const [open, setOpen] = useState(false)
+  const [open, setOpen] = useState(tour.status === 'in_progress')
+
   const successRate = tour.stops_total > 0
     ? Math.round(((tour.stops_delivered + tour.stops_partial) / tour.stops_total) * 100)
     : null
+
+  const isActive = tour.status === 'in_progress'
+  const hasIdleDays = isActive && tour.idle_days > 1
 
   return (
     <div className="border border-[#f0f0ee] rounded-[12px] overflow-hidden">
@@ -64,22 +137,39 @@ function TourRow({ tour }: { tour: TourStat }) {
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 flex-wrap">
             <span className="font-semibold text-sm text-[#1a1a2e]">{tour.name}</span>
-            <span className="text-[10px] text-[#9b9b93]">{fmtDate(tour.planned_date)}</span>
+            {tour.planned_date && <span className="text-[10px] text-[#9b9b93]">{fmtDate(tour.planned_date)}</span>}
+            {isActive && (
+              <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-[#fef9c3] text-[#a16207]">
+                en cours
+              </span>
+            )}
           </div>
+          {/* Alert: idle days for in-progress tour */}
+          {hasIdleDays && (
+            <div className="flex items-center gap-1 mt-0.5">
+              <AlertTriangle size={10} className="text-[#b91c1c]" />
+              <span className="text-[10px] text-[#b91c1c] font-medium">
+                {tour.idle_days} jour{tour.idle_days > 1 ? 's' : ''} sans activité sur {tour.days_since_start} jours au total
+              </span>
+            </div>
+          )}
         </div>
         <div className="flex items-center gap-4 shrink-0 text-right">
           <div className="hidden sm:block">
             <p className="text-xs font-bold text-[#1a1a2e]">{tour.panels_delivered} panneaux</p>
             <p className="text-[10px] text-[#9b9b93]">{tour.stops_delivered + tour.stops_partial}/{tour.stops_total} stops</p>
           </div>
-          <div className="hidden sm:block">
-            <p className="text-xs font-bold text-[#1a1a2e]">{fmtDuration(tour.duration_ms)}</p>
-            {tour.total_km != null && <p className="text-[10px] text-[#9b9b93]">{tour.total_km} km</p>}
-          </div>
+          {!isActive && (
+            <div className="hidden sm:block">
+              <p className="text-xs font-bold text-[#1a1a2e]">{fmtDuration(tour.duration_ms)}</p>
+              {tour.total_km != null && <p className="text-[10px] text-[#9b9b93]">{tour.total_km} km</p>}
+            </div>
+          )}
           {successRate != null && (
             <div className={`w-10 h-10 rounded-full flex items-center justify-center text-[11px] font-bold shrink-0 ${
-              successRate === 100 ? 'bg-[#dcfce7] text-[#15803d]'
-              : successRate >= 75  ? 'bg-[#fef9c3] text-[#a16207]'
+              isActive           ? 'bg-[#fef9c3] text-[#a16207]'
+              : successRate === 100 ? 'bg-[#dcfce7] text-[#15803d]'
+              : successRate >= 75   ? 'bg-[#fef9c3] text-[#a16207]'
               : 'bg-[#fee2e2] text-[#b91c1c]'
             }`}>
               {successRate}%
@@ -89,39 +179,85 @@ function TourRow({ tour }: { tour: TourStat }) {
       </button>
 
       {open && (
-        <div className="border-t border-[#f0f0ee] bg-[#fafaf8] px-4 py-3">
-          {/* Mobile details */}
-          <div className="sm:hidden flex flex-wrap gap-3 mb-3 text-sm">
-            <span><span className="font-semibold">{tour.panels_delivered}</span> panneaux</span>
-            <span><span className="font-semibold">{tour.stops_delivered + tour.stops_partial}</span>/{tour.stops_total} stops</span>
-            <span><span className="font-semibold">{fmtDuration(tour.duration_ms)}</span></span>
-            {tour.total_km != null && <span><span className="font-semibold">{tour.total_km} km</span></span>}
-          </div>
+        <div className="border-t border-[#f0f0ee] bg-[#fafaf8] px-4 py-4 space-y-4">
 
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
+          {/* Alert banner for procrastination */}
+          {hasIdleDays && (
+            <div className="bg-[#fee2e2] border border-[#fecaca] rounded-[10px] px-4 py-3 flex items-start gap-2">
+              <AlertTriangle size={14} className="text-[#b91c1c] shrink-0 mt-0.5" />
+              <div>
+                <p className="text-xs font-bold text-[#b91c1c]">Activité fragmentée</p>
+                <p className="text-[11px] text-[#b91c1c]/80 mt-0.5">
+                  Démarré le {fmtDateTime(tour.started_at!)}, {tour.days_with_activity} jour{tour.days_with_activity > 1 ? 's' : ''} avec livraisons sur {tour.days_since_start} jours calendaires — {tour.idle_days} jour{tour.idle_days > 1 ? 's' : ''} sans activité.
+                </p>
+              </div>
+            </div>
+          )}
+
+          {/* Started at / timestamps */}
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 text-xs">
             <div className="bg-white rounded-[8px] px-3 py-2">
-              <p className="text-[#9b9b93]">Départ</p>
-              <p className="font-semibold text-[#1a1a2e]">{tour.started_at ? new Date(tour.started_at).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }) : '—'}</p>
+              <p className="text-[#9b9b93] text-[10px]">Chargement / Départ</p>
+              <p className="font-semibold text-[#1a1a2e]">
+                {tour.started_at ? fmtDateTime(tour.started_at) : '—'}
+              </p>
             </div>
             <div className="bg-white rounded-[8px] px-3 py-2">
-              <p className="text-[#9b9b93]">Fin</p>
-              <p className="font-semibold text-[#1a1a2e]">{tour.completed_at ? new Date(tour.completed_at).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }) : '—'}</p>
+              <p className="text-[#9b9b93] text-[10px]">Fin de tournée</p>
+              <p className="font-semibold text-[#1a1a2e]">
+                {tour.completed_at ? fmtDateTime(tour.completed_at) : isActive ? 'En cours…' : '—'}
+              </p>
             </div>
             <div className="bg-white rounded-[8px] px-3 py-2">
-              <p className="text-[#9b9b93]">Stops OK / Partiel / Raté</p>
+              <p className="text-[#9b9b93] text-[10px]">Stops OK / Partiel / Raté</p>
               <p className="font-semibold text-[#1a1a2e]">
                 <span className="text-[#15803d]">{tour.stops_delivered}</span>
                 {' / '}
                 <span className="text-[#a16207]">{tour.stops_partial}</span>
                 {' / '}
                 <span className="text-[#b91c1c]">{tour.stops_failed}</span>
+                {tour.stops_pending > 0 && (
+                  <span className="text-[#9b9b93]"> + {tour.stops_pending} en attente</span>
+                )}
               </p>
             </div>
-            <div className="bg-white rounded-[8px] px-3 py-2">
-              <p className="text-[#9b9b93]">Panneaux livrés</p>
-              <p className="font-semibold text-[#1a1a2e]">{tour.panels_delivered}</p>
-            </div>
           </div>
+
+          {/* Mobile summary */}
+          <div className="sm:hidden flex flex-wrap gap-3 text-sm">
+            <span><span className="font-semibold">{tour.panels_delivered}</span> panneaux livrés</span>
+            {!isActive && <span><span className="font-semibold">{fmtDuration(tour.duration_ms)}</span></span>}
+            {tour.total_km != null && <span><span className="font-semibold">{tour.total_km} km</span></span>}
+          </div>
+
+          {/* Day-by-day timeline */}
+          {tour.days.length > 0 && (
+            <div>
+              <p className="text-[10px] font-semibold uppercase tracking-[0.08em] text-[#9b9b93] mb-3">
+                Chronologie des livraisons
+              </p>
+              {tour.days.map(day => (
+                <DayBlock key={day.date} day={day} />
+              ))}
+            </div>
+          )}
+
+          {/* Pending stops */}
+          {tour.pending_stops.length > 0 && (
+            <div>
+              <div className="flex items-center gap-2 mb-2">
+                <MapPin size={11} className="text-[#9b9b93]" />
+                <p className="text-[10px] font-semibold uppercase tracking-[0.08em] text-[#9b9b93]">
+                  Restant à livrer ({tour.pending_stops.length})
+                </p>
+              </div>
+              <div className="pl-3 border-l-2 border-[#e8e8e4]">
+                {tour.pending_stops.map((s, i) => (
+                  <StopLine key={`${s.order_name}-${i}`} stop={s} showTime={false} />
+                ))}
+              </div>
+            </div>
+          )}
         </div>
       )}
     </div>
@@ -130,6 +266,7 @@ function TourRow({ tour }: { tour: TourStat }) {
 
 function DriverCard({ driver, defaultOpen }: { driver: DriverStats; defaultOpen?: boolean }) {
   const [open, setOpen] = useState(defaultOpen ?? false)
+  const hasActiveTours = driver.active_tours > 0
 
   return (
     <div className="bg-white border border-[#e8e8e4] rounded-[18px] overflow-hidden shadow-sm">
@@ -142,8 +279,18 @@ function DriverCard({ driver, defaultOpen }: { driver: DriverStats; defaultOpen?
           {driver.driver_name.charAt(0).toUpperCase()}
         </div>
         <div className="flex-1 min-w-0">
-          <p className="font-bold text-[#1a1a2e] text-base leading-tight">{driver.driver_name}</p>
-          <p className="text-xs text-[#9b9b93]">{driver.total_tours} tournée{driver.total_tours > 1 ? 's' : ''}</p>
+          <div className="flex items-center gap-2 flex-wrap">
+            <p className="font-bold text-[#1a1a2e] text-base leading-tight">{driver.driver_name}</p>
+            {hasActiveTours && (
+              <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-[#fef9c3] text-[#a16207]">
+                {driver.active_tours} en cours
+              </span>
+            )}
+          </div>
+          <p className="text-xs text-[#9b9b93]">
+            {driver.total_tours} tournée{driver.total_tours > 1 ? 's' : ''}
+            {driver.completed_tours > 0 && ` · ${driver.completed_tours} terminée${driver.completed_tours > 1 ? 's' : ''}`}
+          </p>
         </div>
         {open ? <ChevronDown size={16} className="text-[#9b9b93] shrink-0" /> : <ChevronRight size={16} className="text-[#9b9b93] shrink-0" />}
       </button>
@@ -154,7 +301,7 @@ function DriverCard({ driver, defaultOpen }: { driver: DriverStats; defaultOpen?
           icon={<Package size={16} />}
           label="Panneaux livrés"
           value={String(driver.total_panels)}
-          sub={`~${driver.avg_panels_per_tour}/tournée`}
+          sub={driver.completed_tours > 0 ? `~${driver.avg_panels_per_tour}/tournée` : undefined}
         />
         <StatBadge
           icon={<Clock size={16} />}
@@ -166,7 +313,7 @@ function DriverCard({ driver, defaultOpen }: { driver: DriverStats; defaultOpen?
           icon={<Route size={16} />}
           label="Km parcourus"
           value={driver.total_km != null ? `${driver.total_km} km` : '—'}
-          sub={driver.total_km && driver.total_tours > 1 ? `~${Math.round(driver.total_km / driver.total_tours)} km/tournée` : undefined}
+          sub={driver.total_km && driver.completed_tours > 1 ? `~${Math.round(driver.total_km / driver.completed_tours)} km/tournée` : undefined}
         />
         <StatBadge
           icon={<TrendingUp size={16} />}
@@ -193,7 +340,7 @@ function DriverCard({ driver, defaultOpen }: { driver: DriverStats; defaultOpen?
 export default function StatsView() {
   const [data, setData]       = useState<StatsResponse | null>(null)
   const [loading, setLoading] = useState(true)
-  const [month, setMonth]     = useState<string>('')   // '' = current month
+  const [month, setMonth]     = useState<string>('')
 
   // Default to current month
   useEffect(() => {
@@ -238,7 +385,7 @@ export default function StatsView() {
             </div>
             <div>
               <h1 className="text-base font-bold text-[#1a1a2e]">Stats livreurs</h1>
-              <p className="text-[11px] text-[#9b9b93]">Tournées complétées</p>
+              <p className="text-[11px] text-[#9b9b93]">Complétées + en cours</p>
             </div>
           </div>
 
@@ -267,51 +414,56 @@ export default function StatsView() {
           </div>
         ) : !data || data.drivers.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-20 text-center">
-            <p className="text-base font-semibold text-[#1a1a2e]">Aucune tournée complétée</p>
+            <p className="text-base font-semibold text-[#1a1a2e]">Aucune tournée</p>
             <p className="text-sm text-[#9b9b93] mt-1">sur {data?.month ? fmtMonth(data.month) : 'cette période'}</p>
           </div>
         ) : (
           <>
             {/* Total recap at the top */}
-            {(
-              <div className="bg-[#1a1a2e] rounded-[18px] px-5 py-5 shadow-sm">
-                <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-white/50 mb-4">
-                  Total — {data.month !== 'all' ? fmtMonth(data.month) : 'toute période'}
-                </p>
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
-                  {[
-                    { label: 'Panneaux livrés', value: String(totalPanels), icon: <Package size={15} /> },
-                    { label: 'Tournées',         value: String(totalTours),  icon: <BarChart2 size={15} /> },
-                    { label: 'Km parcourus',     value: totalKm != null ? `${totalKm} km` : '—', icon: <Route size={15} /> },
-                    { label: 'Temps cumulé',     value: fmtDuration(totalDuration), icon: <Clock size={15} /> },
-                  ].map(({ label, value, icon }) => (
-                    <div key={label} className="bg-white/8 rounded-[12px] px-4 py-3">
-                      <div className="flex items-center gap-1.5 mb-1 text-white/50">
-                        {icon}
-                        <p className="text-[10px] font-semibold uppercase tracking-[0.07em]">{label}</p>
-                      </div>
-                      <p className="text-2xl font-bold text-white leading-tight">{value}</p>
+            <div className="bg-[#1a1a2e] rounded-[18px] px-5 py-5 shadow-sm">
+              <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-white/50 mb-4">
+                Total — {data.month !== 'all' ? fmtMonth(data.month) : 'toute période'}
+              </p>
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
+                {[
+                  { label: 'Panneaux livrés', value: String(totalPanels), icon: <Package size={15} /> },
+                  { label: 'Tournées',         value: String(totalTours),  icon: <BarChart2 size={15} /> },
+                  { label: 'Km parcourus',     value: totalKm != null ? `${totalKm} km` : '—', icon: <Route size={15} /> },
+                  { label: 'Temps cumulé',     value: fmtDuration(totalDuration), icon: <Clock size={15} /> },
+                ].map(({ label, value, icon }) => (
+                  <div key={label} className="bg-white/8 rounded-[12px] px-4 py-3">
+                    <div className="flex items-center gap-1.5 mb-1 text-white/50">
+                      {icon}
+                      <p className="text-[10px] font-semibold uppercase tracking-[0.07em]">{label}</p>
                     </div>
-                  ))}
-                </div>
+                    <p className="text-2xl font-bold text-white leading-tight">{value}</p>
+                  </div>
+                ))}
+              </div>
 
-                {/* Per-driver comparison table — only when multiple drivers */}
-                {data.drivers.length > 1 && <div className="border-t border-white/10 pt-4 space-y-2">
+              {/* Per-driver comparison table */}
+              {data.drivers.length > 1 && (
+                <div className="border-t border-white/10 pt-4 space-y-2">
                   {data.drivers.map(d => (
                     <div key={d.driver_name} className="flex items-center gap-3 text-sm">
                       <div className="w-7 h-7 rounded-full bg-white/10 text-white flex items-center justify-center font-bold text-xs shrink-0">
                         {d.driver_name.charAt(0).toUpperCase()}
                       </div>
                       <span className="flex-1 font-medium text-white">{d.driver_name}</span>
+                      {d.active_tours > 0 && (
+                        <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-[#a16207]/30 text-[#fef9c3]">
+                          {d.active_tours} en cours
+                        </span>
+                      )}
                       <span className="text-white/60 text-xs">{d.total_tours} tournée{d.total_tours > 1 ? 's' : ''}</span>
                       <span className="font-semibold text-white w-20 text-right">{d.total_panels} pan.</span>
                       <span className="text-white/60 w-16 text-right">{d.total_km != null ? `${d.total_km} km` : '—'}</span>
                       <span className="text-white/60 w-16 text-right">{fmtDuration(d.total_duration_ms)}</span>
                     </div>
                   ))}
-                </div>}
-              </div>
-            )}
+                </div>
+              )}
+            </div>
 
             {/* One card per driver */}
             {data.drivers.map((driver) => (
