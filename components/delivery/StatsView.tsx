@@ -98,6 +98,141 @@ function StopLine({ stop, showTime = true }: { stop: StopEvent; showTime?: boole
   )
 }
 
+// ── Activity Calendar ─────────────────────────────────────────────────────────
+
+function toParisDayStr(iso: string): string {
+  const d = new Date(iso)
+  const s = d.toLocaleString('en-US', { timeZone: 'Europe/Paris' })
+  const p = new Date(s)
+  return [p.getFullYear(), String(p.getMonth() + 1).padStart(2, '0'), String(p.getDate()).padStart(2, '0')].join('-')
+}
+
+function addDays(yyyymmdd: string, n: number): string {
+  const [y, m, d] = yyyymmdd.split('-').map(Number)
+  const dt = new Date(y, m - 1, d + n)
+  return [dt.getFullYear(), String(dt.getMonth() + 1).padStart(2, '0'), String(dt.getDate()).padStart(2, '0')].join('-')
+}
+
+function shortDayFr(yyyymmdd: string): string {
+  const [y, m, d] = yyyymmdd.split('-').map(Number)
+  return new Date(y, m - 1, d).toLocaleDateString('fr-FR', { weekday: 'short', day: 'numeric', month: 'short' })
+}
+
+function ActivityCalendar({ tour }: { tour: TourStat }) {
+  const [tooltip, setTooltip] = useState<string | null>(null)
+
+  if (!tour.started_at) return null
+
+  const startDay = toParisDayStr(tour.started_at)
+  const endDay   = tour.completed_at ? toParisDayStr(tour.completed_at) : toParisDayStr(new Date().toISOString())
+
+  // Build ordered day list
+  const days: string[] = []
+  let cur = startDay
+  while (cur <= endDay) {
+    days.push(cur)
+    cur = addDays(cur, 1)
+  }
+
+  if (days.length === 0) return null
+
+  // Map of date → delivery count
+  const activityMap = new Map<string, number>()
+  for (const d of tour.days) activityMap.set(d.date, d.deliveries.length)
+
+  const workDays = days.filter(d => activityMap.has(d)).length
+  const idleDays = days.length - workDays
+
+  return (
+    <div>
+      {/* Summary counters */}
+      <div className="flex items-center gap-3 mb-2 flex-wrap">
+        <p className="text-[10px] font-semibold uppercase tracking-[0.08em] text-[#9b9b93]">
+          Calendrier d&apos;activité
+        </p>
+        <span className="text-[10px] font-semibold text-[#15803d] bg-[#dcfce7] px-2 py-0.5 rounded-full">
+          {workDays}j travaillé{workDays > 1 ? 's' : ''}
+        </span>
+        {idleDays > 0 && (
+          <span className="text-[10px] font-semibold text-[#b91c1c] bg-[#fee2e2] px-2 py-0.5 rounded-full">
+            {idleDays}j sans activité
+          </span>
+        )}
+        <span className="text-[10px] text-[#9b9b93]">
+          {days.length}j au total ({shortDayFr(startDay)} → {shortDayFr(endDay)})
+        </span>
+      </div>
+
+      {/* Day squares */}
+      <div className="flex flex-wrap gap-1 relative">
+        {days.map(day => {
+          const count = activityMap.get(day) ?? 0
+          const isWork = count > 0
+          // Weekends in idle are less alarming (grey) vs weekdays (red)
+          const [y, mo, d] = day.split('-').map(Number)
+          const dow = new Date(y, mo - 1, d).getDay() // 0=Sun, 6=Sat
+          const isWeekend = dow === 0 || dow === 6
+
+          let bg: string
+          if (isWork) {
+            // Shade green by delivery count: 1 = light, 4+ = dark
+            const intensity = Math.min(count, 5)
+            const greens = ['#bbf7d0', '#86efac', '#4ade80', '#22c55e', '#16a34a']
+            bg = greens[intensity - 1]
+          } else if (isWeekend) {
+            bg = '#e5e7eb' // grey — weekend, not alarming
+          } else {
+            bg = '#fecaca' // red — weekday with no activity
+          }
+
+          const label = `${shortDayFr(day)}${isWork ? ` · ${count} livraison${count > 1 ? 's' : ''}` : isWeekend ? ' · Weekend' : ' · Aucune activité'}`
+
+          return (
+            <div
+              key={day}
+              className="relative"
+              onMouseEnter={() => setTooltip(label)}
+              onMouseLeave={() => setTooltip(null)}
+            >
+              <div
+                className="w-7 h-7 rounded-[5px] flex items-center justify-center text-[10px] font-bold cursor-default select-none"
+                style={{
+                  background: bg,
+                  color: isWork && count >= 3 ? '#14532d' : isWork ? '#15803d' : isWeekend ? '#9ca3af' : '#b91c1c',
+                  border: day === toParisDayStr(new Date().toISOString()) ? '2px solid #6366f1' : '2px solid transparent',
+                }}
+              >
+                {new Date(Number(day.split('-')[0]), Number(day.split('-')[1]) - 1, Number(day.split('-')[2])).getDate()}
+              </div>
+            </div>
+          )
+        })}
+      </div>
+
+      {/* Active tooltip */}
+      {tooltip && (
+        <p className="text-[11px] text-[#1a1a2e] bg-white border border-[#e8e8e4] rounded-[7px] px-2.5 py-1.5 mt-2 shadow-sm inline-block">
+          {tooltip}
+        </p>
+      )}
+
+      {/* Legend */}
+      <div className="flex items-center gap-3 mt-2 flex-wrap">
+        {[
+          { color: '#4ade80', label: 'Jours travaillés' },
+          { color: '#fecaca', label: 'Jours ouvrés sans activité' },
+          { color: '#e5e7eb', label: 'Weekend' },
+        ].map(({ color, label }) => (
+          <div key={label} className="flex items-center gap-1">
+            <div className="w-3 h-3 rounded-[3px]" style={{ background: color }} />
+            <span className="text-[10px] text-[#9b9b93]">{label}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
 function DayBlock({ day }: { day: DayActivity }) {
   return (
     <div className="mb-3">
@@ -229,6 +364,13 @@ function TourRow({ tour }: { tour: TourStat }) {
             {!isActive && <span><span className="font-semibold">{fmtDuration(tour.duration_ms)}</span></span>}
             {tour.total_km != null && <span><span className="font-semibold">{tour.total_km} km</span></span>}
           </div>
+
+          {/* Activity calendar */}
+          {tour.started_at && (
+            <div className="bg-white rounded-[10px] px-4 py-3">
+              <ActivityCalendar tour={tour} />
+            </div>
+          )}
 
           {/* Day-by-day timeline */}
           {tour.days.length > 0 && (
