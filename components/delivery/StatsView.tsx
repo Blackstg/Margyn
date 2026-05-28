@@ -168,24 +168,17 @@ function ActivityCalendar({ tour }: { tour: TourStat }) {
         {days.map(day => {
           const count = activityMap.get(day) ?? 0
           const isWork = count > 0
-          // Weekends in idle are less alarming (grey) vs weekdays (red)
-          const [y, mo, d] = day.split('-').map(Number)
-          const dow = new Date(y, mo - 1, d).getDay() // 0=Sun, 6=Sat
-          const isWeekend = dow === 0 || dow === 6
 
           let bg: string
           if (isWork) {
-            // Shade green by delivery count: 1 = light, 4+ = dark
             const intensity = Math.min(count, 5)
             const greens = ['#bbf7d0', '#86efac', '#4ade80', '#22c55e', '#16a34a']
             bg = greens[intensity - 1]
-          } else if (isWeekend) {
-            bg = '#e5e7eb' // grey — weekend, not alarming
           } else {
-            bg = '#fecaca' // red — weekday with no activity
+            bg = '#fecaca' // red — no activity (including weekends)
           }
 
-          const label = `${shortDayFr(day)}${isWork ? ` · ${count} livraison${count > 1 ? 's' : ''}` : isWeekend ? ' · Weekend' : ' · Aucune activité'}`
+          const label = `${shortDayFr(day)}${isWork ? ` · ${count} livraison${count > 1 ? 's' : ''}` : ' · Aucune activité'}`
 
           return (
             <div
@@ -198,7 +191,7 @@ function ActivityCalendar({ tour }: { tour: TourStat }) {
                 className="w-7 h-7 rounded-[5px] flex items-center justify-center text-[10px] font-bold cursor-default select-none"
                 style={{
                   background: bg,
-                  color: isWork && count >= 3 ? '#14532d' : isWork ? '#15803d' : isWeekend ? '#9ca3af' : '#b91c1c',
+                  color: isWork && count >= 3 ? '#14532d' : isWork ? '#15803d' : '#b91c1c',
                   border: day === toParisDayStr(new Date().toISOString()) ? '2px solid #6366f1' : '2px solid transparent',
                 }}
               >
@@ -220,8 +213,7 @@ function ActivityCalendar({ tour }: { tour: TourStat }) {
       <div className="flex items-center gap-3 mt-2 flex-wrap">
         {[
           { color: '#4ade80', label: 'Jours travaillés' },
-          { color: '#fecaca', label: 'Jours ouvrés sans activité' },
-          { color: '#e5e7eb', label: 'Weekend' },
+          { color: '#fecaca', label: 'Jours sans activité' },
         ].map(({ color, label }) => (
           <div key={label} className="flex items-center gap-1">
             <div className="w-3 h-3 rounded-[3px]" style={{ background: color }} />
@@ -447,10 +439,8 @@ function DriverMonthCalendar({ driver, month }: { driver: DriverStats; month: st
     if (day > today) continue
     const hasWork = deliveryMap.has(day)
     const isActive = activeTourOnDay(day)
-    const dow = new Date(y, m - 1, d).getDay()
-    const isWeekend = dow === 0 || dow === 6
     if (hasWork) workDays++
-    else if (isActive && !isWeekend) idleWhenActive++
+    else if (isActive) idleWhenActive++
   }
 
   // Week headers
@@ -486,8 +476,6 @@ function DriverMonthCalendar({ driver, month }: { driver: DriverStats; month: st
 
         {allMonthDays.map(day => {
           const d = Number(day.split('-')[2])
-          const dow = new Date(y, m - 1, d).getDay()
-          const isWeekend = dow === 0 || dow === 6
           const isFuture  = day > today
           const count     = deliveryMap.get(day) ?? 0
           const hasWork   = count > 0
@@ -504,7 +492,7 @@ function DriverMonthCalendar({ driver, month }: { driver: DriverStats; month: st
             const greens = ['#bbf7d0', '#86efac', '#4ade80', '#22c55e', '#16a34a']
             bg = greens[intensity - 1]
             textColor = intensity >= 3 ? '#14532d' : '#15803d'
-          } else if (isActive && !isWeekend) {
+          } else if (isActive) {
             bg = '#fecaca'; textColor = '#b91c1c'
           } else {
             bg = '#f3f4f6'; textColor = '#9ca3af'
@@ -514,9 +502,9 @@ function DriverMonthCalendar({ driver, month }: { driver: DriverStats; month: st
             ? shortDayFr(day)
             : hasWork
               ? `${shortDayFr(day)} · ${count} livraison${count > 1 ? 's' : ''}`
-              : isActive && !isWeekend
+              : isActive
                 ? `${shortDayFr(day)} · Tournée active, aucune livraison`
-                : `${shortDayFr(day)} · ${isWeekend ? 'Weekend' : 'Pas de tournée'}`
+                : `${shortDayFr(day)} · Pas de tournée`
 
           return (
             <div
