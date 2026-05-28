@@ -409,11 +409,22 @@ function DriverMonthCalendar({ driver, month }: { driver: DriverStats; month: st
   const daysInMonth = new Date(y, m, 0).getDate()
   const today = toParisDayStr(new Date().toISOString())
 
-  // Build delivery map across ALL tours: date → total deliveries
-  const deliveryMap = new Map<string, number>()
+  // Build delivery map across ALL tours: date → { count, firstHour (Paris time) }
+  const deliveryMap = new Map<string, { count: number; firstHour: number }>()
   for (const tour of driver.tours) {
     for (const day of tour.days) {
-      deliveryMap.set(day.date, (deliveryMap.get(day.date) ?? 0) + day.deliveries.length)
+      const existing = deliveryMap.get(day.date)
+      // First delivery hour in Paris time
+      let firstHour = 23
+      const first = day.deliveries[0]
+      if (first?.delivered_at) {
+        const s = new Date(first.delivered_at).toLocaleString('en-US', { timeZone: 'Europe/Paris' })
+        firstHour = new Date(s).getHours()
+      }
+      deliveryMap.set(day.date, {
+        count: (existing?.count ?? 0) + day.deliveries.length,
+        firstHour: Math.min(existing?.firstHour ?? 23, firstHour),
+      })
     }
   }
 
@@ -424,9 +435,13 @@ function DriverMonthCalendar({ driver, month }: { driver: DriverStats; month: st
     const day = `${month}-${String(d).padStart(2, '0')}`
     allMonthDays.push(day)
     if (day > today) continue
-    const hasWork = deliveryMap.has(day)
-    if (hasWork) workDays++
-    else idleDays++
+    const entry = deliveryMap.get(day)
+    if (entry) {
+      if (entry.firstHour >= 12) workDays += 0.5  // demi-journée
+      else workDays++
+    } else {
+      idleDays++
+    }
   }
 
   // Week headers
@@ -438,7 +453,7 @@ function DriverMonthCalendar({ driver, month }: { driver: DriverStats; month: st
       {/* Counters */}
       <div className="flex items-center gap-2 mb-2 flex-wrap">
         <span className="text-[10px] font-bold text-[#15803d] bg-[#dcfce7] px-1.5 py-0.5 rounded-full">
-          {workDays}j ✓
+          {workDays % 1 === 0 ? workDays : workDays.toFixed(1)}j ✓
         </span>
         {idleDays > 0 && (
           <span className="text-[10px] font-bold text-[#b91c1c] bg-[#fee2e2] px-1.5 py-0.5 rounded-full">
@@ -462,10 +477,12 @@ function DriverMonthCalendar({ driver, month }: { driver: DriverStats; month: st
 
         {allMonthDays.map(day => {
           const d = Number(day.split('-')[2])
-          const isFuture  = day > today
-          const count     = deliveryMap.get(day) ?? 0
-          const hasWork   = count > 0
-          const isToday   = day === today
+          const isFuture   = day > today
+          const entry      = deliveryMap.get(day)
+          const count      = entry?.count ?? 0
+          const hasWork    = count > 0
+          const isHalfDay  = hasWork && (entry?.firstHour ?? 0) >= 12
+          const isToday    = day === today
 
           let bg: string
           let textColor: string
@@ -475,17 +492,20 @@ function DriverMonthCalendar({ driver, month }: { driver: DriverStats; month: st
           } else if (hasWork) {
             const intensity = Math.min(count, 5)
             const greens = ['#bbf7d0', '#86efac', '#4ade80', '#22c55e', '#16a34a']
-            bg = greens[intensity - 1]
+            const green = greens[intensity - 1]
+            // Demi-journée : moitié rouge (matin absent) / moitié verte (après-midi travaillé)
+            bg = isHalfDay
+              ? `linear-gradient(to bottom, #fecaca 50%, ${green} 50%)`
+              : green
             textColor = intensity >= 3 ? '#14532d' : '#15803d'
           } else {
-            // Tous les jours passés sans livraison = rouge (repos)
             bg = '#fecaca'; textColor = '#b91c1c'
           }
 
           const label = isFuture
             ? shortDayFr(day)
             : hasWork
-              ? `${shortDayFr(day)} · ${count} livraison${count > 1 ? 's' : ''}`
+              ? `${shortDayFr(day)} · ${count} livraison${count > 1 ? 's' : ''}${isHalfDay ? ' (après-midi)' : ''}`
               : `${shortDayFr(day)} · Repos`
 
           return (
@@ -529,8 +549,9 @@ function DriverMonthCalendar({ driver, month }: { driver: DriverStats; month: st
       {/* Minimal legend */}
       <div className="flex items-center gap-2 mt-1.5 flex-wrap">
         {[
-          { color: '#4ade80', label: 'Travaillé' },
-          { color: '#fecaca', label: 'Inactif' },
+          { color: '#4ade80', label: 'Journée' },
+          { color: 'linear-gradient(to bottom, #fecaca 50%, #4ade80 50%)', label: 'Demi-journée' },
+          { color: '#fecaca', label: 'Repos' },
         ].map(({ color, label }) => (
           <div key={label} className="flex items-center gap-1">
             <div className="w-2.5 h-2.5 rounded-[2px]" style={{ background: color }} />
