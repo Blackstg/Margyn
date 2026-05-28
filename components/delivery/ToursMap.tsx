@@ -159,43 +159,84 @@ export default function ToursMap({ tours, height = 480 }: Props) {
       // Geocode all stops in parallel across all tours
       const activeTours = tours.filter(t => t.status !== 'completed' && t.status !== 'cancelled')
 
+      // 1. Geocode all stops in parallel
+      type StopWithMeta = {
+        stop: TourMapStop
+        tour: TourMapTour
+        tourIdx: number
+        coord: [number, number]
+      }
+
+      const allResults: StopWithMeta[] = []
+
       await Promise.all(
         activeTours.flatMap((tour, tourIdx) =>
           tour.stops.map(async (stop) => {
             if (cancelled) return
             const coord = await geocode(stop, token)
             if (!coord || cancelled) return
-
-            hasAny = true
-            bounds.extend(coord)
-
-            const color = tourColor(tourIdx)
-            const el = makeMarkerEl(color, stop.sequence, stop.status)
-
-            const popup = new mgl.Popup({ offset: 14, closeButton: false, maxWidth: '220px' }).setHTML(`
-              <div style="font-size:12px;line-height:1.6;font-family:system-ui,sans-serif">
-                <div style="font-weight:700;color:#1a1a2e">${stop.customer_name || stop.order_name}</div>
-                <div style="color:#6b6b63">${stop.city} ${stop.zip}</div>
-                <div style="margin-top:4px;display:flex;align-items:center;gap:6px">
-                  <span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:${color};flex-shrink:0"></span>
-                  <span style="color:#1a1a2e;font-weight:600">${tour.name}</span>
-                </div>
-                <div style="color:#6b6b63;font-size:11px">${tour.driver_name} · ${stop.panel_count} panneau${stop.panel_count !== 1 ? 'x' : ''}</div>
-              </div>
-            `)
-
-            const marker = new mgl.Marker({ element: el })
-              .setLngLat(coord)
-              .setPopup(popup)
-              .addTo(map)
-
-            el.addEventListener('mouseenter', () => popup.addTo(map))
-            el.addEventListener('mouseleave', () => popup.remove())
-
-            markersRef.current.push(marker)
+            allResults.push({ stop, tour, tourIdx, coord })
           })
         )
       )
+
+      if (cancelled) return
+
+      // 2. Group by coordinate key to detect overlaps (rounded to ~11m precision)
+      const coordKey = ([lng, lat]: [number, number]) =>
+        `${lat.toFixed(4)},${lng.toFixed(4)}`
+
+      const groups = new Map<string, StopWithMeta[]>()
+      for (const r of allResults) {
+        const k = coordKey(r.coord)
+        if (!groups.has(k)) groups.set(k, [])
+        groups.get(k)!.push(r)
+      }
+
+      // 3. Apply radial jitter for overlapping stops (~40m radius)
+      const JITTER_DEG = 0.0004
+      for (const group of groups.values()) {
+        if (group.length === 1) continue
+        const [baseLng, baseLat] = group[0].coord
+        group.forEach((r, i) => {
+          const angle = (2 * Math.PI * i) / group.length
+          r.coord = [
+            baseLng + JITTER_DEG * Math.cos(angle),
+            baseLat + JITTER_DEG * Math.sin(angle),
+          ]
+        })
+      }
+
+      // 4. Add markers
+      for (const { stop, tour, tourIdx, coord } of allResults) {
+        hasAny = true
+        bounds.extend(coord)
+
+        const color = tourColor(tourIdx)
+        const el = makeMarkerEl(color, stop.sequence, stop.status)
+
+        const popup = new mgl.Popup({ offset: 14, closeButton: false, maxWidth: '220px' }).setHTML(`
+          <div style="font-size:12px;line-height:1.6;font-family:system-ui,sans-serif">
+            <div style="font-weight:700;color:#1a1a2e">${stop.customer_name || stop.order_name}</div>
+            <div style="color:#6b6b63">${stop.address1 ? stop.address1 + ', ' : ''}${stop.city} ${stop.zip}</div>
+            <div style="margin-top:4px;display:flex;align-items:center;gap:6px">
+              <span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:${color};flex-shrink:0"></span>
+              <span style="color:#1a1a2e;font-weight:600">${tour.name}</span>
+            </div>
+            <div style="color:#6b6b63;font-size:11px">${tour.driver_name} · ${stop.panel_count} panneau${stop.panel_count !== 1 ? 'x' : ''}</div>
+          </div>
+        `)
+
+        const marker = new mgl.Marker({ element: el })
+          .setLngLat(coord)
+          .setPopup(popup)
+          .addTo(map)
+
+        el.addEventListener('mouseenter', () => popup.addTo(map))
+        el.addEventListener('mouseleave', () => popup.remove())
+
+        markersRef.current.push(marker)
+      }
 
       if (cancelled) return
 
