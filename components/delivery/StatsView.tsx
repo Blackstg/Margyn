@@ -431,7 +431,7 @@ function DriverMonthCalendar({ driver, month }: { driver: DriverStats; month: st
   }
 
   // Summary counters for the month (1 jour = 8h)
-  let totalHours = 0, idleDays = 0
+  let totalHours = 0, idleDays = 0, halfDays = 0
   const allMonthDays: string[] = []
   for (let d = 1; d <= daysInMonth; d++) {
     const day = `${month}-${String(d).padStart(2, '0')}`
@@ -441,7 +441,9 @@ function DriverMonthCalendar({ driver, month }: { driver: DriverStats; month: st
     if (entry) {
       const rawWindow    = entry.lastHour - entry.firstHour
       const minFromStops = entry.count * 0.75
-      totalHours += Math.min(Math.max(rawWindow, minFromStops, 1), 8)
+      const h = Math.min(Math.max(rawWindow, minFromStops, 1), 8)
+      totalHours += h
+      if (h < 4) halfDays++  // moins de 4h = demi-journée
     } else {
       idleDays++
     }
@@ -460,6 +462,11 @@ function DriverMonthCalendar({ driver, month }: { driver: DriverStats; month: st
           {workDays % 1 === 0 ? workDays : workDays.toFixed(1)}j ✓
         </span>
         <span className="text-[10px] text-[#9b9b93]">(~{Math.round(totalHours)}h)</span>
+        {halfDays > 0 && (
+          <span className="text-[10px] font-bold text-[#a16207] bg-[#fef9c3] px-1.5 py-0.5 rounded-full">
+            {halfDays} demi-j
+          </span>
+        )}
         {idleDays > 0 && (
           <span className="text-[10px] font-bold text-[#b91c1c] bg-[#fee2e2] px-1.5 py-0.5 rounded-full">
             {idleDays}j repos
