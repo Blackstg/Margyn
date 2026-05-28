@@ -439,7 +439,9 @@ function DriverMonthCalendar({ driver, month }: { driver: DriverStats; month: st
     if (day > today) continue
     const entry = deliveryMap.get(day)
     if (entry) {
-      totalHours += Math.min(entry.lastHour - entry.firstHour, 8)
+      const rawWindow    = entry.lastHour - entry.firstHour
+      const minFromStops = entry.count * 0.75
+      totalHours += Math.min(Math.max(rawWindow, minFromStops, 1), 8)
     } else {
       idleDays++
     }
@@ -487,7 +489,12 @@ function DriverMonthCalendar({ driver, month }: { driver: DriverStats; month: st
           const firstHour  = entry?.firstHour ?? 0
           const lastHour   = entry?.lastHour  ?? 0
           // Nb de barres vertes (1 barre = 1h, max 8)
-          const hoursWorked = hasWork ? Math.min(Math.round(lastHour - firstHour), 8) : 0
+          // Minimum : 45min/stop (trajet inclus) + 30min retour, au moins 1h si livraison
+          const rawWindow   = lastHour - firstHour
+          const minFromStops = count * 0.75  // 45min par stop
+          const hoursWorked = hasWork
+            ? Math.min(Math.round(Math.max(rawWindow, minFromStops, 1)), 8)
+            : 0
           const isToday    = day === today
 
           // Couleur verte selon intensité (heures travaillées)
