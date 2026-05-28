@@ -406,7 +406,176 @@ function TourRow({ tour }: { tour: TourStat }) {
   )
 }
 
-function DriverCard({ driver, defaultOpen }: { driver: DriverStats; defaultOpen?: boolean }) {
+// ── Driver Monthly Calendar ───────────────────────────────────────────────────
+
+function DriverMonthCalendar({ driver, month }: { driver: DriverStats; month: string }) {
+  const [tooltip, setTooltip] = useState<string | null>(null)
+
+  if (!month || !/^\d{4}-\d{2}$/.test(month)) return null
+
+  const [y, m] = month.split('-').map(Number)
+  const daysInMonth = new Date(y, m, 0).getDate()
+  const today = toParisDayStr(new Date().toISOString())
+
+  // Build delivery map across ALL tours: date → total deliveries
+  const deliveryMap = new Map<string, number>()
+  for (const tour of driver.tours) {
+    for (const day of tour.days) {
+      deliveryMap.set(day.date, (deliveryMap.get(day.date) ?? 0) + day.deliveries.length)
+    }
+  }
+
+  // For each day, determine if ANY tour was active (started_at ≤ day ≤ completed_at or in_progress today)
+  const activeTourOnDay = (day: string): boolean => {
+    for (const tour of driver.tours) {
+      if (!tour.started_at) continue
+      const start = toParisDayStr(tour.started_at)
+      const end   = tour.completed_at
+        ? toParisDayStr(tour.completed_at)
+        : today
+      if (day >= start && day <= end) return true
+    }
+    return false
+  }
+
+  // Summary counters for the month
+  let workDays = 0, idleWhenActive = 0
+  const allMonthDays: string[] = []
+  for (let d = 1; d <= daysInMonth; d++) {
+    const day = `${month}-${String(d).padStart(2, '0')}`
+    allMonthDays.push(day)
+    if (day > today) continue
+    const hasWork = deliveryMap.has(day)
+    const isActive = activeTourOnDay(day)
+    const dow = new Date(y, m - 1, d).getDay()
+    const isWeekend = dow === 0 || dow === 6
+    if (hasWork) workDays++
+    else if (isActive && !isWeekend) idleWhenActive++
+  }
+
+  // Week headers
+  const firstDow = new Date(y, m - 1, 1).getDay() // 0=Sun
+  const mondayOffset = (firstDow + 6) % 7 // shift so Mon=0
+
+  return (
+    <div className="px-5 pb-4">
+      <div className="bg-[#f8f7f5] rounded-[14px] px-4 py-3">
+        {/* Header row */}
+        <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
+          <p className="text-[10px] font-semibold uppercase tracking-[0.08em] text-[#9b9b93]">
+            Activité du mois
+          </p>
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="text-[10px] font-bold text-[#15803d] bg-[#dcfce7] px-2 py-0.5 rounded-full">
+              {workDays}j travaillé{workDays > 1 ? 's' : ''}
+            </span>
+            {idleWhenActive > 0 && (
+              <span className="text-[10px] font-bold text-[#b91c1c] bg-[#fee2e2] px-2 py-0.5 rounded-full">
+                {idleWhenActive}j sans activité (tournée active)
+              </span>
+            )}
+          </div>
+        </div>
+
+        {/* Day-of-week header */}
+        <div className="grid grid-cols-7 gap-1 mb-1">
+          {['L', 'M', 'M', 'J', 'V', 'S', 'D'].map((d, i) => (
+            <div key={i} className="text-center text-[9px] font-semibold text-[#9b9b93]">{d}</div>
+          ))}
+        </div>
+
+        {/* Calendar grid */}
+        <div className="grid grid-cols-7 gap-1">
+          {/* Empty cells before first day */}
+          {Array.from({ length: mondayOffset }).map((_, i) => (
+            <div key={`e${i}`} />
+          ))}
+
+          {allMonthDays.map(day => {
+            const d = Number(day.split('-')[2])
+            const dow = new Date(y, m - 1, d).getDay()
+            const isWeekend = dow === 0 || dow === 6
+            const isFuture  = day > today
+            const count     = deliveryMap.get(day) ?? 0
+            const hasWork   = count > 0
+            const isActive  = !isFuture && activeTourOnDay(day)
+            const isToday   = day === today
+
+            let bg: string
+            let textColor: string
+
+            if (isFuture) {
+              bg = 'transparent'; textColor = '#d1d5db'
+            } else if (hasWork) {
+              const intensity = Math.min(count, 5)
+              const greens = ['#bbf7d0', '#86efac', '#4ade80', '#22c55e', '#16a34a']
+              bg = greens[intensity - 1]
+              textColor = intensity >= 3 ? '#14532d' : '#15803d'
+            } else if (isActive && !isWeekend) {
+              bg = '#fecaca'; textColor = '#b91c1c'
+            } else if (isWeekend) {
+              bg = '#f3f4f6'; textColor = '#9ca3af'
+            } else {
+              bg = '#f3f4f6'; textColor = '#9ca3af'
+            }
+
+            const label = isFuture
+              ? shortDayFr(day)
+              : hasWork
+                ? `${shortDayFr(day)} · ${count} livraison${count > 1 ? 's' : ''}`
+                : isActive && !isWeekend
+                  ? `${shortDayFr(day)} · Tournée active, aucune livraison`
+                  : `${shortDayFr(day)} · ${isWeekend ? 'Weekend' : 'Pas de tournée'}`
+
+            return (
+              <div
+                key={day}
+                className="relative aspect-square"
+                onMouseEnter={() => setTooltip(label)}
+                onMouseLeave={() => setTooltip(null)}
+              >
+                <div
+                  className="w-full h-full rounded-[4px] flex items-center justify-center text-[10px] font-bold cursor-default select-none"
+                  style={{
+                    background: bg,
+                    color: textColor,
+                    outline: isToday ? '2px solid #6366f1' : 'none',
+                    outlineOffset: '1px',
+                  }}
+                >
+                  {d}
+                </div>
+              </div>
+            )
+          })}
+        </div>
+
+        {/* Tooltip */}
+        {tooltip && (
+          <p className="text-[11px] text-[#1a1a2e] bg-white border border-[#e8e8e4] rounded-[7px] px-2.5 py-1.5 mt-2 shadow-sm inline-block">
+            {tooltip}
+          </p>
+        )}
+
+        {/* Legend */}
+        <div className="flex items-center gap-3 mt-2 flex-wrap">
+          {[
+            { color: '#4ade80', label: 'Travaillé' },
+            { color: '#fecaca', label: 'Inactif (tournée active)' },
+            { color: '#f3f4f6', label: 'Weekend / pas de tournée' },
+          ].map(({ color, label }) => (
+            <div key={label} className="flex items-center gap-1">
+              <div className="w-3 h-3 rounded-[3px]" style={{ background: color }} />
+              <span className="text-[10px] text-[#9b9b93]">{label}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function DriverCard({ driver, defaultOpen, month }: { driver: DriverStats; defaultOpen?: boolean; month: string }) {
   const [open, setOpen] = useState(defaultOpen ?? false)
   const hasActiveTours = driver.active_tours > 0
 
@@ -463,6 +632,9 @@ function DriverCard({ driver, defaultOpen }: { driver: DriverStats; defaultOpen?
           value={String(driver.total_tours)}
         />
       </div>
+
+      {/* Monthly calendar — always visible, no need to open */}
+      <DriverMonthCalendar driver={driver} month={month} />
 
       {/* Tour list */}
       {open && (
@@ -609,7 +781,7 @@ export default function StatsView() {
 
             {/* One card per driver */}
             {data.drivers.map((driver) => (
-              <DriverCard key={driver.driver_name} driver={driver} defaultOpen />
+              <DriverCard key={driver.driver_name} driver={driver} month={month} defaultOpen />
             ))}
           </>
         )}
