@@ -506,6 +506,12 @@ function DriverMonthCalendar({ driver, month }: { driver: DriverStats; month: st
                 ? `${shortDayFr(day)} · Tournée active, aucune livraison`
                 : `${shortDayFr(day)} · Pas de tournée`
 
+          // Days with no active tour: empty cell (no square, no number)
+          const noTour = !isFuture && !hasWork && !isActive
+          if (noTour && !isToday) {
+            return <div key={day} className="w-full aspect-square" />
+          }
+
           return (
             <div
               key={day}
