@@ -2294,6 +2294,48 @@ function LivreurView() {
   const [tours, setTours] = useState<Tour[]>([])
   const [selectedTourId, setSelectedTourId] = useState('')
   const [loading, setLoading] = useState(true)
+
+  // ── GPS tracking silencieux ───────────────────────────────────────────────
+  useEffect(() => {
+    if (!navigator?.geolocation) return
+    const supabase = createBrowserClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+    )
+    let intervalId: ReturnType<typeof setInterval> | null = null
+
+    async function sendPos(driverName: string) {
+      try {
+        const pos = await new Promise<GeolocationPosition>((ok, err) =>
+          navigator.geolocation.getCurrentPosition(ok, err, {
+            enableHighAccuracy: true, timeout: 15_000, maximumAge: 60_000,
+          })
+        )
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const battery = await (navigator as any).getBattery?.().then((b: any) => Math.round(b.level * 100)).catch(() => null)
+        await fetch('/api/delivery/location', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            driver_name: driverName,
+            lat:      pos.coords.latitude,
+            lng:      pos.coords.longitude,
+            accuracy: pos.coords.accuracy,
+            battery,
+          }),
+        })
+      } catch { /* silencieux */ }
+    }
+
+    supabase.auth.getUser().then(({ data }) => {
+      const meta       = data.user?.user_metadata
+      const driverName = (meta?.full_name ?? meta?.name ?? data.user?.email ?? 'Inconnu') as string
+      sendPos(driverName)
+      intervalId = setInterval(() => sendPos(driverName), 5 * 60 * 1000)
+    })
+
+    return () => { if (intervalId) clearInterval(intervalId) }
+  }, [])
   const [screen, setScreen] = useState<LivreurScreen>('home')
   const [stopIdx, setStopIdx] = useState(0)
   const [marking, setMarking] = useState(false)
