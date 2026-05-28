@@ -139,24 +139,25 @@ export async function GET(req: NextRequest) {
       .in('status', ['completed', 'in_progress'])
       .order('planned_date', { ascending: false })
 
-    // For month filter: include any tour that overlaps with the selected month.
-    // Two chained .or() (AND between them):
-    //   1st: at least one date >= month start  (tour starts/ends after month begins)
-    //   2nd: at least one date <  month end    (tour starts/ends before month ends)
-    // Together they capture: planned in month, started in month, completed in month,
-    // or spanning the month (e.g. April tour that ends May 2).
+    // For month filter: fetch a broad window (3 months back) then filter client-side.
+    // This catches tours where planned_date/started_at/completed_at are all in the
+    // previous month but some stops' delivered_at fall in the selected month.
     if (fromDate && toDate) {
-      const fromISO = `${fromDate}T00:00:00Z`
-      const toISO   = `${toDate}T00:00:00Z`
+      const [y, m] = fromDate.split('-').map(Number)
+      const broadY = m <= 3 ? y - 1 : y
+      const broadM = ((m - 4 + 12) % 12) + 1
+      const broadFrom = `${broadY}-${String(broadM).padStart(2, '0')}-01`
+      const broadFromISO = `${broadFrom}T00:00:00Z`
+      const toISO = `${toDate}T00:00:00Z`
       query = query.or(
-        `planned_date.gte.${fromDate},started_at.gte.${fromISO},completed_at.gte.${fromISO},planned_date.is.null`
+        `planned_date.gte.${broadFrom},started_at.gte.${broadFromISO},completed_at.gte.${broadFromISO},planned_date.is.null`
       )
       query = query.or(
         `planned_date.lt.${toDate},started_at.lt.${toISO},completed_at.lt.${toISO},status.eq.in_progress`
       )
     }
 
-    const [{ data: tours, error }, { data: allDates }] = await Promise.all([
+    const [{ data: rawTours, error }, { data: allDates }] = await Promise.all([
       query,
       admin
         .from('delivery_tours')
@@ -167,6 +168,27 @@ export async function GET(req: NextRequest) {
     ])
 
     if (error) throw error
+
+    // Client-side filter: keep only tours that overlap the selected month.
+    // A tour overlaps if: planned/started/completed date is in range,
+    // OR any stop's delivered_at is in the month (catches April tours with May deliveries).
+    const tours = fromDate && toDate ? (rawTours ?? []).filter(tour => {
+      const fromISO = `${fromDate}T00:00:00Z`
+      const toISO   = `${toDate}T00:00:00Z`
+      // Any stop delivered in the month
+      const stops = (tour.delivery_stops ?? []) as { delivered_at: string | null }[]
+      if (stops.some(s => s.delivered_at && s.delivered_at >= fromISO && s.delivered_at < toISO)) return true
+      // planned_date in month
+      if (tour.planned_date && tour.planned_date >= fromDate && tour.planned_date < toDate) return true
+      // started_at in month
+      if (tour.started_at && tour.started_at >= fromISO && tour.started_at < toISO) return true
+      // completed_at in month
+      if (tour.completed_at && tour.completed_at >= fromISO && tour.completed_at < toISO) return true
+      // tour spans the month: started before month end AND (ended after month start OR in_progress)
+      const startAny = tour.started_at ?? (tour.planned_date ? `${tour.planned_date}T00:00:00Z` : null)
+      if (startAny && startAny < toISO && (!tour.completed_at || tour.completed_at >= fromISO)) return true
+      return false
+    }) : (rawTours ?? [])
 
     // Available months for picker
     const monthSet = new Set<string>()
