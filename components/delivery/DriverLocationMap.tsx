@@ -69,7 +69,6 @@ export default function DriverLocationMap({ driverName }: Props) {
     if (!token) return
 
     import('mapbox-gl').then(({ default: mapboxgl }) => {
-      import('mapbox-gl/dist/mapbox-gl.css')
       mapboxgl.accessToken = token
 
       const map = new mapboxgl.Map({
