@@ -139,10 +139,26 @@ export async function GET(req: NextRequest) {
       .in('status', ['completed', 'in_progress'])
       .order('planned_date', { ascending: false })
 
-    // For month filter: use planned_date. Active tours without planned_date still show.
+    // For month filter: include any tour that overlaps with the month.
+    // A tour overlaps if: planned_date in month, OR started_at in month,
+    // OR completed_at in month, OR tour spans the month (started before end, ended after start).
     if (fromDate && toDate) {
-      query = query.or(`planned_date.gte.${fromDate},planned_date.is.null`)
-      query = query.or(`planned_date.lt.${toDate},planned_date.is.null`)
+      const fromISO = `${fromDate}T00:00:00Z`
+      const toISO   = `${toDate}T00:00:00Z`
+      query = query.or(
+        // planned_date in month
+        `and(planned_date.gte.${fromDate},planned_date.lt.${toDate}),` +
+        // no planned_date → always include
+        `planned_date.is.null,` +
+        // started_at in month
+        `and(started_at.gte.${fromISO},started_at.lt.${toISO}),` +
+        // completed_at in month
+        `and(completed_at.gte.${fromISO},completed_at.lt.${toISO}),` +
+        // spans the month: started before month end AND ended after month start
+        `and(started_at.lt.${toISO},completed_at.gte.${fromISO}),` +
+        // in_progress and started before month end
+        `and(status.eq.in_progress,started_at.lt.${toISO})`
+      )
     }
 
     const [{ data: tours, error }, { data: allDates }] = await Promise.all([
