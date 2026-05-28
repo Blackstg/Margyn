@@ -597,8 +597,8 @@ function DriverCard({ driver, defaultOpen, month }: { driver: DriverStats; defau
 
       {/* Two-column body: stats left, calendar right */}
       <div className="px-5 pb-4 flex gap-4 items-start">
-        {/* Left: stat badges stacked 2x2 */}
-        <div className="grid grid-cols-2 gap-2 shrink-0 w-[260px]">
+        {/* Left: stat badges stacked vertically */}
+        <div className="flex flex-col gap-2 shrink-0 w-[160px]">
           <StatBadge
             icon={<Package size={16} />}
             label="Panneaux livrés"
