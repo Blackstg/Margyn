@@ -430,8 +430,8 @@ function DriverMonthCalendar({ driver, month }: { driver: DriverStats; month: st
     }
   }
 
-  // Summary counters for the month
-  let workDays = 0, idleDays = 0
+  // Summary counters for the month (1 jour = 8h)
+  let totalHours = 0, idleDays = 0
   const allMonthDays: string[] = []
   for (let d = 1; d <= daysInMonth; d++) {
     const day = `${month}-${String(d).padStart(2, '0')}`
@@ -439,13 +439,12 @@ function DriverMonthCalendar({ driver, month }: { driver: DriverStats; month: st
     if (day > today) continue
     const entry = deliveryMap.get(day)
     if (entry) {
-      const isHalf = entry.firstHour >= 12 || entry.lastHour <= 13
-      if (isHalf) workDays += 0.5
-      else workDays++
+      totalHours += Math.min(entry.lastHour - entry.firstHour, 8)
     } else {
       idleDays++
     }
   }
+  const workDays = Math.round(totalHours / 8 * 10) / 10
 
   // Week headers
   const firstDow = new Date(y, m - 1, 1).getDay() // 0=Sun
@@ -458,6 +457,7 @@ function DriverMonthCalendar({ driver, month }: { driver: DriverStats; month: st
         <span className="text-[10px] font-bold text-[#15803d] bg-[#dcfce7] px-1.5 py-0.5 rounded-full">
           {workDays % 1 === 0 ? workDays : workDays.toFixed(1)}j ✓
         </span>
+        <span className="text-[10px] text-[#9b9b93]">(~{Math.round(totalHours)}h)</span>
         {idleDays > 0 && (
           <span className="text-[10px] font-bold text-[#b91c1c] bg-[#fee2e2] px-1.5 py-0.5 rounded-full">
             {idleDays}j repos
@@ -481,72 +481,70 @@ function DriverMonthCalendar({ driver, month }: { driver: DriverStats; month: st
         {allMonthDays.map(day => {
           const d = Number(day.split('-')[2])
           const isFuture    = day > today
-          const entry       = deliveryMap.get(day)
-          const count       = entry?.count ?? 0
-          const hasWork     = count > 0
-          const firstHour   = entry?.firstHour ?? 0
-          const lastHour    = entry?.lastHour  ?? 24
-          // Demi après-midi : première livraison après 12h
-          const isAfternoon = hasWork && firstHour >= 12
-          // Demi matin : dernière livraison avant ou à 13h
-          const isMorning   = hasWork && !isAfternoon && lastHour <= 13
-          void (isAfternoon || isMorning) // isHalfDay intentionally removed
-          const isToday     = day === today
+          const entry      = deliveryMap.get(day)
+          const count      = entry?.count ?? 0
+          const hasWork    = count > 0
+          const firstHour  = entry?.firstHour ?? 0
+          const lastHour   = entry?.lastHour  ?? 0
+          // Nb de barres vertes (1 barre = 1h, max 8)
+          const hoursWorked = hasWork ? Math.min(Math.round(lastHour - firstHour), 8) : 0
+          const isToday    = day === today
 
-          let bg: string
-          let textColor: string
+          // Couleur verte selon intensité (heures travaillées)
+          const greenPalette = ['#bbf7d0', '#86efac', '#4ade80', '#22c55e', '#16a34a', '#15803d', '#166534', '#14532d']
+          const green = greenPalette[Math.max(0, hoursWorked - 1)]
+          const textGreen = hoursWorked >= 5 ? '#fff' : '#14532d'
 
-          if (isFuture) {
-            bg = 'transparent'; textColor = '#d1d5db'
-          } else if (hasWork) {
-            const intensity = Math.min(count, 5)
-            const greens = ['#bbf7d0', '#86efac', '#4ade80', '#22c55e', '#16a34a']
-            const green = greens[intensity - 1]
-            if (isAfternoon) {
-              // Matin libre (rouge) → après-midi travaillé (vert)
-              bg = `linear-gradient(to bottom, #fecaca 50%, ${green} 50%)`
-            } else if (isMorning) {
-              // Matin travaillé (vert) → après-midi libre (rouge)
-              bg = `linear-gradient(to bottom, ${green} 50%, #fecaca 50%)`
-            } else {
-              bg = green
-            }
-            textColor = intensity >= 3 ? '#14532d' : '#15803d'
-          } else {
-            bg = '#fecaca'; textColor = '#b91c1c'
-          }
-
-          const halfLabel = isAfternoon ? ' (après-midi seulement)' : isMorning ? ' (matin seulement)' : ''
           const label = isFuture
             ? shortDayFr(day)
             : hasWork
-              ? `${shortDayFr(day)} · ${count} livraison${count > 1 ? 's' : ''}${halfLabel}`
+              ? `${shortDayFr(day)} · ${hoursWorked}h de travail · ${count} livraison${count > 1 ? 's' : ''}`
               : `${shortDayFr(day)} · Repos`
 
           return (
             <div
               key={day}
-              className="w-full aspect-square min-h-[28px]"
+              className="w-full aspect-square min-h-[32px]"
               onMouseEnter={() => setTooltip(label)}
               onMouseLeave={() => setTooltip(null)}
             >
               <div
-                className="relative w-full h-full rounded-[3px] flex items-center justify-center text-[9px] font-bold cursor-default select-none"
+                className="relative w-full h-full rounded-[3px] overflow-hidden flex flex-col-reverse cursor-default select-none"
                 style={{
-                  background: bg,
-                  color: textColor,
-                  outline: isToday ? '1.5px solid #6366f1' : 'none',
+                  outline: isToday ? '2px solid #6366f1' : 'none',
                   outlineOffset: '1px',
                 }}
               >
-                {d}
-                {hasWork && (
-                  <span
-                    className="absolute bottom-[2px] right-[2px] w-[14px] h-[14px] rounded-full bg-white flex items-center justify-center text-[9px] font-bold leading-none"
-                    style={{ color: textColor }}
-                  >
-                    {count}
-                  </span>
+                {isFuture ? (
+                  <div className="flex-1 flex items-center justify-center text-[9px] font-bold text-[#d1d5db]">
+                    {d}
+                  </div>
+                ) : (
+                  <>
+                    {Array.from({ length: 8 }).map((_, i) => (
+                      <div
+                        key={i}
+                        className="flex-1 w-full"
+                        style={{
+                          background: i < hoursWorked ? green : '#fecaca',
+                          borderTop: i > 0 ? '0.5px solid rgba(255,255,255,0.25)' : 'none',
+                        }}
+                      />
+                    ))}
+                    {/* Numéro du jour en bas à gauche */}
+                    <span
+                      className="absolute bottom-[1px] left-[2px] text-[8px] font-bold leading-none"
+                      style={{ color: hoursWorked >= 4 ? textGreen : '#b91c1c' }}
+                    >
+                      {d}
+                    </span>
+                    {/* Badge nombre de stops en haut à droite */}
+                    {hasWork && (
+                      <span className="absolute top-[1px] right-[1px] w-[13px] h-[13px] rounded-full bg-white flex items-center justify-center text-[7px] font-bold leading-none text-[#15803d]">
+                        {count}
+                      </span>
+                    )}
+                  </>
                 )}
               </div>
             </div>
@@ -564,8 +562,8 @@ function DriverMonthCalendar({ driver, month }: { driver: DriverStats; month: st
       {/* Minimal legend */}
       <div className="flex items-center gap-2 mt-1.5 flex-wrap">
         {[
-          { color: '#4ade80', label: 'Journée' },
-          { color: 'linear-gradient(to bottom, #fecaca 50%, #4ade80 50%)', label: 'Demi-journée' },
+          { color: '#16a34a', label: '8h (journée)' },
+          { color: '#4ade80', label: '4h (demi)' },
           { color: '#fecaca', label: 'Repos' },
         ].map(({ color, label }) => (
           <div key={label} className="flex items-center gap-1">
