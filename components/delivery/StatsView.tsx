@@ -417,19 +417,6 @@ function DriverMonthCalendar({ driver, month }: { driver: DriverStats; month: st
     }
   }
 
-  // For each day, determine if ANY tour was active (started_at ≤ day ≤ completed_at or in_progress today)
-  const activeTourOnDay = (day: string): boolean => {
-    for (const tour of driver.tours) {
-      if (!tour.started_at) continue
-      const start = toParisDayStr(tour.started_at)
-      const end   = tour.completed_at
-        ? toParisDayStr(tour.completed_at)
-        : today
-      if (day >= start && day <= end) return true
-    }
-    return false
-  }
-
   // Summary counters for the month
   let workDays = 0, idleDays = 0
   const allMonthDays: string[] = []
