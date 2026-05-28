@@ -495,7 +495,7 @@ function DriverMonthCalendar({ driver, month }: { driver: DriverStats; month: st
           } else if (isActive) {
             bg = '#fecaca'; textColor = '#b91c1c'
           } else {
-            bg = '#f3f4f6'; textColor = '#9ca3af'
+            bg = 'transparent'; textColor = '#d1d5db'
           }
 
           const label = isFuture
