@@ -431,16 +431,15 @@ function DriverMonthCalendar({ driver, month }: { driver: DriverStats; month: st
   }
 
   // Summary counters for the month
-  let workDays = 0, idleWhenActive = 0
+  let workDays = 0, idleDays = 0
   const allMonthDays: string[] = []
   for (let d = 1; d <= daysInMonth; d++) {
     const day = `${month}-${String(d).padStart(2, '0')}`
     allMonthDays.push(day)
     if (day > today) continue
     const hasWork = deliveryMap.has(day)
-    const isActive = activeTourOnDay(day)
     if (hasWork) workDays++
-    else if (isActive) idleWhenActive++
+    else idleDays++
   }
 
   // Week headers
@@ -454,9 +453,9 @@ function DriverMonthCalendar({ driver, month }: { driver: DriverStats; month: st
         <span className="text-[10px] font-bold text-[#15803d] bg-[#dcfce7] px-1.5 py-0.5 rounded-full">
           {workDays}j ✓
         </span>
-        {idleWhenActive > 0 && (
+        {idleDays > 0 && (
           <span className="text-[10px] font-bold text-[#b91c1c] bg-[#fee2e2] px-1.5 py-0.5 rounded-full">
-            {idleWhenActive}j inactif
+            {idleDays}j repos
           </span>
         )}
       </div>
@@ -479,7 +478,6 @@ function DriverMonthCalendar({ driver, month }: { driver: DriverStats; month: st
           const isFuture  = day > today
           const count     = deliveryMap.get(day) ?? 0
           const hasWork   = count > 0
-          const isActive  = !isFuture && activeTourOnDay(day)
           const isToday   = day === today
 
           let bg: string
@@ -492,25 +490,16 @@ function DriverMonthCalendar({ driver, month }: { driver: DriverStats; month: st
             const greens = ['#bbf7d0', '#86efac', '#4ade80', '#22c55e', '#16a34a']
             bg = greens[intensity - 1]
             textColor = intensity >= 3 ? '#14532d' : '#15803d'
-          } else if (isActive) {
-            bg = '#fecaca'; textColor = '#b91c1c'
           } else {
-            bg = 'transparent'; textColor = '#d1d5db'
+            // Tous les jours passés sans livraison = rouge (repos)
+            bg = '#fecaca'; textColor = '#b91c1c'
           }
 
           const label = isFuture
             ? shortDayFr(day)
             : hasWork
               ? `${shortDayFr(day)} · ${count} livraison${count > 1 ? 's' : ''}`
-              : isActive
-                ? `${shortDayFr(day)} · Tournée active, aucune livraison`
-                : `${shortDayFr(day)} · Pas de tournée`
-
-          // Days with no active tour: empty cell (no square, no number)
-          const noTour = !isFuture && !hasWork && !isActive
-          if (noTour && !isToday) {
-            return <div key={day} className="w-full aspect-square" />
-          }
+              : `${shortDayFr(day)} · Repos`
 
           return (
             <div
