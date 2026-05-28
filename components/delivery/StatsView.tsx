@@ -430,8 +430,8 @@ function DriverMonthCalendar({ driver, month }: { driver: DriverStats; month: st
     }
   }
 
-  // Summary counters for the month (1 jour = 8h)
-  let totalHours = 0, idleDays = 0, halfDays = 0
+  // Summary counters for the month (1 jour = 8h, seuil demi-journée = 4h)
+  let totalHours = 0, fullWorkDays = 0, halfWorkDays = 0, idleDays = 0
   const allMonthDays: string[] = []
   for (let d = 1; d <= daysInMonth; d++) {
     const day = `${month}-${String(d).padStart(2, '0')}`
@@ -443,12 +443,12 @@ function DriverMonthCalendar({ driver, month }: { driver: DriverStats; month: st
       const minFromStops = entry.count * 0.75
       const h = Math.min(Math.max(rawWindow, minFromStops, 1), 8)
       totalHours += h
-      if (h < 4) halfDays++  // moins de 4h = demi-journée
+      if (h >= 4) fullWorkDays++   // 4h+ = journée complète
+      else        halfWorkDays++   // < 4h = demi-journée travaillée
     } else {
       idleDays++
     }
   }
-  const workDays = Math.round(totalHours / 8 * 10) / 10
 
   // Week headers
   const firstDow = new Date(y, m - 1, 1).getDay() // 0=Sun
@@ -458,15 +458,17 @@ function DriverMonthCalendar({ driver, month }: { driver: DriverStats; month: st
     <div className="bg-[#f8f7f5] rounded-[14px] px-3 py-2.5 w-full">
       {/* Counters */}
       <div className="flex items-center gap-2 mb-2 flex-wrap">
-        <span className="text-[10px] font-bold text-[#15803d] bg-[#dcfce7] px-1.5 py-0.5 rounded-full">
-          {workDays % 1 === 0 ? workDays : workDays.toFixed(1)}j ✓
-        </span>
-        <span className="text-[10px] text-[#9b9b93]">(~{Math.round(totalHours)}h)</span>
-        {halfDays > 0 && (
-          <span className="text-[10px] font-bold text-[#a16207] bg-[#fef9c3] px-1.5 py-0.5 rounded-full">
-            {halfDays} demi-j
+        {fullWorkDays > 0 && (
+          <span className="text-[10px] font-bold text-[#15803d] bg-[#dcfce7] px-1.5 py-0.5 rounded-full">
+            {fullWorkDays}j complètes
           </span>
         )}
+        {halfWorkDays > 0 && (
+          <span className="text-[10px] font-bold text-[#15803d] bg-[#bbf7d0] px-1.5 py-0.5 rounded-full">
+            {halfWorkDays} demi-j travaillées
+          </span>
+        )}
+        <span className="text-[10px] text-[#9b9b93]">(~{Math.round(totalHours)}h)</span>
         {idleDays > 0 && (
           <span className="text-[10px] font-bold text-[#b91c1c] bg-[#fee2e2] px-1.5 py-0.5 rounded-full">
             {idleDays}j repos
