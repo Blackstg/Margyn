@@ -184,9 +184,6 @@ export async function GET(req: NextRequest) {
       if (tour.started_at && tour.started_at >= fromISO && tour.started_at < toISO) return true
       // completed_at in month
       if (tour.completed_at && tour.completed_at >= fromISO && tour.completed_at < toISO) return true
-      // tour spans the month: started before month end AND (ended after month start OR in_progress)
-      const startAny = tour.started_at ?? (tour.planned_date ? `${tour.planned_date}T00:00:00Z` : null)
-      if (startAny && startAny < toISO && (!tour.completed_at || tour.completed_at >= fromISO)) return true
       return false
     }) : (rawTours ?? [])
 

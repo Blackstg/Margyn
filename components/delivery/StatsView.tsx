@@ -496,7 +496,7 @@ function DriverMonthCalendar({ driver, month }: { driver: DriverStats; month: st
               onMouseLeave={() => setTooltip(null)}
             >
               <div
-                className="w-full h-full rounded-[3px] flex items-center justify-center text-[9px] font-bold cursor-default select-none"
+                className="w-full h-full rounded-[3px] flex flex-col items-center justify-center cursor-default select-none leading-none gap-[1px]"
                 style={{
                   background: bg,
                   color: textColor,
@@ -504,7 +504,14 @@ function DriverMonthCalendar({ driver, month }: { driver: DriverStats; month: st
                   outlineOffset: '1px',
                 }}
               >
-                {d}
+                {hasWork ? (
+                  <>
+                    <span className="text-[9px] font-bold">{count}</span>
+                    <span className="text-[7px] opacity-70">{d}</span>
+                  </>
+                ) : (
+                  <span className="text-[9px] font-bold">{d}</span>
+                )}
               </div>
             </div>
           )
