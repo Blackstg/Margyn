@@ -1,8 +1,13 @@
 'use client'
 
 import { useState, useEffect, useCallback } from 'react'
-import { BarChart2, TrendingUp, Clock, Route, Package, ChevronDown, ChevronRight, AlertTriangle, Calendar, MapPin } from 'lucide-react'
+import dynamic from 'next/dynamic'
+import { BarChart2, TrendingUp, Clock, Route, Package, ChevronDown, ChevronRight, AlertTriangle, Calendar, MapPin, Navigation } from 'lucide-react'
 import type { StatsResponse, DriverStats, TourStat, DayActivity, StopEvent } from '@/app/api/delivery/stats/route'
+
+const DriverLocationMap = dynamic(() => import('./DriverLocationMap'), { ssr: false })
+
+const GPS_DRIVERS = ['Khalid']  // livreurs trackés
 
 // ── Formatters ────────────────────────────────────────────────────────────────
 
@@ -688,6 +693,7 @@ export default function StatsView() {
   const [data, setData]       = useState<StatsResponse | null>(null)
   const [loading, setLoading] = useState(true)
   const [month, setMonth]     = useState<string>('')
+  const [tab, setTab]         = useState<'stats' | 'gps'>('stats')
 
   // Default to current month
   useEffect(() => {
@@ -736,26 +742,74 @@ export default function StatsView() {
             </div>
           </div>
 
-          {/* Month picker */}
           <div className="flex items-center gap-2">
-            <select
-              value={month}
-              onChange={e => setMonth(e.target.value)}
-              className="text-sm font-medium text-[#1a1a2e] bg-[#f5f4f2] border border-[#e8e8e4] rounded-[10px] px-3 py-2 outline-none cursor-pointer"
-            >
-              {(data?.months ?? []).includes(month) ? null : month ? (
-                <option value={month}>{fmtMonth(month)}</option>
-              ) : null}
-              {(data?.months ?? []).map(m => (
-                <option key={m} value={m}>{fmtMonth(m)}</option>
-              ))}
-            </select>
+            {/* Onglets */}
+            <div className="flex bg-[#f5f4f2] border border-[#e8e8e4] rounded-[10px] p-0.5">
+              <button
+                onClick={() => setTab('stats')}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-[8px] text-xs font-semibold transition-colors ${tab === 'stats' ? 'bg-white shadow-sm text-[#1a1a2e]' : 'text-[#9b9b93] hover:text-[#1a1a2e]'}`}
+              >
+                <BarChart2 size={12} />Stats
+              </button>
+              <button
+                onClick={() => setTab('gps')}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-[8px] text-xs font-semibold transition-colors ${tab === 'gps' ? 'bg-white shadow-sm text-[#6366f1]' : 'text-[#9b9b93] hover:text-[#1a1a2e]'}`}
+              >
+                <Navigation size={12} />GPS Live
+              </button>
+            </div>
+
+            {/* Month picker (stats only) */}
+            {tab === 'stats' && (
+              <select
+                value={month}
+                onChange={e => setMonth(e.target.value)}
+                className="text-sm font-medium text-[#1a1a2e] bg-[#f5f4f2] border border-[#e8e8e4] rounded-[10px] px-3 py-2 outline-none cursor-pointer"
+              >
+                {(data?.months ?? []).includes(month) ? null : month ? (
+                  <option value={month}>{fmtMonth(month)}</option>
+                ) : null}
+                {(data?.months ?? []).map(m => (
+                  <option key={m} value={m}>{fmtMonth(m)}</option>
+                ))}
+              </select>
+            )}
           </div>
         </div>
       </div>
 
       <div className="max-w-4xl mx-auto px-4 sm:px-6 pt-5 space-y-4">
-        {loading ? (
+
+        {/* ── Onglet GPS ──────────────────────────────────────────────────── */}
+        {tab === 'gps' && (
+          <div className="space-y-4">
+            {GPS_DRIVERS.map(driver => (
+              <div key={driver} className="bg-white border border-[#e8e8e4] rounded-[18px] p-5 shadow-sm">
+                <div className="flex items-center gap-3 mb-4">
+                  <div className="w-9 h-9 rounded-[10px] bg-[#6366f1]/10 flex items-center justify-center">
+                    <Navigation size={16} className="text-[#6366f1]" />
+                  </div>
+                  <div>
+                    <p className="font-bold text-[#1a1a2e]">{driver}</p>
+                    <p className="text-xs text-[#9b9b93]">Localisation en temps réel</p>
+                  </div>
+                  <a
+                    href="/delivery/tracking"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="ml-auto text-[10px] font-semibold text-[#6366f1] bg-[#6366f1]/10 px-3 py-1.5 rounded-lg hover:bg-[#6366f1]/20 transition-colors"
+                  >
+                    Lien téléphone →
+                  </a>
+                </div>
+                <DriverLocationMap driverName={driver} />
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* ── Onglet Stats ─────────────────────────────────────────────────── */}
+        {tab === 'stats' && loading ? (
           <div className="flex items-center justify-center py-20">
             <p className="text-sm text-[#9b9b93]">Chargement…</p>
           </div>
@@ -818,6 +872,7 @@ export default function StatsView() {
             ))}
           </>
         )}
+
       </div>
     </div>
   )
