@@ -3,8 +3,8 @@
 import { useEffect, useRef, useState } from 'react'
 import { MapPin, Wifi, WifiOff, Battery, Clock } from 'lucide-react'
 
-const DRIVER_NAME  = 'Khalid'
-const INTERVAL_MS  = 5 * 60 * 1000   // toutes les 5 minutes
+const DRIVER_NAME = 'Khalid'
+const INTERVAL_MS = 5 * 60 * 1000  // toutes les 5 minutes
 
 interface Status {
   lastSync:   string | null
@@ -20,20 +20,16 @@ export default function TrackingPage() {
     lastSync: null, accuracy: null, battery: null,
     error: null, syncing: false, totalSyncs: 0,
   })
-  const [active, setActive] = useState(false)
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const wakeLockRef = useRef<WakeLockSentinel | null>(null)
+  const startedRef  = useRef(false)
 
   async function getBattery(): Promise<number | null> {
     try {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const nav = navigator as any
-      if (nav.getBattery) {
-        const b = await nav.getBattery()
-        return Math.round(b.level * 100)
-      }
-    } catch {}
-    return null
+      const b = await (navigator as any).getBattery?.()
+      return b ? Math.round(b.level * 100) : null
+    } catch { return null }
   }
 
   async function sendPosition() {
@@ -48,7 +44,7 @@ export default function TrackingPage() {
       )
       const battery = await getBattery()
       const res = await fetch('/api/delivery/location', {
-        method: 'POST',
+        method:  'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           driver_name: DRIVER_NAME,
@@ -69,41 +65,38 @@ export default function TrackingPage() {
       }))
     } catch (err) {
       const msg = err instanceof GeolocationPositionError
-        ? ['Permission refusée', 'Position indisponible', 'Délai expiré'][err.code - 1] ?? 'Erreur GPS'
+        ? (['Permission refusée — autorise la localisation dans les réglages', 'Position indisponible', 'Délai expiré'][err.code - 1] ?? 'Erreur GPS')
         : String(err)
       setStatus(s => ({ ...s, syncing: false, error: msg }))
     }
   }
 
-  async function startTracking() {
-    if (!navigator.geolocation) {
-      setStatus(s => ({ ...s, error: 'GPS non supporté par ce navigateur' }))
-      return
+  // Démarrage automatique dès le chargement
+  useEffect(() => {
+    if (startedRef.current) return
+    startedRef.current = true
+
+    async function init() {
+      if (!navigator.geolocation) {
+        setStatus(s => ({ ...s, error: 'GPS non supporté par ce navigateur' }))
+        return
+      }
+      // Wake lock pour garder l'écran allumé
+      try { wakeLockRef.current = await navigator.wakeLock?.request('screen') } catch {}
+
+      await sendPosition()
+      intervalRef.current = setInterval(sendPosition, INTERVAL_MS)
     }
-    // Wake lock pour garder l'écran allumé
-    try {
-      wakeLockRef.current = await navigator.wakeLock?.request('screen')
-    } catch {}
+    init()
 
-    setActive(true)
-    await sendPosition()
-    intervalRef.current = setInterval(sendPosition, INTERVAL_MS)
-  }
-
-  function stopTracking() {
-    if (intervalRef.current) clearInterval(intervalRef.current)
-    wakeLockRef.current?.release()
-    setActive(false)
-  }
-
-  useEffect(() => () => {
-    if (intervalRef.current) clearInterval(intervalRef.current)
-    wakeLockRef.current?.release()
+    return () => {
+      if (intervalRef.current) clearInterval(intervalRef.current)
+      wakeLockRef.current?.release()
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  const nextSyncIn = status.lastSync
-    ? `dans ${Math.round(INTERVAL_MS / 60_000)} min`
-    : '—'
+  const active = status.totalSyncs > 0 || status.syncing
 
   return (
     <div className="min-h-screen bg-[#1a1a2e] flex flex-col items-center justify-center p-6 text-white">
@@ -111,8 +104,8 @@ export default function TrackingPage() {
 
         {/* Header */}
         <div className="text-center">
-          <div className="w-16 h-16 rounded-full bg-[#6366f1]/20 flex items-center justify-center mx-auto mb-3">
-            <MapPin size={28} className="text-[#6366f1]" />
+          <div className={`w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-3 ${active ? 'bg-green-500/20' : 'bg-[#6366f1]/20'}`}>
+            <MapPin size={28} className={active ? 'text-green-400' : 'text-[#6366f1]'} />
           </div>
           <h1 className="text-xl font-bold">Suivi GPS</h1>
           <p className="text-sm text-white/50 mt-1">{DRIVER_NAME} · Margyn</p>
@@ -123,9 +116,11 @@ export default function TrackingPage() {
           <div className="flex items-center justify-between">
             <span className="text-sm text-white/60">Statut</span>
             <div className="flex items-center gap-2">
-              {active
-                ? <><div className="w-2 h-2 rounded-full bg-green-400 animate-pulse" /><span className="text-sm text-green-400 font-medium">Actif</span></>
-                : <><div className="w-2 h-2 rounded-full bg-white/30" /><span className="text-sm text-white/40">Inactif</span></>
+              {status.syncing
+                ? <><div className="w-2 h-2 rounded-full bg-yellow-400 animate-pulse" /><span className="text-sm text-yellow-300 font-medium">Envoi…</span></>
+                : active
+                  ? <><div className="w-2 h-2 rounded-full bg-green-400 animate-pulse" /><span className="text-sm text-green-400 font-medium">Actif</span></>
+                  : <><div className="w-2 h-2 rounded-full bg-white/30 animate-pulse" /><span className="text-sm text-white/40">Démarrage…</span></>
               }
             </div>
           </div>
@@ -137,7 +132,7 @@ export default function TrackingPage() {
 
           <div className="flex items-center justify-between">
             <span className="text-sm text-white/60">Prochain envoi</span>
-            <span className="text-sm">{active ? nextSyncIn : '—'}</span>
+            <span className="text-sm">{active ? `dans ${Math.round(INTERVAL_MS / 60_000)} min` : '—'}</span>
           </div>
 
           {status.accuracy != null && (
@@ -161,7 +156,7 @@ export default function TrackingPage() {
           {status.totalSyncs > 0 && (
             <div className="flex items-center justify-between">
               <span className="text-sm text-white/60">Positions envoyées</span>
-              <span className="text-sm">{status.totalSyncs}</span>
+              <span className="text-sm font-medium text-green-400">{status.totalSyncs}</span>
             </div>
           )}
         </div>
@@ -173,19 +168,6 @@ export default function TrackingPage() {
             <p className="text-sm text-red-300">{status.error}</p>
           </div>
         )}
-
-        {/* Bouton */}
-        <button
-          onClick={active ? stopTracking : startTracking}
-          disabled={status.syncing}
-          className={`w-full py-4 rounded-2xl font-bold text-base transition-all ${
-            active
-              ? 'bg-red-500/20 text-red-400 border border-red-500/40 hover:bg-red-500/30'
-              : 'bg-[#6366f1] text-white hover:bg-[#4f52d3] shadow-lg shadow-[#6366f1]/30'
-          } disabled:opacity-50`}
-        >
-          {status.syncing ? 'Envoi en cours…' : active ? 'Arrêter le suivi' : 'Démarrer le suivi'}
-        </button>
 
         <p className="text-center text-xs text-white/30">
           Garde cette page ouverte · Position envoyée toutes les 5 min
