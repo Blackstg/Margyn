@@ -410,20 +410,22 @@ function DriverMonthCalendar({ driver, month }: { driver: DriverStats; month: st
   const today = toParisDayStr(new Date().toISOString())
 
   // Build delivery map across ALL tours: date → { count, firstHour (Paris time) }
-  const deliveryMap = new Map<string, { count: number; firstHour: number }>()
+  const deliveryMap = new Map<string, { count: number; firstHour: number; lastHour: number }>()
   for (const tour of driver.tours) {
     for (const day of tour.days) {
       const existing = deliveryMap.get(day.date)
-      // First delivery hour in Paris time
-      let firstHour = 23
-      const first = day.deliveries[0]
-      if (first?.delivered_at) {
-        const s = new Date(first.delivered_at).toLocaleString('en-US', { timeZone: 'Europe/Paris' })
-        firstHour = new Date(s).getHours()
+      const toHour = (iso: string) => {
+        const s = new Date(iso).toLocaleString('en-US', { timeZone: 'Europe/Paris' })
+        return new Date(s).getHours()
       }
+      const first = day.deliveries[0]
+      const last  = day.deliveries[day.deliveries.length - 1]
+      const firstHour = first?.delivered_at ? toHour(first.delivered_at) : 23
+      const lastHour  = last?.delivered_at  ? toHour(last.delivered_at)  : 0
       deliveryMap.set(day.date, {
-        count: (existing?.count ?? 0) + day.deliveries.length,
+        count:     (existing?.count ?? 0) + day.deliveries.length,
         firstHour: Math.min(existing?.firstHour ?? 23, firstHour),
+        lastHour:  Math.max(existing?.lastHour  ?? 0,  lastHour),
       })
     }
   }
@@ -437,7 +439,8 @@ function DriverMonthCalendar({ driver, month }: { driver: DriverStats; month: st
     if (day > today) continue
     const entry = deliveryMap.get(day)
     if (entry) {
-      if (entry.firstHour >= 12) workDays += 0.5  // demi-journée
+      const isHalf = entry.firstHour >= 12 || entry.lastHour <= 13
+      if (isHalf) workDays += 0.5
       else workDays++
     } else {
       idleDays++
@@ -477,12 +480,18 @@ function DriverMonthCalendar({ driver, month }: { driver: DriverStats; month: st
 
         {allMonthDays.map(day => {
           const d = Number(day.split('-')[2])
-          const isFuture   = day > today
-          const entry      = deliveryMap.get(day)
-          const count      = entry?.count ?? 0
-          const hasWork    = count > 0
-          const isHalfDay  = hasWork && (entry?.firstHour ?? 0) >= 12
-          const isToday    = day === today
+          const isFuture    = day > today
+          const entry       = deliveryMap.get(day)
+          const count       = entry?.count ?? 0
+          const hasWork     = count > 0
+          const firstHour   = entry?.firstHour ?? 0
+          const lastHour    = entry?.lastHour  ?? 24
+          // Demi après-midi : première livraison après 12h
+          const isAfternoon = hasWork && firstHour >= 12
+          // Demi matin : dernière livraison avant ou à 13h
+          const isMorning   = hasWork && !isAfternoon && lastHour <= 13
+          void (isAfternoon || isMorning) // isHalfDay intentionally removed
+          const isToday     = day === today
 
           let bg: string
           let textColor: string
@@ -493,19 +502,25 @@ function DriverMonthCalendar({ driver, month }: { driver: DriverStats; month: st
             const intensity = Math.min(count, 5)
             const greens = ['#bbf7d0', '#86efac', '#4ade80', '#22c55e', '#16a34a']
             const green = greens[intensity - 1]
-            // Demi-journée : moitié rouge (matin absent) / moitié verte (après-midi travaillé)
-            bg = isHalfDay
-              ? `linear-gradient(to bottom, #fecaca 50%, ${green} 50%)`
-              : green
+            if (isAfternoon) {
+              // Matin libre (rouge) → après-midi travaillé (vert)
+              bg = `linear-gradient(to bottom, #fecaca 50%, ${green} 50%)`
+            } else if (isMorning) {
+              // Matin travaillé (vert) → après-midi libre (rouge)
+              bg = `linear-gradient(to bottom, ${green} 50%, #fecaca 50%)`
+            } else {
+              bg = green
+            }
             textColor = intensity >= 3 ? '#14532d' : '#15803d'
           } else {
             bg = '#fecaca'; textColor = '#b91c1c'
           }
 
+          const halfLabel = isAfternoon ? ' (après-midi seulement)' : isMorning ? ' (matin seulement)' : ''
           const label = isFuture
             ? shortDayFr(day)
             : hasWork
-              ? `${shortDayFr(day)} · ${count} livraison${count > 1 ? 's' : ''}${isHalfDay ? ' (après-midi)' : ''}`
+              ? `${shortDayFr(day)} · ${count} livraison${count > 1 ? 's' : ''}${halfLabel}`
               : `${shortDayFr(day)} · Repos`
 
           return (
