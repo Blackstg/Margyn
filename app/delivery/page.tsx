@@ -20,6 +20,7 @@ const TourMap        = nextDynamic(() => import('@/components/delivery/TourMap')
 const OrdersMap      = nextDynamic(() => import('@/components/delivery/OrdersMap'),      { ssr: false })
 const SavPositionMap = nextDynamic(() => import('@/components/delivery/SavPositionMap'), { ssr: false })
 const StatsView      = nextDynamic(() => import('@/components/delivery/StatsView'),      { ssr: false })
+const ToursMap       = nextDynamic(() => import('@/components/delivery/ToursMap'),       { ssr: false })
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -309,6 +310,7 @@ function PlanificateurView() {
   const [deferPopover, setDeferPopover] = useState<{ orderName: string; date: string; note: string } | null>(null)
   const [showDeferredSection, setShowDeferredSection] = useState(false)
   const [ordersViewMode, setOrdersViewMode] = useState<'list' | 'map'>('list')
+  const [toursViewMode, setToursViewMode] = useState<'list' | 'map'>('list')
   const [syncingStopId, setSyncingStopId] = useState<string | null>(null)
 
   async function handleSyncStop(stopId: string) {
@@ -1201,6 +1203,19 @@ function PlanificateurView() {
                 })()}
               </h2>
               <div className="flex items-center gap-1.5">
+                {!showHistory && (
+                  <button
+                    onClick={() => setToursViewMode(m => m === 'list' ? 'map' : 'list')}
+                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-[10px] text-xs font-medium transition-colors ${
+                      toursViewMode === 'map'
+                        ? 'bg-[#6366f1] text-white'
+                        : 'bg-[#f5f5f3] text-[#6b6b63] hover:bg-[#e8e8e4]'
+                    }`}
+                  >
+                    <MapPin size={12} />
+                    {toursViewMode === 'map' ? 'Liste' : 'Carte'}
+                  </button>
+                )}
                 <button
                   onClick={() => setShowHistory(v => !v)}
                   className={`flex items-center gap-1.5 px-3 py-1.5 rounded-[10px] text-xs font-medium transition-colors ${
@@ -1234,6 +1249,33 @@ function PlanificateurView() {
                 className="w-full pl-8 pr-3 py-2 text-sm border border-[#e8e8e4] rounded-[10px] outline-none focus:border-[#aeb0c9] bg-white"
               />
             </div>
+
+            {/* Tours map view */}
+            {!showHistory && toursViewMode === 'map' && (
+              <div className="mb-4">
+                <ToursMap
+                  tours={tours.filter(t => t.status !== 'completed' && t.status !== 'cancelled').map(t => ({
+                    id:           t.id,
+                    name:         t.name,
+                    driver_name:  t.driver_name,
+                    planned_date: t.planned_date,
+                    status:       t.status,
+                    stops:        t.stops.map(s => ({
+                      id:            s.id,
+                      order_name:    s.order_name,
+                      customer_name: s.customer_name,
+                      address1:      s.address1,
+                      city:          s.city,
+                      zip:           s.zip,
+                      panel_count:   s.panel_count,
+                      sequence:      s.sequence,
+                      status:        s.status,
+                    })),
+                  }))}
+                  height={480}
+                />
+              </div>
+            )}
 
             {/* New tour form */}
             {showNewTour && (
