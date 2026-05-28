@@ -52,16 +52,33 @@ function tourColor(idx: number): string {
 
 // ── Geocoding ────────────────────────────────────────────────────────────────
 
-async function geocode(address: string, token: string): Promise<[number, number] | null> {
+async function geocodeQuery(query: string, token: string, types?: string): Promise<[number, number] | null> {
   try {
+    const t = types ? `&types=${types}` : ''
     const res = await fetch(
-      `https://api.mapbox.com/geocoding/v5/mapbox.places/${encodeURIComponent(address)}.json?access_token=${token}&country=fr&limit=1&types=address,postcode`
+      `https://api.mapbox.com/geocoding/v5/mapbox.places/${encodeURIComponent(query)}.json?access_token=${token}&country=fr&limit=1${t}`
     )
     if (!res.ok) return null
     const d = await res.json()
     const c = d.features?.[0]?.center
     return c ?? null
   } catch { return null }
+}
+
+// Tries: full address → city+zip → city alone
+async function geocode(
+  stop: { address1: string; city: string; zip: string },
+  token: string
+): Promise<[number, number] | null> {
+  const full = `${stop.address1}, ${stop.city} ${stop.zip}, France`
+  const byCity = `${stop.city} ${stop.zip}, France`
+  const cityOnly = `${stop.city}, France`
+
+  return (
+    (await geocodeQuery(full, token, 'address')) ??
+    (await geocodeQuery(byCity, token, 'postcode,place')) ??
+    (await geocodeQuery(cityOnly, token, 'place'))
+  )
 }
 
 // ── Marker element ───────────────────────────────────────────────────────────
@@ -146,7 +163,7 @@ export default function ToursMap({ tours, height = 480 }: Props) {
         activeTours.flatMap((tour, tourIdx) =>
           tour.stops.map(async (stop) => {
             if (cancelled) return
-            const coord = await geocode(`${stop.address1}, ${stop.city} ${stop.zip}, France`, token)
+            const coord = await geocode(stop, token)
             if (!coord || cancelled) return
 
             hasAny = true
