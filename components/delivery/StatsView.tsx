@@ -491,7 +491,7 @@ function DriverMonthCalendar({ driver, month }: { driver: DriverStats; month: st
           return (
             <div
               key={day}
-              className="w-full aspect-square"
+              className="w-full aspect-square min-h-[28px]"
               onMouseEnter={() => setTooltip(label)}
               onMouseLeave={() => setTooltip(null)}
             >
@@ -507,7 +507,7 @@ function DriverMonthCalendar({ driver, month }: { driver: DriverStats; month: st
                 {d}
                 {hasWork && (
                   <span
-                    className="absolute bottom-[1px] right-[1px] w-[11px] h-[11px] rounded-full bg-white flex items-center justify-center text-[7px] font-bold leading-none"
+                    className="absolute bottom-[2px] right-[2px] w-[14px] h-[14px] rounded-full bg-white flex items-center justify-center text-[9px] font-bold leading-none"
                     style={{ color: textColor }}
                   >
                     {count}
