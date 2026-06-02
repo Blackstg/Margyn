@@ -2357,6 +2357,10 @@ function LivreurView() {
   const [markingPartial, setMarkingPartial] = useState(false)
   const coordsCache = useRef<Map<string, [number, number]>>(new Map())
   const [navSheet, setNavSheet] = useState(false)
+  const [stopListSheet, setStopListSheet] = useState(false)
+  const [optimizedOrder, setOptimizedOrder] = useState<string[] | null>(null)
+  const [optimizing, setOptimizing] = useState(false)
+  const [optimizeError, setOptimizeError] = useState<string | null>(null)
   const [nearbyOrders, setNearbyOrders]   = useState<ShopifyOrder[]>([])
   const [nearbyLoading, setNearbyLoading] = useState(false)
   const [nearbyZoneFilter, setNearbyZoneFilter] = useState<string>('all')
@@ -2532,7 +2536,9 @@ function LivreurView() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [stopsSignature])
 
-  const sortedStops = sortedStopsForETA  // alias — même tableau
+  const sortedStops = optimizedOrder
+    ? optimizedOrder.map(id => sortedStopsForETA.find(s => s.id === id)).filter(Boolean) as typeof sortedStopsForETA
+    : sortedStopsForETA
   const deliveredCount = sortedStops.filter((s) => s.status === 'delivered').length
 
   // Reset comment state whenever the user navigates to a different stop
@@ -2572,6 +2578,84 @@ function LivreurView() {
 
 
   const currentStop = sortedStops[stopIdx]
+
+  // ── Optimisation de tournée (nearest-neighbor depuis position GPS) ──────────
+  async function optimizeTour() {
+    setOptimizing(true)
+    setOptimizeError(null)
+    try {
+      // 1. Position GPS actuelle
+      const pos = await new Promise<GeolocationPosition>((ok, err) =>
+        navigator.geolocation.getCurrentPosition(ok, err, { enableHighAccuracy: true, timeout: 12_000 })
+      )
+      const { latitude: driverLat, longitude: driverLng } = pos.coords
+
+      // 2. S'assurer que les coords des arrêts sont en cache (géocodage si besoin)
+      const token = process.env.NEXT_PUBLIC_MAPBOX_TOKEN ?? ''
+      if (token) {
+        await Promise.all(
+          sortedStopsForETA.map(async (stop) => {
+            if (coordsCache.current.has(stop.id)) return
+            const coord = await geocodeForMap(`${stop.address1}, ${stop.city} ${stop.zip}, France`, token)
+            if (coord) coordsCache.current.set(stop.id, coord)
+          })
+        )
+      }
+
+      // 3. Nearest-neighbor — arrêts livrés/échoués à la fin, dans leur ordre d'origine
+      function haversineKm(lat1: number, lng1: number, lat2: number, lng2: number) {
+        const R = 6371
+        const dLat = (lat2 - lat1) * Math.PI / 180
+        const dLng = (lng2 - lng1) * Math.PI / 180
+        const a = Math.sin(dLat / 2) ** 2 + Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.sin(dLng / 2) ** 2
+        return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
+      }
+
+      const done    = sortedStopsForETA.filter(s => s.status === 'delivered' || s.status === 'failed')
+      const pending = sortedStopsForETA.filter(s => s.status !== 'delivered' && s.status !== 'failed')
+
+      let curLat = driverLat
+      let curLng = driverLng
+      const ordered: typeof pending = []
+      const remaining = [...pending]
+
+      while (remaining.length > 0) {
+        let nearestIdx = 0
+        let minDist = Infinity
+        for (let i = 0; i < remaining.length; i++) {
+          const coord = coordsCache.current.get(remaining[i].id)
+          if (!coord) continue
+          const [lng, lat] = coord  // Mapbox: [lng, lat]
+          const d = haversineKm(curLat, curLng, lat, lng)
+          if (d < minDist) { minDist = d; nearestIdx = i }
+        }
+        const stop = remaining.splice(nearestIdx, 1)[0]
+        ordered.push(stop)
+        const coord = coordsCache.current.get(stop.id)
+        if (coord) { curLng = coord[0]; curLat = coord[1] }
+      }
+
+      // Stops à livrer en premier, déjà livrés/échoués à la fin
+      const newOrder = [...ordered, ...done].map(s => s.id)
+      setOptimizedOrder(newOrder)
+      setStopIdx(0)
+      setStopListSheet(false)
+    } catch (err) {
+      const isGeoErr = typeof GeolocationPositionError !== 'undefined' && err instanceof GeolocationPositionError
+      if (isGeoErr) {
+        const msgs = [
+          'Localisation refusée — autorise l\'accès dans les réglages du téléphone',
+          'Position GPS indisponible',
+          'GPS trop lent — réessaie à l\'extérieur',
+        ]
+        setOptimizeError(msgs[(err as GeolocationPositionError).code - 1] ?? 'Erreur GPS')
+      } else {
+        setOptimizeError('Impossible d\'obtenir ta position')
+      }
+    } finally {
+      setOptimizing(false)
+    }
+  }
 
   // Full-tour Maps URL: depot → all pending stops in order
   const tourMapsUrl = (() => {
@@ -3546,6 +3630,94 @@ function LivreurView() {
 
   return (
     <>
+    {/* Stop list bottom sheet */}
+    {stopListSheet && (
+      <div
+        className="fixed inset-0 z-50 bg-black/40"
+        onClick={() => { setStopListSheet(false); setOptimizeError(null) }}
+      >
+        <div
+          className="absolute bottom-0 left-0 right-0 bg-white rounded-t-[24px] shadow-[0_-8px_32px_rgba(0,0,0,0.15)]"
+          style={{ maxHeight: '75svh', display: 'flex', flexDirection: 'column' }}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <div className="px-4 pt-5 pb-3 shrink-0">
+            <div className="w-10 h-1 bg-[#e8e8e4] rounded-full mx-auto mb-4" />
+            <div className="flex items-center justify-between mb-3">
+              <p className="text-sm font-bold text-[#1a1a2e]">Arrêts de la tournée</p>
+              <span className="text-xs text-[#9b9b93]">{sortedStops.filter(s => s.status === 'delivered').length} / {sortedStops.length} livrés</span>
+            </div>
+            {/* Bouton optimisation */}
+            <button
+              onClick={optimizeTour}
+              disabled={optimizing}
+              className="w-full h-12 rounded-[14px] bg-[#1a7f4b] text-white flex items-center justify-center gap-2.5 font-semibold text-sm active:bg-[#15653c] disabled:opacity-60 transition-colors"
+            >
+              {optimizing ? (
+                <>
+                  <svg className="animate-spin" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M21 12a9 9 0 1 1-6.219-8.56"/></svg>
+                  Calcul en cours…
+                </>
+              ) : (
+                <>
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                    <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/>
+                  </svg>
+                  {optimizedOrder ? 'Ré-optimiser depuis ici' : 'Optimiser depuis ma position'}
+                </>
+              )}
+            </button>
+            {optimizeError && (
+              <div className="mt-2 px-3 py-2.5 rounded-[12px] bg-[#fef2f2] border border-[#fecaca] flex items-start gap-2">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#dc2626" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 mt-px"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+                <p className="text-xs text-[#b91c1c] leading-relaxed">{optimizeError}</p>
+              </div>
+            )}
+            {optimizedOrder && (
+              <button
+                onClick={() => { setOptimizedOrder(null); setStopIdx(0) }}
+                className="w-full mt-2 h-10 rounded-[12px] bg-[#f5f5f3] text-[#6b6b63] flex items-center justify-center gap-2 text-xs font-medium active:bg-[#e8e8e4]"
+              >
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg>
+                Remettre l&apos;ordre original
+              </button>
+            )}
+          </div>
+          <div className="overflow-y-auto px-4 pb-10 flex-1">
+            {sortedStops.map((stop, i) => (
+              <button
+                key={stop.id}
+                onClick={() => { setStopIdx(i); setStopListSheet(false) }}
+                className={`w-full flex items-center gap-3 px-4 py-3 rounded-[14px] mb-2 text-left active:opacity-70 transition-colors ${
+                  i === stopIdx ? 'bg-[#1a1a2e] text-white' : 'bg-[#f5f5f3] text-[#1a1a2e]'
+                }`}
+              >
+                <div className={`w-7 h-7 rounded-full flex items-center justify-center shrink-0 text-xs font-bold ${
+                  stop.status === 'delivered' ? 'bg-[#4ade80] text-[#14532d]'
+                  : stop.status === 'failed'  ? 'bg-[#f97316] text-white'
+                  : stop.status === 'partial' ? 'bg-[#fbbf24] text-[#78350f]'
+                  : i === stopIdx ? 'bg-white text-[#1a1a2e]'
+                  : 'bg-[#e8e8e4] text-[#6b6b63]'
+                }`}>
+                  {i + 1}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="font-semibold text-sm truncate">{stop.customer_name}</div>
+                  <div className={`text-xs truncate ${i === stopIdx ? 'text-white/60' : 'text-[#9b9b93]'}`}>{stop.city}</div>
+                </div>
+                {stop.status === 'delivered' && (
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#4ade80" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+                )}
+                {stop.status === 'failed' && (
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#f97316" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                )}
+              </button>
+            ))}
+          </div>
+        </div>
+      </div>
+    )}
+
     {/* Nav bottom sheet */}
     {navSheet && (
       <div
@@ -3598,27 +3770,51 @@ function LivreurView() {
       </div>
     )}
     <div className="w-full flex flex-col px-4 py-4" style={{ minHeight: '100svh' }}>
-      {/* Top bar: back + Maps */}
-      <div className="flex items-center justify-between mb-4">
+      {/* Top bar: back · counter · liste · maps */}
+      <div className="flex items-center gap-2 mb-4">
+        {/* Retour */}
         <button
           onClick={() => setScreen('home')}
-          className="w-10 h-10 rounded-full bg-white shadow flex items-center justify-center"
+          className="w-11 h-11 rounded-full bg-white shadow-sm flex items-center justify-center shrink-0 active:bg-[#f5f5f3]"
         >
-          <ChevronLeft size={20} />
+          <ChevronLeft size={22} />
         </button>
-        <div className="text-sm font-medium text-[#6b6b63]">
-          {stopIdx + 1} / {sortedStops.length}
+
+        {/* Compteur centré */}
+        <div className="flex-1 text-center">
+          <span className="text-base font-bold text-[#1a1a2e]">{stopIdx + 1}</span>
+          <span className="text-base font-normal text-[#9b9b93]"> / {sortedStops.length}</span>
         </div>
-        {tourMapsUrl && (
+
+        {/* Liste */}
+        <button
+          onClick={() => setStopListSheet(true)}
+          className="w-11 h-11 rounded-full bg-[#1a1a2e] text-white flex items-center justify-center shrink-0 active:bg-[#2d2d4e]"
+          aria-label="Liste des arrêts"
+        >
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+            <line x1="8" y1="6" x2="21" y2="6"/>
+            <line x1="8" y1="12" x2="21" y2="12"/>
+            <line x1="8" y1="18" x2="21" y2="18"/>
+            <line x1="3" y1="6" x2="3.01" y2="6"/>
+            <line x1="3" y1="12" x2="3.01" y2="12"/>
+            <line x1="3" y1="18" x2="3.01" y2="18"/>
+          </svg>
+        </button>
+
+        {/* Maps — toujours visible même sans tourMapsUrl */}
+        {tourMapsUrl ? (
           <a
             href={tourMapsUrl}
             target="_blank"
             rel="noopener noreferrer"
-            className="flex items-center gap-1.5 px-3 py-2 rounded-[12px] bg-[#1a7f4b] text-white text-sm font-medium"
+            className="w-11 h-11 rounded-full bg-[#1a7f4b] text-white flex items-center justify-center shrink-0 active:bg-[#15653c]"
+            aria-label="Voir la tournée sur Maps"
           >
-            <MapPin size={15} />
-            Maps
+            <MapPin size={18} />
           </a>
+        ) : (
+          <div className="w-11 h-11 shrink-0" />
         )}
       </div>
 
@@ -3714,18 +3910,26 @@ function LivreurView() {
             <button
               onClick={() => setStopIdx((i) => Math.max(0, i - 1))}
               disabled={stopIdx === 0}
-              className="flex-1 flex items-center justify-center gap-2 py-3 rounded-[14px] border border-[#e8e8e4] text-[#6b6b63] disabled:opacity-30 active:bg-[#f5f5f3]"
+              className="w-14 h-14 rounded-full border-2 border-[#e8e8e4] flex items-center justify-center shrink-0 text-[#1a1a2e] disabled:opacity-25 active:bg-[#f5f5f3] transition-colors"
             >
-              <ChevronLeft size={20} />
-              Précédent
+              <ChevronLeft size={26} />
+            </button>
+            <button
+              onClick={() => setStopListSheet(true)}
+              className="flex-1 h-14 rounded-[16px] bg-[#f5f5f3] flex items-center justify-center gap-2 text-[#1a1a2e] font-semibold text-base active:bg-[#e8e8e4] transition-colors"
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                <line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/>
+                <line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/>
+              </svg>
+              Liste
             </button>
             <button
               onClick={() => setStopIdx((i) => Math.min(sortedStops.length - 1, i + 1))}
               disabled={stopIdx === sortedStops.length - 1}
-              className="flex-1 flex items-center justify-center gap-2 py-3 rounded-[14px] border border-[#e8e8e4] text-[#6b6b63] disabled:opacity-30 active:bg-[#f5f5f3]"
+              className="w-14 h-14 rounded-full border-2 border-[#e8e8e4] flex items-center justify-center shrink-0 text-[#1a1a2e] disabled:opacity-25 active:bg-[#f5f5f3] transition-colors"
             >
-              Suivant
-              <ChevronRight size={20} />
+              <ChevronRight size={26} />
             </button>
           </div>
         </div>
