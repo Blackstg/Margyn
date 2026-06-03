@@ -213,6 +213,15 @@ export default function FacturesLogisticienPage() {
   const [saving, setSaving]                 = useState(false)
   const [saved, setSaved]                   = useState(false)
   const [parseError, setParseError]         = useState('')
+  const [usdEurRate, setUsdEurRate]         = useState(0.92)
+
+  // Taux USD→EUR live (frankfurter.app, gratuit sans clé)
+  useEffect(() => {
+    fetch('https://api.frankfurter.app/latest?from=USD&to=EUR')
+      .then(r => r.json())
+      .then(d => { if (d.rates?.EUR) setUsdEurRate(d.rates.EUR) })
+      .catch(() => {})
+  }, [])
 
   useEffect(() => {
     fetch('/api/factures-logisticien/history')
@@ -645,11 +654,13 @@ Historique FW : ${history.map(h => `${h.month}: ${h.fw_count} FW ($${h.fw_total?
                       const ctx = a.type === 'high_shipping' ? shippingContext[a.order_name]  : undefined
 
                       if (a.type === 'high_shipping') {
-                        const logShip    = a.logistician_shipping ?? 0
+                        const row        = rows.find(r => r.order_name === a.order_name)
+                        const totalUsd   = row ? (row.service_price + row.shipping_price) : (a.logistician_shipping ?? 0)
+                        const totalEur   = totalUsd * usdEurRate
                         const clientPaid = sd?.customer_paid ?? 0
-                        const netCost    = logShip - clientPaid
+                        const netCost    = totalEur - clientPaid
                         const isIntl     = sd && !EU_MEMBER_STATES.has(sd.country_code)
-                        const isCovered  = clientPaid > 0 && clientPaid >= logShip
+                        const isCovered  = clientPaid > 0 && clientPaid >= totalEur
                         const verdict    =
                           isCovered ? { label: 'Couvert', color: 'green' } :
                           isIntl    ? { label: 'International', color: 'gray' } :
@@ -657,7 +668,7 @@ Historique FW : ${history.map(h => `${h.month}: ${h.fw_count} FW ($${h.fw_total?
 
                         return (
                           <div key={i} className="px-5 py-4 space-y-3">
-                            {/* Header : tag + commande + pays + verdict */}
+                            {/* Header */}
                             <div className="flex items-center gap-2 flex-wrap">
                               <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-md bg-[#fff3cd] text-[#b45309]">
                                 Shipping élevé
@@ -670,7 +681,7 @@ Historique FW : ${history.map(h => `${h.month}: ${h.fw_count} FW ($${h.fw_total?
                               )}
                               {verdict && (
                                 <span className={`ml-auto text-[10px] font-semibold px-1.5 py-0.5 rounded-md ${
-                                  verdict.color === 'red'  ? 'bg-[#fce8ea] text-[#c7293a]' :
+                                  verdict.color === 'red'   ? 'bg-[#fce8ea] text-[#c7293a]' :
                                   verdict.color === 'green' ? 'bg-[#e6f4ec] text-[#1a7f4b]' :
                                   'bg-[#f0f0ee] text-[#6b6b63]'
                                 }`}>
@@ -683,7 +694,8 @@ Historique FW : ${history.map(h => `${h.month}: ${h.fw_count} FW ($${h.fw_total?
                             <div className="grid grid-cols-3 gap-2">
                               <div className="bg-[#f8f8f7] rounded-xl p-3 text-center">
                                 <p className="text-[10px] text-[#9b9b93] mb-1">Bowa facture</p>
-                                <p className="text-base font-bold text-[#1a1a2e]">{logShip.toFixed(2)}€</p>
+                                <p className="text-base font-bold text-[#1a1a2e]">{totalEur.toFixed(2)}€</p>
+                                <p className="text-[10px] text-[#c0bfba] mt-0.5">${totalUsd.toFixed(2)}</p>
                               </div>
                               <div className="bg-[#f0fdf4] rounded-xl p-3 text-center">
                                 <p className="text-[10px] text-[#9b9b93] mb-1">Client a payé</p>
@@ -699,12 +711,15 @@ Historique FW : ${history.map(h => `${h.month}: ${h.fw_count} FW ($${h.fw_total?
                               </div>
                             </div>
 
-                            {/* Contexte France (discret) */}
-                            {ctx && ctx.similar_orders_count > 0 && (
+                            {/* Taux + contexte France */}
+                            <div className="flex items-center justify-between gap-2">
                               <p className="text-[11px] text-[#9b9b93]">
-                                En France, commandes similaires (~{ctx.order_item_count} article{ctx.order_item_count !== 1 ? 's' : ''}) : ~{ctx.similar_avg_shipping.toFixed(0)}€ de shipping
+                                {ctx && ctx.similar_orders_count > 0
+                                  ? `En France (~${ctx.order_item_count} art.) : ~${(ctx.similar_avg_shipping * usdEurRate).toFixed(0)}€ de shipping`
+                                  : ''}
                               </p>
-                            )}
+                              <p className="text-[10px] text-[#c0bfba] shrink-0">1$ = {usdEurRate.toFixed(4)}€</p>
+                            </div>
                           </div>
                         )
                       }
