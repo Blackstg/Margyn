@@ -28,15 +28,20 @@ interface SplitShipment {
 }
 
 interface ShippingDetail {
-  country:      string
-  country_code: string
+  country:       string
+  country_code:  string
+  customer_paid: number
 }
 
-const EU_COUNTRIES = new Set([
-  'FR','BE','DE','NL','ES','IT','PT','CH','AT','LU','GB','IE','DK',
-  'SE','NO','FI','PL','CZ','HU','RO','BG','HR','SK','SI','EE','LV',
-  'LT','GR','CY','MT','IS','LI','MC','AD','SM','RE','GP','MQ','GF',
+// Pays membres UE + DOM-TOM : livraisons chères sont suspectes
+const EU_MEMBER_STATES = new Set([
+  'FR','BE','DE','NL','ES','IT','PT','AT','LU','IE','DK',
+  'SE','FI','PL','CZ','HU','RO','BG','HR','SK','SI','EE','LV',
+  'LT','GR','CY','MT',
+  'RE','GP','MQ','GF',  // DOM-TOM
 ])
+// Pays européens hors UE : tarif international normal (CH, UK, NO…)
+const EU_COUNTRIES = EU_MEMBER_STATES  // kept for legacy compat
 
 interface ShippingContext {
   order_item_count:     number
@@ -206,7 +211,9 @@ export default function FacturesLogisticienPage() {
   const [history, setHistory]               = useState<MonthlySummary[]>([])
   const [aiText, setAiText]                 = useState('')
   const [aiLoading, setAiLoading]           = useState(false)
-  const [confirmFile, setConfirmFile]       = useState<File | null>(null)
+  const [saving, setSaving]                 = useState(false)
+  const [saved, setSaved]                   = useState(false)
+  const [parseError, setParseError]         = useState('')
 
   useEffect(() => {
     fetch('/api/factures-logisticien/history')
@@ -229,6 +236,7 @@ export default function FacturesLogisticienPage() {
         setShippingDetails(s.shipping_details_data ?? {})
         setShippingContext(s.shipping_context_data ?? {})
         setFileName(`${m} (historique)`)
+        setSaved(true)
       }
     } catch { /* ignore */ }
     setLoadingHistory(false)
@@ -237,38 +245,60 @@ export default function FacturesLogisticienPage() {
   function handleFileInput(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0]
     if (!file) return
-    // Reset so the same file can be re-selected after cancelling
     if (fileRef.current) fileRef.current.value = ''
     setFileName(file.name)
-
-    const monthExists = history.some(h => h.month === month)
-    if (monthExists) {
-      setConfirmFile(file)
-    } else {
-      processFile(file)
-    }
+    processFile(file)
   }
 
   async function processFile(file: File) {
     setLoading(true)
+    setSaved(false)
     setAiText('')
+    setRows([])
 
-    const buf  = await file.arrayBuffer()
-    const wb   = read(buf)
-    const ws   = wb.Sheets[wb.SheetNames[0]]
-    const raw: Record<string, unknown>[] = utils.sheet_to_json(ws, { defval: '' })
+    let parsed: InvoiceRow[] = []
+    try {
+      const buf = await file.arrayBuffer()
+      const wb  = read(buf)
+      const ws  = wb.Sheets[wb.SheetNames[0]]
+      const raw: Record<string, unknown>[] = utils.sheet_to_json(ws, { defval: '' })
 
-    const parsed: InvoiceRow[] = raw.map(r => ({
-      order_name:     String(r['order_name'] ?? '').trim(),
-      date:           excelDate(r['date']),
-      service_price:  toNum(r['service_price']),
-      shipping_price: toNum(r['shipping_price']),
-      total_price:    toNum(r['total_price']),
-      isFW:           isFW(r),
-      sku:            String(r['sku'] ?? r['SKU'] ?? r['product_sku'] ?? r['variant_sku'] ?? '').trim(),
-    })).filter(r => r.order_name !== '')
+      // Log columns for debugging
+      if (raw.length > 0) console.log('[invoice] colonnes détectées:', Object.keys(raw[0]))
+
+      // Flexible column lookup: case-insensitive, ignores spaces/underscores
+      function col(row: Record<string, unknown>, ...candidates: string[]): unknown {
+        const keys = Object.keys(row)
+        for (const c of candidates) {
+          const norm = c.toLowerCase().replace(/[\s_-]/g, '')
+          const found = keys.find(k => k.toLowerCase().replace(/[\s_-]/g, '') === norm)
+          if (found !== undefined && row[found] !== '' && row[found] !== undefined && row[found] !== null) return row[found]
+        }
+        return ''
+      }
+
+      parsed = raw.map(r => ({
+        order_name:     String(col(r, 'order_name', 'order name', 'order', 'reference', 'ref', 'commande', 'numero commande', 'numéro commande')).trim(),
+        date:           excelDate(col(r, 'date', 'created', 'created_at', 'created at', 'order_date', 'order date', 'Date')),
+        service_price:  toNum(col(r, 'service_price', 'service fee', 'service price', 'serviceprice', 'preparation', 'prep', 'picking', 'service')),
+        shipping_price: toNum(col(r, 'shipping_price', 'shipping fee', 'shipping price', 'shippingprice', 'shipping', 'livraison', 'transport', 'frais livraison', 'frais de port')),
+        total_price:    toNum(col(r, 'total_price', 'total price', 'total fee', 'totalprice', 'total', 'montant', 'amount', 'prix total')),
+        isFW:           isFW(r),
+        sku:            String(col(r, 'sku', 'SKU', 'product_sku', 'variant_sku', 'article', 'reference produit', 'réf')).trim(),
+      })).filter(r => r.order_name !== '')
+    } catch (err) {
+      console.error('[invoice] erreur parsing:', err)
+      setLoading(false)
+      return
+    }
 
     setLoading(false)
+
+    if (parsed.length === 0) {
+      setParseError('Aucune ligne reconnue dans ce fichier. Vérifie que les colonnes s\'appellent bien order_name, total_price, etc.')
+      return
+    }
+    setParseError('')
 
     // Pre-identify double billing candidates
     const parsedNormal  = parsed.filter(r => !r.isFW)
@@ -343,33 +373,37 @@ export default function FacturesLogisticienPage() {
     setSplitShipments(splits)
     setShippingDetails(newShippingDetails)
     setShippingContext(newShippingContext)
+    setSaved(false)
+  }
 
-    // Save full data to history
-    if (month) {
-      const normalRows = parsed.filter(r => !r.isFW)
-      const fwRows     = parsed.filter(r => r.isFW)
-      const doubles    = detected.filter(a => a.type === 'double_billing').length
-      await fetch('/api/factures-logisticien/history', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          month,
-          normal_count:          normalRows.length,
-          fw_count:              fwRows.length,
-          normal_total:          normalRows.reduce((s, r) => s + r.total_price, 0),
-          fw_total:              fwRows.reduce((s, r) => s + r.total_price, 0),
-          double_billing_count:  doubles,
-          anomaly_count:         detected.length,
-          invoice_rows:          parsed,
-          anomalies_data:        detected,
-          split_shipments_data:  splits,
-          shipping_details_data: newShippingDetails,
-          shipping_context_data: newShippingContext,
-        }),
-      })
-      const updated = await fetch('/api/factures-logisticien/history').then(r => r.json())
-      setHistory(updated.summaries ?? [])
-    }
+  async function handleSave() {
+    if (!month || !rows.length) return
+    setSaving(true)
+    const normalRows = rows.filter(r => !r.isFW)
+    const fwRows     = rows.filter(r => r.isFW)
+    const doubles    = anomalies.filter(a => a.type === 'double_billing').length
+    await fetch('/api/factures-logisticien/history', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        month,
+        normal_count:          normalRows.length,
+        fw_count:              fwRows.length,
+        normal_total:          normalRows.reduce((s, r) => s + r.total_price, 0),
+        fw_total:              fwRows.reduce((s, r) => s + r.total_price, 0),
+        double_billing_count:  doubles,
+        anomaly_count:         anomalies.length,
+        invoice_rows:          rows,
+        anomalies_data:        anomalies,
+        split_shipments_data:  splitShipments,
+        shipping_details_data: shippingDetails,
+        shipping_context_data: shippingContext,
+      }),
+    })
+    const updated = await fetch('/api/factures-logisticien/history').then(r => r.json())
+    setHistory(updated.summaries ?? [])
+    setSaving(false)
+    setSaved(true)
   }
 
   async function handleAI() {
@@ -487,24 +521,74 @@ Historique FW : ${history.map(h => `${h.month}: ${h.fw_count} FW ($${h.fw_total?
           </div>
 
           {/* Step 2 — Upload */}
-          <div
-            onClick={() => { if (month) fileRef.current?.click() }}
-            className={`bg-white rounded-[16px] shadow-[0_2px_12px_rgba(0,0,0,0.06)] p-8 flex flex-col items-center justify-center gap-3 border-2 border-dashed transition-colors ${
-              month ? 'cursor-pointer border-[#e8e4e0] hover:border-[#aeb0c9]' : 'cursor-not-allowed border-[#f0f0ee] opacity-40'
-            }`}
-          >
-            <Upload size={28} className="text-[#aeb0c9]" />
-            <p className="text-sm font-medium text-[#1a1a2e]">
-              {fileName ? fileName : month ? 'Step 2 — Upload Excel invoice' : 'Select a month first'}
-            </p>
-            <p className="text-[11px] text-[#9b9b93]">.xlsx or .xls</p>
-            <input ref={fileRef} type="file" accept=".xlsx,.xls" className="hidden" onChange={handleFileInput} disabled={!month} />
+          <div className="bg-white rounded-[16px] shadow-[0_2px_12px_rgba(0,0,0,0.06)] p-5 flex flex-col items-center justify-center gap-4">
+            <label className="block text-[10px] font-semibold uppercase tracking-[0.1em] text-[#6b6b63] w-full">
+              Step 2 — Charger la facture *
+            </label>
+            <Upload size={24} className="text-[#aeb0c9]" />
+            {fileName ? (
+              <p className="text-sm font-medium text-[#1a7f4b] text-center break-all">{fileName}</p>
+            ) : (
+              <p className="text-[11px] text-[#9b9b93]">.xlsx ou .xls</p>
+            )}
+            <label
+              className={`w-full flex items-center justify-center gap-2 py-2.5 rounded-xl text-sm font-semibold transition-colors ${
+                month
+                  ? 'bg-[#1a1a2e] text-white cursor-pointer hover:bg-[#2d2d4a]'
+                  : 'bg-[#f0f0ee] text-[#9b9b93] cursor-not-allowed'
+              }`}
+            >
+              <Upload size={14} />
+              {fileName ? 'Changer le fichier' : 'Charger'}
+              <input
+                ref={fileRef}
+                type="file"
+                accept=".xlsx,.xls"
+                className="hidden"
+                onChange={handleFileInput}
+                disabled={!month}
+              />
+            </label>
           </div>
         </div>
 
-        {loading        && <p className="text-sm text-[#9b9b93] text-center">Parsing file…</p>}
+        {loading        && <p className="text-sm text-[#9b9b93] text-center">Lecture du fichier…</p>}
         {lookingUp      && <p className="text-sm text-[#9b9b93] text-center">Vérification auprès de Shopify…</p>}
         {loadingHistory && <p className="text-sm text-[#9b9b93] text-center">Chargement de l&apos;historique…</p>}
+        {parseError && (
+          <div className="rounded-[14px] bg-[#fef2f2] border border-[#fecaca] px-5 py-4">
+            <p className="text-sm font-semibold text-[#c7293a] mb-1">Fichier non reconnu</p>
+            <p className="text-xs text-[#6b6b63]">{parseError}</p>
+          </div>
+        )}
+
+        {rows.length > 0 && (
+          <div className={`rounded-[16px] px-5 py-4 flex items-center justify-between gap-4 shadow-[0_2px_12px_rgba(0,0,0,0.08)] ${saved ? 'bg-[#f0fdf4] border border-[#bbf7d0]' : 'bg-[#1a1a2e]'}`}>
+            <div>
+              {saved ? (
+                <p className="text-sm font-semibold text-[#15803d]">✓ Facture enregistrée dans le système</p>
+              ) : (
+                <>
+                  <p className="text-sm font-semibold text-white">{rows.length} lignes chargées · {anomalies.length} anomalie{anomalies.length !== 1 ? 's' : ''}</p>
+                  <p className="text-xs text-white/50 mt-0.5">Clique sur Valider pour enregistrer cette facture</p>
+                </>
+              )}
+            </div>
+            {!saved && (
+              <button
+                onClick={handleSave}
+                disabled={saving}
+                className="shrink-0 flex items-center gap-2 px-5 py-2.5 rounded-xl bg-white text-[#1a1a2e] text-sm font-bold hover:bg-[#f5f5f3] transition-colors disabled:opacity-50"
+              >
+                {saving ? (
+                  <><svg className="animate-spin" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M21 12a9 9 0 1 1-6.219-8.56"/></svg>Enregistrement…</>
+                ) : (
+                  <><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"/></svg>Valider</>
+                )}
+              </button>
+            )}
+          </div>
+        )}
 
         {rows.length > 0 && (
           <>
@@ -584,24 +668,50 @@ Historique FW : ${history.map(h => `${h.month}: ${h.fw_count} FW ($${h.fw_total?
                               </div>
                             )}
 
-                            {/* Écart vs moyenne — computed from invoice data, independent of Shopify country lookup */}
+                            {/* Écart vs moyenne + verdict */}
                             {ctx && ctx.similar_orders_count > 0 && (() => {
-                              const ecart   = (a.logistician_shipping ?? 0) - ctx.similar_avg_shipping
-                              const verdict = sd && EU_COUNTRIES.has(sd.country_code) && ecart > 20
-                                ? 'À contester' : sd ? 'Justifié' : null
+                              const logShip      = a.logistician_shipping ?? 0
+                              const clientPaid   = sd?.customer_paid ?? 0
+                              const ecart        = logShip - ctx.similar_avg_shipping
+                              const netCost      = logShip - clientPaid
+                              const isIntl       = sd && !EU_MEMBER_STATES.has(sd.country_code)
+                              const isCovered    = clientPaid > 0 && clientPaid >= logShip
+                              const isPartial    = clientPaid > 0 && clientPaid < logShip
+                              const verdict =
+                                isCovered ? { label: 'Couvert par client', color: 'green' } :
+                                isIntl    ? { label: 'Justifié (international)', color: 'green' } :
+                                ecart > 20 && sd ? { label: 'À contester', color: 'red' } :
+                                sd ? { label: 'Justifié', color: 'green' } : null
                               return (
-                                <div className="flex items-center gap-2 mt-1 flex-wrap">
-                                  <span className="text-xs text-[#6b6b63]">
-                                    Écart: <span className="font-semibold text-[#c7293a]">${ecart.toFixed(2)}</span>
-                                  </span>
-                                  {verdict && (
-                                    <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-md ${
-                                      verdict === 'À contester'
-                                        ? 'bg-[#fce8ea] text-[#c7293a]'
-                                        : 'bg-[#e6f4ec] text-[#1a7f4b]'
-                                    }`}>
-                                      {verdict}
+                                <div className="flex flex-col gap-1 mt-1">
+                                  <div className="flex items-center gap-2 flex-wrap">
+                                    <span className="text-xs text-[#6b6b63]">
+                                      Écart: <span className="font-semibold text-[#c7293a]">+{ecart.toFixed(2)}€</span>
                                     </span>
+                                    {verdict && (
+                                      <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-md ${
+                                        verdict.color === 'red'
+                                          ? 'bg-[#fce8ea] text-[#c7293a]'
+                                          : 'bg-[#e6f4ec] text-[#1a7f4b]'
+                                      }`}>
+                                        {verdict.label}
+                                      </span>
+                                    )}
+                                  </div>
+                                  {clientPaid > 0 && (
+                                    <div className="flex items-center gap-2 flex-wrap text-[11px]">
+                                      <span className="text-[#6b6b63]">
+                                        Client a payé <span className="font-medium text-[#1a1a2e]">{clientPaid.toFixed(2)}€</span>
+                                      </span>
+                                      {isPartial && (
+                                        <span className="text-[#6b6b63]">
+                                          → Coût net Mōom : <span className="font-semibold text-[#b45309]">{netCost.toFixed(2)}€</span>
+                                        </span>
+                                      )}
+                                      {isCovered && (
+                                        <span className="text-[#1a7f4b] font-medium">→ Zéro coût logistique</span>
+                                      )}
+                                    </div>
                                   )}
                                 </div>
                               )
@@ -611,15 +721,15 @@ Historique FW : ${history.map(h => `${h.month}: ${h.fw_count} FW ($${h.fw_total?
                             {ctx && ctx.similar_orders_count > 0 && (
                               <p className="text-[11px] text-[#9b9b93] mt-1.5 leading-relaxed">
                                 Les commandes à {ctx.order_item_count} article{ctx.order_item_count !== 1 ? 's' : ''} coûtent en moyenne{' '}
-                                <span className="font-medium text-[#1a1a2e]">${ctx.similar_avg_shipping.toFixed(2)}</span> de shipping ce mois —{' '}
+                                <span className="font-medium text-[#1a1a2e]">{ctx.similar_avg_shipping.toFixed(2)}€</span> de shipping ce mois —{' '}
                                 celle-ci est à{' '}
-                                <span className="font-medium text-[#1a1a2e]">${(a.logistician_shipping ?? 0).toFixed(2)}</span>{' '}
+                                <span className="font-medium text-[#1a1a2e]">{(a.logistician_shipping ?? 0).toFixed(2)}€</span>{' '}
                                 soit{' '}
                                 <span className="font-semibold text-[#c7293a]">+{ctx.pct_above.toFixed(0)}% au-dessus</span>
                               </p>
                             )}
                           </div>
-                          <p className="text-sm font-semibold text-[#c7293a] tabular-nums shrink-0">${a.amount.toFixed(2)}</p>
+                          <p className="text-sm font-semibold text-[#c7293a] tabular-nums shrink-0">{a.amount.toFixed(2)}€</p>
                         </div>
                       )
                     })}
@@ -734,39 +844,6 @@ Historique FW : ${history.map(h => `${h.month}: ${h.fw_count} FW ($${h.fw_total?
 
       </div>
 
-      {/* Confirmation dialog — re-upload existing month */}
-      {confirmFile && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-[2px]">
-          <div className="bg-white rounded-[20px] shadow-2xl p-6 max-w-sm w-full mx-4">
-            <h3 className="font-semibold text-[#1a1a2e] mb-2">Remplacer les données ?</h3>
-            <p className="text-sm text-[#9b9b93] mb-5 leading-relaxed">
-              Un fichier pour{' '}
-              <span className="font-medium text-[#1a1a2e]">
-                {new Date(month + '-02').toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' })}
-              </span>{' '}
-              existe déjà. Voulez-vous écraser les données existantes ?
-            </p>
-            <div className="flex gap-3 justify-end">
-              <button
-                onClick={() => setConfirmFile(null)}
-                className="px-4 py-2 rounded-xl text-sm font-medium text-[#6b6b63] hover:bg-[#f5f5f3] transition-colors"
-              >
-                Annuler
-              </button>
-              <button
-                onClick={() => {
-                  const f = confirmFile
-                  setConfirmFile(null)
-                  processFile(f)
-                }}
-                className="px-4 py-2 rounded-xl bg-[#c7293a] text-white text-sm font-semibold hover:bg-[#b02234] transition-colors"
-              >
-                Remplacer
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
 
     </div>
   )

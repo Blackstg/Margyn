@@ -44,11 +44,11 @@ export async function POST(req: NextRequest) {
     order_names.map(async (name) => ({ name, data: await fetchOrderShipping(name) }))
   )
 
-  const results: Record<string, { country: string; country_code: string }> = {}
+  const results: Record<string, { country: string; country_code: string; customer_paid: number }> = {}
 
   for (const { name, data } of fetched) {
     if (!data) continue
-    results[name] = { country: data.country, country_code: data.country_code }
+    results[name] = { country: data.country, country_code: data.country_code, customer_paid: data.customer_paid }
   }
 
   return NextResponse.json({ results })
