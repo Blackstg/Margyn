@@ -34,14 +34,13 @@ interface ShippingDetail {
 }
 
 // Pays membres UE + DOM-TOM : livraisons chères sont suspectes
+// CH, NO, GB, IS, LI… sont hors UE → tarif international normal, non contestable
 const EU_MEMBER_STATES = new Set([
   'FR','BE','DE','NL','ES','IT','PT','AT','LU','IE','DK',
   'SE','FI','PL','CZ','HU','RO','BG','HR','SK','SI','EE','LV',
   'LT','GR','CY','MT',
   'RE','GP','MQ','GF',  // DOM-TOM
 ])
-// Pays européens hors UE : tarif international normal (CH, UK, NO…)
-const EU_COUNTRIES = EU_MEMBER_STATES  // kept for legacy compat
 
 interface ShippingContext {
   order_item_count:     number
