@@ -643,90 +643,85 @@ Historique FW : ${history.map(h => `${h.month}: ${h.fw_count} FW ($${h.fw_total?
                     {anomalies.map((a, i) => {
                       const sd  = a.type === 'high_shipping' ? shippingDetails[a.order_name] : undefined
                       const ctx = a.type === 'high_shipping' ? shippingContext[a.order_name]  : undefined
+
+                      if (a.type === 'high_shipping') {
+                        const logShip    = a.logistician_shipping ?? 0
+                        const clientPaid = sd?.customer_paid ?? 0
+                        const netCost    = logShip - clientPaid
+                        const isIntl     = sd && !EU_MEMBER_STATES.has(sd.country_code)
+                        const isCovered  = clientPaid > 0 && clientPaid >= logShip
+                        const verdict    =
+                          isCovered ? { label: 'Couvert', color: 'green' } :
+                          isIntl    ? { label: 'International', color: 'gray' } :
+                          sd        ? { label: 'À contester', color: 'red' } : null
+
+                        return (
+                          <div key={i} className="px-5 py-4 space-y-3">
+                            {/* Header : tag + commande + pays + verdict */}
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-md bg-[#fff3cd] text-[#b45309]">
+                                Shipping élevé
+                              </span>
+                              <span className="font-mono text-xs font-semibold text-[#1a1a2e]">{a.order_name}</span>
+                              {sd && (
+                                <span className="text-xs text-[#6b6b63]">
+                                  {countryFlag(sd.country_code)} {sd.country}
+                                </span>
+                              )}
+                              {verdict && (
+                                <span className={`ml-auto text-[10px] font-semibold px-1.5 py-0.5 rounded-md ${
+                                  verdict.color === 'red'  ? 'bg-[#fce8ea] text-[#c7293a]' :
+                                  verdict.color === 'green' ? 'bg-[#e6f4ec] text-[#1a7f4b]' :
+                                  'bg-[#f0f0ee] text-[#6b6b63]'
+                                }`}>
+                                  {verdict.label}
+                                </span>
+                              )}
+                            </div>
+
+                            {/* 3 chiffres clés */}
+                            <div className="grid grid-cols-3 gap-2">
+                              <div className="bg-[#f8f8f7] rounded-xl p-3 text-center">
+                                <p className="text-[10px] text-[#9b9b93] mb-1">Bowa facture</p>
+                                <p className="text-base font-bold text-[#1a1a2e]">{logShip.toFixed(2)}€</p>
+                              </div>
+                              <div className="bg-[#f0fdf4] rounded-xl p-3 text-center">
+                                <p className="text-[10px] text-[#9b9b93] mb-1">Client a payé</p>
+                                <p className="text-base font-bold text-[#1a7f4b]">
+                                  {clientPaid > 0 ? `${clientPaid.toFixed(2)}€` : '—'}
+                                </p>
+                              </div>
+                              <div className={`rounded-xl p-3 text-center ${isCovered ? 'bg-[#f0fdf4]' : netCost > 30 ? 'bg-[#fff8ec]' : 'bg-[#f8f8f7]'}`}>
+                                <p className="text-[10px] text-[#9b9b93] mb-1">Coût net Mōom</p>
+                                <p className={`text-base font-bold ${isCovered ? 'text-[#1a7f4b]' : netCost > 30 ? 'text-[#b45309]' : 'text-[#1a1a2e]'}`}>
+                                  {isCovered ? '0.00€' : `${netCost.toFixed(2)}€`}
+                                </p>
+                              </div>
+                            </div>
+
+                            {/* Contexte France (discret) */}
+                            {ctx && ctx.similar_orders_count > 0 && (
+                              <p className="text-[11px] text-[#9b9b93]">
+                                En France, commandes similaires (~{ctx.order_item_count} article{ctx.order_item_count !== 1 ? 's' : ''}) : ~{ctx.similar_avg_shipping.toFixed(0)}€ de shipping
+                              </p>
+                            )}
+                          </div>
+                        )
+                      }
+
+                      // double_billing / suspicious — carte simple
                       return (
                         <div key={i} className="flex items-start justify-between px-5 py-3.5 gap-4">
                           <div className="flex-1 min-w-0">
                             <div className="flex items-center gap-2 mb-0.5">
                               <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-md ${
-                                a.type === 'double_billing' ? 'bg-[#fce8ea] text-[#c7293a]' :
-                                a.type === 'high_shipping'  ? 'bg-[#fff3cd] text-[#b45309]' :
-                                'bg-[#f0f0ee] text-[#6b6b63]'
+                                a.type === 'double_billing' ? 'bg-[#fce8ea] text-[#c7293a]' : 'bg-[#f0f0ee] text-[#6b6b63]'
                               }`}>
-                                {a.type === 'double_billing' ? 'Double billing' : a.type === 'high_shipping' ? 'Shipping élevé' : 'Suspect'}
+                                {a.type === 'double_billing' ? 'Double billing' : 'Suspect'}
                               </span>
                               <span className="font-mono text-xs text-[#1a1a2e]">{a.order_name}</span>
                             </div>
                             <p className="text-xs text-[#9b9b93]">{a.detail}</p>
-
-                            {/* Country (from Shopify) */}
-                            {sd && (
-                              <div className="flex items-center gap-2 mt-1.5">
-                                <span className="text-xs text-[#1a1a2e]">
-                                  {countryFlag(sd.country_code)} {sd.country}
-                                </span>
-                              </div>
-                            )}
-
-                            {/* Écart vs moyenne + verdict */}
-                            {ctx && ctx.similar_orders_count > 0 && (() => {
-                              const logShip      = a.logistician_shipping ?? 0
-                              const clientPaid   = sd?.customer_paid ?? 0
-                              const ecart        = logShip - ctx.similar_avg_shipping
-                              const netCost      = logShip - clientPaid
-                              const isIntl       = sd && !EU_MEMBER_STATES.has(sd.country_code)
-                              const isCovered    = clientPaid > 0 && clientPaid >= logShip
-                              const isPartial    = clientPaid > 0 && clientPaid < logShip
-                              const verdict =
-                                isCovered ? { label: 'Couvert par client', color: 'green' } :
-                                isIntl    ? { label: 'Justifié (international)', color: 'green' } :
-                                ecart > 20 && sd ? { label: 'À contester', color: 'red' } :
-                                sd ? { label: 'Justifié', color: 'green' } : null
-                              return (
-                                <div className="flex flex-col gap-1 mt-1">
-                                  <div className="flex items-center gap-2 flex-wrap">
-                                    <span className="text-xs text-[#6b6b63]">
-                                      Écart: <span className="font-semibold text-[#c7293a]">+{ecart.toFixed(2)}€</span>
-                                    </span>
-                                    {verdict && (
-                                      <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-md ${
-                                        verdict.color === 'red'
-                                          ? 'bg-[#fce8ea] text-[#c7293a]'
-                                          : 'bg-[#e6f4ec] text-[#1a7f4b]'
-                                      }`}>
-                                        {verdict.label}
-                                      </span>
-                                    )}
-                                  </div>
-                                  {clientPaid > 0 && (
-                                    <div className="flex items-center gap-2 flex-wrap text-[11px]">
-                                      <span className="text-[#6b6b63]">
-                                        Client a payé <span className="font-medium text-[#1a1a2e]">{clientPaid.toFixed(2)}€</span>
-                                      </span>
-                                      {isPartial && (
-                                        <span className="text-[#6b6b63]">
-                                          → Coût net Mōom : <span className="font-semibold text-[#b45309]">{netCost.toFixed(2)}€</span>
-                                        </span>
-                                      )}
-                                      {isCovered && (
-                                        <span className="text-[#1a7f4b] font-medium">→ Zéro coût logistique</span>
-                                      )}
-                                    </div>
-                                  )}
-                                </div>
-                              )
-                            })()}
-
-                            {/* Contextual shipping analysis */}
-                            {ctx && ctx.similar_orders_count > 0 && (
-                              <p className="text-[11px] text-[#9b9b93] mt-1.5 leading-relaxed">
-                                Les commandes à {ctx.order_item_count} article{ctx.order_item_count !== 1 ? 's' : ''} coûtent en moyenne{' '}
-                                <span className="font-medium text-[#1a1a2e]">{ctx.similar_avg_shipping.toFixed(2)}€</span> de shipping ce mois —{' '}
-                                celle-ci est à{' '}
-                                <span className="font-medium text-[#1a1a2e]">{(a.logistician_shipping ?? 0).toFixed(2)}€</span>{' '}
-                                soit{' '}
-                                <span className="font-semibold text-[#c7293a]">+{ctx.pct_above.toFixed(0)}% au-dessus</span>
-                              </p>
-                            )}
                           </div>
                           <p className="text-sm font-semibold text-[#c7293a] tabular-nums shrink-0">{a.amount.toFixed(2)}€</p>
                         </div>
