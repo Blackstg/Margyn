@@ -99,15 +99,22 @@ export default function LivreurOverviewMap({ plannedStops, unplannedOrders, heig
       await new Promise<void>(res => map.once('load', () => res()))
       if (cancelled) return
 
+      // Build a geocodable address — if address1 is just digits (street number without name),
+      // omit it to avoid bad geocodes (e.g. "4, Colombes 92700" → wrong location)
+      function buildAddress(address1: string, city: string, zip: string) {
+        const streetPart = /^\d+$/.test(address1.trim()) ? '' : `${address1}, `
+        return `${streetPart}${city} ${zip}, France`
+      }
+
       // Geocode everything in parallel
       const allAddresses: { key: string; address: string }[] = [
         ...plannedStops.map(s => ({
           key:     `stop:${s.id}`,
-          address: `${s.address1}, ${s.city} ${s.zip}, France`,
+          address: buildAddress(s.address1, s.city, s.zip),
         })),
         ...unplannedOrders.map(o => ({
           key:     `order:${o.order_name}`,
-          address: `${o.address1}, ${o.city} ${o.zip}, France`,
+          address: buildAddress(o.address1, o.city, o.zip),
         })),
       ]
 
