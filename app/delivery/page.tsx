@@ -16,11 +16,12 @@ import {
 } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
 
-const TourMap        = nextDynamic(() => import('@/components/delivery/TourMap'),        { ssr: false })
-const OrdersMap      = nextDynamic(() => import('@/components/delivery/OrdersMap'),      { ssr: false })
-const SavPositionMap = nextDynamic(() => import('@/components/delivery/SavPositionMap'), { ssr: false })
-const StatsView      = nextDynamic(() => import('@/components/delivery/StatsView'),      { ssr: false })
-const ToursMap       = nextDynamic(() => import('@/components/delivery/ToursMap'),       { ssr: false })
+const TourMap            = nextDynamic(() => import('@/components/delivery/TourMap'),            { ssr: false })
+const OrdersMap          = nextDynamic(() => import('@/components/delivery/OrdersMap'),          { ssr: false })
+const SavPositionMap     = nextDynamic(() => import('@/components/delivery/SavPositionMap'),     { ssr: false })
+const StatsView          = nextDynamic(() => import('@/components/delivery/StatsView'),          { ssr: false })
+const ToursMap           = nextDynamic(() => import('@/components/delivery/ToursMap'),           { ssr: false })
+const LivreurOverviewMap = nextDynamic(() => import('@/components/delivery/LivreurOverviewMap'), { ssr: false })
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -2116,7 +2117,7 @@ function PlanificateurView() {
 
 // ─── Livreur View ─────────────────────────────────────────────────────────────
 
-type LivreurScreen = 'home' | 'loading' | 'tour' | 'map' | 'nearby' | 'reorder' | 'celebration'
+type LivreurScreen = 'home' | 'loading' | 'tour' | 'map' | 'nearby' | 'reorder' | 'celebration' | 'overview-map'
 
 // ─── Drag-and-drop stop item ──────────────────────────────────────────────────
 
@@ -2873,10 +2874,83 @@ function LivreurView() {
     )
   }
 
+  // ── Planned stops for overview map (all active tours) ─────────────────────
+  const TOUR_COLORS = ['#6366f1','#0ea5e9','#10b981','#f59e0b','#ef4444','#8b5cf6','#ec4899','#14b8a6']
+  const activeToursList = tours.filter(t => t.status !== 'completed' && t.status !== 'cancelled')
+  const plannedStops = activeToursList.flatMap((t, ti) =>
+    t.stops.map(s => ({
+      id:            s.id,
+      order_name:    s.order_name,
+      customer_name: s.customer_name,
+      address1:      s.address1,
+      city:          s.city,
+      zip:           s.zip,
+      panel_count:   s.panel_count,
+      status:        s.status,
+      tour_name:     t.name,
+      tour_color:    TOUR_COLORS[ti % TOUR_COLORS.length],
+    }))
+  )
+
+  // ── Screen: overview-map ──────────────────────────────────────────────────
+  if (screen === 'overview-map') {
+    return (
+      <div className="w-full flex flex-col" style={{ height: '100dvh' }}>
+        {/* Header */}
+        <div className="flex items-center gap-3 px-4 pt-4 pb-3 shrink-0">
+          <button
+            onClick={() => setScreen('home')}
+            className="w-10 h-10 rounded-full bg-[#f0f0ee] flex items-center justify-center active:bg-[#e8e8e4]"
+          >
+            <ChevronLeft size={20} className="text-[#1a1a2e]" />
+          </button>
+          <div className="flex-1">
+            <h2 className="text-base font-bold text-[#1a1a2e]">Carte des commandes</h2>
+            <p className="text-xs text-[#9b9b93]">
+              {plannedStops.length} planifiée{plannedStops.length !== 1 ? 's' : ''} · {nearbyOrders.length} non planifiée{nearbyOrders.length !== 1 ? 's' : ''}
+            </p>
+          </div>
+        </div>
+
+        {/* Légende */}
+        <div className="flex items-center gap-4 px-4 pb-3 flex-wrap shrink-0">
+          <div className="flex items-center gap-1.5 text-xs text-[#6b6b63]">
+            <span className="w-3 h-3 rounded-full bg-[#6366f1] inline-block" />
+            Planifiée (en tournée)
+          </div>
+          <div className="flex items-center gap-1.5 text-xs text-[#6b6b63]">
+            <span className="w-2.5 h-2.5 rounded-sm bg-[#f59e0b] inline-block rotate-45" />
+            Non planifiée
+          </div>
+          <div className="flex items-center gap-1.5 text-xs text-[#6b6b63]">
+            <span className="w-2.5 h-2.5 rounded-sm bg-[#a855f7] inline-block rotate-45" />
+            Précommande
+          </div>
+        </div>
+
+        {/* Carte */}
+        <div className="flex-1 px-4 pb-6 min-h-0">
+          <LivreurOverviewMap
+            plannedStops={plannedStops}
+            unplannedOrders={nearbyOrders.map(o => ({
+              order_name:    o.order_name,
+              customer_name: o.customer_name,
+              address1:      o.address1,
+              city:          o.city,
+              zip:           o.zip,
+              panel_count:   o.panel_count,
+              is_preorder:   o.is_preorder ?? false,
+            }))}
+          />
+        </div>
+      </div>
+    )
+  }
+
   // ── Screen: home ──
   if (screen === 'home') {
     // Only show active (non-completed, non-cancelled) tours to the driver
-    const activeTours = tours.filter(t => t.status !== 'completed' && t.status !== 'cancelled')
+    const activeTours = activeToursList
     const upcomingTours = activeTours.filter(t => t.id !== selectedTourId)
 
     return (
@@ -3110,6 +3184,23 @@ function LivreurView() {
             })}
           </div>
         )}
+
+        {/* Overview map button */}
+        <button
+          onClick={() => setScreen('overview-map')}
+          className="w-full flex items-center gap-4 px-5 py-4 rounded-[18px] bg-[#eff6ff] border border-[#bfdbfe] active:bg-[#dbeafe] transition-colors"
+        >
+          <span className="w-10 h-10 rounded-full bg-[#2563eb] flex items-center justify-center shrink-0">
+            <MapIcon size={20} strokeWidth={1.8} className="text-white" />
+          </span>
+          <div className="flex-1 text-left min-w-0">
+            <p className="text-sm font-bold text-[#1e3a8a]">Carte des commandes</p>
+            <p className="text-xs text-[#1e3a8a]/60">
+              {plannedStops.length} planifiée{plannedStops.length !== 1 ? 's' : ''} · {nearbyOrders.length} non planifiée{nearbyOrders.length !== 1 ? 's' : ''}
+            </p>
+          </div>
+          <ChevronRight size={18} className="text-[#2563eb] shrink-0" />
+        </button>
 
         {/* Nearby orders button */}
         <button
