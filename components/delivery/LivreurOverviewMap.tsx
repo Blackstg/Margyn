@@ -8,6 +8,7 @@ export interface PlannedStop {
   order_name:    string
   customer_name: string
   address1:      string
+  address2?:     string
   city:          string
   zip:           string
   panel_count:   number
@@ -20,6 +21,7 @@ export interface UnplannedOrder {
   order_name:    string
   customer_name: string
   address1:      string
+  address2?:     string
   city:          string
   zip:           string
   panel_count:   number
@@ -99,22 +101,31 @@ export default function LivreurOverviewMap({ plannedStops, unplannedOrders, heig
       await new Promise<void>(res => map.once('load', () => res()))
       if (cancelled) return
 
-      // Build a geocodable address — if address1 is just digits (street number without name),
-      // omit it to avoid bad geocodes (e.g. "4, Colombes 92700" → wrong location)
-      function buildAddress(address1: string, city: string, zip: string) {
-        const streetPart = /^\d+$/.test(address1.trim()) ? '' : `${address1}, `
-        return `${streetPart}${city} ${zip}, France`
+      // Build a geocodable address.
+      // Shopify sometimes stores only the street number in address1 and the street name in address2
+      // (e.g. address1="4", address2="Avenue Virginie"). Combine them when address1 is digits-only.
+      function buildAddress(address1: string, address2: string | undefined, city: string, zip: string) {
+        const isNumberOnly = /^\d+$/.test(address1.trim())
+        let street: string
+        if (isNumberOnly && address2) {
+          street = `${address1} ${address2}`
+        } else if (isNumberOnly) {
+          street = ''  // no street name at all — fall back to city+zip
+        } else {
+          street = address1
+        }
+        return street ? `${street}, ${city} ${zip}, France` : `${city} ${zip}, France`
       }
 
       // Geocode everything in parallel
       const allAddresses: { key: string; address: string }[] = [
         ...plannedStops.map(s => ({
           key:     `stop:${s.id}`,
-          address: buildAddress(s.address1, s.city, s.zip),
+          address: buildAddress(s.address1, s.address2, s.city, s.zip),
         })),
         ...unplannedOrders.map(o => ({
           key:     `order:${o.order_name}`,
-          address: buildAddress(o.address1, o.city, o.zip),
+          address: buildAddress(o.address1, o.address2, o.city, o.zip),
         })),
       ]
 

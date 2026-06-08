@@ -57,6 +57,7 @@ interface ShopifyOrder {
   is_accessory_only?: boolean
   needs_replan?: boolean
   address1: string
+  address2?: string
   city: string
   zip: string
   zone: Zone
@@ -72,6 +73,7 @@ interface TourStop {
   email: string
   phone?: string | null
   address1: string
+  address2?: string
   city: string
   zip: string
   zone: Zone
@@ -2883,6 +2885,7 @@ function LivreurView() {
       order_name:    s.order_name,
       customer_name: s.customer_name,
       address1:      s.address1,
+      address2:      s.address2,
       city:          s.city,
       zip:           s.zip,
       panel_count:   s.panel_count,
@@ -2936,6 +2939,7 @@ function LivreurView() {
               order_name:    o.order_name,
               customer_name: o.customer_name,
               address1:      o.address1,
+              address2:      o.address2,
               city:          o.city,
               zip:           o.zip,
               panel_count:   o.panel_count,
