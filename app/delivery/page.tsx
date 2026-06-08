@@ -2901,6 +2901,11 @@ function LivreurView() {
                   <span className="text-white/40 text-xs font-bold uppercase tracking-widest">Prochaine tournée</span>
                 </div>
               )}
+              {tour.status === 'draft' && (
+                <div className="flex items-center gap-2 mb-3">
+                  <span className="text-[#fbbf24] text-xs font-bold uppercase tracking-widest">⏳ En cours de préparation</span>
+                </div>
+              )}
               <div className="text-2xl font-bold leading-tight">{tour.name}</div>
               {tour.planned_date && (
                 <div className="text-white/50 text-base mt-1 capitalize">{formatDate(tour.planned_date)}</div>
@@ -2942,9 +2947,16 @@ function LivreurView() {
 
             {/* Actions */}
             <div className="px-6 pt-4 pb-6 space-y-3">
+              {tour.status === 'draft' && (
+                <div className="w-full py-4 rounded-[16px] bg-[#fbbf24]/10 border border-[#fbbf24]/30 text-center">
+                  <p className="text-[#fbbf24] text-sm font-semibold">Tournée en cours de préparation</p>
+                  <p className="text-white/40 text-xs mt-1">Le planificateur finalise encore les arrêts</p>
+                </div>
+              )}
               <button
                 onClick={() => setScreen('loading')}
-                className="w-full flex items-center justify-center gap-3 py-5 rounded-[16px] border border-white/25 text-white font-semibold text-lg active:bg-white/10 transition-colors"
+                disabled={tour.status === 'draft'}
+                className="w-full flex items-center justify-center gap-3 py-5 rounded-[16px] border border-white/25 text-white font-semibold text-lg active:bg-white/10 disabled:opacity-30 transition-colors"
               >
                 <Package size={24} strokeWidth={1.8} />
                 Préparer le camion
@@ -2964,7 +2976,7 @@ function LivreurView() {
                     fetchTours()
                   }
                 }}
-                disabled={sortedStops.length === 0}
+                disabled={sortedStops.length === 0 || tour.status === 'draft'}
                 className="w-full flex items-center justify-center gap-3 py-5 rounded-[16px] bg-[#4ade80] text-[#1a1a2e] font-bold text-lg disabled:opacity-30 active:bg-[#22c55e] transition-colors"
               >
                 <Truck size={24} strokeWidth={1.8} />
@@ -3049,7 +3061,14 @@ function LivreurView() {
                       <Truck size={18} strokeWidth={1.8} className="text-[#6b6b63]" />
                     </div>
                     <div className="flex-1 min-w-0">
-                      <p className="text-sm font-bold text-[#1a1a2e] truncate">{t.name}</p>
+                      <div className="flex items-center gap-2">
+                        <p className="text-sm font-bold text-[#1a1a2e] truncate">{t.name}</p>
+                        {t.status === 'draft' && (
+                          <span className="shrink-0 text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-[#fef3c7] text-[#92400e]">
+                            Brouillon
+                          </span>
+                        )}
+                      </div>
                       <p className="text-xs text-[#9b9b93] mt-0.5 capitalize">
                         {t.planned_date ? formatDate(t.planned_date) : 'Sans date'}
                         {' · '}{tStops.length} arrêts · {t.total_panels} panneaux
