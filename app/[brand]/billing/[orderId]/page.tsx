@@ -239,7 +239,7 @@ function Invoice({ order, settings }: { order: ShopifyOrder; settings: InvoiceSe
               <th style={S.th}>Article</th>
               <th style={S.th}>Description</th>
               <th style={{ ...S.thR }}>Quantité</th>
-              <th style={{ ...S.thR }}>Prix unitaire TTC</th>
+              <th style={{ ...S.thR }}>{tvaEnabled ? 'Prix unitaire TTC' : 'Prix unitaire HT'}</th>
               <th style={{ ...S.thR }}>TVA</th>
               <th style={{ ...S.thR }}>Total</th>
             </tr>
@@ -258,7 +258,7 @@ function Invoice({ order, settings }: { order: ShopifyOrder; settings: InvoiceSe
                   </td>
                   <td style={S.tdR}>{item.quantity}</td>
                   <td style={S.tdR}>{fmtEur(parseFloat(item.price))}</td>
-                  <td style={S.tdR}>{tvaEnabled ? `${tvaRate}%` : '—'}</td>
+                  <td style={S.tdR}>{tvaEnabled ? `${tvaRate}%` : 'N/A'}</td>
                   <td style={{ ...S.tdR, fontWeight: 700 }}>{fmtEur(lineTotal)}</td>
                 </tr>
               )
@@ -273,7 +273,7 @@ function Invoice({ order, settings }: { order: ShopifyOrder; settings: InvoiceSe
               <span>Sous-total</span>
               <span style={{ fontWeight: 600 }}>{fmtEur(subtotal)}</span>
             </div>
-            {tvaEnabled && (
+            {tvaEnabled ? (
               <>
                 <div style={S.totalRow}>
                   <span>Total HT</span>
@@ -283,12 +283,23 @@ function Invoice({ order, settings }: { order: ShopifyOrder; settings: InvoiceSe
                   <span>TVA (FR TVA) {tvaRate}%</span>
                   <span style={{ fontWeight: 600 }}>{fmtEur(tvaAmount)}</span>
                 </div>
+                <div style={S.totalRow}>
+                  <span>Total TTC</span>
+                  <span style={{ fontWeight: 700, color: '#1a1a18' }}>{fmtEur(totalPrice)}</span>
+                </div>
+              </>
+            ) : (
+              <>
+                <div style={S.totalRow}>
+                  <span style={{ color: '#888', fontSize: 11 }}>TVA — Non applicable</span>
+                  <span style={{ color: '#888', fontSize: 11 }}>—</span>
+                </div>
+                <div style={S.totalRow}>
+                  <span>Total HT</span>
+                  <span style={{ fontWeight: 700, color: '#1a1a18' }}>{fmtEur(totalPrice)}</span>
+                </div>
               </>
             )}
-            <div style={S.totalRow}>
-              <span>Total TTC</span>
-              <span style={{ fontWeight: 700, color: '#1a1a18' }}>{fmtEur(totalPrice)}</span>
-            </div>
             {isPaid && (
               <div style={S.totalRow}>
                 <span>Montant payé</span>
