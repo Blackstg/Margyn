@@ -230,8 +230,8 @@ export default function Sidebar({ isOpen, collapsed, onToggleCollapse }: Sidebar
             if (role === 'sav')     return key === 'sav' || key === 'sav-krom' || key === 'delivery'
             // Shared pages: always visible
             if (brandLock === null) return true
-            // Brand-locked: only if user has access to that brand
-            return allowedBrands === null || allowedBrands.includes(brandLock)
+            // Brand-locked: only visible when currently ON that brand
+            return brandLock === currentBrand
           })
           if (items.length === 0) return null
 
