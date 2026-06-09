@@ -27,10 +27,11 @@ const BRAND_LABELS: Record<string, string> = {
 }
 
 // Pages accessible to all brands — link uses current brand
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
+import type { LucideProps } from 'lucide-react'
+
 type NavItem = {
   key:       string
-  icon:      React.ComponentType<any>
+  icon:      React.ForwardRefExoticComponent<Omit<LucideProps, 'ref'> & React.RefAttributes<SVGSVGElement>>
   label:     string
   brandLock: string | null
 }
