@@ -68,6 +68,7 @@ interface InvoiceSettings {
   color_primary: string
   bank_iban:     string
   bank_bic:      string
+  logo_size?:    number
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -118,8 +119,8 @@ function Invoice({ order, settings }: { order: ShopifyOrder; settings: InvoiceSe
 
     // Header
     headerRow:  { display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 36 },
-    logo:       { height: 32, objectFit: 'contain' as const },
-    logoText:   { fontSize: 28, fontWeight: 900, letterSpacing: '-1px', color: '#1a1a18', lineHeight: 1 },
+    logo:       { height: settings?.logo_size ?? 36, objectFit: 'contain' as const },
+    logoText:   { fontSize: settings?.logo_size ?? 28, fontWeight: 900, letterSpacing: '-1px', color: '#1a1a18', lineHeight: 1 },
     headerRight:{ display: 'flex', flexDirection: 'column' as const, alignItems: 'flex-end', gap: 6 },
     invoiceLabel:{ fontSize: 11, color: '#888', letterSpacing: '0.5px' },
     invoiceNum: { fontSize: 13, fontWeight: 700, letterSpacing: '0.5px' },
@@ -139,7 +140,7 @@ function Invoice({ order, settings }: { order: ShopifyOrder; settings: InvoiceSe
     metaItem:   { display: 'flex', gap: 16, alignItems: 'baseline' },
     metaKey:    { fontSize: 9, fontWeight: 700, color: '#888', letterSpacing: '1px', textTransform: 'uppercase' as const, minWidth: 100 },
     metaVal:    { fontSize: 11, fontWeight: 700, color: '#1a1a18' },
-    thankyou:   { fontSize: 24, fontWeight: 900, color: '#1a1a18', letterSpacing: '-0.5px', lineHeight: 1.15, alignSelf: 'center' as const },
+    thankyou:   { fontSize: 17, fontWeight: 900, color: '#1a1a18', letterSpacing: '-0.3px', lineHeight: 1.2, alignSelf: 'center' as const },
 
     // Table
     table:      { width: '100%', borderCollapse: 'collapse' as const, marginBottom: 28 },
@@ -226,12 +227,6 @@ function Invoice({ order, settings }: { order: ShopifyOrder; settings: InvoiceSe
               <span style={S.metaKey}>Numéro de commande</span>
               <span style={S.metaVal}>{order.name}</span>
             </div>
-            {settings?.payment_terms && (
-              <div style={S.metaItem}>
-                <span style={S.metaKey}>Conditions</span>
-                <span style={S.metaVal}>{settings.payment_terms}</span>
-              </div>
-            )}
           </div>
           <div style={{ display: 'flex', alignItems: 'center' }}>
             <div style={S.thankyou}>MERCI POUR<br />VOTRE ACHAT.</div>

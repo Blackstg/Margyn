@@ -560,6 +560,7 @@ interface InvoiceSettings {
   color_primary: string
   bank_iban:     string
   bank_bic:      string
+  logo_size:     number
 }
 
 const INVOICE_DEFAULTS: InvoiceSettings = {
@@ -567,7 +568,7 @@ const INVOICE_DEFAULTS: InvoiceSettings = {
   country: 'France', vat_number: '', siret: '', email: '', phone: '',
   logo_url: '', tva_rate: '20', tva_enabled: true,
   payment_terms: '30 jours nets', footer_notes: '', color_primary: '#1a1a2e',
-  bank_iban: '', bank_bic: '',
+  bank_iban: '', bank_bic: '', logo_size: 36,
 }
 
 function InvoiceSettingsSection({ brand }: { brand: BrandTab }) {
@@ -584,7 +585,8 @@ function InvoiceSettingsSection({ brand }: { brand: BrandTab }) {
           setForm({
             ...INVOICE_DEFAULTS,
             ...settings,
-            tva_rate: String(settings.tva_rate ?? 20),
+            tva_rate:  String(settings.tva_rate ?? 20),
+            logo_size: settings.logo_size ?? 36,
           })
         }
       })
@@ -592,7 +594,7 @@ function InvoiceSettingsSection({ brand }: { brand: BrandTab }) {
       .finally(() => setLoading(false))
   }, [brand])
 
-  function set(k: keyof InvoiceSettings, v: string | boolean) {
+  function set(k: keyof InvoiceSettings, v: string | boolean | number) {
     setForm(prev => ({ ...prev, [k]: v }))
   }
 
@@ -642,6 +644,29 @@ function InvoiceSettingsSection({ brand }: { brand: BrandTab }) {
             <Field label="N° TVA intracommunautaire" value={form.vat_number} onChange={v => set('vat_number', v)} />
             <Field label="Email" value={form.email} onChange={v => set('email', v)} type="email" />
             <Field label="Téléphone" value={form.phone} onChange={v => set('phone', v)} />
+          </div>
+          {/* Logo size slider */}
+          <div className="mt-4">
+            <div className="flex items-center justify-between mb-1.5">
+              <label className="text-xs font-medium text-[#6b6b63]">Taille du logo</label>
+              <span className="text-xs font-semibold text-[#1a1a2e]">{form.logo_size} px</span>
+            </div>
+            <input
+              type="range" min={20} max={80} step={2}
+              value={form.logo_size}
+              onChange={e => set('logo_size', parseInt(e.target.value))}
+              className="w-full accent-[#1a1a2e]"
+            />
+            <div className="flex justify-between text-[10px] text-[#c0c0b8] mt-0.5">
+              <span>Petit</span><span>Grand</span>
+            </div>
+            {form.logo_url && (
+              <div className="mt-3 p-3 bg-[#faf9f8] border border-[#e8e8e4] rounded-lg flex items-center gap-3">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src={form.logo_url} alt="logo preview" style={{ height: form.logo_size, objectFit: 'contain' }} />
+                <span className="text-xs text-[#9b9b93]">Aperçu</span>
+              </div>
+            )}
           </div>
         </div>
 
