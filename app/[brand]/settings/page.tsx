@@ -4,7 +4,7 @@ export const dynamic = 'force-dynamic'
 
 import React, { useState, useEffect, useCallback, useRef } from 'react'
 import { createBrowserClient } from '@supabase/auth-helpers-nextjs'
-import { Plus, Trash2, Check, Loader2, ChevronLeft, ChevronRight, Search, X, Pencil } from 'lucide-react'
+import { Plus, Trash2, Check, Loader2, ChevronLeft, ChevronRight, Search, X, Pencil, FileText } from 'lucide-react'
 import { useBrand } from '@/context/BrandContext'
 
 // ─── Supabase ─────────────────────────────────────────────────────────────────
@@ -539,6 +539,216 @@ function ExclusionSection({ brand }: { brand: BrandTab }) {
   )
 }
 
+// ─── InvoiceSettingsSection ───────────────────────────────────────────────────
+
+interface InvoiceSettings {
+  company_name:  string
+  address_line1: string
+  address_line2: string
+  city:          string
+  zip:           string
+  country:       string
+  vat_number:    string
+  siret:         string
+  email:         string
+  phone:         string
+  logo_url:      string
+  tva_rate:      string
+  tva_enabled:   boolean
+  payment_terms: string
+  footer_notes:  string
+  color_primary: string
+  bank_iban:     string
+  bank_bic:      string
+}
+
+const INVOICE_DEFAULTS: InvoiceSettings = {
+  company_name: '', address_line1: '', address_line2: '', city: '', zip: '',
+  country: 'France', vat_number: '', siret: '', email: '', phone: '',
+  logo_url: '', tva_rate: '20', tva_enabled: true,
+  payment_terms: '30 jours nets', footer_notes: '', color_primary: '#1a1a2e',
+  bank_iban: '', bank_bic: '',
+}
+
+function InvoiceSettingsSection({ brand }: { brand: BrandTab }) {
+  const [form, setForm]       = useState<InvoiceSettings>(INVOICE_DEFAULTS)
+  const [saveState, setSave]  = useState<SaveState>('idle')
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    setLoading(true)
+    fetch(`/api/billing/settings?brand=${brand}`)
+      .then(r => r.json())
+      .then(({ settings }) => {
+        if (settings) {
+          setForm({
+            ...INVOICE_DEFAULTS,
+            ...settings,
+            tva_rate: String(settings.tva_rate ?? 20),
+          })
+        }
+      })
+      .catch(() => {})
+      .finally(() => setLoading(false))
+  }, [brand])
+
+  function set(k: keyof InvoiceSettings, v: string | boolean) {
+    setForm(prev => ({ ...prev, [k]: v }))
+  }
+
+  async function save() {
+    setSave('saving')
+    try {
+      const body = { ...form, tva_rate: parseFloat(form.tva_rate) || 20 }
+      const res  = await fetch(`/api/billing/settings?brand=${brand}`, {
+        method:  'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify(body),
+      })
+      const data = await res.json()
+      if (data.error) throw new Error(data.error)
+      setSave('saved')
+      setTimeout(() => setSave('idle'), 2500)
+    } catch {
+      setSave('error')
+      setTimeout(() => setSave('idle'), 3000)
+    }
+  }
+
+  if (loading) {
+    return (
+      <div className="bg-white rounded-[20px] shadow-[0_2px_16px_rgba(0,0,0,0.06)] h-32 animate-pulse" />
+    )
+  }
+
+  return (
+    <div className="bg-white rounded-[20px] shadow-[0_2px_16px_rgba(0,0,0,0.06)] overflow-hidden">
+      <div className="px-6 py-4 border-b border-[#f0f0ee] flex items-center gap-2">
+        <FileText size={15} strokeWidth={1.8} className="text-[#6b6b63]" />
+        <div>
+          <h3 className="text-sm font-semibold text-[#1a1a2e]">Paramètres de facturation</h3>
+          <p className="text-xs text-[#6b6b63] mt-0.5">Informations émetteur sur les factures PDF</p>
+        </div>
+      </div>
+
+      <div className="divide-y divide-[#f0f0ee]">
+        {/* Company */}
+        <div className="px-6 py-4">
+          <p className="text-xs font-semibold text-[#9b9b93] uppercase tracking-wider mb-3">Société</p>
+          <div className="grid grid-cols-2 gap-3">
+            <Field label="Nom de la société" value={form.company_name} onChange={v => set('company_name', v)} />
+            <Field label="URL du logo" value={form.logo_url} onChange={v => set('logo_url', v)} placeholder="https://..." />
+            <Field label="SIRET" value={form.siret} onChange={v => set('siret', v)} />
+            <Field label="N° TVA intracommunautaire" value={form.vat_number} onChange={v => set('vat_number', v)} />
+            <Field label="Email" value={form.email} onChange={v => set('email', v)} type="email" />
+            <Field label="Téléphone" value={form.phone} onChange={v => set('phone', v)} />
+          </div>
+        </div>
+
+        {/* Address */}
+        <div className="px-6 py-4">
+          <p className="text-xs font-semibold text-[#9b9b93] uppercase tracking-wider mb-3">Adresse</p>
+          <div className="grid grid-cols-2 gap-3">
+            <Field label="Ligne 1" value={form.address_line1} onChange={v => set('address_line1', v)} className="col-span-2" />
+            <Field label="Ligne 2" value={form.address_line2} onChange={v => set('address_line2', v)} className="col-span-2" />
+            <Field label="Code postal" value={form.zip} onChange={v => set('zip', v)} />
+            <Field label="Ville" value={form.city} onChange={v => set('city', v)} />
+            <Field label="Pays" value={form.country} onChange={v => set('country', v)} />
+          </div>
+        </div>
+
+        {/* TVA */}
+        <div className="px-6 py-4">
+          <p className="text-xs font-semibold text-[#9b9b93] uppercase tracking-wider mb-3">TVA</p>
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <label className="relative inline-flex items-center cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={form.tva_enabled}
+                  onChange={e => set('tva_enabled', e.target.checked)}
+                  className="sr-only peer"
+                />
+                <div className="w-9 h-5 bg-[#e8e8e4] peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-[#1a1a2e]"></div>
+              </label>
+              <span className="text-sm text-[#1a1a2e] font-medium">TVA applicable</span>
+            </div>
+            {form.tva_enabled && (
+              <div className="flex items-center gap-2">
+                <input
+                  type="number" value={form.tva_rate}
+                  onChange={e => set('tva_rate', e.target.value)}
+                  min="0" max="100" step="0.1"
+                  className="w-20 text-right text-sm text-[#1a1a18] border border-[#e8e8e4] rounded-lg px-3 py-1.5 focus:border-[#1a1a2e] focus:outline-none transition-colors"
+                />
+                <span className="text-xs text-[#6b6b63]">%</span>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Paiement */}
+        <div className="px-6 py-4">
+          <p className="text-xs font-semibold text-[#9b9b93] uppercase tracking-wider mb-3">Paiement</p>
+          <div className="grid grid-cols-2 gap-3">
+            <Field label="Conditions de paiement" value={form.payment_terms} onChange={v => set('payment_terms', v)} />
+            <div style={{ display: 'flex', gap: 8 }}>
+              <div style={{ flex: 1 }}>
+                <Field label="Couleur principale" value={form.color_primary} onChange={v => set('color_primary', v)} />
+              </div>
+              {form.color_primary && /^#[0-9a-fA-F]{6}$/.test(form.color_primary) && (
+                <div className="w-9 h-9 rounded-lg border border-[#e8e8e4] mt-5 shrink-0" style={{ backgroundColor: form.color_primary }} />
+              )}
+            </div>
+            <Field label="IBAN" value={form.bank_iban} onChange={v => set('bank_iban', v)} className="col-span-2" />
+            <Field label="BIC" value={form.bank_bic} onChange={v => set('bank_bic', v)} />
+          </div>
+        </div>
+
+        {/* Footer */}
+        <div className="px-6 py-4">
+          <label className="block text-xs font-medium text-[#6b6b63] mb-1">Notes de bas de page</label>
+          <textarea
+            value={form.footer_notes}
+            onChange={e => set('footer_notes', e.target.value)}
+            rows={2}
+            placeholder="Ex: Société au capital de 10 000€ — RCS Paris B 123 456 789"
+            className="w-full text-sm text-[#1a1a18] bg-[#faf9f8] border border-[#e8e8e4] rounded-lg px-3 py-2 focus:border-[#1a1a2e] focus:outline-none transition-colors resize-none"
+          />
+        </div>
+      </div>
+
+      <div className="flex justify-end px-6 py-4 border-t border-[#f0f0ee] bg-[#f8f8f6]">
+        <SaveButton state={saveState} onClick={save} />
+      </div>
+    </div>
+  )
+}
+
+function Field({
+  label, value, onChange, placeholder, type = 'text', className,
+}: {
+  label: string
+  value: string
+  onChange: (v: string) => void
+  placeholder?: string
+  type?: string
+  className?: string
+}) {
+  return (
+    <div className={className}>
+      <label className="block text-xs font-medium text-[#6b6b63] mb-1">{label}</label>
+      <input
+        type={type}
+        value={value}
+        onChange={e => onChange(e.target.value)}
+        placeholder={placeholder}
+        className="w-full text-sm text-[#1a1a18] bg-[#faf9f8] border border-[#e8e8e4] rounded-lg px-3 py-1.5 focus:border-[#1a1a2e] focus:outline-none transition-colors"
+      />
+    </div>
+  )
+}
+
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 type FixedKey = 'bowaTeam' | 'bowaInfra' | 'bowaFulfillmentFixed'
@@ -1055,6 +1265,9 @@ export default function SettingsPage() {
 
           </div>
         )}
+
+        {/* Facturation */}
+        <InvoiceSettingsSection brand={activeBrand} />
 
         {/* Produits exclus */}
         <ExclusionSection brand={activeBrand} />

@@ -4,7 +4,7 @@ import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
 import {
   LayoutDashboard, BarChart2, PackageOpen, Settings, LogOut,
-  Boxes, FileText, Tag, Truck, Headphones, ChevronLeft, ChevronRight, Sparkles,
+  Boxes, FileText, Tag, Truck, Headphones, ChevronLeft, ChevronRight, Sparkles, Receipt,
 } from 'lucide-react'
 import { createBrowserClient } from '@supabase/auth-helpers-nextjs'
 import { useState, useEffect } from 'react'
@@ -48,11 +48,12 @@ const NAV_SECTIONS: { label: string; items: NavItem[] }[] = [
   {
     label: 'Opérations',
     items: [
-      { key: 'reorder',   icon: PackageOpen, label: 'Réappro',   brandLock: null   },
-      { key: 'delivery',  icon: Truck,        label: 'Delivery',  brandLock: 'bowa' },
-      { key: 'stock',     icon: Boxes,        label: 'Stock',     brandLock: 'moom' },
-      { key: 'invoices',  icon: FileText,     label: 'Factures',  brandLock: 'moom' },
-      { key: 'products',  icon: Tag,          label: 'Produits',  brandLock: 'moom' },
+      { key: 'reorder',   icon: PackageOpen, label: 'Réappro',      brandLock: null   },
+      { key: 'billing',   icon: Receipt,      label: 'Facturation', brandLock: null   },
+      { key: 'delivery',  icon: Truck,        label: 'Delivery',    brandLock: 'bowa' },
+      { key: 'stock',     icon: Boxes,        label: 'Stock',       brandLock: 'moom' },
+      { key: 'invoices',  icon: FileText,     label: 'Factures',    brandLock: 'moom' },
+      { key: 'products',  icon: Tag,          label: 'Produits',    brandLock: 'moom' },
     ],
   },
   {
@@ -66,9 +67,9 @@ const NAV_SECTIONS: { label: string; items: NavItem[] }[] = [
 
 // Pages the brand-selector can jump to when switching brands
 const BRAND_PAGES: Record<string, string[]> = {
-  bowa: ['dashboard', 'campaigns', 'creatives', 'settings', 'reorder', 'delivery'],
-  moom: ['dashboard', 'campaigns', 'creatives', 'settings', 'reorder', 'invoices', 'stock', 'products', 'sav'],
-  krom: ['dashboard', 'campaigns', 'creatives', 'settings', 'reorder', 'sav-krom'],
+  bowa: ['dashboard', 'campaigns', 'creatives', 'settings', 'reorder', 'billing', 'delivery'],
+  moom: ['dashboard', 'campaigns', 'creatives', 'settings', 'reorder', 'billing', 'invoices', 'stock', 'products', 'sav'],
+  krom: ['dashboard', 'campaigns', 'creatives', 'settings', 'reorder', 'billing', 'sav-krom'],
 }
 
 // ─── Component ────────────────────────────────────────────────────────────────

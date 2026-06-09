@@ -16,7 +16,7 @@ const BRAND_LOCKED: Record<string, Brand> = {
 }
 
 // All pages that live under /[brand]/
-const ALL_BRAND_PAGES = ['dashboard', 'campaigns', 'creatives', 'settings', 'reorder', ...Object.keys(BRAND_LOCKED)]
+const ALL_BRAND_PAGES = ['dashboard', 'campaigns', 'creatives', 'settings', 'reorder', 'billing', ...Object.keys(BRAND_LOCKED)]
 
 export async function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl
