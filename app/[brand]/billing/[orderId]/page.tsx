@@ -199,6 +199,7 @@ function Invoice({ order, settings }: { order: ShopifyOrder; settings: InvoiceSe
             {(settings?.zip || settings?.city) && (
               <p style={S.addrLine}>{[settings.zip, settings.city].filter(Boolean).join(' ')}</p>
             )}
+            {settings?.country && <p style={S.addrLine}>{settings.country}</p>}
             {settings?.vat_number && <p style={{ ...S.addrLine, marginTop: 6 }}>N° de TVA : {settings.vat_number}</p>}
           </div>
           <div>
@@ -210,9 +211,7 @@ function Invoice({ order, settings }: { order: ShopifyOrder; settings: InvoiceSe
             {(billingAddr?.zip || billingAddr?.city) && (
               <p style={S.addrLine}>{[billingAddr.zip, billingAddr.city].filter(Boolean).join(' ')}</p>
             )}
-            {billingAddr?.country && billingAddr.country !== 'France' && (
-              <p style={S.addrLine}>{billingAddr.country}</p>
-            )}
+            {billingAddr?.country && <p style={S.addrLine}>{billingAddr.country}</p>}
           </div>
         </div>
 
