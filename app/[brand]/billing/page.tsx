@@ -61,7 +61,7 @@ export default function BillingPage() {
   const [searching, setSearching] = useState(false)
 
   const load = useCallback(async (q = '') => {
-    q ? setSearching(true) : setLoading(true)
+    if (q) { setSearching(true) } else { setLoading(true) }
     setError(null)
     try {
       const url = q
