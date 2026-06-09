@@ -93,8 +93,6 @@ function Invoice({ order, settings }: { order: ShopifyOrder; settings: InvoiceSe
   const tvaEnabled = settings?.tva_enabled ?? true
   const tvaRate    = settings?.tva_rate ?? 20
 
-  const subtotal    = parseFloat(order.subtotal_price)
-  const totalTax    = parseFloat(order.total_tax)
   const totalPrice  = parseFloat(order.total_price)
   const discounts   = parseFloat(order.total_discounts || '0')
 
@@ -234,7 +232,7 @@ function Invoice({ order, settings }: { order: ShopifyOrder; settings: InvoiceSe
             </tr>
           </thead>
           <tbody>
-            {order.line_items.map((item, i) => {
+            {order.line_items.map((item) => {
               const lineTotal = parseFloat(item.price) * item.quantity - parseFloat(item.total_discount || '0')
               return (
                 <tr key={item.id} style={{ borderBottom: '1px solid #f0f0ee' }}>
