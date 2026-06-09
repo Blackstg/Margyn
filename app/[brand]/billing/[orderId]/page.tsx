@@ -182,7 +182,7 @@ function Invoice({ order, settings }: { order: ShopifyOrder; settings: InvoiceSe
               <div style={S.invoiceNum}>{invoiceNumber}</div>
             </div>
             <div style={S.dateBadge}>
-              <div style={S.dateLabel}>DATE D'ÉMISSION</div>
+              <div style={S.dateLabel}>DATE D&apos;ÉMISSION</div>
               <div style={S.dateVal}>{fmtDateLong(order.created_at)}</div>
             </div>
           </div>
