@@ -2,6 +2,7 @@
 export const dynamic = 'force-dynamic'
 
 import { Suspense, useState, useEffect, useCallback, useMemo } from 'react'
+import { useBrand } from '@/context/BrandContext'
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip,
   ResponsiveContainer,
@@ -15,7 +16,6 @@ import AiInsights from '@/components/dashboard/AiInsights'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-type Brand  = 'bowa' | 'moom' | 'krom' | 'all'
 type Period = '7j' | '30j' | '90j' | 'mois'
 type Format = 'all' | 'image' | 'video' | 'carousel'
 type StatusFilter = 'all' | 'active' | 'paused'
@@ -797,8 +797,7 @@ function KpiCard({ label, value, loading }: { label: string; value: string; load
 // ─── Main page ────────────────────────────────────────────────────────────────
 
 function CreativesPage() {
-  const [brand, setBrand]         = useState<Brand>('bowa')
-  const [brandReady, setBrandReady] = useState(false)
+  const brand = useBrand()
   const [period, setPeriod] = useState<Period>('30j')
   const [format, setFormat] = useState<Format>('all')
   const [statusF, setStatusF] = useState<StatusFilter>('all')
@@ -813,18 +812,6 @@ function CreativesPage() {
   const [drawer, setDrawer] = useState<CreativeAgg | null>(null)
   const [loadError, setLoadError] = useState<string | null>(null)
 
-  // Lire la brand depuis localStorage au mount (côté client uniquement), puis écouter les events sidebar
-  useEffect(() => {
-    const stored = localStorage.getItem('steero_brand')
-    if (stored === 'bowa' || stored === 'moom' || stored === 'krom') setBrand(stored)
-    setBrandReady(true)
-    function onBrand(e: Event) {
-      const b = (e as CustomEvent<string>).detail
-      if (b === 'bowa' || b === 'moom' || b === 'krom') setBrand(b)
-    }
-    window.addEventListener('steero:brand', onBrand)
-    return () => window.removeEventListener('steero:brand', onBrand)
-  }, [])
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -844,7 +831,7 @@ function CreativesPage() {
     }
   }, [brand, period])
 
-  useEffect(() => { if (brandReady) load() }, [load, brandReady])
+  useEffect(() => { load() }, [load])
 
   // Aggregate
   const allAggs = useMemo(
@@ -961,7 +948,7 @@ function CreativesPage() {
         </div>
 
         {/* AI Insights */}
-        <AiInsights type="creatives" brand={brand === 'all' ? 'bowa' : (brand as string)} context={aiContext} />
+        <AiInsights type="creatives" brand={brand} context={aiContext} />
 
         {/* Filters */}
         <div className="flex flex-wrap gap-2 items-center">

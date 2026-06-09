@@ -39,7 +39,7 @@ function detectZone(zip: string): Zone {
 }
 
 // ─── Orders to log for diagnostic purposes ───────────────────────────────────
-const DEBUG_ORDER_NAMES = new Set(['#10009', '#9997', '#9917', '#9767', '#9759', '#9740', '#9728', '#9718'])
+const DEBUG_ORDER_NAMES = new Set(['#9990', '#10009', '#9997', '#9917', '#9767', '#9759', '#9740', '#9728', '#9718'])
 
 // ─── Internal / sample order detection ───────────────────────────────────────
 // "interne" tag or Bowa/Steero staff → always skip

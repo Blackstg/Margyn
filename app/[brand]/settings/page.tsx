@@ -5,6 +5,7 @@ export const dynamic = 'force-dynamic'
 import React, { useState, useEffect, useCallback, useRef } from 'react'
 import { createBrowserClient } from '@supabase/auth-helpers-nextjs'
 import { Plus, Trash2, Check, Loader2, ChevronLeft, ChevronRight, Search, X, Pencil } from 'lucide-react'
+import { useBrand } from '@/context/BrandContext'
 
 // ─── Supabase ─────────────────────────────────────────────────────────────────
 
@@ -545,7 +546,8 @@ type AppKey   = 'bowaApp' | 'moomTeam' | 'moomApp' | 'kromTeam' | 'kromApp'
 type AllKey   = FixedKey | AppKey
 
 export default function SettingsPage() {
-  const [activeBrand, setActiveBrand]       = useState<BrandTab>('bowa')
+  const urlBrand                            = useBrand()
+  const [activeBrand, setActiveBrand]       = useState<BrandTab>(() => urlBrand)
   const [allowedBrands, setAllowedBrands]   = useState<BrandTab[] | null>(null)
 
   // ── Fixed sentinel rows ──────────────────────────────────────────────────

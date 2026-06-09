@@ -10,37 +10,9 @@ import { createBrowserClient } from '@supabase/auth-helpers-nextjs'
 import { useState, useEffect } from 'react'
 import DataFreshness from './DataFreshness'
 
-// ─── Nav definition ───────────────────────────────────────────────────────────
-
-const NAV_SECTIONS = [
-  {
-    label: 'Analyse',
-    items: [
-      { href: '/dashboard',  icon: LayoutDashboard, label: 'Dashboard',  brand: null },
-      { href: '/campaigns',  icon: BarChart2,        label: 'Campagnes',  brand: null },
-      { href: '/creatives',  icon: Sparkles,         label: 'Créatives',  brand: null },
-    ],
-  },
-  {
-    label: 'Opérations',
-    items: [
-      { href: '/reorder',  icon: PackageOpen, label: 'Réappro',   brand: null   },
-      { href: '/delivery', icon: Truck,        label: 'Delivery',  brand: 'bowa' },
-      { href: '/stock',    icon: Boxes,        label: 'Stock',     brand: 'moom' },
-      { href: '/invoices', icon: FileText,     label: 'Factures',  brand: 'moom' },
-      { href: '/products', icon: Tag,          label: 'Produits',  brand: 'moom' },
-    ],
-  },
-  {
-    label: 'Support',
-    items: [
-      { href: '/sav',      icon: Headphones, label: 'SAV Mōom',    brand: 'moom' },
-      { href: '/sav-krom', icon: Headphones, label: 'SAV Krom',     brand: 'krom' },
-    ],
-  },
-]
-
 // ─── Brand config ─────────────────────────────────────────────────────────────
+
+const VALID_BRANDS = ['bowa', 'moom', 'krom']
 
 const BRAND_LOGOS: Record<string, string> = {
   bowa: 'https://cdn.shopify.com/s/files/1/0617/2806/3648/files/profil.png?v=1693451968',
@@ -52,6 +24,50 @@ const BRAND_LABELS: Record<string, string> = {
   bowa: 'Bowa',
   moom: 'Mōom Paris',
   krom: 'Krom Water',
+}
+
+// Pages accessible to all brands — link uses current brand
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type NavItem = {
+  key:       string
+  icon:      React.ComponentType<any>
+  label:     string
+  brandLock: string | null
+}
+
+const NAV_SECTIONS: { label: string; items: NavItem[] }[] = [
+  {
+    label: 'Analyse',
+    items: [
+      { key: 'dashboard', icon: LayoutDashboard, label: 'Dashboard',  brandLock: null   },
+      { key: 'campaigns', icon: BarChart2,        label: 'Campagnes',  brandLock: null   },
+      { key: 'creatives', icon: Sparkles,         label: 'Créatives',  brandLock: null   },
+    ],
+  },
+  {
+    label: 'Opérations',
+    items: [
+      { key: 'reorder',   icon: PackageOpen, label: 'Réappro',   brandLock: null   },
+      { key: 'delivery',  icon: Truck,        label: 'Delivery',  brandLock: 'bowa' },
+      { key: 'stock',     icon: Boxes,        label: 'Stock',     brandLock: 'moom' },
+      { key: 'invoices',  icon: FileText,     label: 'Factures',  brandLock: 'moom' },
+      { key: 'products',  icon: Tag,          label: 'Produits',  brandLock: 'moom' },
+    ],
+  },
+  {
+    label: 'Support',
+    items: [
+      { key: 'sav',       icon: Headphones, label: 'SAV Mōom',  brandLock: 'moom' },
+      { key: 'sav-krom',  icon: Headphones, label: 'SAV Krom',  brandLock: 'krom' },
+    ],
+  },
+]
+
+// Pages the brand-selector can jump to when switching brands
+const BRAND_PAGES: Record<string, string[]> = {
+  bowa: ['dashboard', 'campaigns', 'creatives', 'settings', 'reorder', 'delivery'],
+  moom: ['dashboard', 'campaigns', 'creatives', 'settings', 'reorder', 'invoices', 'stock', 'products', 'sav'],
+  krom: ['dashboard', 'campaigns', 'creatives', 'settings', 'reorder', 'sav-krom'],
 }
 
 // ─── Component ────────────────────────────────────────────────────────────────
@@ -77,15 +93,23 @@ export default function Sidebar({ isOpen, collapsed, onToggleCollapse }: Sidebar
     if (typeof window !== 'undefined') return localStorage.getItem('bowa_role')
     return null
   })
-  const [currentBrand, setCurrentBrandState] = useState<string>(() => {
-    if (typeof window !== 'undefined') return localStorage.getItem('steero_brand') ?? 'bowa'
-    return 'bowa'
-  })
 
+  // Extract current brand from URL: /[brand]/page → brand
+  const urlSegments    = pathname.split('/').filter(Boolean)
+  const currentBrand   = VALID_BRANDS.includes(urlSegments[0]) ? urlSegments[0] : null
+  const currentPage    = urlSegments[1] ?? 'dashboard'
+
+  // Build href for a nav item
+  function itemHref(item: NavItem): string {
+    const brand = item.brandLock ?? currentBrand ?? 'bowa'
+    return `/${brand}/${item.key}`
+  }
+
+  // Switch brand: navigate to same page if available, else dashboard
   function selectBrand(b: string) {
-    setCurrentBrandState(b)
-    localStorage.setItem('steero_brand', b)
-    window.dispatchEvent(new CustomEvent('steero:brand', { detail: b }))
+    const available = BRAND_PAGES[b] ?? ['dashboard']
+    const targetPage = available.includes(currentPage) ? currentPage : 'dashboard'
+    router.push(`/${b}/${targetPage}`)
   }
 
   useEffect(() => {
@@ -100,23 +124,6 @@ export default function Sidebar({ isOpen, collapsed, onToggleCollapse }: Sidebar
     })
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
-
-  // Auto-sync brand from URL when navigating to brand-specific pages
-  useEffect(() => {
-    if (pathname.startsWith('/sav-krom')) {
-      if (currentBrand !== 'krom') selectBrand('krom')
-    } else if (pathname.startsWith('/delivery')) {
-      if (currentBrand !== 'bowa') selectBrand('bowa')
-    } else if (
-      pathname.startsWith('/stock') ||
-      pathname.startsWith('/invoices') ||
-      pathname.startsWith('/products') ||
-      (pathname.startsWith('/sav') && !pathname.startsWith('/sav-krom'))
-    ) {
-      if (currentBrand !== 'moom') selectBrand('moom')
-    }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pathname])
 
   useEffect(() => {
     fetch('/api/reconciliation/history')
@@ -135,8 +142,9 @@ export default function Sidebar({ isOpen, collapsed, onToggleCollapse }: Sidebar
 
   if (!isOpen) return null
 
-  const isAdmin = role !== 'delivery' && role !== 'sav'
+  const isAdmin          = role !== 'delivery' && role !== 'sav'
   const showBrandSelector = isAdmin && allowedBrands && allowedBrands.length > 1
+  const settingsHref     = `/${currentBrand ?? 'bowa'}/settings`
 
   const w = collapsed ? 'w-[72px]' : 'w-[240px]'
 
@@ -161,7 +169,6 @@ export default function Sidebar({ isOpen, collapsed, onToggleCollapse }: Sidebar
       {showBrandSelector && (
         <div className={`mx-3 mb-4 ${collapsed ? 'mx-2' : ''}`}>
           {collapsed ? (
-            // Collapsed: stacked small avatars
             <div className="flex flex-col items-center gap-1.5">
               {allowedBrands!.map(b => (
                 <button key={b} onClick={() => selectBrand(b)} className="group relative">
@@ -180,7 +187,6 @@ export default function Sidebar({ isOpen, collapsed, onToggleCollapse }: Sidebar
               ))}
             </div>
           ) : (
-            // Expanded: full brand pills
             <div className="space-y-1">
               <p className="text-[10px] font-semibold uppercase tracking-widest text-white/25 px-2 mb-2">Marque</p>
               {allowedBrands!.map(b => (
@@ -218,13 +224,13 @@ export default function Sidebar({ isOpen, collapsed, onToggleCollapse }: Sidebar
       {/* ── Nav ──────────────────────────────────────────────────────────── */}
       <nav className="flex-1 overflow-y-auto px-3 space-y-5 pb-4">
         {role === null ? null : NAV_SECTIONS.map(section => {
-          const items = section.items.filter(({ href, brand }) => {
-            if (role === 'delivery') return href === '/delivery'
-            if (role === 'sav')     return href === '/sav' || href === '/sav-krom' || href === '/delivery'
-            // brand:null = page multi-brand, toujours visible
-            // brand spécifique = seulement si c'est la brand sélectionnée (et accessible)
-            if (brand === null) return true
-            return brand === currentBrand && (allowedBrands === null || allowedBrands.includes(brand))
+          const items = section.items.filter(({ key, brandLock }) => {
+            if (role === 'delivery') return key === 'delivery'
+            if (role === 'sav')     return key === 'sav' || key === 'sav-krom' || key === 'delivery'
+            // Shared pages: always visible
+            if (brandLock === null) return true
+            // Brand-locked: only if user has access to that brand
+            return allowedBrands === null || allowedBrands.includes(brandLock)
           })
           if (items.length === 0) return null
 
@@ -236,28 +242,29 @@ export default function Sidebar({ isOpen, collapsed, onToggleCollapse }: Sidebar
                 </p>
               )}
               <div className="space-y-0.5">
-                {items.map(({ href, icon: Icon, label }) => {
+                {items.map((item) => {
+                  const href   = itemHref(item)
                   const active = pathname.startsWith(href)
-                  const badge  = href === '/stock' && pendingCount > 0
+                  const badge  = item.key === 'stock' && pendingCount > 0
 
                   return collapsed ? (
-                    <div key={href} className="flex justify-center">
+                    <div key={item.key} className="flex justify-center">
                       <Link
                         href={href}
                         className={`group relative w-11 h-11 rounded-xl flex items-center justify-center transition-all ${
                           active ? 'bg-[#aeb0c9]/20 text-[#c9c6e8]' : 'text-white/35 hover:text-[#c9c6e8] hover:bg-white/8'
                         }`}
                       >
-                        <Icon size={20} strokeWidth={1.6} />
+                        <item.icon size={20} strokeWidth={1.6} />
                         {badge && <span className="absolute top-1.5 right-1.5 w-2 h-2 rounded-full bg-[#c7293a]" />}
                         <span className="pointer-events-none absolute left-full ml-3 px-2.5 py-1.5 bg-[#1a1a2e] border border-white/10 text-white text-xs font-medium rounded-lg opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap shadow-lg z-50">
-                          {label}{badge ? ` (${pendingCount})` : ''}
+                          {item.label}{badge ? ` (${pendingCount})` : ''}
                         </span>
                       </Link>
                     </div>
                   ) : (
                     <Link
-                      key={href}
+                      key={item.key}
                       href={href}
                       className={`flex items-center gap-3 px-3 py-2.5 rounded-xl transition-all group ${
                         active
@@ -265,8 +272,8 @@ export default function Sidebar({ isOpen, collapsed, onToggleCollapse }: Sidebar
                           : 'text-white/45 hover:text-white/80 hover:bg-white/5'
                       }`}
                     >
-                      <Icon size={18} strokeWidth={1.6} className="shrink-0" />
-                      <span className="text-sm font-medium">{label}</span>
+                      <item.icon size={18} strokeWidth={1.6} className="shrink-0" />
+                      <span className="text-sm font-medium">{item.label}</span>
                       {badge && (
                         <span className="ml-auto min-w-[20px] h-5 px-1.5 bg-[#c7293a] text-white text-[10px] font-bold rounded-full flex items-center justify-center">
                           {pendingCount}
@@ -293,9 +300,9 @@ export default function Sidebar({ isOpen, collapsed, onToggleCollapse }: Sidebar
           collapsed ? (
             <div className="flex justify-center">
               <Link
-                href="/settings"
+                href={settingsHref}
                 className={`group relative w-11 h-11 rounded-xl flex items-center justify-center transition-all ${
-                  pathname.startsWith('/settings') ? 'bg-[#aeb0c9]/20 text-[#c9c6e8]' : 'text-white/35 hover:text-[#c9c6e8] hover:bg-white/8'
+                  pathname.includes('/settings') ? 'bg-[#aeb0c9]/20 text-[#c9c6e8]' : 'text-white/35 hover:text-[#c9c6e8] hover:bg-white/8'
                 }`}
               >
                 <Settings size={20} strokeWidth={1.6} />
@@ -306,9 +313,9 @@ export default function Sidebar({ isOpen, collapsed, onToggleCollapse }: Sidebar
             </div>
           ) : (
             <Link
-              href="/settings"
+              href={settingsHref}
               className={`flex items-center gap-3 px-3 py-2.5 rounded-xl transition-all ${
-                pathname.startsWith('/settings') ? 'bg-[#aeb0c9]/15 text-white' : 'text-white/45 hover:text-white/80 hover:bg-white/5'
+                pathname.includes('/settings') ? 'bg-[#aeb0c9]/15 text-white' : 'text-white/45 hover:text-white/80 hover:bg-white/5'
               }`}
             >
               <Settings size={18} strokeWidth={1.6} className="shrink-0" />

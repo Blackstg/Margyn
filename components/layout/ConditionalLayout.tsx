@@ -8,7 +8,7 @@ import { Menu } from 'lucide-react'
 
 export default function ConditionalLayout({ children }: { children: React.ReactNode }) {
   const pathname   = usePathname()
-  const isAuthPage = pathname === '/login' || pathname === '/reconciliation' || pathname === '/tracking'
+  const isAuthPage = pathname === '/login' || pathname === '/reconciliation' || pathname === '/tracking' || pathname.startsWith('/tracking/')
 
   const [role, setRole] = useState<string | null>(() => {
     if (typeof window !== 'undefined') return localStorage.getItem('bowa_role')
@@ -68,8 +68,8 @@ export default function ConditionalLayout({ children }: { children: React.ReactN
 
   // Livreurs get a completely clean full-screen layout — no sidebar, no padding
   const isDelivery  = role === 'delivery'
-  // While role is loading, assume delivery if on /delivery to avoid sidebar flash
-  const likelyDelivery = role === null && pathname === '/delivery'
+  // While role is loading, assume delivery if on a delivery path to avoid sidebar flash
+  const likelyDelivery = role === null && pathname.includes('/delivery')
 
   if (isDelivery || likelyDelivery) {
     return <div className="min-h-screen">{children}</div>

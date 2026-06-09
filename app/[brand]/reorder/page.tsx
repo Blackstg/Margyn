@@ -4,6 +4,7 @@ import { useState, useEffect, useMemo, useRef } from 'react'
 import { createBrowserClient } from '@supabase/auth-helpers-nextjs'
 import { Download, Search, Package, ChevronDown, ClipboardList, X, GripVertical, Plus, Check } from 'lucide-react'
 import AiInsights from '@/components/dashboard/AiInsights'
+import { useBrand } from '@/context/BrandContext'
 
 const supabase = createBrowserClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -204,21 +205,7 @@ const BRAND_LABELS: Record<string, string> = { bowa: 'Bowa', moom: 'Mōom Paris'
 
 export default function ReapproPage() {
   // ── Brand ─────────────────────────────────────────────────────────────────
-  const [brand, setBrandState] = useState<'bowa' | 'moom' | 'krom'>('moom')
-
-  useEffect(() => {
-    // Restore brand from localStorage on mount
-    const stored = localStorage.getItem('steero_brand')
-    if (stored === 'moom' || stored === 'krom' || stored === 'bowa') setBrandState(stored)
-
-    // React to sidebar brand selector
-    function onBrandChange(e: Event) {
-      const b = (e as CustomEvent<string>).detail
-      if (b === 'moom' || b === 'krom' || b === 'bowa') setBrandState(b)
-    }
-    window.addEventListener('steero:brand', onBrandChange)
-    return () => window.removeEventListener('steero:brand', onBrandChange)
-  }, [])
+  const brand = useBrand()
 
   // ── Settings ──────────────────────────────────────────────────────────────
   const [refFrom,    setRefFrom]    = useState('2025-04-01')
@@ -229,9 +216,6 @@ export default function ReapproPage() {
   const [buffer,     setBuffer]     = useState(20)
   const [search,     setSearch]     = useState('')
   const [showAll,    setShowAll]    = useState(false)
-
-  // Reset cart when brand changes
-  useEffect(() => { setCartItems([]) }, [brand])
 
   // ── Cart / sidebar ─────────────────────────────────────────────────────────
   const [sidebarOpen, setSidebarOpen] = useState(false)

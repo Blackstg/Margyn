@@ -8,6 +8,7 @@ import { useSearchParams, useRouter, usePathname } from 'next/navigation'
 import { createBrowserClient } from '@supabase/auth-helpers-nextjs'
 import CampaignsTable, { type CampaignAgg } from '@/components/dashboard/CampaignsTable'
 import AiInsights from '@/components/dashboard/AiInsights'
+import { useBrand, type Brand } from '@/context/BrandContext'
 
 // ─── Supabase ─────────────────────────────────────────────────────────────────
 
@@ -18,7 +19,6 @@ const supabase = createBrowserClient(
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-type Brand  = 'bowa' | 'moom' | 'krom'
 type Period = '7j' | '30j' | 'mois'
 
 // ─── Date helpers ─────────────────────────────────────────────────────────────
@@ -105,16 +105,13 @@ function CampaignsPage() {
   const pathname    = usePathname()
   const searchParams = useSearchParams()
 
-  function urlToBrand(b: string | null): Brand {
-    return b === 'moom' ? 'moom' : b === 'krom' ? 'krom' : 'bowa'
-  }
   function urlToPeriod(p: string | null): Period {
     if (p === '30d')   return '30j'
     if (p === 'month') return 'mois'
     return '7j'
   }
 
-  const [brand, setBrandState]   = useState<Brand>(() => urlToBrand(searchParams.get('brand')))
+  const brand                    = useBrand()
   const [period, setPeriodState] = useState<Period>(() => urlToPeriod(searchParams.get('period')))
   const [campaigns, setCampaigns] = useState<CampaignAgg[]>([])
   const [loading, setLoading]    = useState(true)
@@ -149,20 +146,6 @@ function CampaignsPage() {
 
   useEffect(() => { load() }, [load])
 
-  useEffect(() => {
-    // Restore brand from localStorage on mount
-    const stored = localStorage.getItem('steero_brand') as Brand | null
-    if (stored === 'moom' || stored === 'krom' || stored === 'bowa') setBrandState(stored)
-
-    // React to sidebar brand selector
-    function onBrandChange(e: Event) {
-      const b = (e as CustomEvent<string>).detail as Brand
-      if (b === 'moom' || b === 'krom' || b === 'bowa') setBrandState(b)
-    }
-    window.addEventListener('steero:brand', onBrandChange)
-    return () => window.removeEventListener('steero:brand', onBrandChange)
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
 
   const periodTabs: { id: Period; label: string }[] = [
     { id: '7j',   label: '7 j'     },

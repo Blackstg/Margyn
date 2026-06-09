@@ -14,10 +14,10 @@ import AdPanel from '@/components/dashboard/AdPanel'
 import ProductsView, { type BestSeller, type InventoryItem } from '@/components/dashboard/ProductsView'
 import AnnualChart, { type MonthPoint } from '@/components/dashboard/AnnualChart'
 import AiInsights from '@/components/dashboard/AiInsights'
+import { useBrand, type Brand } from '@/context/BrandContext'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-type Brand = 'bowa' | 'moom' | 'krom'
 type Period = '7j' | '30j' | 'mois'
 
 // ─── Supabase client ──────────────────────────────────────────────────────────
@@ -840,10 +840,7 @@ function DashboardPage() {
     return '7d'
   }
 
-  const [brand, setBrandState] = useState<Brand>(() => {
-    const b = searchParams.get('brand')
-    return b === 'moom' ? 'moom' : b === 'krom' ? 'krom' : 'bowa'
-  })
+  const brand                  = useBrand()
   const [period, setPeriodState] = useState<Period>(() =>
     urlToPeriod(searchParams.get('period'))
   )
@@ -891,22 +888,6 @@ function DashboardPage() {
   const syncAttempted                             = useRef<Set<string>>(new Set())
   const [annualData, setAnnualData]               = useState<MonthPoint[]>([])
   const [annualLoading, setAnnualLoading]         = useState(true)
-  useEffect(() => {
-    // Restore brand from localStorage on mount
-    const stored = localStorage.getItem('steero_brand') as Brand | null
-    if (stored === 'moom' || stored === 'krom' || stored === 'bowa') setBrandState(stored)
-
-    // React to sidebar brand selector
-    function onBrandChange(e: Event) {
-      const b = (e as CustomEvent<string>).detail as Brand
-      if (b === 'moom' || b === 'krom' || b === 'bowa') setBrandState(b)
-    }
-    window.addEventListener('steero:brand', onBrandChange)
-
-    return () => window.removeEventListener('steero:brand', onBrandChange)
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
-
   const yesterday = getYesterday()
 
   const load = useCallback(async () => {
