@@ -546,9 +546,7 @@ type AppKey   = 'bowaApp' | 'moomTeam' | 'moomApp' | 'kromTeam' | 'kromApp'
 type AllKey   = FixedKey | AppKey
 
 export default function SettingsPage() {
-  const urlBrand                            = useBrand()
-  const [activeBrand, setActiveBrand]       = useState<BrandTab>(() => urlBrand)
-  const [allowedBrands, setAllowedBrands]   = useState<BrandTab[] | null>(null)
+  const activeBrand = useBrand()
 
   // ── Fixed sentinel rows ──────────────────────────────────────────────────
   const [fixedRows, setFixedRows] = useState<Record<AllKey, CostRow[]>>({
@@ -680,17 +678,6 @@ export default function SettingsPage() {
   }, [])
 
   // ─── Effects ──────────────────────────────────────────────────────────────
-
-  useEffect(() => {
-    supabase.from('user_brands').select('brand').then(({ data }) => {
-      if (data && data.length > 0) {
-        const brands = data.map((r: { brand: string }) => r.brand) as BrandTab[]
-        setAllowedBrands(brands)
-        if (!brands.includes(activeBrand)) setActiveBrand(brands[0])
-      }
-    })
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
 
   useEffect(() => {
     loadFixed()
@@ -847,23 +834,13 @@ export default function SettingsPage() {
       <main className="max-w-3xl mx-auto px-6 py-8 space-y-6">
 
         {/* Header */}
-        <div>
-          <h1 className="text-xl font-bold text-[#1a1a18] tracking-tight">Paramètres</h1>
-          <p className="text-sm text-[#6b6b63] mt-1">Charges et revenus par marque</p>
-        </div>
-
-        {/* Brand selector */}
-        <div className="flex items-center gap-3">
-          <div className="inline-flex items-center bg-white shadow-[0_2px_16px_rgba(0,0,0,0.06)] rounded-xl p-1 gap-0.5">
-            {(['bowa', 'moom', 'krom'] as BrandTab[]).filter((brand) => allowedBrands?.includes(brand) ?? false).map((brand) => (
-              <button key={brand} onClick={() => setActiveBrand(brand)}
-                className={`px-5 py-2 rounded-lg text-sm font-semibold transition-all ${activeBrand === brand ? 'bg-[#1a1a2e] text-white' : 'text-[#6b6b63] hover:text-[#1a1a2e]'}`}>
-                {BRAND_LABELS[brand]}
-              </button>
-            ))}
+        <div className="flex items-center justify-between">
+          <div>
+            <h1 className="text-xl font-bold text-[#1a1a18] tracking-tight">Paramètres — {BRAND_LABELS[activeBrand]}</h1>
+            <p className="text-sm text-[#6b6b63] mt-1">Charges et revenus</p>
           </div>
           {!loading && (
-            <span className="text-xs text-[#6b6b63]">
+            <span className="text-sm text-[#6b6b63]">
               Fixes : <span className="font-semibold text-[#1a1a18]">{fmtEur(totalFixed)}/mois</span>
             </span>
           )}
