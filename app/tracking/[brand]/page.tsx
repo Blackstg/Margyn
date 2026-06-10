@@ -95,9 +95,9 @@ function StepDots({ step, primary }: { step: number; primary: string }) {
                 width:        current ? 26 : 20,
                 height:       current ? 26 : 20,
                 borderRadius: '50%',
-                background:   done ? '#22c55e' : current ? primary : 'rgba(0,0,0,0.1)',
+                background:   done || current ? '#22c55e' : 'rgba(0,0,0,0.1)',
                 display:      'flex', alignItems: 'center', justifyContent: 'center',
-                boxShadow:    current ? `0 0 0 3px ${primary}28` : 'none',
+                boxShadow:    current ? '0 0 0 3px #22c55e44' : 'none',
                 flexShrink:   0,
               }}>
                 {done
@@ -109,7 +109,7 @@ function StepDots({ step, primary }: { step: number; primary: string }) {
               <p style={{
                 fontSize:   9,
                 fontWeight: current ? 700 : 500,
-                color:      done ? '#22c55e' : current ? primary : 'rgba(0,0,0,0.3)',
+                color:      done || current ? '#22c55e' : 'rgba(0,0,0,0.3)',
                 marginTop:  5,
                 textAlign:  'center',
                 lineHeight: 1.2,
@@ -183,8 +183,9 @@ export default function BrandTrackingPage({ params }: { params: { brand: string 
     <div style={{ minHeight: '100dvh', display: 'flex', flexDirection: 'column', background: '#f5f5f3' }}>
 
       {/* ── Header ── */}
-      <header style={{ background: '#fff', borderBottom: '1px solid rgba(0,0,0,0.06)', padding: '10px 20px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-        <a href={settings?.brand_website || '#'} target="_blank" rel="noopener noreferrer">
+      <header style={{ background: '#fff', borderBottom: '1px solid rgba(0,0,0,0.06)', padding: '10px 20px', display: 'grid', gridTemplateColumns: '1fr auto 1fr', alignItems: 'center' }}>
+        <div />
+        <a href={settings?.brand_website || '#'} target="_blank" rel="noopener noreferrer" style={{ display: 'flex', justifyContent: 'center' }}>
           {settings?.brand_logo_url ? (
             <Image src={settings.brand_logo_url} alt={settings.brand_name || brand}
               width={120} height={36} unoptimized priority
@@ -195,12 +196,14 @@ export default function BrandTrackingPage({ params }: { params: { brand: string 
             </span>
           )}
         </a>
-        {result && (
-          <button onClick={() => { setResult(null); setError(null) }}
-            style={{ fontSize: 12, color: 'rgba(0,0,0,0.4)', textDecoration: 'underline', background: 'none', border: 'none', cursor: 'pointer' }}>
-            Autre commande
-          </button>
-        )}
+        <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+          {result && (
+            <button onClick={() => { setResult(null); setError(null) }}
+              style={{ fontSize: 12, color: 'rgba(0,0,0,0.4)', textDecoration: 'underline', background: 'none', border: 'none', cursor: 'pointer' }}>
+              Autre commande
+            </button>
+          )}
+        </div>
       </header>
 
       <main style={{ flex: 1, width: '100%', maxWidth: 480, margin: '0 auto', padding: '12px 16px 20px', display: 'flex', flexDirection: 'column', gap: 10 }}>
