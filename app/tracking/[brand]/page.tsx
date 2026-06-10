@@ -19,44 +19,99 @@ interface TrackingSettings {
   estimated_days_max:   number
 }
 
+interface Product {
+  title:         string
+  variant_title: string | null
+  qty:           number
+  image_url:     string | null
+}
+
 interface TrackingResult {
   order_name:      string
   created_at:      string
   customer_name:   string
-  products:        { title: string; variant_title: string | null; qty: number }[]
+  products:        Product[]
   address:         { address1: string; address2: string; city: string; zip: string } | null
   tracking_number: string | null
   step:            number
 }
 
-// ─── Steps ────────────────────────────────────────────────────────────────────
+// ─── Steps config ─────────────────────────────────────────────────────────────
 
 const STEPS = [
-  { icon: '✅', label: 'Commande confirmée',     desc: 'Votre commande a bien été reçue et enregistrée.' },
-  { icon: '🔄', label: 'En traitement',           desc: 'Nous préparons votre commande avec soin.' },
-  { icon: '📦', label: 'Expédiée',               desc: 'Votre commande est en route\u00a0!' },
-  { icon: '🚚', label: 'En cours de livraison',  desc: 'Votre colis est pris en charge par le transporteur.' },
-  { icon: '✅', label: 'Livré',                  desc: 'Votre commande a bien été livrée. Merci pour votre confiance\u00a0!' },
+  { label: 'Confirmée',    desc: 'Votre commande a bien été reçue et enregistrée.' },
+  { label: 'En traitement', desc: 'Nous préparons votre commande avec soin.' },
+  { label: 'Expédiée',    desc: 'Votre commande est en route\u00a0!' },
+  { label: 'En livraison', desc: 'Votre colis est pris en charge par le transporteur.' },
+  { label: 'Livrée',      desc: 'Votre commande a bien été livrée. Merci pour votre confiance\u00a0!' },
 ]
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-function fmtDate(iso: string) {
-  return new Date(iso).toLocaleDateString('fr-FR', { day: 'numeric', month: 'long', year: 'numeric' })
-}
-
 function addDays(iso: string, days: number) {
   const d = new Date(iso)
   d.setDate(d.getDate() + days)
-  return d.toLocaleDateString('fr-FR', { day: 'numeric', month: 'long', year: 'numeric' })
+  return d.toLocaleDateString('fr-FR', { day: 'numeric', month: 'long' })
 }
 
-// ─── Component ────────────────────────────────────────────────────────────────
+// ─── Sub-components ───────────────────────────────────────────────────────────
+
+function StepDots({ step, primary }: { step: number; primary: string }) {
+  return (
+    <div className="flex items-center w-full px-1">
+      {STEPS.map((s, i) => {
+        const num     = i + 1
+        const done    = num < step
+        const current = num === step
+        return (
+          <div key={i} className="flex items-center" style={{ flex: i < STEPS.length - 1 ? '1' : 'none' }}>
+            {/* Dot */}
+            <div style={{ position: 'relative', flexShrink: 0 }}>
+              <div style={{
+                width: current ? 28 : 20,
+                height: current ? 28 : 20,
+                borderRadius: '50%',
+                background: done ? '#22c55e' : current ? primary : 'rgba(0,0,0,0.1)',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                boxShadow: current ? `0 0 0 4px ${primary}28` : 'none',
+                transition: 'all 0.2s',
+              }}>
+                {done
+                  ? <span style={{ color: '#fff', fontSize: 11, fontWeight: 700 }}>✓</span>
+                  : <span style={{ color: current ? '#fff' : 'rgba(0,0,0,0.3)', fontSize: 10, fontWeight: 700 }}>{num}</span>
+                }
+              </div>
+              {current && (
+                <div style={{
+                  position: 'absolute', top: '100%', left: '50%', transform: 'translateX(-50%)',
+                  marginTop: 5, whiteSpace: 'nowrap',
+                  fontSize: 10, fontWeight: 700, color: primary, letterSpacing: '0.3px',
+                }}>
+                  {s.label}
+                </div>
+              )}
+            </div>
+            {/* Connector */}
+            {i < STEPS.length - 1 && (
+              <div style={{
+                flex: 1, height: 2, marginLeft: 2, marginRight: 2,
+                background: done ? '#22c55e' : 'rgba(0,0,0,0.08)',
+                borderRadius: 1,
+              }} />
+            )}
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
+// ─── Main component ───────────────────────────────────────────────────────────
 
 export default function BrandTrackingPage({ params }: { params: { brand: string } }) {
   const { brand } = params
 
-  const [settings, setSettings] = useState<TrackingSettings | null>(null)
+  const [settings,  setSettings]  = useState<TrackingSettings | null>(null)
   const [email,     setEmail]     = useState('')
   const [orderName, setOrderName] = useState('')
   const [loading,   setLoading]   = useState(false)
@@ -70,8 +125,7 @@ export default function BrandTrackingPage({ params }: { params: { brand: string 
       .catch(() => null)
   }, [brand])
 
-  const primary  = settings?.brand_color || '#111'
-  const bgColor  = `${primary}0d` // 5% opacity tint
+  const primary = settings?.brand_color || '#111'
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault()
@@ -85,11 +139,8 @@ export default function BrandTrackingPage({ params }: { params: { brand: string 
         body:    JSON.stringify({ email: email.trim(), order_name: orderName.trim() }),
       })
       const data = await res.json() as TrackingResult & { error?: string }
-      if (!res.ok || data.error) {
-        setError(data.error ?? 'Commande introuvable.')
-      } else {
-        setResult(data)
-      }
+      if (!res.ok || data.error) setError(data.error ?? 'Commande introuvable.')
+      else setResult(data)
     } catch {
       setError('Erreur réseau. Veuillez réessayer.')
     } finally {
@@ -97,250 +148,206 @@ export default function BrandTrackingPage({ params }: { params: { brand: string 
     }
   }
 
+  const currentStep = result ? STEPS[result.step - 1] : null
+  const isDelivered = result?.step === 5
+
   return (
-    <div className="min-h-screen flex flex-col" style={{ backgroundColor: bgColor || '#f8f8f8' }}>
+    <div style={{ minHeight: '100dvh', display: 'flex', flexDirection: 'column', background: '#f5f5f3' }}>
 
       {/* ── Header ── */}
-      <header style={{ backgroundColor: '#fff', borderBottom: '1px solid rgba(0,0,0,0.06)' }} className="px-6 py-4 flex justify-center">
-        {settings?.brand_logo_url ? (
-          <a href={settings.brand_website || '#'} target="_blank" rel="noopener noreferrer">
-            <Image
-              src={settings.brand_logo_url}
-              alt={settings.brand_name || brand}
-              width={160}
-              height={48}
-              style={{ objectFit: 'contain', height: 40, width: 'auto' }}
-              priority
-              unoptimized
-            />
-          </a>
-        ) : (
-          <span style={{ fontSize: 20, fontWeight: 800, color: primary, letterSpacing: '-0.5px' }}>
-            {settings?.brand_name || brand.toUpperCase()}
-          </span>
+      <header style={{ background: '#fff', borderBottom: '1px solid rgba(0,0,0,0.06)', padding: '10px 20px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+        <a href={settings?.brand_website || '#'} target="_blank" rel="noopener noreferrer">
+          {settings?.brand_logo_url ? (
+            <Image src={settings.brand_logo_url} alt={settings.brand_name || brand}
+              width={120} height={36} unoptimized priority
+              style={{ objectFit: 'contain', height: 32, width: 'auto' }} />
+          ) : (
+            <span style={{ fontSize: 17, fontWeight: 800, color: primary, letterSpacing: '-0.5px' }}>
+              {settings?.brand_name || brand.toUpperCase()}
+            </span>
+          )}
+        </a>
+        {result && (
+          <button
+            onClick={() => { setResult(null); setError(null) }}
+            style={{ fontSize: 12, color: 'rgba(0,0,0,0.4)', textDecoration: 'underline', background: 'none', border: 'none', cursor: 'pointer' }}
+          >
+            Autre commande
+          </button>
         )}
       </header>
 
-      {/* ── Main ── */}
-      <main className="flex-1 w-full max-w-xl mx-auto px-4 py-8 space-y-4">
+      <main style={{ flex: 1, width: '100%', maxWidth: 480, margin: '0 auto', padding: '12px 16px 16px', display: 'flex', flexDirection: 'column', gap: 10 }}>
 
-        {/* Form / pill */}
+        {/* ── FORM ── */}
         {!result ? (
-          <div style={{ background: '#fff', borderRadius: 16, boxShadow: '0 1px 12px rgba(0,0,0,0.06)' }} className="p-6">
-            <h2 className="text-[15px] font-semibold text-black mb-1">Suivi de commande</h2>
-            <p className="text-sm text-black/50 mb-5">Entrez votre email et votre numéro de commande pour suivre votre livraison.</p>
-            <form onSubmit={handleSubmit} className="space-y-3">
+          <div style={{ background: '#fff', borderRadius: 16, boxShadow: '0 1px 12px rgba(0,0,0,0.06)', padding: 24 }}>
+            <h2 style={{ fontSize: 15, fontWeight: 700, marginBottom: 4 }}>Suivi de commande</h2>
+            <p style={{ fontSize: 13, color: 'rgba(0,0,0,0.45)', marginBottom: 18 }}>
+              Entrez votre email et votre numéro de commande.
+            </p>
+            <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
               <div>
-                <label className="block text-xs font-medium text-black/50 mb-1">Adresse email</label>
-                <input
-                  type="email" required value={email} onChange={(e) => setEmail(e.target.value)}
+                <label style={{ fontSize: 11, fontWeight: 600, color: 'rgba(0,0,0,0.45)', display: 'block', marginBottom: 4 }}>Adresse email</label>
+                <input type="email" required value={email} onChange={(e) => setEmail(e.target.value)}
                   placeholder="votre@email.com"
-                  style={{ borderRadius: 10, border: '1px solid #e5e5e5', background: '#fff' }}
-                  className="w-full px-4 py-2.5 text-sm outline-none focus:border-black/30 transition-colors"
-                />
+                  style={{ width: '100%', borderRadius: 10, border: '1px solid #e5e5e5', padding: '10px 14px', fontSize: 14, outline: 'none', boxSizing: 'border-box' }} />
               </div>
               <div>
-                <label className="block text-xs font-medium text-black/50 mb-1">Numéro de commande</label>
-                <input
-                  type="text" required value={orderName} onChange={(e) => setOrderName(e.target.value)}
+                <label style={{ fontSize: 11, fontWeight: 600, color: 'rgba(0,0,0,0.45)', display: 'block', marginBottom: 4 }}>Numéro de commande</label>
+                <input type="text" required value={orderName} onChange={(e) => setOrderName(e.target.value)}
                   placeholder="#1234"
-                  style={{ borderRadius: 10, border: '1px solid #e5e5e5', background: '#fff' }}
-                  className="w-full px-4 py-2.5 text-sm outline-none focus:border-black/30 transition-colors"
-                />
+                  style={{ width: '100%', borderRadius: 10, border: '1px solid #e5e5e5', padding: '10px 14px', fontSize: 14, outline: 'none', boxSizing: 'border-box' }} />
               </div>
               {error && (
-                <p style={{ borderRadius: 10, background: '#fff3f3', color: '#c0392b' }} className="text-sm px-4 py-2.5">
-                  {error}
-                </p>
+                <p style={{ borderRadius: 10, background: '#fff3f3', color: '#c0392b', fontSize: 13, padding: '10px 14px' }}>{error}</p>
               )}
-              <button
-                type="submit" disabled={loading}
-                style={{ borderRadius: 10, background: primary, color: '#fff' }}
-                className="w-full py-2.5 text-sm font-semibold disabled:opacity-50 hover:opacity-90 transition-opacity"
-              >
+              <button type="submit" disabled={loading}
+                style={{ borderRadius: 10, background: primary, color: '#fff', padding: '11px', fontSize: 14, fontWeight: 600, border: 'none', cursor: 'pointer', opacity: loading ? 0.6 : 1 }}>
                 {loading ? 'Recherche…' : 'Suivre ma commande'}
               </button>
             </form>
           </div>
         ) : (
-          <div
-            style={{ background: '#fff', borderRadius: 12, border: '1px solid rgba(0,0,0,0.07)' }}
-            className="flex items-center justify-between px-5 py-3"
-          >
-            <div className="flex items-center gap-3">
-              <span className="text-sm font-semibold text-black">{result.order_name}</span>
-              <span className="text-xs text-black/40">{email}</span>
-            </div>
-            <button
-              onClick={() => { setResult(null); setError(null) }}
-              className="text-xs text-black/40 hover:text-black transition-colors underline underline-offset-2 shrink-0"
-            >
-              Autre commande
-            </button>
-          </div>
-        )}
-
-        {result && (
           <>
-            {/* Order summary */}
-            <div style={{ background: '#fff', borderRadius: 16, boxShadow: '0 1px 12px rgba(0,0,0,0.06)' }} className="p-6 space-y-4">
-              <div className="flex items-start justify-between gap-4">
-                <div>
-                  <p className="text-xs text-black/40 mb-0.5">Commande</p>
-                  <p className="font-semibold text-black text-lg">{result.order_name}</p>
+            {/* ── 1. STATUS CARD (top, prominent) ── */}
+            <div style={{
+              background: isDelivered ? '#f0fdf4' : primary,
+              borderRadius: 16,
+              padding: '16px 20px',
+              color: isDelivered ? '#166534' : '#fff',
+            }}>
+              <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 8 }}>
+                <div style={{ flex: 1 }}>
+                  <p style={{ fontSize: 11, fontWeight: 600, opacity: 0.75, letterSpacing: '0.8px', textTransform: 'uppercase', marginBottom: 4 }}>
+                    Statut
+                  </p>
+                  <p style={{ fontSize: 20, fontWeight: 800, lineHeight: 1.2, marginBottom: 4 }}>
+                    {currentStep?.label}
+                  </p>
+                  <p style={{ fontSize: 13, opacity: 0.8, lineHeight: 1.4 }}>
+                    {currentStep?.desc}
+                  </p>
                 </div>
-                <div className="text-right">
-                  <p className="text-xs text-black/40 mb-0.5">Date</p>
-                  <p className="text-sm text-black">{fmtDate(result.created_at)}</p>
-                </div>
-              </div>
-
-              {/* Estimated delivery */}
-              {result.step < 5 && settings && (
-                <>
-                  <hr style={{ borderColor: 'rgba(0,0,0,0.05)' }} />
-                  <div style={{ background: bgColor, borderRadius: 12 }} className="px-4 py-3">
-                    <p className="text-xs font-semibold text-black/50 uppercase tracking-wide mb-0.5">Livraison estimée</p>
-                    <p className="text-sm font-semibold text-black">
-                      {addDays(result.created_at, settings.estimated_days_min)} — {addDays(result.created_at, settings.estimated_days_max)}
+                {!isDelivered && settings && (
+                  <div style={{
+                    background: 'rgba(255,255,255,0.15)', borderRadius: 12,
+                    padding: '8px 12px', textAlign: 'right', flexShrink: 0,
+                  }}>
+                    <p style={{ fontSize: 10, fontWeight: 600, opacity: 0.8, marginBottom: 2 }}>Livraison estimée</p>
+                    <p style={{ fontSize: 12, fontWeight: 700, lineHeight: 1.3 }}>
+                      {addDays(result.created_at, settings.estimated_days_min)}<br />
+                      — {addDays(result.created_at, settings.estimated_days_max)}
                     </p>
                   </div>
-                </>
-              )}
+                )}
+              </div>
+            </div>
 
+            {/* ── 2. STEP DOTS ── */}
+            <div style={{ background: '#fff', borderRadius: 14, padding: '14px 16px 22px' }}>
+              <StepDots step={result.step} primary={primary} />
+            </div>
+
+            {/* ── 3. PRODUCTS + DETAILS ── */}
+            <div style={{ background: '#fff', borderRadius: 16, overflow: 'hidden' }}>
+
+              {/* Products with images */}
               {settings?.show_products && (
-                <>
-                  <hr style={{ borderColor: 'rgba(0,0,0,0.05)' }} />
-                  <div>
-                    <p className="text-xs font-semibold text-black/40 mb-2 uppercase tracking-wide">Produits commandés</p>
-                    <ul className="space-y-1.5">
-                      {result.products.map((p, i) => (
-                        <li key={i} className="flex items-start justify-between gap-2 text-sm">
-                          <span className="text-black">
+                <div style={{ padding: '14px 16px', borderBottom: settings?.show_address && result.address ? '1px solid rgba(0,0,0,0.05)' : 'none' }}>
+                  <p style={{ fontSize: 10, fontWeight: 700, color: 'rgba(0,0,0,0.35)', letterSpacing: '1px', textTransform: 'uppercase', marginBottom: 10 }}>
+                    Produits
+                  </p>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                    {result.products.map((p, i) => (
+                      <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                        {/* Thumbnail */}
+                        <div style={{
+                          width: 52, height: 52, borderRadius: 10, flexShrink: 0, overflow: 'hidden',
+                          background: 'rgba(0,0,0,0.04)', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        }}>
+                          {p.image_url ? (
+                            <Image src={p.image_url} alt={p.title} width={52} height={52} unoptimized
+                              style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                          ) : (
+                            <span style={{ fontSize: 20 }}>📦</span>
+                          )}
+                        </div>
+                        {/* Info */}
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <p style={{ fontSize: 13, fontWeight: 600, color: '#111', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                             {p.title}
-                            {p.variant_title && <span className="text-black/40"> — {p.variant_title}</span>}
-                          </span>
-                          <span className="shrink-0 text-black/50 font-medium">×{p.qty}</span>
-                        </li>
-                      ))}
-                    </ul>
+                          </p>
+                          {p.variant_title && (
+                            <p style={{ fontSize: 12, color: 'rgba(0,0,0,0.4)', marginTop: 1 }}>{p.variant_title}</p>
+                          )}
+                        </div>
+                        {/* Qty */}
+                        <span style={{ fontSize: 13, fontWeight: 600, color: 'rgba(0,0,0,0.45)', flexShrink: 0 }}>×{p.qty}</span>
+                      </div>
+                    ))}
                   </div>
-                </>
+                </div>
               )}
 
+              {/* Address */}
               {settings?.show_address && result.address && (
-                <>
-                  <hr style={{ borderColor: 'rgba(0,0,0,0.05)' }} />
-                  <div>
-                    <p className="text-xs font-semibold text-black/40 mb-1 uppercase tracking-wide">Adresse de livraison</p>
-                    <p className="text-sm text-black">{result.customer_name}</p>
-                    <p className="text-sm text-black/60">{result.address.address1}</p>
-                    {result.address.address2 && <p className="text-sm text-black/60">{result.address.address2}</p>}
-                    <p className="text-sm text-black/60">{result.address.zip} {result.address.city}</p>
-                  </div>
-                </>
+                <div style={{ padding: '12px 16px' }}>
+                  <p style={{ fontSize: 10, fontWeight: 700, color: 'rgba(0,0,0,0.35)', letterSpacing: '1px', textTransform: 'uppercase', marginBottom: 6 }}>
+                    Livraison à
+                  </p>
+                  <p style={{ fontSize: 13, color: '#111', fontWeight: 600 }}>{result.customer_name}</p>
+                  <p style={{ fontSize: 12, color: 'rgba(0,0,0,0.5)', marginTop: 2 }}>
+                    {result.address.address1}
+                    {result.address.address2 ? `, ${result.address.address2}` : ''}
+                    {' — '}{result.address.zip} {result.address.city}
+                  </p>
+                </div>
               )}
             </div>
 
-            {/* Tracking number */}
+            {/* ── 4. TRACKING BUTTON ── */}
             {settings?.show_tracking_number && result.tracking_number && (
-              <div style={{ background: '#fff', borderRadius: 16, boxShadow: '0 1px 12px rgba(0,0,0,0.06)' }} className="p-6 space-y-3">
-                <p className="text-xs font-semibold text-black/40 uppercase tracking-wide">Numéro de suivi transporteur</p>
-                <p className="font-mono font-semibold text-black text-base tracking-widest">{result.tracking_number}</p>
+              <div style={{ background: '#fff', borderRadius: 14, padding: '12px 16px', display: 'flex', flexDirection: 'column', gap: 8 }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                  <p style={{ fontSize: 10, fontWeight: 700, color: 'rgba(0,0,0,0.35)', letterSpacing: '1px', textTransform: 'uppercase' }}>
+                    Numéro de suivi
+                  </p>
+                  <p style={{ fontSize: 13, fontWeight: 600, fontFamily: 'monospace', color: '#111', letterSpacing: '1px' }}>
+                    {result.tracking_number}
+                  </p>
+                </div>
                 {settings.show_tracking_link && (
                   <a
                     href={`https://t.17track.net/fr#nums=${result.tracking_number}`}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    style={{ borderRadius: 10, background: primary, color: '#fff' }}
-                    className="flex items-center justify-center gap-2 w-full py-2.5 text-sm font-semibold hover:opacity-90 transition-opacity"
+                    target="_blank" rel="noopener noreferrer"
+                    style={{
+                      display: 'block', textAlign: 'center', borderRadius: 10,
+                      background: primary, color: '#fff', padding: '10px',
+                      fontSize: 13, fontWeight: 600, textDecoration: 'none',
+                    }}
                   >
-                    Suivre mon colis
+                    Suivre mon colis →
                   </a>
                 )}
               </div>
             )}
-
-            {/* Timeline */}
-            <div style={{ background: '#fff', borderRadius: 16, boxShadow: '0 1px 12px rgba(0,0,0,0.06)' }} className="p-6">
-              <p className="text-xs font-semibold text-black/40 mb-5 uppercase tracking-wide">Progression</p>
-              <ol>
-                {STEPS.map((s, i) => {
-                  const stepNum   = i + 1
-                  const isDone    = stepNum < result.step
-                  const isCurrent = stepNum === result.step
-
-                  return (
-                    <li key={i} className="flex gap-4">
-                      <div className="flex flex-col items-center">
-                        <div
-                          style={{
-                            width: 32, height: 32, borderRadius: '50%', flexShrink: 0,
-                            display: 'flex', alignItems: 'center', justifyContent: 'center',
-                            fontSize: 14,
-                            background: isDone ? '#eaf7f0' : isCurrent ? primary : 'rgba(0,0,0,0.05)',
-                            color:      isDone ? '#27ae60' : isCurrent ? '#fff'   : 'rgba(0,0,0,0.2)',
-                            boxShadow:  isCurrent ? `0 0 0 4px ${primary}22` : 'none',
-                          }}
-                        >
-                          {isDone ? '✓' : s.icon}
-                        </div>
-                        {i < STEPS.length - 1 && (
-                          <div
-                            style={{
-                              width: 1, flexGrow: 1, minHeight: 24, margin: '4px 0',
-                              background: isDone ? '#b5e8cf' : 'rgba(0,0,0,0.08)',
-                            }}
-                          />
-                        )}
-                      </div>
-
-                      <div className={`flex-1 min-w-0 ${i < STEPS.length - 1 ? 'pb-5' : ''}`}>
-                        <p
-                          style={{
-                            fontSize: 14, fontWeight: 600, lineHeight: 1.3,
-                            color: isCurrent ? '#111' : isDone ? '#27ae60' : 'rgba(0,0,0,0.28)',
-                          }}
-                        >
-                          {s.label}
-                        </p>
-                        {(isCurrent || isDone) && (
-                          <p style={{ fontSize: 12, marginTop: 2, lineHeight: 1.5, color: isCurrent ? 'rgba(0,0,0,0.55)' : 'rgba(0,0,0,0.35)' }}>
-                            {s.desc}
-                          </p>
-                        )}
-                      </div>
-                    </li>
-                  )
-                })}
-              </ol>
-            </div>
           </>
         )}
       </main>
 
       {/* ── Footer ── */}
-      <footer style={{ backgroundColor: '#fff', borderTop: '1px solid rgba(0,0,0,0.06)' }} className="px-6 py-5 text-center space-y-1">
-        <p className="text-xs text-black/40">© {settings?.brand_name || brand}</p>
-        {settings?.brand_website && (
-          <a
-            href={settings.brand_website}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="text-xs text-black/50 hover:text-black transition-colors underline underline-offset-2 block"
-          >
-            Retour au site
-          </a>
-        )}
+      <footer style={{ padding: '12px 20px', textAlign: 'center', borderTop: '1px solid rgba(0,0,0,0.05)' }}>
         {settings?.contact_email && (
-          <p className="text-xs text-black/30 pt-1">
-            Des questions ?{' '}
-            <a href={`mailto:${settings.contact_email}`} className="underline">
+          <p style={{ fontSize: 11, color: 'rgba(0,0,0,0.3)' }}>
+            Questions ?{' '}
+            <a href={`mailto:${settings.contact_email}`} style={{ color: 'rgba(0,0,0,0.4)', textDecoration: 'underline' }}>
               {settings.contact_email}
             </a>
           </p>
         )}
       </footer>
+
     </div>
   )
 }
