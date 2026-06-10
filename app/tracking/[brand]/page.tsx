@@ -2,6 +2,9 @@
 
 import { useState, FormEvent, useEffect } from 'react'
 import Image from 'next/image'
+import nextDynamic from 'next/dynamic'
+
+const TrackingMap = nextDynamic(() => import('@/components/delivery/TrackingMap'), { ssr: false })
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -345,21 +348,10 @@ export default function BrandTrackingPage({ params }: { params: { brand: string 
               </div>
             )}
 
-            {/* ── 5. RASSURANCE ── */}
-            {!isDelivered && (
-              <div style={{ background: '#fff', borderRadius: 14, padding: '14px 16px' }}>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                  {[
-                    { icon: '🛡️', text: 'Votre commande est suivie et protégée à chaque étape de son acheminement.' },
-                    { icon: '📦', text: 'Chaque colis est soigneusement emballé pour vous parvenir en parfait état.' },
-                    ...(settings?.contact_email ? [{ icon: '💬', text: `Notre équipe est disponible pour toute question : ${settings.contact_email}` }] : []),
-                  ].map((item, i) => (
-                    <div key={i} style={{ display: 'flex', gap: 10, alignItems: 'flex-start' }}>
-                      <span style={{ fontSize: 15, flexShrink: 0 }}>{item.icon}</span>
-                      <p style={{ fontSize: 12, color: 'rgba(0,0,0,0.5)', lineHeight: 1.5 }}>{item.text}</p>
-                    </div>
-                  ))}
-                </div>
+            {/* ── 5. MAP ── */}
+            {settings?.show_address && result.address && (
+              <div style={{ borderRadius: 16, overflow: 'hidden', height: 200 }}>
+                <TrackingMap address={[result.address.address1, result.address.zip, result.address.city, 'France'].filter(Boolean).join(', ')} />
               </div>
             )}
           </>
