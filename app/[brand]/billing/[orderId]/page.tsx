@@ -371,16 +371,9 @@ export default function InvoicePage({ params }: { params: { orderId: string } })
     <>
       <style>{`
         @media print {
-          body * { visibility: hidden !important; }
-          #invoice-content, #invoice-content * { visibility: visible !important; }
-          #invoice-content {
-            position: fixed !important;
-            top: 0 !important; left: 0 !important;
-            width: 100% !important;
-            margin: 0 !important;
-            box-shadow: none !important;
-          }
           .no-print { display: none !important; }
+          .print-wrapper { padding: 0 !important; background: white !important; }
+          #invoice-content { box-shadow: none !important; border-radius: 0 !important; }
           @page { margin: 0; size: A4; }
         }
       `}</style>
@@ -410,7 +403,7 @@ export default function InvoicePage({ params }: { params: { orderId: string } })
         </div>
 
         {/* Content */}
-        <div className="no-print py-10 px-6">
+        <div className="print-wrapper py-10 px-6">
           {loading ? (
             <div className="flex items-center justify-center py-32">
               <Loader2 size={24} className="animate-spin text-[#9b9b93]" />
