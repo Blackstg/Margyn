@@ -180,7 +180,7 @@ function Invoice({ order, settings }: { order: ShopifyOrder; settings: InvoiceSe
           <div style={S.headerRight}>
             <div>
               <div style={S.invoiceLabel}>FACTURE</div>
-              <div style={S.invoiceNum}>{invoiceNumber}</div>
+              <div style={S.invoiceNum} data-invoice-number>{invoiceNumber}</div>
             </div>
             <div style={S.dateBadge}>
               <div style={S.dateLabel}>DATE D&apos;ÉMISSION</div>
@@ -350,8 +350,10 @@ export default function InvoicePage({ params }: { params: { orderId: string } })
     if (!el) return
     const win = window.open('', '_blank', 'width=900,height=1200')
     if (!win) return
+    const orderName = el.querySelector('[data-invoice-number]')?.textContent ?? params.orderId
     win.document.write(`<!DOCTYPE html><html><head>
       <meta charset="utf-8"/>
+      <title>Facture-${orderName}</title>
       <style>
         * { margin: 0; padding: 0; box-sizing: border-box; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
         body { background: white; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
