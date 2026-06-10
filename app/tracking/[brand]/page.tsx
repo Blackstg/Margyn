@@ -36,43 +36,33 @@ interface TrackingResult {
   step:            number
 }
 
-// ─── Steps config ─────────────────────────────────────────────────────────────
+// ─── Steps ────────────────────────────────────────────────────────────────────
 
-const STEPS: {
-  label:    string
-  detail:   string
-  next:     string | null
-  icon:     string
-}[] = [
+const STEPS: { short: string; detail: string; next: string | null }[] = [
   {
-    label:  'Commande confirmée',
-    detail: 'Votre commande a bien été reçue et votre paiement validé. Notre équipe va prendre en charge votre colis très prochainement.',
-    next:   'Votre colis va être préparé et contrôlé avant expédition.',
-    icon:   '✅',
+    short:  'Confirmée',
+    detail: 'Merci pour votre commande ! Tout est en ordre et votre colis va bientôt être pris en charge.',
+    next:   'Votre colis va être préparé et soigneusement emballé.',
   },
   {
-    label:  'En cours de préparation',
-    detail: 'Votre commande est en cours de traitement par notre équipe. Chaque article est soigneusement vérifié et emballé avant de vous être expédié.',
-    next:   'Vous recevrez une notification dès que votre colis est expédié.',
-    icon:   '🔄',
+    short:  'Préparation',
+    detail: 'Votre commande est entre nos mains. Nous prenons le temps de préparer et vérifier chaque article.',
+    next:   'Votre colis sera expédié dès que la préparation est finalisée.',
   },
   {
-    label:  'Expédiée',
-    detail: 'Votre colis a quitté notre entrepôt et est en cours d\'acheminement. Ce délai est tout à fait normal — votre commande avance chaque jour.',
-    next:   'Votre colis sera bientôt pris en charge par le transporteur final pour la livraison chez vous.',
-    icon:   '📦',
+    short:  'Expédiée',
+    detail: 'C\'est parti ! Votre colis est en route et se rapproche de vous chaque jour.',
+    next:   'Il sera bientôt remis au transporteur final pour la livraison à votre domicile.',
   },
   {
-    label:  'En cours de livraison',
-    detail: 'Votre colis est maintenant entre les mains du transporteur final. La livraison à votre domicile est imminente.',
-    next:   'Vous recevrez votre commande très prochainement.',
-    icon:   '🚚',
-  },
-  {
-    label:  'Livrée 🎉',
-    detail: 'Votre commande a bien été livrée. Nous espérons que vous êtes pleinement satisfait(e) de votre achat.',
+    short:  'En livraison',
+    detail: 'Votre colis est tout proche — le transporteur final s\'en occupe et vous le remettra très prochainement.',
     next:   null,
-    icon:   '✅',
+  },
+  {
+    short:  'Livrée',
+    detail: 'Votre commande est arrivée à destination. Nous espérons qu\'elle vous donne entière satisfaction !',
+    next:   null,
   },
 ]
 
@@ -84,53 +74,54 @@ function addDays(iso: string, days: number) {
   return d.toLocaleDateString('fr-FR', { day: 'numeric', month: 'long' })
 }
 
-function daysRemaining(iso: string, days: number): number {
-  const target = new Date(iso)
-  target.setDate(target.getDate() + days)
-  return Math.max(0, Math.ceil((target.getTime() - Date.now()) / 86_400_000))
-}
-
 // ─── StepDots ─────────────────────────────────────────────────────────────────
 
 function StepDots({ step, primary }: { step: number; primary: string }) {
   return (
-    <div style={{ display: 'flex', alignItems: 'center', width: '100%' }}>
+    <div style={{ display: 'flex', alignItems: 'flex-start', width: '100%' }}>
       {STEPS.map((s, i) => {
         const num     = i + 1
         const done    = num < step
         const current = num === step
+
         return (
-          <div key={i} style={{ display: 'flex', alignItems: 'center', flex: i < STEPS.length - 1 ? 1 : 'none' as never }}>
-            <div style={{ position: 'relative', flexShrink: 0 }}>
+          <div key={i} style={{ display: 'flex', alignItems: 'flex-start', flex: i < STEPS.length - 1 ? 1 : 'none' as never }}>
+            {/* Dot + label */}
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', flexShrink: 0 }}>
               <div style={{
-                width:        current ? 28 : 20,
-                height:       current ? 28 : 20,
+                width:        current ? 26 : 20,
+                height:       current ? 26 : 20,
                 borderRadius: '50%',
                 background:   done ? '#22c55e' : current ? primary : 'rgba(0,0,0,0.1)',
                 display:      'flex', alignItems: 'center', justifyContent: 'center',
-                boxShadow:    current ? `0 0 0 4px ${primary}28` : 'none',
-                transition:   'all 0.2s',
+                boxShadow:    current ? `0 0 0 3px ${primary}28` : 'none',
+                flexShrink:   0,
               }}>
                 {done
-                  ? <span style={{ color: '#fff', fontSize: 11, fontWeight: 700 }}>✓</span>
-                  : <span style={{ color: current ? '#fff' : 'rgba(0,0,0,0.3)', fontSize: 10, fontWeight: 700 }}>{num}</span>
+                  ? <span style={{ color: '#fff', fontSize: 10, fontWeight: 700 }}>✓</span>
+                  : <span style={{ color: current ? '#fff' : 'rgba(0,0,0,0.3)', fontSize: 9, fontWeight: 700 }}>{num}</span>
                 }
               </div>
-              {current && (
-                <div style={{
-                  position: 'absolute', top: '100%', left: '50%', transform: 'translateX(-50%)',
-                  marginTop: 5, whiteSpace: 'nowrap',
-                  fontSize: 10, fontWeight: 700, color: primary, letterSpacing: '0.3px',
-                }}>
-                  {s.label.replace(' 🎉', '')}
-                </div>
-              )}
+              {/* Label below dot */}
+              <p style={{
+                fontSize:   9,
+                fontWeight: current ? 700 : 500,
+                color:      done ? '#22c55e' : current ? primary : 'rgba(0,0,0,0.3)',
+                marginTop:  5,
+                textAlign:  'center',
+                lineHeight: 1.2,
+                maxWidth:   48,
+              }}>
+                {s.short}
+              </p>
             </div>
+
+            {/* Connector line */}
             {i < STEPS.length - 1 && (
               <div style={{
-                flex: 1, height: 2, marginLeft: 2, marginRight: 2,
+                flex: 1, height: 2, marginTop: 9, marginLeft: 3, marginRight: 3,
                 background:   done ? '#22c55e' : 'rgba(0,0,0,0.08)',
-                borderRadius: 1,
+                borderRadius: 1, flexShrink: 0,
               }} />
             )}
           </div>
@@ -184,11 +175,6 @@ export default function BrandTrackingPage({ params }: { params: { brand: string 
 
   const currentStep = result ? STEPS[result.step - 1] : null
   const isDelivered = result?.step === 5
-
-  // Days remaining until max estimate
-  const daysLeft = result && settings
-    ? daysRemaining(result.created_at, settings.estimated_days_max)
-    : null
 
   return (
     <div style={{ minHeight: '100dvh', display: 'flex', flexDirection: 'column', background: '#f5f5f3' }}>
@@ -247,48 +233,37 @@ export default function BrandTrackingPage({ params }: { params: { brand: string 
           </div>
         ) : (
           <>
-            {/* ── 1. STATUT PRINCIPAL ── */}
+            {/* ── 1. STATUT ── */}
             <div style={{
               background:   isDelivered ? '#f0fdf4' : primary,
               borderRadius: 16,
               padding:      '18px 20px',
               color:        isDelivered ? '#166534' : '#fff',
             }}>
+              <p style={{ fontSize: 10, fontWeight: 700, opacity: 0.65, letterSpacing: '1px', textTransform: 'uppercase', marginBottom: 6 }}>
+                Statut
+              </p>
               <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12 }}>
                 <div style={{ flex: 1 }}>
-                  <p style={{ fontSize: 10, fontWeight: 700, opacity: 0.7, letterSpacing: '1px', textTransform: 'uppercase', marginBottom: 5 }}>
-                    Statut de votre commande
-                  </p>
-                  <p style={{ fontSize: 18, fontWeight: 800, lineHeight: 1.2, marginBottom: 6 }}>
-                    {currentStep?.label}
+                  <p style={{ fontSize: 19, fontWeight: 800, lineHeight: 1.2, marginBottom: 6 }}>
+                    {currentStep?.short}
                   </p>
                   <p style={{ fontSize: 13, opacity: 0.85, lineHeight: 1.55 }}>
                     {currentStep?.detail}
                   </p>
                 </div>
-                {/* Délai estimé ou livraison imminente */}
+                {/* Livraison estimée - doux */}
                 {!isDelivered && settings && (
                   <div style={{
-                    background: 'rgba(255,255,255,0.18)', borderRadius: 12,
-                    padding: '10px 12px', textAlign: 'center', flexShrink: 0, minWidth: 80,
+                    background: 'rgba(255,255,255,0.15)', borderRadius: 12,
+                    padding: '10px 12px', textAlign: 'center', flexShrink: 0,
                   }}>
-                    {daysLeft !== null && daysLeft > 0 ? (
-                      <>
-                        <p style={{ fontSize: 22, fontWeight: 900, lineHeight: 1 }}>{daysLeft}</p>
-                        <p style={{ fontSize: 10, fontWeight: 600, opacity: 0.8, marginTop: 2 }}>
-                          jour{daysLeft > 1 ? 's' : ''} max
-                        </p>
-                      </>
-                    ) : (
-                      <>
-                        <p style={{ fontSize: 18, fontWeight: 900, lineHeight: 1 }}>📬</p>
-                        <p style={{ fontSize: 10, fontWeight: 600, opacity: 0.8, marginTop: 2 }}>
-                          Imminent
-                        </p>
-                      </>
-                    )}
-                    <p style={{ fontSize: 9, opacity: 0.65, marginTop: 4 }}>
-                      avant le {addDays(result.created_at, settings.estimated_days_max)}
+                    <p style={{ fontSize: 9, fontWeight: 600, opacity: 0.75, marginBottom: 4, letterSpacing: '0.5px' }}>
+                      LIVRAISON PRÉVUE
+                    </p>
+                    <p style={{ fontSize: 12, fontWeight: 700, lineHeight: 1.4 }}>
+                      {addDays(result.created_at, settings.estimated_days_min)}<br />
+                      au {addDays(result.created_at, settings.estimated_days_max)}
                     </p>
                   </div>
                 )}
@@ -296,17 +271,17 @@ export default function BrandTrackingPage({ params }: { params: { brand: string 
 
               {/* Prochaine étape */}
               {currentStep?.next && (
-                <div style={{ marginTop: 12, paddingTop: 12, borderTop: '1px solid rgba(255,255,255,0.2)', display: 'flex', alignItems: 'flex-start', gap: 8 }}>
-                  <span style={{ fontSize: 12, opacity: 0.7, flexShrink: 0, marginTop: 1 }}>→</span>
-                  <p style={{ fontSize: 12, opacity: 0.8, lineHeight: 1.45 }}>
-                    <strong style={{ opacity: 1 }}>Prochaine étape :</strong> {currentStep.next}
+                <div style={{ marginTop: 12, paddingTop: 12, borderTop: '1px solid rgba(255,255,255,0.18)', display: 'flex', alignItems: 'flex-start', gap: 8 }}>
+                  <span style={{ fontSize: 11, opacity: 0.6, flexShrink: 0, marginTop: 1 }}>→</span>
+                  <p style={{ fontSize: 12, opacity: 0.75, lineHeight: 1.5 }}>
+                    {currentStep.next}
                   </p>
                 </div>
               )}
             </div>
 
-            {/* ── 2. BARRE DE PROGRESSION ── */}
-            <div style={{ background: '#fff', borderRadius: 14, padding: '14px 16px 26px' }}>
+            {/* ── 2. PROGRESSION ── */}
+            <div style={{ background: '#fff', borderRadius: 14, padding: '16px 12px 20px' }}>
               <StepDots step={result.step} primary={primary} />
             </div>
 
@@ -314,7 +289,7 @@ export default function BrandTrackingPage({ params }: { params: { brand: string 
             <div style={{ background: '#fff', borderRadius: 16, overflow: 'hidden' }}>
               {settings?.show_products && (
                 <div style={{ padding: '14px 16px', borderBottom: settings?.show_address && result.address ? '1px solid rgba(0,0,0,0.05)' : 'none' }}>
-                  <p style={{ fontSize: 10, fontWeight: 700, color: 'rgba(0,0,0,0.35)', letterSpacing: '1px', textTransform: 'uppercase', marginBottom: 10 }}>
+                  <p style={{ fontSize: 10, fontWeight: 700, color: 'rgba(0,0,0,0.3)', letterSpacing: '1px', textTransform: 'uppercase', marginBottom: 10 }}>
                     Votre commande — {result.order_name}
                   </p>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
@@ -324,20 +299,14 @@ export default function BrandTrackingPage({ params }: { params: { brand: string 
                           width: 52, height: 52, borderRadius: 10, flexShrink: 0, overflow: 'hidden',
                           background: 'rgba(0,0,0,0.04)', display: 'flex', alignItems: 'center', justifyContent: 'center',
                         }}>
-                          {p.image_url ? (
-                            <Image src={p.image_url} alt={p.title} width={52} height={52} unoptimized
-                              style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-                          ) : (
-                            <span style={{ fontSize: 20 }}>📦</span>
-                          )}
+                          {p.image_url
+                            ? <Image src={p.image_url} alt={p.title} width={52} height={52} unoptimized style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                            : <span style={{ fontSize: 20 }}>📦</span>
+                          }
                         </div>
                         <div style={{ flex: 1, minWidth: 0 }}>
-                          <p style={{ fontSize: 13, fontWeight: 600, color: '#111', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                            {p.title}
-                          </p>
-                          {p.variant_title && (
-                            <p style={{ fontSize: 12, color: 'rgba(0,0,0,0.4)', marginTop: 1 }}>{p.variant_title}</p>
-                          )}
+                          <p style={{ fontSize: 13, fontWeight: 600, color: '#111', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.title}</p>
+                          {p.variant_title && <p style={{ fontSize: 12, color: 'rgba(0,0,0,0.4)', marginTop: 1 }}>{p.variant_title}</p>}
                         </div>
                         <span style={{ fontSize: 13, fontWeight: 600, color: 'rgba(0,0,0,0.4)', flexShrink: 0 }}>×{p.qty}</span>
                       </div>
@@ -348,7 +317,7 @@ export default function BrandTrackingPage({ params }: { params: { brand: string 
 
               {settings?.show_address && result.address && (
                 <div style={{ padding: '12px 16px' }}>
-                  <p style={{ fontSize: 10, fontWeight: 700, color: 'rgba(0,0,0,0.35)', letterSpacing: '1px', textTransform: 'uppercase', marginBottom: 6 }}>
+                  <p style={{ fontSize: 10, fontWeight: 700, color: 'rgba(0,0,0,0.3)', letterSpacing: '1px', textTransform: 'uppercase', marginBottom: 6 }}>
                     Livraison à
                   </p>
                   <p style={{ fontSize: 13, color: '#111', fontWeight: 600 }}>{result.customer_name}</p>
@@ -363,10 +332,8 @@ export default function BrandTrackingPage({ params }: { params: { brand: string 
             {settings?.show_tracking_number && result.tracking_number && (
               <div style={{ background: '#fff', borderRadius: 14, padding: '12px 16px', display: 'flex', flexDirection: 'column', gap: 8 }}>
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                  <p style={{ fontSize: 10, fontWeight: 700, color: 'rgba(0,0,0,0.35)', letterSpacing: '1px', textTransform: 'uppercase' }}>Numéro de suivi</p>
-                  <p style={{ fontSize: 13, fontWeight: 600, fontFamily: 'monospace', color: '#111', letterSpacing: '1px' }}>
-                    {result.tracking_number}
-                  </p>
+                  <p style={{ fontSize: 10, fontWeight: 700, color: 'rgba(0,0,0,0.3)', letterSpacing: '1px', textTransform: 'uppercase' }}>Numéro de suivi</p>
+                  <p style={{ fontSize: 13, fontWeight: 600, fontFamily: 'monospace', color: '#111', letterSpacing: '1px' }}>{result.tracking_number}</p>
                 </div>
                 {settings.show_tracking_link && (
                   <a href={`https://t.17track.net/fr#nums=${result.tracking_number}`}
@@ -378,21 +345,18 @@ export default function BrandTrackingPage({ params }: { params: { brand: string 
               </div>
             )}
 
-            {/* ── 5. BLOC RASSURANT ── */}
+            {/* ── 5. RASSURANCE ── */}
             {!isDelivered && (
               <div style={{ background: '#fff', borderRadius: 14, padding: '14px 16px' }}>
-                <p style={{ fontSize: 10, fontWeight: 700, color: 'rgba(0,0,0,0.35)', letterSpacing: '1px', textTransform: 'uppercase', marginBottom: 10 }}>
-                  Bon à savoir
-                </p>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
                   {[
-                    { icon: '🕐', text: 'Les délais de livraison affichés sont calculés à partir de la date de commande et représentent une estimation standard.' },
-                    { icon: '📦', text: 'Votre colis est soigneusement emballé et protégé pour arriver en parfait état.' },
-                    { icon: '💬', text: settings?.contact_email ? `Une question ? Notre équipe répond rapidement sur ${settings.contact_email}` : 'Notre équipe est disponible pour toute question sur votre commande.' },
+                    { icon: '🛡️', text: 'Votre commande est suivie et protégée à chaque étape de son acheminement.' },
+                    { icon: '📦', text: 'Chaque colis est soigneusement emballé pour vous parvenir en parfait état.' },
+                    ...(settings?.contact_email ? [{ icon: '💬', text: `Notre équipe est disponible pour toute question : ${settings.contact_email}` }] : []),
                   ].map((item, i) => (
                     <div key={i} style={{ display: 'flex', gap: 10, alignItems: 'flex-start' }}>
-                      <span style={{ fontSize: 15, flexShrink: 0, marginTop: 1 }}>{item.icon}</span>
-                      <p style={{ fontSize: 12, color: 'rgba(0,0,0,0.55)', lineHeight: 1.5 }}>{item.text}</p>
+                      <span style={{ fontSize: 15, flexShrink: 0 }}>{item.icon}</span>
+                      <p style={{ fontSize: 12, color: 'rgba(0,0,0,0.5)', lineHeight: 1.5 }}>{item.text}</p>
                     </div>
                   ))}
                 </div>
@@ -402,7 +366,6 @@ export default function BrandTrackingPage({ params }: { params: { brand: string 
         )}
       </main>
 
-      {/* ── Footer ── */}
       <footer style={{ padding: '10px 20px', textAlign: 'center', borderTop: '1px solid rgba(0,0,0,0.05)' }}>
         {settings?.contact_email && (
           <p style={{ fontSize: 11, color: 'rgba(0,0,0,0.3)' }}>
