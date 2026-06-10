@@ -777,11 +777,7 @@ function Field({
 // ─── TrackingSettingsSection ──────────────────────────────────────────────────
 
 interface TrackingSettings {
-  brand_name:           string
-  brand_logo_url:       string
-  brand_color:          string
   brand_website:        string
-  contact_email:        string
   show_products:        boolean
   show_address:         boolean
   show_tracking_number: boolean
@@ -791,11 +787,7 @@ interface TrackingSettings {
 }
 
 const TRACKING_DEFAULTS: TrackingSettings = {
-  brand_name:           '',
-  brand_logo_url:       '',
-  brand_color:          '#111111',
   brand_website:        '',
-  contact_email:        '',
   show_products:        true,
   show_address:         true,
   show_tracking_number: true,
@@ -860,43 +852,16 @@ function TrackingSettingsSection({ brand }: { brand: BrandTab }) {
         </button>
       </div>
 
-      {/* Branding */}
-      <div className="space-y-3">
-        <p className="text-xs font-semibold text-[#9b9b93] uppercase tracking-wide">Branding</p>
-        <div className="grid grid-cols-2 gap-3">
-          {([
-            ['brand_name',     'Nom de la marque', 'text',  'Mōom Paris'],
-            ['brand_website',  'Site web',         'url',   'https://…'],
-            ['contact_email',  'Email contact',    'email', 'hello@…'],
-            ['brand_color',    'Couleur principale','text', '#111111'],
-          ] as [keyof TrackingSettings, string, string, string][]).map(([k, label, type, ph]) => (
-            <div key={k} className={k === 'brand_name' ? 'col-span-1' : ''}>
-              <label className="block text-xs text-[#9b9b93] mb-1">{label}</label>
-              <div className="flex items-center gap-2">
-                {k === 'brand_color' && (
-                  <input type="color" value={form[k] as string}
-                    onChange={(e) => setField(k, e.target.value)}
-                    className="w-8 h-8 rounded cursor-pointer border border-[#ececea] p-0.5 shrink-0" />
-                )}
-                <input
-                  type={type} value={form[k] as string} placeholder={ph}
-                  onChange={(e) => setField(k, e.target.value)}
-                  style={{ borderRadius: 10, border: '1px solid #ececea' }}
-                  className="w-full px-3 py-2 text-sm outline-none focus:border-[#1a1a2e] transition-colors bg-[#fafafa]"
-                />
-              </div>
-            </div>
-          ))}
-        </div>
-        <div>
-          <label className="block text-xs text-[#9b9b93] mb-1">URL du logo</label>
-          <input
-            type="url" value={form.brand_logo_url} placeholder="https://…/logo.png"
-            onChange={(e) => setField('brand_logo_url', e.target.value)}
-            style={{ borderRadius: 10, border: '1px solid #ececea' }}
-            className="w-full px-3 py-2 text-sm outline-none focus:border-[#1a1a2e] transition-colors bg-[#fafafa]"
-          />
-        </div>
+      {/* Site web */}
+      <div>
+        <p className="text-xs font-semibold text-[#9b9b93] uppercase tracking-wide mb-2">Lien site web</p>
+        <p className="text-xs text-[#9b9b93] mb-2">Le logo et les couleurs sont repris automatiquement depuis vos paramètres de facturation.</p>
+        <input
+          type="url" value={form.brand_website} placeholder="https://…"
+          onChange={(e) => setField('brand_website', e.target.value)}
+          style={{ borderRadius: 10, border: '1px solid #ececea' }}
+          className="w-full px-3 py-2 text-sm outline-none focus:border-[#1a1a2e] transition-colors bg-[#fafafa]"
+        />
       </div>
 
       {/* Délai estimé */}
