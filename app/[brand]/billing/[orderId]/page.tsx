@@ -345,6 +345,23 @@ export default function InvoicePage({ params }: { params: { orderId: string } })
   const [loading, setLoading]   = useState(true)
   const [error, setError]       = useState<string | null>(null)
 
+  function handlePrint() {
+    const el = document.getElementById('invoice-content')
+    if (!el) return
+    const win = window.open('', '_blank', 'width=900,height=1200')
+    if (!win) return
+    win.document.write(`<!DOCTYPE html><html><head>
+      <meta charset="utf-8"/>
+      <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { background: white; }
+        @page { margin: 0; size: A4; }
+      </style>
+    </head><body>${el.outerHTML}</body></html>`)
+    win.document.close()
+    win.onload = () => { win.focus(); win.print(); win.close() }
+  }
+
   const load = useCallback(async () => {
     setLoading(true)
     setError(null)
@@ -369,22 +386,6 @@ export default function InvoicePage({ params }: { params: { orderId: string } })
 
   return (
     <>
-      <style>{`
-        @media print {
-          body * { visibility: hidden; }
-          #invoice-content, #invoice-content * { visibility: visible; }
-          #invoice-content {
-            position: fixed !important;
-            left: 0 !important;
-            top: 0 !important;
-            width: 210mm !important;
-            box-shadow: none !important;
-            border-radius: 0 !important;
-          }
-          @page { margin: 0; size: A4; }
-        }
-      `}</style>
-
       <div className="min-h-screen bg-[#f0f0ee]">
         {/* Toolbar */}
         <div className="sticky top-0 z-10 bg-white border-b border-[#f0f0ee] px-6 py-3 flex items-center justify-between shadow-sm">
@@ -399,7 +400,7 @@ export default function InvoicePage({ params }: { params: { orderId: string } })
             <div className="flex items-center gap-3">
               <span className="text-sm font-semibold text-[#1a1a2e]">Facture {order.name}</span>
               <button
-                onClick={() => window.print()}
+                onClick={handlePrint}
                 className="flex items-center gap-2 px-4 py-2 rounded-xl bg-[#1a1a2e] text-white text-sm font-medium hover:bg-[#2d2d4a] transition-colors shadow-sm"
               >
                 <Download size={14} strokeWidth={2} />
