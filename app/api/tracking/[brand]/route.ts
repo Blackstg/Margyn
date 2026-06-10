@@ -106,7 +106,7 @@ export async function POST(
 
     // Fetch product images — one call with all unique product IDs
     const productIds = [...new Set(order.line_items.map((li) => li.product_id).filter(Boolean))]
-    let imageMap: Record<number, string> = {}
+    const imageMap: Record<number, string> = {}
 
     if (productIds.length > 0) {
       try {
