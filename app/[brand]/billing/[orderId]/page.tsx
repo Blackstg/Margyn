@@ -359,13 +359,11 @@ export default function InvoicePage({ params }: { params: { orderId: string } })
       </style>
     </head><body>${el.outerHTML}</body></html>`)
     win.document.close()
-    win.onload = () => {
+    setTimeout(() => {
       win.focus()
-      setTimeout(() => {
-        win.print()
-        win.addEventListener('afterprint', () => win.close())
-      }, 300)
-    }
+      win.print()
+      win.addEventListener('afterprint', () => win.close())
+    }, 500)
   }
 
   const load = useCallback(async () => {
