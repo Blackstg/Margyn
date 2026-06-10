@@ -371,16 +371,23 @@ export default function InvoicePage({ params }: { params: { orderId: string } })
     <>
       <style>{`
         @media print {
-          .no-print { display: none !important; }
-          .print-wrapper { padding: 0 !important; background: white !important; }
-          #invoice-content { box-shadow: none !important; border-radius: 0 !important; }
+          body * { visibility: hidden; }
+          #invoice-content, #invoice-content * { visibility: visible; }
+          #invoice-content {
+            position: fixed !important;
+            left: 0 !important;
+            top: 0 !important;
+            width: 210mm !important;
+            box-shadow: none !important;
+            border-radius: 0 !important;
+          }
           @page { margin: 0; size: A4; }
         }
       `}</style>
 
       <div className="min-h-screen bg-[#f0f0ee]">
         {/* Toolbar */}
-        <div className="no-print sticky top-0 z-10 bg-white border-b border-[#f0f0ee] px-6 py-3 flex items-center justify-between shadow-sm">
+        <div className="sticky top-0 z-10 bg-white border-b border-[#f0f0ee] px-6 py-3 flex items-center justify-between shadow-sm">
           <button
             onClick={() => router.push(`/${brand}/billing`)}
             className="flex items-center gap-2 text-sm text-[#6b6b63] hover:text-[#1a1a2e] transition-colors"
