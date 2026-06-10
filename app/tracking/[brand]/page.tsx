@@ -79,7 +79,7 @@ function addDays(iso: string, days: number) {
 
 // ─── StepDots ─────────────────────────────────────────────────────────────────
 
-function StepDots({ step, primary }: { step: number; primary: string }) {
+function StepDots({ step }: { step: number }) {
   return (
     <div style={{ display: 'flex', alignItems: 'flex-start', width: '100%' }}>
       {STEPS.map((s, i) => {
@@ -288,7 +288,7 @@ export default function BrandTrackingPage({ params }: { params: { brand: string 
 
             {/* ── 2. PROGRESSION ── */}
             <div style={{ background: '#fff', borderRadius: 14, padding: '16px 12px 20px' }}>
-              <StepDots step={result.step} primary={primary} />
+              <StepDots step={result.step} />
             </div>
 
             {/* ── 3. PRODUITS + ADRESSE ── */}
