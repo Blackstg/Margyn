@@ -353,8 +353,8 @@ export default function InvoicePage({ params }: { params: { orderId: string } })
     win.document.write(`<!DOCTYPE html><html><head>
       <meta charset="utf-8"/>
       <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; }
-        body { background: white; }
+        * { margin: 0; padding: 0; box-sizing: border-box; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+        body { background: white; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
         @page { margin: 0; size: A4; }
       </style>
     </head><body>${el.outerHTML}</body></html>`)
