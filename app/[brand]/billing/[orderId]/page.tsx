@@ -350,10 +350,10 @@ export default function InvoicePage({ params }: { params: { orderId: string } })
     if (!el) return
     const win = window.open('', '_blank', 'width=900,height=1200')
     if (!win) return
-    const orderName = el.querySelector('[data-invoice-number]')?.textContent ?? params.orderId
+    const filename = order ? `Facture-${order.name.replace('#', '')}` : `Facture-${params.orderId}`
     win.document.write(`<!DOCTYPE html><html><head>
       <meta charset="utf-8"/>
-      <title>Facture-${orderName}</title>
+      <title>${filename}</title>
       <style>
         * { margin: 0; padding: 0; box-sizing: border-box; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
         body { background: white; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
