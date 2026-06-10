@@ -774,6 +774,191 @@ function Field({
   )
 }
 
+// ─── TrackingSettingsSection ──────────────────────────────────────────────────
+
+interface TrackingSettings {
+  brand_name:           string
+  brand_logo_url:       string
+  brand_color:          string
+  brand_website:        string
+  contact_email:        string
+  show_products:        boolean
+  show_address:         boolean
+  show_tracking_number: boolean
+  show_tracking_link:   boolean
+  estimated_days_min:   number
+  estimated_days_max:   number
+}
+
+const TRACKING_DEFAULTS: TrackingSettings = {
+  brand_name:           '',
+  brand_logo_url:       '',
+  brand_color:          '#111111',
+  brand_website:        '',
+  contact_email:        '',
+  show_products:        true,
+  show_address:         true,
+  show_tracking_number: true,
+  show_tracking_link:   true,
+  estimated_days_min:   7,
+  estimated_days_max:   14,
+}
+
+function TrackingSettingsSection({ brand }: { brand: BrandTab }) {
+  const [form, setForm]     = useState<TrackingSettings>(TRACKING_DEFAULTS)
+  const [save, setSave]     = useState<SaveState>('idle')
+
+  useEffect(() => {
+    fetch(`/api/tracking/settings?brand=${brand}`)
+      .then((r) => r.json())
+      .then((d) => {
+        if (d.settings) setForm({ ...TRACKING_DEFAULTS, ...d.settings })
+      })
+      .catch(() => null)
+  }, [brand])
+
+  function setField(k: keyof TrackingSettings, v: string | boolean | number) {
+    setForm((prev) => ({ ...prev, [k]: v }))
+  }
+
+  async function handleSave() {
+    setSave('saving')
+    try {
+      const res = await fetch(`/api/tracking/settings?brand=${brand}`, {
+        method:  'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify(form),
+      })
+      setSave(res.ok ? 'saved' : 'error')
+      setTimeout(() => setSave('idle'), 2500)
+    } catch {
+      setSave('error')
+      setTimeout(() => setSave('idle'), 2500)
+    }
+  }
+
+  const trackingUrl = typeof window !== 'undefined'
+    ? `${window.location.origin}/tracking/${brand}`
+    : `/tracking/${brand}`
+
+  return (
+    <section style={{ background: '#fff', borderRadius: 16, border: '1px solid #ececea' }} className="p-6 space-y-5">
+      <div className="flex items-center justify-between gap-4">
+        <div>
+          <h2 className="text-[15px] font-semibold text-[#1a1a18]">Page de suivi de commande</h2>
+          <a href={trackingUrl} target="_blank" rel="noopener noreferrer"
+            className="text-xs text-[#6b6b63] hover:text-[#1a1a2e] underline underline-offset-2 transition-colors">
+            {trackingUrl}
+          </a>
+        </div>
+        <button
+          onClick={handleSave} disabled={save === 'saving'}
+          style={{ borderRadius: 10, background: save === 'saved' ? '#22c55e' : save === 'error' ? '#ef4444' : '#1a1a2e', color: '#fff' }}
+          className="px-4 py-2 text-sm font-medium transition-colors shrink-0 disabled:opacity-60"
+        >
+          {save === 'saving' ? 'Enregistrement…' : save === 'saved' ? 'Enregistré ✓' : save === 'error' ? 'Erreur' : 'Enregistrer'}
+        </button>
+      </div>
+
+      {/* Branding */}
+      <div className="space-y-3">
+        <p className="text-xs font-semibold text-[#9b9b93] uppercase tracking-wide">Branding</p>
+        <div className="grid grid-cols-2 gap-3">
+          {([
+            ['brand_name',     'Nom de la marque', 'text',  'Mōom Paris'],
+            ['brand_website',  'Site web',         'url',   'https://…'],
+            ['contact_email',  'Email contact',    'email', 'hello@…'],
+            ['brand_color',    'Couleur principale','text', '#111111'],
+          ] as [keyof TrackingSettings, string, string, string][]).map(([k, label, type, ph]) => (
+            <div key={k} className={k === 'brand_name' ? 'col-span-1' : ''}>
+              <label className="block text-xs text-[#9b9b93] mb-1">{label}</label>
+              <div className="flex items-center gap-2">
+                {k === 'brand_color' && (
+                  <input type="color" value={form[k] as string}
+                    onChange={(e) => setField(k, e.target.value)}
+                    className="w-8 h-8 rounded cursor-pointer border border-[#ececea] p-0.5 shrink-0" />
+                )}
+                <input
+                  type={type} value={form[k] as string} placeholder={ph}
+                  onChange={(e) => setField(k, e.target.value)}
+                  style={{ borderRadius: 10, border: '1px solid #ececea' }}
+                  className="w-full px-3 py-2 text-sm outline-none focus:border-[#1a1a2e] transition-colors bg-[#fafafa]"
+                />
+              </div>
+            </div>
+          ))}
+        </div>
+        <div>
+          <label className="block text-xs text-[#9b9b93] mb-1">URL du logo</label>
+          <input
+            type="url" value={form.brand_logo_url} placeholder="https://…/logo.png"
+            onChange={(e) => setField('brand_logo_url', e.target.value)}
+            style={{ borderRadius: 10, border: '1px solid #ececea' }}
+            className="w-full px-3 py-2 text-sm outline-none focus:border-[#1a1a2e] transition-colors bg-[#fafafa]"
+          />
+        </div>
+      </div>
+
+      {/* Délai estimé */}
+      <div className="space-y-3">
+        <p className="text-xs font-semibold text-[#9b9b93] uppercase tracking-wide">Délai de livraison estimé</p>
+        <div className="flex items-center gap-3">
+          <div className="flex-1">
+            <label className="block text-xs text-[#9b9b93] mb-1">Minimum (jours)</label>
+            <input
+              type="number" min={1} max={60} value={form.estimated_days_min}
+              onChange={(e) => setField('estimated_days_min', parseInt(e.target.value) || 7)}
+              style={{ borderRadius: 10, border: '1px solid #ececea' }}
+              className="w-full px-3 py-2 text-sm outline-none focus:border-[#1a1a2e] transition-colors bg-[#fafafa]"
+            />
+          </div>
+          <span className="text-sm text-[#9b9b93] mt-5">—</span>
+          <div className="flex-1">
+            <label className="block text-xs text-[#9b9b93] mb-1">Maximum (jours)</label>
+            <input
+              type="number" min={1} max={60} value={form.estimated_days_max}
+              onChange={(e) => setField('estimated_days_max', parseInt(e.target.value) || 14)}
+              style={{ borderRadius: 10, border: '1px solid #ececea' }}
+              className="w-full px-3 py-2 text-sm outline-none focus:border-[#1a1a2e] transition-colors bg-[#fafafa]"
+            />
+          </div>
+        </div>
+      </div>
+
+      {/* Fonctionnalités */}
+      <div className="space-y-3">
+        <p className="text-xs font-semibold text-[#9b9b93] uppercase tracking-wide">Fonctionnalités affichées</p>
+        <div className="space-y-2">
+          {([
+            ['show_products',        'Liste des produits commandés'],
+            ['show_address',         'Adresse de livraison'],
+            ['show_tracking_number', 'Numéro de suivi transporteur'],
+            ['show_tracking_link',   'Lien "Suivre mon colis"'],
+          ] as [keyof TrackingSettings, string][]).map(([k, label]) => (
+            <label key={k} className="flex items-center gap-3 cursor-pointer group">
+              <div
+                onClick={() => setField(k, !form[k])}
+                style={{
+                  width: 36, height: 20, borderRadius: 999, cursor: 'pointer', flexShrink: 0,
+                  background: form[k] ? '#1a1a2e' : '#e0e0dc',
+                  position: 'relative', transition: 'background 0.2s',
+                }}
+              >
+                <div style={{
+                  position: 'absolute', top: 2, left: form[k] ? 18 : 2,
+                  width: 16, height: 16, borderRadius: '50%', background: '#fff',
+                  transition: 'left 0.2s', boxShadow: '0 1px 3px rgba(0,0,0,0.2)',
+                }} />
+              </div>
+              <span className="text-sm text-[#1a1a18]">{label}</span>
+            </label>
+          ))}
+        </div>
+      </div>
+    </section>
+  )
+}
+
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 type FixedKey = 'bowaTeam' | 'bowaInfra' | 'bowaFulfillmentFixed'
@@ -1290,6 +1475,9 @@ export default function SettingsPage() {
 
           </div>
         )}
+
+        {/* Suivi de commande */}
+        <TrackingSettingsSection brand={activeBrand} />
 
         {/* Facturation */}
         <InvoiceSettingsSection brand={activeBrand} />
