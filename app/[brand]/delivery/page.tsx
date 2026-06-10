@@ -6,6 +6,7 @@ import { useState, useEffect, useCallback, useRef, useMemo, Suspense } from 'rea
 import nextDynamic from 'next/dynamic'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { createBrowserClient } from '@supabase/auth-helpers-nextjs'
+import { useBrand } from '@/context/BrandContext'
 import { ChevronDown, ChevronUp, ChevronLeft, ChevronRight, Trash2, Mail, Plus, X, MapPin, Package, Truck, Map as MapIcon, Search, Pencil, Check, MessageSquare, GripVertical, Printer, RefreshCw, Clock } from 'lucide-react'
 import {
   DndContext, DragEndEvent, DragOverlay, DragStartEvent,
@@ -161,6 +162,7 @@ const TAB_LABELS: Record<DeliveryView, string> = {
 
 function DeliveryPageInner() {
   const router = useRouter()
+  const brand  = useBrand()
   const searchParams = useSearchParams()
   const [allowedViews, setAllowedViews] = useState<DeliveryView[] | null>(null)
 
@@ -193,12 +195,12 @@ function DeliveryPageInner() {
   useEffect(() => {
     if (!allowedViews) return
     if (!allowedViews.includes(activeTab)) {
-      router.replace(`/delivery?view=${allowedViews[0]}`)
+      router.replace(`/${brand}/delivery?view=${allowedViews[0]}`)
     }
-  }, [allowedViews, activeTab, router])
+  }, [allowedViews, activeTab, router, brand])
 
   function setActiveTab(tab: DeliveryView) {
-    router.replace(`/delivery?view=${tab}`)
+    router.replace(`/${brand}/delivery?view=${tab}`)
   }
 
   // Don't render until we know which views are allowed
