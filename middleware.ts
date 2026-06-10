@@ -107,12 +107,29 @@ export async function middleware(req: NextRequest) {
     return NextResponse.redirect(new URL(`/${defaultBrand}/dashboard`, req.url))
   }
 
+  const pageSeg = pathname.split('/')[2] ?? ''
+
+  // ── Role: delivery → only /bowa/delivery (checked before brand access) ────
+  if (role === 'delivery') {
+    if (urlBrand !== 'bowa' || pageSeg !== 'delivery') {
+      return NextResponse.redirect(new URL(`/bowa/delivery`, req.url))
+    }
+    return response
+  }
+
+  // ── Role: sav → only sav/sav-krom/delivery (checked before brand access) ──
+  if (role === 'sav') {
+    const allowed = ['sav', 'sav-krom', 'delivery']
+    if (!allowed.includes(pageSeg)) {
+      return NextResponse.redirect(new URL(`/moom/sav`, req.url))
+    }
+    return response
+  }
+
   // ── Check user has access to this brand ───────────────────────────────────
   if (brands && !brands.includes(urlBrand)) {
     return NextResponse.redirect(new URL(`/${defaultBrand}/dashboard`, req.url))
   }
-
-  const pageSeg = pathname.split('/')[2] ?? ''
 
   // ── Brand-locked page on wrong brand → redirect to correct brand ──────────
   if (pageSeg && BRAND_LOCKED[pageSeg] && BRAND_LOCKED[pageSeg] !== urlBrand) {
@@ -121,23 +138,6 @@ export async function middleware(req: NextRequest) {
       return NextResponse.redirect(new URL(`/${correctBrand}/${pageSeg}`, req.url))
     }
     return NextResponse.redirect(new URL(`/${defaultBrand}/dashboard`, req.url))
-  }
-
-  // ── Role: delivery → only /bowa/delivery ─────────────────────────────────
-  if (role === 'delivery') {
-    if (urlBrand !== 'bowa' || pageSeg !== 'delivery') {
-      return NextResponse.redirect(new URL(`/bowa/delivery`, req.url))
-    }
-    return response
-  }
-
-  // ── Role: sav → only sav/sav-krom/delivery paths ─────────────────────────
-  if (role === 'sav') {
-    const allowed = ['sav', 'sav-krom', 'delivery']
-    if (!allowed.includes(pageSeg)) {
-      return NextResponse.redirect(new URL(`/moom/sav`, req.url))
-    }
-    return response
   }
 
   return response
