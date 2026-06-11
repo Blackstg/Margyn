@@ -5,7 +5,21 @@ const SHOPIFY: Record<string, { shop: string; token: string }> = {
   krom: { shop: process.env.SHOPIFY_KROM_SHOP!, token: process.env.SHOPIFY_KROM_ACCESS_TOKEN! },
 }
 
+const STATUS_LABELS: Record<string, string> = {
+  label_printed:      'Étiquette créée',
+  label_purchased:    'Étiquette achetée',
+  confirmed:          'Expédition confirmée',
+  in_transit:         'En transit',
+  out_for_delivery:   'En cours de livraison',
+  attempt_failure:    'Tentative de livraison échouée',
+  delivered:          'Livré',
+  failure:            'Incident de livraison',
+  picked_up:          'Pris en charge',
+  ready_for_pickup:   'Prêt à être récupéré',
+}
+
 interface ShopifyFulfillment {
+  id:              number
   created_at:      string
   tracking_number: string | null
   shipment_status: string | null
@@ -20,6 +34,7 @@ interface ShopifyLineItem {
 }
 
 interface ShopifyOrder {
+  id:               number
   name:             string
   email:            string
   created_at:       string
@@ -36,28 +51,33 @@ interface ShopifyOrder {
 }
 
 interface ShopifyProduct {
-  id:      number
-  image?:  { src: string }
-  images?: { src: string; variant_ids: number[] }[]
+  id:       number
+  image?:   { src: string }
+  images?:  { src: string; variant_ids: number[] }[]
   variants: { id: number }[]
+}
+
+interface FulfillmentEvent {
+  status:       string
+  message:      string | null
+  happened_at:  string
+  city:         string | null
+  country:      string | null
 }
 
 function computeStep(order: ShopifyOrder): number {
   const fulfillment = order.fulfillments?.[0] ?? null
-
   if (!fulfillment) {
     const daysSince = (Date.now() - new Date(order.created_at).getTime()) / 86_400_000
     if (daysSince >= 2) return 2
     return 1
   }
-
-  const shipStatus = fulfillment.shipment_status ?? ''
-  if (shipStatus === 'delivered')          return 5
-  if (shipStatus === 'out_for_delivery')   return 4
-  if (shipStatus === 'in_transit')         return 4
-
-  const daysSinceFulfillment = (Date.now() - new Date(fulfillment.created_at).getTime()) / 86_400_000
-  if (daysSinceFulfillment >= 10) return 4
+  const s = fulfillment.shipment_status ?? ''
+  if (s === 'delivered')        return 5
+  if (s === 'out_for_delivery') return 4
+  if (s === 'in_transit')       return 4
+  const daysSince = (Date.now() - new Date(fulfillment.created_at).getTime()) / 86_400_000
+  if (daysSince >= 10) return 4
   return 3
 }
 
@@ -85,7 +105,7 @@ export async function POST(
 
     // Fetch order
     const orderRes = await fetch(
-      `https://${creds.shop}/admin/api/2024-01/orders.json?name=${encodeURIComponent(normalizedName)}&status=any&fields=name,email,created_at,shipping_address,line_items,fulfillments`,
+      `https://${creds.shop}/admin/api/2024-01/orders.json?name=${encodeURIComponent(normalizedName)}&status=any&fields=id,name,email,created_at,shipping_address,line_items,fulfillments`,
       { headers, cache: 'no-store' }
     )
     if (!orderRes.ok) return NextResponse.json({ error: 'Erreur Shopify' }, { status: 500 })
@@ -104,42 +124,54 @@ export async function POST(
       )
     }
 
-    // Fetch product images — one call with all unique product IDs
+    const fulfillment = order.fulfillments?.[0] ?? null
+
+    // Fetch product images + fulfillment events in parallel
     const productIds = [...new Set(order.line_items.map((li) => li.product_id).filter(Boolean))]
-    const imageMap: Record<number, string> = {}
 
-    if (productIds.length > 0) {
-      try {
-        const prodRes = await fetch(
-          `https://${creds.shop}/admin/api/2024-01/products.json?ids=${productIds.join(',')}&fields=id,image,images,variants`,
-          { headers, cache: 'no-store' }
-        )
-        if (prodRes.ok) {
-          const { products } = await prodRes.json() as { products: ShopifyProduct[] }
-          for (const p of products) {
-            // Build variant → image map first (variant-specific images)
-            const variantImageMap: Record<number, string> = {}
-            for (const img of p.images ?? []) {
-              for (const vid of img.variant_ids) {
-                if (!variantImageMap[vid]) variantImageMap[vid] = img.src
+    const [imageMap, trackingEvents] = await Promise.all([
+      // Product images
+      productIds.length > 0
+        ? fetch(`https://${creds.shop}/admin/api/2024-01/products.json?ids=${productIds.join(',')}&fields=id,image,images,variants`, { headers, cache: 'no-store' })
+            .then((r) => r.ok ? r.json() as Promise<{ products: ShopifyProduct[] }> : { products: [] })
+            .then(({ products }) => {
+              const map: Record<number, string> = {}
+              for (const p of products) {
+                const variantImageMap: Record<number, string> = {}
+                for (const img of p.images ?? []) {
+                  for (const vid of img.variant_ids) {
+                    if (!variantImageMap[vid]) variantImageMap[vid] = img.src
+                  }
+                }
+                for (const v of p.variants) {
+                  map[v.id] = variantImageMap[v.id] ?? p.image?.src ?? ''
+                }
+                if (p.image?.src) map[p.id] = p.image.src
               }
-            }
-            // For each variant, prefer variant-specific image, fallback to product image
-            for (const v of p.variants) {
-              imageMap[v.id] = variantImageMap[v.id] ?? p.image?.src ?? ''
-            }
-            // Also store product-level fallback
-            if (!imageMap[p.id] && p.image?.src) imageMap[p.id] = p.image.src
-          }
-        }
-      } catch {
-        // Images are best-effort — don't fail the whole request
-      }
-    }
+              return map
+            })
+            .catch(() => ({} as Record<number, string>))
+        : Promise.resolve({} as Record<number, string>),
 
-    const fulfillment    = order.fulfillments?.[0] ?? null
-    const trackingNumber = fulfillment?.tracking_number ?? null
-    const addr           = order.shipping_address
+      // Fulfillment events (only if fulfillment exists)
+      fulfillment
+        ? fetch(`https://${creds.shop}/admin/api/2024-01/orders/${order.id}/fulfillments/${fulfillment.id}/events.json`, { headers, cache: 'no-store' })
+            .then((r) => r.ok ? r.json() as Promise<{ fulfillment_events: FulfillmentEvent[] }> : { fulfillment_events: [] })
+            .then(({ fulfillment_events }) =>
+              [...fulfillment_events]
+                .sort((a, b) => new Date(b.happened_at).getTime() - new Date(a.happened_at).getTime())
+                .map((e) => ({
+                  label:   STATUS_LABELS[e.status] ?? e.status,
+                  message: e.message ?? null,
+                  date:    e.happened_at,
+                  location: [e.city, e.country].filter(Boolean).join(', ') || null,
+                }))
+            )
+            .catch(() => [])
+        : Promise.resolve([]),
+    ])
+
+    const addr = order.shipping_address
 
     return NextResponse.json({
       order_name:    order.name,
@@ -163,7 +195,8 @@ export async function POST(
         city:     addr.city     ?? '',
         zip:      addr.zip      ?? '',
       } : null,
-      tracking_number: trackingNumber,
+      tracking_number: fulfillment?.tracking_number ?? null,
+      tracking_events: trackingEvents,
       step:            computeStep(order),
     })
   } catch (err) {

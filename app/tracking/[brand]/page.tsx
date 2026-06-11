@@ -29,6 +29,13 @@ interface Product {
   image_url:     string | null
 }
 
+interface TrackingEvent {
+  label:    string
+  message:  string | null
+  date:     string
+  location: string | null
+}
+
 interface TrackingResult {
   order_name:      string
   created_at:      string
@@ -36,6 +43,7 @@ interface TrackingResult {
   products:        Product[]
   address:         { address1: string; address2: string; city: string; zip: string } | null
   tracking_number: string | null
+  tracking_events: TrackingEvent[]
   step:            number
 }
 
@@ -139,12 +147,13 @@ function StepDots({ step }: { step: number }) {
 export default function BrandTrackingPage({ params }: { params: { brand: string } }) {
   const { brand } = params
 
-  const [settings,  setSettings]  = useState<TrackingSettings | null>(null)
-  const [email,     setEmail]     = useState('')
-  const [orderName, setOrderName] = useState('')
-  const [loading,   setLoading]   = useState(false)
-  const [error,     setError]     = useState<string | null>(null)
-  const [result,    setResult]    = useState<TrackingResult | null>(null)
+  const [settings,      setSettings]      = useState<TrackingSettings | null>(null)
+  const [email,         setEmail]         = useState('')
+  const [orderName,     setOrderName]     = useState('')
+  const [loading,       setLoading]       = useState(false)
+  const [error,         setError]         = useState<string | null>(null)
+  const [result,        setResult]        = useState<TrackingResult | null>(null)
+  const [eventsOpen,    setEventsOpen]    = useState(false)
 
   useEffect(() => {
     fetch(`/api/tracking/settings?brand=${brand}`)
@@ -336,17 +345,61 @@ export default function BrandTrackingPage({ params }: { params: { brand: string 
 
             {/* ── 4. TRACKING ── */}
             {settings?.show_tracking_number && result.tracking_number && (
-              <div style={{ background: '#fff', borderRadius: 14, padding: '12px 16px', display: 'flex', flexDirection: 'column', gap: 8 }}>
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                  <p style={{ fontSize: 10, fontWeight: 700, color: 'rgba(0,0,0,0.3)', letterSpacing: '1px', textTransform: 'uppercase' }}>Numéro de suivi</p>
-                  <p style={{ fontSize: 13, fontWeight: 600, fontFamily: 'monospace', color: '#111', letterSpacing: '1px' }}>{result.tracking_number}</p>
+              <div style={{ background: '#fff', borderRadius: 14, overflow: 'hidden' }}>
+                {/* Header row */}
+                <div style={{ padding: '12px 16px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                  <div>
+                    <p style={{ fontSize: 10, fontWeight: 700, color: 'rgba(0,0,0,0.3)', letterSpacing: '1px', textTransform: 'uppercase', marginBottom: 2 }}>Numéro de suivi</p>
+                    <p style={{ fontSize: 13, fontWeight: 600, fontFamily: 'monospace', color: '#111', letterSpacing: '1px' }}>{result.tracking_number}</p>
+                  </div>
+                  {result.tracking_events.length > 0 && (
+                    <button
+                      onClick={() => setEventsOpen((o) => !o)}
+                      style={{
+                        display: 'flex', alignItems: 'center', gap: 6,
+                        background: eventsOpen ? 'rgba(0,0,0,0.06)' : 'rgba(0,0,0,0.04)',
+                        border: 'none', borderRadius: 8, padding: '7px 12px',
+                        fontSize: 12, fontWeight: 600, color: '#111', cursor: 'pointer',
+                      }}
+                    >
+                      Voir le détail
+                      <span style={{ fontSize: 10, transition: 'transform 0.2s', display: 'inline-block', transform: eventsOpen ? 'rotate(180deg)' : 'rotate(0deg)' }}>▼</span>
+                    </button>
+                  )}
                 </div>
-                {settings.show_tracking_link && (
-                  <a href={`https://t.17track.net/fr#nums=${result.tracking_number}`}
-                    target="_blank" rel="noopener noreferrer"
-                    style={{ display: 'block', textAlign: 'center', borderRadius: 10, background: primary, color: '#fff', padding: '10px', fontSize: 13, fontWeight: 600, textDecoration: 'none' }}>
-                    Suivre mon colis →
-                  </a>
+
+                {/* Events accordion */}
+                {eventsOpen && result.tracking_events.length > 0 && (
+                  <div style={{ borderTop: '1px solid rgba(0,0,0,0.06)', padding: '12px 16px', display: 'flex', flexDirection: 'column', gap: 0 }}>
+                    {result.tracking_events.map((ev, i) => (
+                      <div key={i} style={{ display: 'flex', gap: 12, paddingBottom: i < result.tracking_events.length - 1 ? 14 : 0 }}>
+                        {/* Timeline dot + line */}
+                        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', flexShrink: 0 }}>
+                          <div style={{
+                            width: 10, height: 10, borderRadius: '50%', flexShrink: 0, marginTop: 3,
+                            background: i === 0 ? '#22c55e' : 'rgba(0,0,0,0.15)',
+                            boxShadow: i === 0 ? '0 0 0 3px #22c55e22' : 'none',
+                          }} />
+                          {i < result.tracking_events.length - 1 && (
+                            <div style={{ width: 1, flex: 1, minHeight: 14, background: 'rgba(0,0,0,0.08)', marginTop: 3 }} />
+                          )}
+                        </div>
+                        {/* Content */}
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <p style={{ fontSize: 13, fontWeight: i === 0 ? 700 : 500, color: i === 0 ? '#111' : 'rgba(0,0,0,0.6)', lineHeight: 1.3 }}>
+                            {ev.label}
+                          </p>
+                          {ev.message && (
+                            <p style={{ fontSize: 12, color: 'rgba(0,0,0,0.45)', marginTop: 2 }}>{ev.message}</p>
+                          )}
+                          <p style={{ fontSize: 11, color: 'rgba(0,0,0,0.35)', marginTop: 2 }}>
+                            {new Date(ev.date).toLocaleString('fr-FR', { day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' })}
+                            {ev.location && <span> · {ev.location}</span>}
+                          </p>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
                 )}
               </div>
             )}
