@@ -311,6 +311,8 @@ function VerticalTimeline({ events, primary }: { events: TLEvent[]; primary: str
 
 // ─── Main ─────────────────────────────────────────────────────────────────────
 
+const SESSION_KEY = (brand: string) => `tracking_session_${brand}`
+
 export default function BrandTrackingPage({ params }: { params: { brand: string } }) {
   const { brand } = params
 
@@ -322,6 +324,7 @@ export default function BrandTrackingPage({ params }: { params: { brand: string 
   const [result,     setResult]     = useState<TrackingResult | null>(null)
   const [eventsOpen, setEventsOpen] = useState(false)
 
+  // Load settings
   useEffect(() => {
     fetch(`/api/tracking/settings?brand=${brand}`)
       .then((r) => r.json())
@@ -329,15 +332,43 @@ export default function BrandTrackingPage({ params }: { params: { brand: string 
       .catch(() => null)
   }, [brand])
 
-  const primary    = settings?.brand_color || '#111'
+  // On mount: read URL params (Klaviyo links) or restore session
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search)
+    const urlEmail = params.get('email')?.trim() ?? ''
+    const urlOrder = params.get('order')?.trim() ?? ''
+
+    if (urlEmail && urlOrder) {
+      // URL params take priority — auto-submit immediately
+      setEmail(urlEmail)
+      setOrderName(urlOrder)
+      doFetch(urlEmail, urlOrder)
+      return
+    }
+
+    // No URL params — try to restore last session
+    try {
+      const raw = sessionStorage.getItem(SESSION_KEY(brand))
+      if (raw) {
+        const { email: se, orderName: so, result: sr } = JSON.parse(raw) as {
+          email: string; orderName: string; result: TrackingResult
+        }
+        setEmail(se)
+        setOrderName(so)
+        setResult(sr)
+      }
+    } catch { /* ignore */ }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [brand])
+
+  const primary     = settings?.brand_color || '#111'
   const isDelivered = result?.step === 5
 
-  const timeline = result ? buildTimeline(result) : []
+  const timeline     = result ? buildTimeline(result) : []
   const currentEvent = timeline.find(e => e.status === 'current')
     ?? [...timeline].reverse().find(e => e.status === 'done')
 
-  async function handleSubmit(e: FormEvent) {
-    e.preventDefault()
+  async function doFetch(em: string, on: string) {
     setLoading(true)
     setError(null)
     setResult(null)
@@ -345,16 +376,34 @@ export default function BrandTrackingPage({ params }: { params: { brand: string 
       const res  = await fetch(`/api/tracking/${brand}`, {
         method:  'POST',
         headers: { 'Content-Type': 'application/json' },
-        body:    JSON.stringify({ email: email.trim(), order_name: orderName.trim() }),
+        body:    JSON.stringify({ email: em, order_name: on }),
       })
       const data = await res.json() as TrackingResult & { error?: string }
-      if (!res.ok || data.error) setError(data.error ?? 'Commande introuvable.')
-      else setResult(data)
+      if (!res.ok || data.error) {
+        setError(data.error ?? 'Commande introuvable.')
+      } else {
+        setResult(data)
+        // Persist session
+        try {
+          sessionStorage.setItem(SESSION_KEY(brand), JSON.stringify({ email: em, orderName: on, result: data }))
+        } catch { /* ignore */ }
+      }
     } catch {
       setError('Erreur réseau. Veuillez réessayer.')
     } finally {
       setLoading(false)
     }
+  }
+
+  async function handleSubmit(e: FormEvent) {
+    e.preventDefault()
+    await doFetch(email.trim(), orderName.trim())
+  }
+
+  function handleReset() {
+    setResult(null)
+    setError(null)
+    try { sessionStorage.removeItem(SESSION_KEY(brand)) } catch { /* ignore */ }
   }
 
   return (
@@ -376,7 +425,7 @@ export default function BrandTrackingPage({ params }: { params: { brand: string 
         </a>
         <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
           {result && (
-            <button onClick={() => { setResult(null); setError(null) }}
+            <button onClick={handleReset}
               style={{ fontSize: 12, color: 'rgba(0,0,0,0.4)', textDecoration: 'underline', background: 'none', border: 'none', cursor: 'pointer' }}>
               Autre commande
             </button>
