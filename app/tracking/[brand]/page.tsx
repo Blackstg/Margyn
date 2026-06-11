@@ -397,12 +397,24 @@ export default function BrandTrackingPage({ params }: { params: { brand: string 
   const [eventsOpen,   setEventsOpen]   = useState(false)
   const [carrierLogos, setCarrierLogos] = useState<Record<string, string>>({})
 
-  // Load settings + carrier logos
+  // Load settings (localStorage cache → API refresh)
   useEffect(() => {
+    const cacheKey = `tracking_settings_${brand}`
+    try {
+      const cached = localStorage.getItem(cacheKey)
+      if (cached) setSettings(JSON.parse(cached))
+    } catch { /* ignore */ }
+
     fetch(`/api/tracking/settings?brand=${brand}`)
       .then((r) => r.json())
-      .then((d) => setSettings(d.settings))
+      .then((d) => {
+        if (d.settings) {
+          setSettings(d.settings)
+          try { localStorage.setItem(cacheKey, JSON.stringify(d.settings)) } catch { /* ignore */ }
+        }
+      })
       .catch(() => null)
+
     fetch('/api/tracking/carrier-logos')
       .then((r) => r.json())
       .then((d) => { if (d.logos) setCarrierLogos(d.logos) })
@@ -489,14 +501,17 @@ export default function BrandTrackingPage({ params }: { params: { brand: string 
       {/* ── Header ── */}
       <header style={{ background: '#fff', borderBottom: '1px solid rgba(0,0,0,0.06)', padding: '10px 20px', display: 'grid', gridTemplateColumns: '1fr auto 1fr', alignItems: 'center' }}>
         <div />
-        <a href={settings?.brand_website || '#'} target="_blank" rel="noopener noreferrer" style={{ display: 'flex', justifyContent: 'center' }}>
-          {settings?.brand_logo_url ? (
+        <a href={settings?.brand_website || '#'} target="_blank" rel="noopener noreferrer" style={{ display: 'flex', justifyContent: 'center', minHeight: 32, alignItems: 'center' }}>
+          {settings === null ? (
+            /* Settings pas encore chargées — placeholder invisible pour éviter le flash de texte */
+            <div style={{ height: 32, width: 80 }} />
+          ) : settings.brand_logo_url ? (
             <Image src={settings.brand_logo_url} alt={settings.brand_name || brand}
               width={120} height={36} unoptimized priority
               style={{ objectFit: 'contain', height: 32, width: 'auto' }} />
           ) : (
             <span style={{ fontSize: 17, fontWeight: 800, color: primary }}>
-              {settings?.brand_name || brand.toUpperCase()}
+              {settings.brand_name || brand.toUpperCase()}
             </span>
           )}
         </a>
