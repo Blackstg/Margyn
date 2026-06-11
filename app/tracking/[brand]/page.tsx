@@ -90,7 +90,8 @@ function buildTimeline(result: TrackingResult, settings: TrackingSettings | null
   function estDate(idx: number): string {
     const fraction = STEP_OFFSETS[idx] / 12  // 12 = max fixed offset
     const days = Math.round(min + fraction * (max - min))
-    return addDays(result.created_at, days)
+    const date = addDays(result.created_at, days)
+    return idx === 9 ? `au plus tard le ${date}` : `~ ${date}`
   }
 
   // Extract key timestamps from carrier events

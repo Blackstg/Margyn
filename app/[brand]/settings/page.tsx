@@ -792,8 +792,13 @@ const TRACKING_DEFAULTS: TrackingSettings = {
   show_address:         true,
   show_tracking_number: true,
   show_tracking_link:   true,
-  estimated_days_min:   7,
-  estimated_days_max:   14,
+  estimated_days_min:   10,
+  estimated_days_max:   15,
+}
+
+const BRAND_DELIVERY_DEFAULTS: Record<string, { estimated_days_min: number; estimated_days_max: number }> = {
+  moom: { estimated_days_min: 8,  estimated_days_max: 10 },
+  krom: { estimated_days_min: 12, estimated_days_max: 14 },
 }
 
 function TrackingSettingsSection({ brand }: { brand: BrandTab }) {
@@ -801,10 +806,12 @@ function TrackingSettingsSection({ brand }: { brand: BrandTab }) {
   const [save, setSave]     = useState<SaveState>('idle')
 
   useEffect(() => {
+    const brandDefaults = { ...TRACKING_DEFAULTS, ...(BRAND_DELIVERY_DEFAULTS[brand] ?? {}) }
     fetch(`/api/tracking/settings?brand=${brand}`)
       .then((r) => r.json())
       .then((d) => {
-        if (d.settings) setForm({ ...TRACKING_DEFAULTS, ...d.settings })
+        if (d.settings) setForm({ ...brandDefaults, ...d.settings })
+        else setForm(brandDefaults)
       })
       .catch(() => null)
   }, [brand])
@@ -869,20 +876,20 @@ function TrackingSettingsSection({ brand }: { brand: BrandTab }) {
         <p className="text-xs font-semibold text-[#9b9b93] uppercase tracking-wide">Délai de livraison estimé</p>
         <div className="flex items-center gap-3">
           <div className="flex-1">
-            <label className="block text-xs text-[#9b9b93] mb-1">Minimum (jours)</label>
+            <label className="block text-xs text-[#9b9b93] mb-1">Minimum (jours ouvrés)</label>
             <input
               type="number" min={1} max={60} value={form.estimated_days_min}
-              onChange={(e) => setField('estimated_days_min', parseInt(e.target.value) || 7)}
+              onChange={(e) => setField('estimated_days_min', parseInt(e.target.value) || 8)}
               style={{ borderRadius: 10, border: '1px solid #ececea' }}
               className="w-full px-3 py-2 text-sm outline-none focus:border-[#1a1a2e] transition-colors bg-[#fafafa]"
             />
           </div>
           <span className="text-sm text-[#9b9b93] mt-5">—</span>
           <div className="flex-1">
-            <label className="block text-xs text-[#9b9b93] mb-1">Maximum (jours)</label>
+            <label className="block text-xs text-[#9b9b93] mb-1">Maximum (jours ouvrés)</label>
             <input
               type="number" min={1} max={60} value={form.estimated_days_max}
-              onChange={(e) => setField('estimated_days_max', parseInt(e.target.value) || 14)}
+              onChange={(e) => setField('estimated_days_max', parseInt(e.target.value) || 10)}
               style={{ borderRadius: 10, border: '1px solid #ececea' }}
               className="w-full px-3 py-2 text-sm outline-none focus:border-[#1a1a2e] transition-colors bg-[#fafafa]"
             />
