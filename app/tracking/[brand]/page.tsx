@@ -101,9 +101,10 @@ function detectCarrier(tracking: string): CarrierId | null {
   // Colissimo international
   if (/^(CW|GR|EE|RR)\d{9}FR$/.test(t)) return 'colissimo'
 
-  // Colis Privé — 13 digits starting with 37, or FCCE prefix
-  if (/^37\d{11}$/.test(t)) return 'colis-prive'
-  if (/^FCCE\d+$/.test(t))  return 'colis-prive'
+  // Colis Privé — plusieurs formats connus
+  if (/^37\d{11}$/.test(t))   return 'colis-prive'
+  if (/^FCCE\d+$/.test(t))    return 'colis-prive'
+  if (/^S\d{15,16}$/.test(t)) return 'colis-prive'  // ex: S6230116917912320
 
   // Gofo — GF or GOF prefix
   if (/^(GF|GOF)\d+/i.test(t)) return 'gofo'
