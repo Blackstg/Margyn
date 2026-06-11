@@ -32,13 +32,15 @@ interface ReplenishmentRow {
   sku: string | null
   image_url: string | null
   stock_quantity: number
+  qty_in_production: number
   ref_qty: number
   daily_sales: number
   coverage_days: number | null
+  projected_coverage: number | null
   stock_needed: number
   qty_to_order: number
   order_deadline: Date
-  status: 'order' | 'low' | 'ok'
+  status: 'order' | 'in_prod' | 'low' | 'ok'
   data_source: DataSource
   velocity_days: number
   velocity_from: string
@@ -217,6 +219,24 @@ export default function ReapproPage() {
   const [search,     setSearch]     = useState('')
   const [showAll,    setShowAll]    = useState(false)
 
+  // ── Production en cours (localStorage par brand) ─────────────────────────
+  const [inProduction, setInProduction] = useState<Record<string, number>>(() => {
+    try {
+      const raw = typeof window !== 'undefined' ? localStorage.getItem(`reorder_inprod_${brand}`) : null
+      return raw ? (JSON.parse(raw) as Record<string, number>) : {}
+    } catch { return {} }
+  })
+
+  function setInProd(variantId: string, qty: number) {
+    setInProduction((prev) => {
+      const next = { ...prev }
+      if (qty > 0) next[variantId] = qty
+      else delete next[variantId]
+      try { localStorage.setItem(`reorder_inprod_${brand}`, JSON.stringify(next)) } catch { /* ignore */ }
+      return next
+    })
+  }
+
   // ── Cart / sidebar ─────────────────────────────────────────────────────────
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [cartItems,   setCartItems]   = useState<CartItem[]>([])
@@ -344,14 +364,19 @@ export default function ReapproPage() {
           velocity_from = refFrom; velocity_to = refTo
         }
 
-        const daily_sales   = velocity_qty / velocity_days
-        const stock_needed  = Math.round(daily_sales * targetDays)
-        const qty_to_order  = Math.round(Math.max(0, stock_needed - v.stock_quantity) * (1 + buffer / 100))
-        const coverage_days = daily_sales > 0 ? Math.round(v.stock_quantity / daily_sales) : null
+        const daily_sales        = velocity_qty / velocity_days
+        const stock_needed       = Math.round(daily_sales * targetDays)
+        const qty_in_production  = inProduction[v.shopify_variant_id] ?? 0
+        const raw_gap            = Math.max(0, stock_needed - v.stock_quantity)
+        const net_gap            = Math.max(0, raw_gap - qty_in_production)
+        const qty_to_order       = Math.round(net_gap * (1 + buffer / 100))
+        const coverage_days      = daily_sales > 0 ? Math.round(v.stock_quantity / daily_sales) : null
+        const projected_coverage = daily_sales > 0 ? Math.round((v.stock_quantity + qty_in_production) / daily_sales) : null
 
         const status: ReplenishmentRow['status'] =
-          qty_to_order > 0                               ? 'order'
-          : coverage_days !== null && coverage_days < 60 ? 'low'
+          qty_to_order > 0                                    ? 'order'
+          : qty_in_production > 0 && raw_gap > 0             ? 'in_prod'
+          : coverage_days !== null && coverage_days < 60      ? 'low'
           : 'ok'
 
         return {
@@ -361,9 +386,11 @@ export default function ReapproPage() {
           sku:                v.sku,
           image_url:          v.image_url,
           stock_quantity:     v.stock_quantity,
+          qty_in_production,
           ref_qty,
           daily_sales,
           coverage_days,
+          projected_coverage,
           stock_needed,
           qty_to_order,
           order_deadline: deadline,
@@ -386,7 +413,7 @@ export default function ReapproPage() {
         if (a.product_title !== b.product_title) return a.product_title.localeCompare(b.product_title)
         return (a.variant_title ?? '').localeCompare(b.variant_title ?? '')
       })
-  }, [variants, salesByVariant, salesByVariant90, exclusions, refFrom, refTo, targetFrom, targetTo, leadTime, buffer, from90, today90])
+  }, [variants, salesByVariant, salesByVariant90, exclusions, refFrom, refTo, targetFrom, targetTo, leadTime, buffer, from90, today90, inProduction])
 
   const rowMap = useMemo(() => new Map(rows.map((r) => [r.shopify_variant_id, r])), [rows])
 
@@ -445,10 +472,11 @@ Stock faible:\n${lowLines || 'Aucun'}`
   }
 
   // ── Summary ───────────────────────────────────────────────────────────────
-  const deadline        = subtractDays(targetFrom, leadTime)
-  const daysToDeadline  = Math.round((deadline.getTime() - new Date().getTime()) / 86_400_000)
-  const totalToOrder    = rows.reduce((s, r) => s + r.qty_to_order, 0)
-  const variantsToOrder = rows.filter((r) => r.qty_to_order > 0).length
+  const deadline          = subtractDays(targetFrom, leadTime)
+  const daysToDeadline    = Math.round((deadline.getTime() - new Date().getTime()) / 86_400_000)
+  const totalToOrder      = rows.reduce((s, r) => s + r.qty_to_order, 0)
+  const variantsToOrder   = rows.filter((r) => r.qty_to_order > 0).length
+  const variantsInProd    = rows.filter((r) => r.status === 'in_prod').length
   const cartTotal       = cartItems.reduce((s, c) => s + c.qty, 0)
 
   // Per-product subtotals (only products with ≥ 2 cart lines)
@@ -622,17 +650,29 @@ Stock faible:\n${lowLines || 'Aucun'}`
               ) : (
                 <div className="flex flex-wrap items-center gap-3">
                   <span className="text-base">{daysToDeadline < 15 ? '⚠️' : '📦'}</span>
-                  <span className={`text-sm font-semibold ${daysToDeadline < 15 ? 'text-amber-600' : 'text-[#1a1a2e]'}`}>
-                    Commande à passer avant le {fmtDate(deadline)}
-                  </span>
-                  <span className="text-sm text-[#6b6b63]">—</span>
-                  <span className="text-sm text-[#1a1a2e]">
-                    <strong>{totalToOrder.toLocaleString('fr-FR')} unités</strong>
-                    <span className="text-[#6b6b63] font-normal"> sur {variantsToOrder} variant{variantsToOrder > 1 ? 's' : ''}</span>
-                  </span>
-                  {daysToDeadline > 0 && (
-                    <span className={`text-xs font-medium ${daysToDeadline < 15 ? 'text-amber-600' : 'text-[#9b9b93]'}`}>
-                      (dans {daysToDeadline} j)
+                  {totalToOrder > 0 ? (
+                    <>
+                      <span className={`text-sm font-semibold ${daysToDeadline < 15 ? 'text-amber-600' : 'text-[#1a1a2e]'}`}>
+                        Commander avant le {fmtDate(deadline)}
+                      </span>
+                      <span className="text-sm text-[#6b6b63]">—</span>
+                      <span className="text-sm text-[#1a1a2e]">
+                        <strong>{totalToOrder.toLocaleString('fr-FR')} unités</strong>
+                        <span className="text-[#6b6b63] font-normal"> sur {variantsToOrder} variant{variantsToOrder > 1 ? 's' : ''}</span>
+                      </span>
+                      {daysToDeadline > 0 && (
+                        <span className={`text-xs font-medium ${daysToDeadline < 15 ? 'text-amber-600' : 'text-[#9b9b93]'}`}>
+                          (dans {daysToDeadline} j)
+                        </span>
+                      )}
+                    </>
+                  ) : (
+                    <span className="text-sm font-semibold text-[#1a7f4b]">Aucune commande urgente</span>
+                  )}
+                  {variantsInProd > 0 && (
+                    <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-blue-50 text-blue-700">
+                      <span className="w-1.5 h-1.5 rounded-full bg-blue-500 shrink-0" />
+                      {variantsInProd} variant{variantsInProd > 1 ? 's' : ''} en production
                     </span>
                   )}
                 </div>
@@ -671,11 +711,12 @@ Stock faible:\n${lowLines || 'Aucun'}`
                 <tr className="border-b border-[#f0f0ee]">
                   {[
                     { label: 'Produit / Variant', w: '' },
-                    { label: 'Stock actuel',       w: 'w-28' },
+                    { label: 'Stock actuel',       w: 'w-24' },
+                    { label: 'En prod.',            w: 'w-28' },
                     { label: 'Couverture',          w: 'w-32' },
                     { label: 'Ventes / jour',       w: 'w-24' },
-                    { label: 'Stock nécessaire',    w: 'w-32' },
-                    { label: 'Qté suggérée',        w: 'w-28' },
+                    { label: 'Stock cible',         w: 'w-28' },
+                    { label: 'À commander',         w: 'w-28' },
                     { label: 'Statut',              w: 'w-36' },
                     { label: '',                    w: 'w-28' },
                   ].map(({ label, w }) => (
@@ -689,7 +730,7 @@ Stock faible:\n${lowLines || 'Aucun'}`
                 {loading ? (
                   Array.from({ length: 10 }).map((_, i) => (
                     <tr key={i}>
-                      {Array.from({ length: 8 }).map((_, j) => (
+                      {Array.from({ length: 9 }).map((_, j) => (
                         <td key={j} className="px-4 py-3.5">
                           <div className="h-3 bg-[#f0f0ee] rounded animate-pulse" style={{ width: j === 0 ? 180 : 56 }} />
                         </td>
@@ -698,7 +739,7 @@ Stock faible:\n${lowLines || 'Aucun'}`
                   ))
                 ) : visibleRows.length === 0 ? (
                   <tr>
-                    <td colSpan={8} className="px-4 py-14 text-center text-sm text-[#9b9b93]">
+                    <td colSpan={9} className="px-4 py-14 text-center text-sm text-[#9b9b93]">
                       {search ? 'Aucun variant correspondant' : 'Aucune donnée — relancez un sync Shopify'}
                     </td>
                   </tr>
@@ -706,11 +747,10 @@ Stock faible:\n${lowLines || 'Aucun'}`
                   visibleRows.map((row) => {
                     const inCart = cartSet.has(row.shopify_variant_id)
                     const badge =
-                      row.status === 'order'
-                        ? { cls: 'bg-[#fce8ea] text-[#c7293a]', dot: 'bg-[#c7293a]', label: '⚠\uFE0F Commander' }
-                        : row.status === 'low'
-                        ? { cls: 'bg-amber-50 text-amber-700',   dot: 'bg-amber-500', label: 'Stock faible' }
-                        : { cls: 'bg-[#dcf5e7] text-[#1a7f4b]', dot: 'bg-[#1a7f4b]', label: 'Stock OK' }
+                      row.status === 'order'   ? { cls: 'bg-[#fce8ea] text-[#c7293a]', dot: 'bg-[#c7293a]', label: '⚠\uFE0F Commander' }
+                      : row.status === 'in_prod' ? { cls: 'bg-blue-50 text-blue-700',    dot: 'bg-blue-500',   label: 'En prod. ✓' }
+                      : row.status === 'low'     ? { cls: 'bg-amber-50 text-amber-700',  dot: 'bg-amber-500',  label: 'Stock faible' }
+                      :                           { cls: 'bg-[#dcf5e7] text-[#1a7f4b]', dot: 'bg-[#1a7f4b]', label: 'Stock OK' }
 
                     return (
                       <tr key={row.shopify_variant_id} className="hover:bg-[#faf9f8] transition-colors">
@@ -744,8 +784,33 @@ Stock faible:\n${lowLines || 'Aucun'}`
                           </span>
                         </td>
 
+                        {/* En production — champ éditable */}
                         <td className="px-4 py-3">
-                          <CoverageBadge days={row.coverage_days} />
+                          <input
+                            type="number"
+                            min={0}
+                            value={row.qty_in_production || ''}
+                            placeholder="0"
+                            onChange={(e) => setInProd(row.shopify_variant_id, Math.max(0, parseInt(e.target.value) || 0))}
+                            className={`w-20 text-xs tabular-nums rounded-lg px-2 py-1.5 border focus:outline-none focus:border-blue-400 transition-colors ${
+                              row.qty_in_production > 0
+                                ? 'border-blue-300 bg-blue-50 text-blue-700 font-semibold'
+                                : 'border-[#e8e4e0] bg-white text-[#9b9b93]'
+                            }`}
+                          />
+                        </td>
+
+                        <td className="px-4 py-3">
+                          {/* Couverture actuelle + projetée si en prod */}
+                          <div className="flex flex-col gap-1">
+                            <CoverageBadge days={row.coverage_days} />
+                            {row.qty_in_production > 0 && row.projected_coverage !== null && (
+                              <span className="inline-flex items-center gap-1 text-[10px] font-medium text-blue-600">
+                                <span className="w-1.5 h-1.5 rounded-full bg-blue-400 shrink-0" />
+                                {row.projected_coverage} j projetés
+                              </span>
+                            )}
+                          </div>
                         </td>
 
                         <td className="px-4 py-3">
