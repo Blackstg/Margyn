@@ -658,12 +658,12 @@ export default function BrandTrackingPage({ params }: { params: { brand: string 
                     {carrierId && (
                       <div style={{
                         width: 40, height: 40, borderRadius: 10, flexShrink: 0,
-                        border: '1px solid rgba(0,0,0,0.06)', background: '#fafafa',
-                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        border: '1px solid rgba(0,0,0,0.06)',
                         overflow: 'hidden',
                       }}>
                         {carrierLogos[carrierId]
-                          ? <img src={carrierLogos[carrierId]} alt={CARRIER_NAMES[carrierId]} style={{ width: 30, height: 30, objectFit: 'contain' }} />  // eslint-disable-line @next/next/no-img-element
+                          // eslint-disable-next-line @next/next/no-img-element
+                          ? <img src={carrierLogos[carrierId]} alt={CARRIER_NAMES[carrierId]} style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
                           : <CarrierLogo id={carrierId} />
                         }
                       </div>
