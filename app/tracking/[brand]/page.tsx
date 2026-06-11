@@ -60,6 +60,34 @@ interface TLEvent {
   nextup?: string          // hint shown below 'current' dot only
 }
 
+// ─── Carrier detection ────────────────────────────────────────────────────────
+
+const CARRIERS = {
+  colissimo:   { name: 'Colissimo',   logo: 'https://logo.clearbit.com/colissimo.fr' },
+  'colis-prive': { name: 'Colis Privé', logo: 'https://logo.clearbit.com/colisprive.com' },
+  gofo:        { name: 'Gofo',        logo: 'https://logo.clearbit.com/gofo.fr' },
+} as const
+
+type CarrierId = keyof typeof CARRIERS
+
+function detectCarrier(tracking: string): CarrierId | null {
+  const t = tracking.toUpperCase().trim()
+
+  // Colissimo (La Poste) — 13 chars, specific 2-letter prefixes
+  if (/^(6[A-Z]|8[LQ]|9V)\d{11}$/.test(t)) return 'colissimo'
+  // Colissimo international
+  if (/^(CW|GR|EE|RR|CP)\d{9}FR$/.test(t)) return 'colissimo'
+
+  // Colis Privé — numeric 13 digits starting with 37, or FCCE prefix
+  if (/^37\d{11}$/.test(t)) return 'colis-prive'
+  if (/^FCCE\d+$/.test(t))  return 'colis-prive'
+
+  // Gofo — GF prefix or GOF prefix
+  if (/^(GF|GOF)\d+/i.test(t)) return 'gofo'
+
+  return null
+}
+
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function addDays(iso: string, days: number) {
@@ -576,18 +604,46 @@ export default function BrandTrackingPage({ params }: { params: { brand: string 
             </div>
 
             {/* ── 4. TRACKING ── */}
-            {settings?.show_tracking_number && result.tracking_number && (
+            {settings?.show_tracking_number && result.tracking_number && (() => {
+              const carrierId = detectCarrier(result.tracking_number)
+              const carrier   = carrierId ? CARRIERS[carrierId] : null
+              return (
               <div style={{ background: '#fff', borderRadius: 14, overflow: 'hidden' }}>
-                <div style={{ padding: '12px 16px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                  <div>
-                    <p style={{ fontSize: 10, fontWeight: 700, color: 'rgba(0,0,0,0.3)', letterSpacing: '1px', textTransform: 'uppercase', marginBottom: 2 }}>Numéro de suivi</p>
-                    <p style={{ fontSize: 13, fontWeight: 600, fontFamily: 'monospace', color: '#111', letterSpacing: '1px' }}>{result.tracking_number}</p>
+                <div style={{ padding: '12px 16px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
+                  {/* Left: numero + carrier logo */}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
+                    {carrier && (
+                      <div style={{
+                        width: 36, height: 36, borderRadius: 8, flexShrink: 0,
+                        border: '1px solid rgba(0,0,0,0.06)',
+                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        background: '#fafafa', overflow: 'hidden',
+                      }}>
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img
+                          src={carrier.logo}
+                          alt={carrier.name}
+                          width={26} height={26}
+                          style={{ objectFit: 'contain', width: 26, height: 26 }}
+                          onError={(e) => { (e.target as HTMLImageElement).style.display = 'none' }}
+                        />
+                      </div>
+                    )}
+                    <div style={{ minWidth: 0 }}>
+                      <p style={{ fontSize: 10, fontWeight: 700, color: 'rgba(0,0,0,0.3)', letterSpacing: '1px', textTransform: 'uppercase', marginBottom: 2 }}>
+                        {carrier ? carrier.name : 'Numéro de suivi'}
+                      </p>
+                      <p style={{ fontSize: 13, fontWeight: 600, fontFamily: 'monospace', color: '#111', letterSpacing: '0.5px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {result.tracking_number}
+                      </p>
+                    </div>
                   </div>
+
                   {result.tracking_events.length > 0 && (
                     <button
                       onClick={() => setEventsOpen((o) => !o)}
                       style={{
-                        display: 'flex', alignItems: 'center', gap: 6,
+                        display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0,
                         background: eventsOpen ? 'rgba(0,0,0,0.06)' : 'rgba(0,0,0,0.04)',
                         border: 'none', borderRadius: 8, padding: '7px 12px',
                         fontSize: 12, fontWeight: 600, color: '#111', cursor: 'pointer',
@@ -630,7 +686,8 @@ export default function BrandTrackingPage({ params }: { params: { brand: string 
                   </div>
                 )}
               </div>
-            )}
+              )
+            })()}
 
             {/* ── 5. MAP ── */}
             {settings?.show_address && result.address && (
