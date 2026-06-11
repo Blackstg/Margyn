@@ -75,9 +75,23 @@ function fmtDate(iso: string | null | undefined): string | null {
 
 // ─── buildTimeline ────────────────────────────────────────────────────────────
 
-function buildTimeline(result: TrackingResult): TLEvent[] {
+// Offsets (in days from created_at) for each of the 10 logical steps.
+// Upcoming steps use these to compute estimated dates.
+const STEP_OFFSETS = [0, 1, 2, 3, 5, 8, 9, 10, 11, 12]
+
+function buildTimeline(result: TrackingResult, settings: TrackingSettings | null): TLEvent[] {
   const s    = result.step
   const evts = result.tracking_events   // newest first
+  const min  = settings?.estimated_days_min ?? 12
+  const max  = settings?.estimated_days_max ?? 20
+
+  // Scale the fixed offsets to the actual delivery window
+  // Steps 0-3 are early (fixed), steps 4-9 spread across the delivery window
+  function estDate(idx: number): string {
+    const fraction = STEP_OFFSETS[idx] / 12  // 12 = max fixed offset
+    const days = Math.round(min + fraction * (max - min))
+    return addDays(result.created_at, days)
+  }
 
   // Extract key timestamps from carrier events
   const labelEvt      = evts.find(e => ['Étiquette créée', 'Étiquette achetée'].includes(e.label))
@@ -95,63 +109,63 @@ function buildTimeline(result: TrackingResult): TLEvent[] {
   const curLogical: Record<number, number> = { 1: 1, 2: 2, 3: 4, 4: 8 }
   const cur = curLogical[s] ?? -1
 
-  type Raw = { title: string; time?: string | null; desc: string; nextup?: string }
+  type Raw = { title: string; realTime?: string | null; desc: string; nextup?: string }
 
   const raw: Raw[] = [
     {
-      title: 'Commande confirmée',
-      time:  fmtDate(result.created_at),
-      desc:  'Votre commande a bien été enregistrée et validée.',
+      title:    'Commande confirmée',
+      realTime: fmtDate(result.created_at),
+      desc:     'Votre commande a bien été enregistrée et validée.',
     },
     {
-      title: 'Préparation en entrepôt',
-      time:  s >= 2 ? fmtDate(labelEvt?.date ?? result.created_at) : null,
-      desc:  'Votre commande a été préparée et soigneusement emballée.',
-      nextup: 'Votre colis sera bientôt pris en charge pour l\'expédition.',
+      title:    'Préparation en entrepôt',
+      realTime: s >= 2 ? fmtDate(labelEvt?.date ?? result.created_at) : null,
+      desc:     'Votre commande a été préparée et soigneusement emballée.',
+      nextup:   'Votre colis sera bientôt pris en charge pour l\'expédition.',
     },
     {
-      title: 'Colis expédié',
-      time:  s >= 3 ? fmtDate(firstScanEvt?.date ?? labelEvt?.date ?? result.created_at) : null,
-      desc:  'Votre colis a quitté notre entrepôt et est en route.',
+      title:    'Colis expédié',
+      realTime: s >= 3 ? fmtDate(firstScanEvt?.date ?? labelEvt?.date ?? result.created_at) : null,
+      desc:     'Votre colis a quitté notre entrepôt et est en route.',
     },
     {
-      title: 'Départ du centre logistique',
-      time:  s >= 3 ? fmtDate(firstScanEvt?.date ?? labelEvt?.date ?? result.created_at) : null,
-      desc:  'Votre colis a quitté le centre logistique de départ.',
+      title:    'Départ du centre logistique',
+      realTime: s >= 3 ? fmtDate(firstScanEvt?.date ?? labelEvt?.date ?? result.created_at) : null,
+      desc:     'Votre colis a quitté le centre logistique de départ.',
     },
     {
-      title: 'Acheminement en cours',
-      time:  s >= 4 ? fmtDate(transitEvt?.date ?? firstScanEvt?.date ?? null) : null,
-      desc:  s === 3
+      title:    'Acheminement en cours',
+      realTime: s >= 4 ? fmtDate(transitEvt?.date ?? firstScanEvt?.date ?? null) : null,
+      desc:     s === 3
         ? 'C\'est l\'étape la plus longue du trajet — votre colis avance chaque jour. Tout se passe normalement.'
         : 'Votre colis a été acheminé avec succès vers la France.',
       nextup: 'Votre colis sera pris en charge par le transporteur local pour la livraison finale.',
     },
     {
-      title: 'Arrivée au centre de tri',
-      time:  s >= 4 ? fmtDate(transitEvt?.date ?? firstScanEvt?.date ?? null) : null,
-      desc:  'Votre colis est arrivé au centre de tri régional.',
+      title:    'Arrivée au centre de tri',
+      realTime: s >= 4 ? fmtDate(transitEvt?.date ?? firstScanEvt?.date ?? null) : null,
+      desc:     'Votre colis est arrivé au centre de tri régional.',
     },
     {
-      title: 'Contrôle & traitement',
-      time:  s >= 4 ? fmtDate(transitEvt?.date ?? firstScanEvt?.date ?? null) : null,
-      desc:  'Votre colis est en cours de traitement et d\'orientation.',
+      title:    'Contrôle & traitement',
+      realTime: s >= 4 ? fmtDate(transitEvt?.date ?? firstScanEvt?.date ?? null) : null,
+      desc:     'Votre colis est en cours de traitement et d\'orientation.',
     },
     {
-      title: 'Remis au transporteur',
-      time:  s >= 4 ? fmtDate(outEvt?.date ?? transitEvt?.date ?? null) : null,
-      desc:  'Votre colis a été confié au transporteur final.',
+      title:    'Remis au transporteur',
+      realTime: s >= 4 ? fmtDate(outEvt?.date ?? transitEvt?.date ?? null) : null,
+      desc:     'Votre colis a été confié au transporteur final.',
     },
     {
-      title: 'En cours de livraison',
-      time:  s >= 5 ? fmtDate(outEvt?.date ?? null) : null,
-      desc:  'Le livreur est en chemin — il passera très bientôt à votre adresse.',
-      nextup: 'Le livreur passera à votre adresse dans la journée.',
+      title:    'En cours de livraison',
+      realTime: s >= 5 ? fmtDate(outEvt?.date ?? null) : null,
+      desc:     'Le livreur est en chemin — il passera très bientôt à votre adresse.',
+      nextup:   'Le livreur passera à votre adresse dans la journée.',
     },
     {
-      title: 'Livré',
-      time:  s >= 5 ? fmtDate(delivEvt?.date ?? null) : null,
-      desc:  'Votre commande est arrivée à destination. Merci de votre confiance !',
+      title:    'Livré',
+      realTime: s >= 5 ? fmtDate(delivEvt?.date ?? null) : null,
+      desc:     'Votre commande est arrivée à destination. Merci de votre confiance !',
     },
   ]
 
@@ -161,10 +175,16 @@ function buildTimeline(result: TrackingResult): TLEvent[] {
       i === cur       ? 'current' :
       'upcoming'
 
+    // done → real timestamp | current → no time | upcoming → estimated date
+    const time =
+      status === 'done'     ? (r.realTime ?? null) :
+      status === 'upcoming' ? estDate(i)            :
+      null
+
     return {
       status,
       title:  r.title,
-      time:   status === 'done' ? (r.time ?? null) : null,
+      time,
       est:    status === 'upcoming',
       desc:   r.desc,
       nextup: status === 'current' ? r.nextup : undefined,
@@ -263,7 +283,7 @@ function VerticalTimeline({ events, primary }: { events: TLEvent[]; primary: str
                       </span>
                     )}
                     {ev.time && (
-                      <span style={{ fontSize: 11, color: 'rgba(0,0,0,0.4)', fontWeight: 500, whiteSpace: 'nowrap' }}>
+                      <span style={{ fontSize: 11, color: ev.est ? '#b45309' : 'rgba(0,0,0,0.4)', fontWeight: 500, whiteSpace: 'nowrap' }}>
                         {ev.time}
                       </span>
                     )}
@@ -364,7 +384,7 @@ export default function BrandTrackingPage({ params }: { params: { brand: string 
   const primary     = settings?.brand_color || '#111'
   const isDelivered = result?.step === 5
 
-  const timeline     = result ? buildTimeline(result) : []
+  const timeline     = result ? buildTimeline(result, settings) : []
   const currentEvent = timeline.find(e => e.status === 'current')
     ?? [...timeline].reverse().find(e => e.status === 'done')
 
