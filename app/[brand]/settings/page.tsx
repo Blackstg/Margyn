@@ -801,9 +801,17 @@ const BRAND_DELIVERY_DEFAULTS: Record<string, { estimated_days_min: number; esti
   krom: { estimated_days_min: 12, estimated_days_max: 14 },
 }
 
+const CARRIER_LABELS: Record<string, string> = {
+  colissimo:     'Colissimo',
+  'colis-prive': 'Colis Privé',
+  gofo:          'Gofo',
+}
+
 function TrackingSettingsSection({ brand }: { brand: BrandTab }) {
-  const [form, setForm]     = useState<TrackingSettings>(TRACKING_DEFAULTS)
-  const [save, setSave]     = useState<SaveState>('idle')
+  const [form, setForm]           = useState<TrackingSettings>(TRACKING_DEFAULTS)
+  const [save, setSave]           = useState<SaveState>('idle')
+  const [carrierLogos, setCarrierLogos] = useState<Record<string, string>>({})
+  const [uploading, setUploading] = useState<string | null>(null)
 
   useEffect(() => {
     const brandDefaults = { ...TRACKING_DEFAULTS, ...(BRAND_DELIVERY_DEFAULTS[brand] ?? {}) }
@@ -814,7 +822,25 @@ function TrackingSettingsSection({ brand }: { brand: BrandTab }) {
         else setForm(brandDefaults)
       })
       .catch(() => null)
+    // Load carrier logos (shared across brands)
+    fetch('/api/tracking/carrier-logos')
+      .then((r) => r.json())
+      .then((d) => { if (d.logos) setCarrierLogos(d.logos) })
+      .catch(() => null)
   }, [brand])
+
+  async function handleLogoUpload(carrierId: string, file: File) {
+    setUploading(carrierId)
+    try {
+      const fd = new FormData()
+      fd.append('file', file)
+      const res  = await fetch(`/api/tracking/carrier-logos?id=${carrierId}`, { method: 'POST', body: fd })
+      const data = await res.json() as { url?: string; error?: string }
+      if (data.url) setCarrierLogos((prev) => ({ ...prev, [carrierId]: data.url! + '?t=' + Date.now() }))
+    } catch { /* ignore */ } finally {
+      setUploading(null)
+    }
+  }
 
   function setField(k: keyof TrackingSettings, v: string | boolean | number) {
     setForm((prev) => ({ ...prev, [k]: v }))
@@ -924,6 +950,48 @@ function TrackingSettingsSection({ brand }: { brand: BrandTab }) {
               </div>
               <span className="text-sm text-[#1a1a18]">{label}</span>
             </label>
+          ))}
+        </div>
+      </div>
+
+      {/* Logos transporteurs */}
+      <div className="space-y-3">
+        <p className="text-xs font-semibold text-[#9b9b93] uppercase tracking-wide">Logos des transporteurs</p>
+        <p className="text-xs text-[#9b9b93]">Communs à toutes les marques. Formats acceptés&nbsp;: PNG, JPG, SVG, WebP.</p>
+        <div className="space-y-2">
+          {Object.entries(CARRIER_LABELS).map(([id, label]) => (
+            <div key={id} className="flex items-center gap-3">
+              {/* Preview */}
+              <div style={{ width: 44, height: 44, borderRadius: 10, border: '1px solid #ececea', background: '#fafafa', flexShrink: 0, overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                {carrierLogos[id]
+                  ? <img src={carrierLogos[id]} alt={label} style={{ width: 36, height: 36, objectFit: 'contain' }} />
+                  : <span style={{ fontSize: 11, color: '#c0c0b8', fontWeight: 600 }}>?</span>
+                }
+              </div>
+              {/* Label */}
+              <span className="text-sm font-medium text-[#1a1a18] flex-1">{label}</span>
+              {/* Upload button */}
+              <label style={{ cursor: 'pointer' }}>
+                <input
+                  type="file" accept="image/*" className="sr-only"
+                  disabled={uploading === id}
+                  onChange={(e) => {
+                    const file = e.target.files?.[0]
+                    if (file) handleLogoUpload(id, file)
+                    e.target.value = ''
+                  }}
+                />
+                <span style={{
+                  display: 'inline-flex', alignItems: 'center', gap: 5,
+                  borderRadius: 8, border: '1px solid #ececea', background: '#fff',
+                  padding: '6px 12px', fontSize: 12, fontWeight: 600,
+                  color: uploading === id ? '#9b9b93' : '#1a1a18',
+                  cursor: uploading === id ? 'not-allowed' : 'pointer',
+                }}>
+                  {uploading === id ? 'Envoi…' : carrierLogos[id] ? 'Remplacer' : 'Importer'}
+                </span>
+              </label>
+            </div>
           ))}
         </div>
       </div>

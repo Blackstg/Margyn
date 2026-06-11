@@ -391,16 +391,21 @@ export default function BrandTrackingPage({ params }: { params: { brand: string 
   const [settings,   setSettings]   = useState<TrackingSettings | null>(null)
   const [email,      setEmail]      = useState('')
   const [orderName,  setOrderName]  = useState('')
-  const [loading,    setLoading]    = useState(false)
-  const [error,      setError]      = useState<string | null>(null)
-  const [result,     setResult]     = useState<TrackingResult | null>(null)
-  const [eventsOpen, setEventsOpen] = useState(false)
+  const [loading,      setLoading]      = useState(false)
+  const [error,        setError]        = useState<string | null>(null)
+  const [result,       setResult]       = useState<TrackingResult | null>(null)
+  const [eventsOpen,   setEventsOpen]   = useState(false)
+  const [carrierLogos, setCarrierLogos] = useState<Record<string, string>>({})
 
-  // Load settings
+  // Load settings + carrier logos
   useEffect(() => {
     fetch(`/api/tracking/settings?brand=${brand}`)
       .then((r) => r.json())
       .then((d) => setSettings(d.settings))
+      .catch(() => null)
+    fetch('/api/tracking/carrier-logos')
+      .then((r) => r.json())
+      .then((d) => { if (d.logos) setCarrierLogos(d.logos) })
       .catch(() => null)
   }, [brand])
 
@@ -635,8 +640,16 @@ export default function BrandTrackingPage({ params }: { params: { brand: string 
                   {/* Left: logo + numero */}
                   <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
                     {carrierId && (
-                      <div style={{ flexShrink: 0 }}>
-                        <CarrierLogo id={carrierId} />
+                      <div style={{
+                        width: 40, height: 40, borderRadius: 10, flexShrink: 0,
+                        border: '1px solid rgba(0,0,0,0.06)', background: '#fafafa',
+                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        overflow: 'hidden',
+                      }}>
+                        {carrierLogos[carrierId]
+                          ? <img src={carrierLogos[carrierId]} alt={CARRIER_NAMES[carrierId]} style={{ width: 30, height: 30, objectFit: 'contain' }} />  // eslint-disable-line @next/next/no-img-element
+                          : <CarrierLogo id={carrierId} />
+                        }
                       </div>
                     )}
                     <div style={{ minWidth: 0 }}>
