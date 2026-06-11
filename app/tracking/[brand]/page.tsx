@@ -47,35 +47,18 @@ interface TrackingResult {
   step:            number
 }
 
-// ─── Steps ────────────────────────────────────────────────────────────────────
+// ─── Timeline types ───────────────────────────────────────────────────────────
 
-const STEPS: { short: string; detail: string; next: string | null }[] = [
-  {
-    short:  'Confirmée',
-    detail: 'Merci pour votre commande ! Tout est en ordre et votre colis va bientôt être pris en charge.',
-    next:   'Votre colis va être préparé et soigneusement emballé.',
-  },
-  {
-    short:  'Préparation',
-    detail: 'Votre commande est entre nos mains. Nous prenons le temps de préparer et vérifier chaque article.',
-    next:   'Votre colis sera expédié dès que la préparation est finalisée.',
-  },
-  {
-    short:  'Expédiée',
-    detail: 'C\'est parti ! Votre colis est en route et se rapproche de vous chaque jour.',
-    next:   'Il sera bientôt remis au transporteur final pour la livraison à votre domicile.',
-  },
-  {
-    short:  'En livraison',
-    detail: 'Votre colis est tout proche — le transporteur final s\'en occupe et vous le remettra très prochainement.',
-    next:   null,
-  },
-  {
-    short:  'Livrée',
-    detail: 'Votre commande est arrivée à destination. Nous espérons qu\'elle vous donne entière satisfaction !',
-    next:   null,
-  },
-]
+type TLStatus = 'done' | 'current' | 'upcoming'
+
+interface TLEvent {
+  status:  TLStatus
+  title:   string
+  time:    string | null   // real date only on 'done'
+  est:     boolean         // amber "estimé" badge on 'upcoming'
+  desc:    string
+  nextup?: string          // hint shown below 'current' dot only
+}
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -85,60 +68,244 @@ function addDays(iso: string, days: number) {
   return d.toLocaleDateString('fr-FR', { day: 'numeric', month: 'long' })
 }
 
-// ─── StepDots ─────────────────────────────────────────────────────────────────
+function fmtDate(iso: string | null | undefined): string | null {
+  if (!iso) return null
+  return new Date(iso).toLocaleDateString('fr-FR', { day: 'numeric', month: 'long' })
+}
 
-function StepDots({ step }: { step: number }) {
+// ─── buildTimeline ────────────────────────────────────────────────────────────
+
+function buildTimeline(result: TrackingResult): TLEvent[] {
+  const s    = result.step
+  const evts = result.tracking_events   // newest first
+
+  // Extract key timestamps from carrier events
+  const labelEvt      = evts.find(e => ['Étiquette créée', 'Étiquette achetée'].includes(e.label))
+  const firstScanEvt  = [...evts].reverse().find(e =>
+    ['Expédition confirmée', 'Pris en charge', 'En transit'].includes(e.label)
+  )
+  const transitEvt    = [...evts].reverse().find(e => e.label === 'En transit')
+  const outEvt        = evts.find(e => e.label === 'En cours de livraison')
+  const delivEvt      = evts.find(e => e.label === 'Livré')
+
+  // Minimum result.step for each logical step (0-indexed) to be "done"
+  const doneAt = [1, 2, 3, 3, 4, 4, 4, 4, 5, 5]
+
+  // Which logical step index is "current" per result.step
+  const curLogical: Record<number, number> = { 1: 1, 2: 2, 3: 4, 4: 8 }
+  const cur = curLogical[s] ?? -1
+
+  type Raw = { title: string; time?: string | null; desc: string; nextup?: string }
+
+  const raw: Raw[] = [
+    {
+      title: 'Commande confirmée',
+      time:  fmtDate(result.created_at),
+      desc:  'Votre commande a bien été enregistrée et validée.',
+    },
+    {
+      title: 'Préparation en entrepôt',
+      time:  s >= 2 ? fmtDate(labelEvt?.date ?? result.created_at) : null,
+      desc:  'Votre commande a été préparée et soigneusement emballée.',
+      nextup: 'Votre colis sera bientôt pris en charge pour l\'expédition.',
+    },
+    {
+      title: 'Colis expédié',
+      time:  s >= 3 ? fmtDate(firstScanEvt?.date ?? labelEvt?.date ?? result.created_at) : null,
+      desc:  'Votre colis a quitté notre entrepôt et est en route.',
+    },
+    {
+      title: 'Départ du centre logistique',
+      time:  s >= 3 ? fmtDate(firstScanEvt?.date ?? labelEvt?.date ?? result.created_at) : null,
+      desc:  'Votre colis a quitté le centre logistique de départ.',
+    },
+    {
+      title: 'Acheminement en cours',
+      time:  s >= 4 ? fmtDate(transitEvt?.date ?? firstScanEvt?.date ?? null) : null,
+      desc:  s === 3
+        ? 'C\'est l\'étape la plus longue du trajet — votre colis avance chaque jour. Tout se passe normalement.'
+        : 'Votre colis a été acheminé avec succès vers la France.',
+      nextup: 'Votre colis sera pris en charge par le transporteur local pour la livraison finale.',
+    },
+    {
+      title: 'Arrivée au centre de tri',
+      time:  s >= 4 ? fmtDate(transitEvt?.date ?? firstScanEvt?.date ?? null) : null,
+      desc:  'Votre colis est arrivé au centre de tri régional.',
+    },
+    {
+      title: 'Contrôle & traitement',
+      time:  s >= 4 ? fmtDate(transitEvt?.date ?? firstScanEvt?.date ?? null) : null,
+      desc:  'Votre colis est en cours de traitement et d\'orientation.',
+    },
+    {
+      title: 'Remis au transporteur',
+      time:  s >= 4 ? fmtDate(outEvt?.date ?? transitEvt?.date ?? null) : null,
+      desc:  'Votre colis a été confié au transporteur final.',
+    },
+    {
+      title: 'En cours de livraison',
+      time:  s >= 5 ? fmtDate(outEvt?.date ?? null) : null,
+      desc:  'Le livreur est en chemin — il passera très bientôt à votre adresse.',
+      nextup: 'Le livreur passera à votre adresse dans la journée.',
+    },
+    {
+      title: 'Livré',
+      time:  s >= 5 ? fmtDate(delivEvt?.date ?? null) : null,
+      desc:  'Votre commande est arrivée à destination. Merci de votre confiance !',
+    },
+  ]
+
+  return raw.map((r, i): TLEvent => {
+    const status: TLStatus =
+      s >= doneAt[i]  ? 'done'    :
+      i === cur       ? 'current' :
+      'upcoming'
+
+    return {
+      status,
+      title:  r.title,
+      time:   status === 'done' ? (r.time ?? null) : null,
+      est:    status === 'upcoming',
+      desc:   r.desc,
+      nextup: status === 'current' ? r.nextup : undefined,
+    }
+  })
+}
+
+// ─── VerticalTimeline ─────────────────────────────────────────────────────────
+
+function VerticalTimeline({ events, primary }: { events: TLEvent[]; primary: string }) {
   return (
-    <div style={{ display: 'flex', alignItems: 'flex-start', width: '100%' }}>
-      {STEPS.map((s, i) => {
-        const num     = i + 1
-        const done    = num < step
-        const current = num === step
+    <>
+      <style>{`
+        @keyframes tl-pulse {
+          0%, 100% { box-shadow: 0 0 0 0 rgba(34,197,94,0.4); }
+          50%       { box-shadow: 0 0 0 6px rgba(34,197,94,0); }
+        }
+        .tl-dot-current { animation: tl-pulse 2s ease-in-out infinite; }
+      `}</style>
 
-        return (
-          <div key={i} style={{ display: 'flex', alignItems: 'flex-start', flex: i < STEPS.length - 1 ? 1 : 'none' as never }}>
-            {/* Dot + label */}
-            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', flexShrink: 0 }}>
-              <div style={{
-                width:        current ? 26 : 20,
-                height:       current ? 26 : 20,
-                borderRadius: '50%',
-                background:   done || current ? '#22c55e' : 'rgba(0,0,0,0.1)',
-                display:      'flex', alignItems: 'center', justifyContent: 'center',
-                boxShadow:    current ? '0 0 0 3px #22c55e44' : 'none',
-                flexShrink:   0,
-              }}>
-                {done
-                  ? <span style={{ color: '#fff', fontSize: 10, fontWeight: 700 }}>✓</span>
-                  : <span style={{ color: current ? '#fff' : 'rgba(0,0,0,0.3)', fontSize: 9, fontWeight: 700 }}>{num}</span>
-                }
+      <div style={{ padding: '2px 0' }}>
+        {events.map((ev, i) => {
+          const isLast    = i === events.length - 1
+          const isDone    = ev.status === 'done'
+          const isCurrent = ev.status === 'current'
+
+          return (
+            <div key={i} style={{ display: 'flex', gap: 14, alignItems: 'stretch' }}>
+
+              {/* Left column: dot + line */}
+              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', flexShrink: 0, width: 18 }}>
+                {/* Dot */}
+                <div
+                  className={isCurrent ? 'tl-dot-current' : undefined}
+                  style={{
+                    width:        isDone ? 14 : isCurrent ? 14 : 12,
+                    height:       isDone ? 14 : isCurrent ? 14 : 12,
+                    borderRadius: '50%',
+                    flexShrink:   0,
+                    marginTop:    4,
+                    background:   isDone ? '#22c55e' : isCurrent ? '#22c55e' : '#e5e7eb',
+                    border:       isCurrent ? '2px solid #22c55e' : isDone ? 'none' : '2px solid #d1d5db',
+                    display:      'flex',
+                    alignItems:   'center',
+                    justifyContent: 'center',
+                  }}
+                >
+                  {isDone && (
+                    <span style={{ color: '#fff', fontSize: 7, fontWeight: 900, lineHeight: 1 }}>✓</span>
+                  )}
+                  {isCurrent && (
+                    <div style={{ width: 5, height: 5, borderRadius: '50%', background: '#fff' }} />
+                  )}
+                </div>
+
+                {/* Connector line */}
+                {!isLast && (
+                  <div style={{
+                    width:      2,
+                    flex:       1,
+                    minHeight:  8,
+                    marginTop:  3,
+                    marginBottom: 3,
+                    background: isDone ? '#22c55e' : '#e5e7eb',
+                    borderRadius: 1,
+                  }} />
+                )}
               </div>
-              {/* Label below dot */}
-              <p style={{
-                fontSize:   9,
-                fontWeight: current ? 700 : 500,
-                color:      done || current ? '#22c55e' : 'rgba(0,0,0,0.3)',
-                marginTop:  5,
-                textAlign:  'center',
-                lineHeight: 1.2,
-                maxWidth:   48,
-              }}>
-                {s.short}
-              </p>
-            </div>
 
-            {/* Connector line */}
-            {i < STEPS.length - 1 && (
-              <div style={{
-                flex: 1, height: 2, marginTop: 9, marginLeft: 3, marginRight: 3,
-                background:   done ? '#22c55e' : 'rgba(0,0,0,0.08)',
-                borderRadius: 1, flexShrink: 0,
-              }} />
-            )}
-          </div>
-        )
-      })}
-    </div>
+              {/* Right column: content */}
+              <div style={{ flex: 1, paddingBottom: isLast ? 0 : 14 }}>
+                {/* Title + badge/time row */}
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+                  <p style={{
+                    fontSize:   13,
+                    fontWeight: isDone || isCurrent ? 700 : 500,
+                    color:      isDone || isCurrent ? '#111' : 'rgba(0,0,0,0.35)',
+                    lineHeight: 1.3,
+                    marginTop:  3,
+                  }}>
+                    {ev.title}
+                  </p>
+                  <div style={{ display: 'flex', gap: 5, alignItems: 'center', flexShrink: 0 }}>
+                    {ev.est && (
+                      <span style={{
+                        fontSize:        9,
+                        fontWeight:      700,
+                        padding:         '2px 6px',
+                        borderRadius:    4,
+                        background:      'rgba(217,119,6,0.10)',
+                        color:           '#b45309',
+                        textTransform:   'uppercase',
+                        letterSpacing:   '0.4px',
+                      }}>
+                        estimé
+                      </span>
+                    )}
+                    {ev.time && (
+                      <span style={{ fontSize: 11, color: 'rgba(0,0,0,0.4)', fontWeight: 500, whiteSpace: 'nowrap' }}>
+                        {ev.time}
+                      </span>
+                    )}
+                    {isCurrent && !ev.time && (
+                      <span style={{
+                        fontSize:   9, fontWeight: 700, padding: '2px 7px', borderRadius: 4,
+                        background: 'rgba(34,197,94,0.12)', color: '#16a34a',
+                        textTransform: 'uppercase', letterSpacing: '0.4px',
+                      }}>
+                        en cours
+                      </span>
+                    )}
+                  </div>
+                </div>
+
+                {/* Description (done + current only) */}
+                {(isDone || isCurrent) && (
+                  <p style={{
+                    fontSize:  12,
+                    color:     isCurrent ? 'rgba(0,0,0,0.55)' : 'rgba(0,0,0,0.4)',
+                    marginTop: 3,
+                    lineHeight: 1.5,
+                  }}>
+                    {ev.desc}
+                  </p>
+                )}
+
+                {/* Next up hint (current step only) */}
+                {ev.nextup && (
+                  <div style={{ marginTop: 8, display: 'flex', gap: 6, alignItems: 'flex-start' }}>
+                    <span style={{ fontSize: 11, color: primary, flexShrink: 0, fontWeight: 700 }}>→</span>
+                    <p style={{ fontSize: 11, color: 'rgba(0,0,0,0.5)', lineHeight: 1.45 }}>
+                      {ev.nextup}
+                    </p>
+                  </div>
+                )}
+              </div>
+            </div>
+          )
+        })}
+      </div>
+    </>
   )
 }
 
@@ -147,13 +314,13 @@ function StepDots({ step }: { step: number }) {
 export default function BrandTrackingPage({ params }: { params: { brand: string } }) {
   const { brand } = params
 
-  const [settings,      setSettings]      = useState<TrackingSettings | null>(null)
-  const [email,         setEmail]         = useState('')
-  const [orderName,     setOrderName]     = useState('')
-  const [loading,       setLoading]       = useState(false)
-  const [error,         setError]         = useState<string | null>(null)
-  const [result,        setResult]        = useState<TrackingResult | null>(null)
-  const [eventsOpen,    setEventsOpen]    = useState(false)
+  const [settings,   setSettings]   = useState<TrackingSettings | null>(null)
+  const [email,      setEmail]      = useState('')
+  const [orderName,  setOrderName]  = useState('')
+  const [loading,    setLoading]    = useState(false)
+  const [error,      setError]      = useState<string | null>(null)
+  const [result,     setResult]     = useState<TrackingResult | null>(null)
+  const [eventsOpen, setEventsOpen] = useState(false)
 
   useEffect(() => {
     fetch(`/api/tracking/settings?brand=${brand}`)
@@ -162,7 +329,12 @@ export default function BrandTrackingPage({ params }: { params: { brand: string 
       .catch(() => null)
   }, [brand])
 
-  const primary = settings?.brand_color || '#111'
+  const primary    = settings?.brand_color || '#111'
+  const isDelivered = result?.step === 5
+
+  const timeline = result ? buildTimeline(result) : []
+  const currentEvent = timeline.find(e => e.status === 'current')
+    ?? [...timeline].reverse().find(e => e.status === 'done')
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault()
@@ -184,9 +356,6 @@ export default function BrandTrackingPage({ params }: { params: { brand: string 
       setLoading(false)
     }
   }
-
-  const currentStep = result ? STEPS[result.step - 1] : null
-  const isDelivered = result?.step === 5
 
   return (
     <div style={{ minHeight: '100dvh', display: 'flex', flexDirection: 'column', background: '#f5f5f3' }}>
@@ -250,24 +419,24 @@ export default function BrandTrackingPage({ params }: { params: { brand: string 
           <>
             {/* ── 1. STATUT ── */}
             <div style={{ background: '#fff', borderRadius: 16, padding: '18px 20px' }}>
-              <p style={{ fontSize: 10, fontWeight: 700, color: 'rgba(0,0,0,0.35)', letterSpacing: '1px', textTransform: 'uppercase', marginBottom: 10 }}>
-                Statut
-              </p>
               <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12 }}>
                 <div style={{ flex: 1 }}>
-                  <p style={{ fontSize: 19, fontWeight: 800, color: '#111', lineHeight: 1.2, marginBottom: 6 }}>
-                    {currentStep?.short}
+                  <p style={{ fontSize: 10, fontWeight: 700, color: 'rgba(0,0,0,0.35)', letterSpacing: '1px', textTransform: 'uppercase', marginBottom: 6 }}>
+                    Statut
                   </p>
-                  <p style={{ fontSize: 13, color: 'rgba(0,0,0,0.55)', lineHeight: 1.55 }}>
-                    {currentStep?.detail}
+                  <p style={{ fontSize: 19, fontWeight: 800, color: '#111', lineHeight: 1.2 }}>
+                    {currentEvent?.title ?? '—'}
                   </p>
+                  {currentEvent?.status === 'current' && (
+                    <p style={{ fontSize: 13, color: 'rgba(0,0,0,0.5)', marginTop: 5, lineHeight: 1.5 }}>
+                      {currentEvent.desc}
+                    </p>
+                  )}
                 </div>
-                {/* Badge livraison estimée en couleur */}
+
+                {/* Delivery estimate badge */}
                 {!isDelivered && settings && (
-                  <div style={{
-                    background: primary, borderRadius: 12,
-                    padding: '10px 12px', textAlign: 'center', flexShrink: 0,
-                  }}>
+                  <div style={{ background: primary, borderRadius: 12, padding: '10px 12px', textAlign: 'center', flexShrink: 0 }}>
                     <p style={{ fontSize: 9, fontWeight: 600, color: 'rgba(255,255,255,0.75)', marginBottom: 4, letterSpacing: '0.5px' }}>
                       LIVRAISON PRÉVUE
                     </p>
@@ -283,21 +452,14 @@ export default function BrandTrackingPage({ params }: { params: { brand: string 
                   </div>
                 )}
               </div>
-
-              {/* Prochaine étape */}
-              {currentStep?.next && (
-                <div style={{ marginTop: 12, paddingTop: 12, borderTop: '1px solid rgba(0,0,0,0.06)', display: 'flex', alignItems: 'flex-start', gap: 8 }}>
-                  <span style={{ fontSize: 11, color: 'rgba(0,0,0,0.3)', flexShrink: 0, marginTop: 1 }}>→</span>
-                  <p style={{ fontSize: 12, color: 'rgba(0,0,0,0.45)', lineHeight: 1.5 }}>
-                    {currentStep.next}
-                  </p>
-                </div>
-              )}
             </div>
 
-            {/* ── 2. PROGRESSION ── */}
-            <div style={{ background: '#fff', borderRadius: 14, padding: '16px 12px 20px' }}>
-              <StepDots step={result.step} />
+            {/* ── 2. TIMELINE VERTICALE ── */}
+            <div style={{ background: '#fff', borderRadius: 14, padding: '16px 18px 20px' }}>
+              <p style={{ fontSize: 10, fontWeight: 700, color: 'rgba(0,0,0,0.3)', letterSpacing: '1px', textTransform: 'uppercase', marginBottom: 14 }}>
+                Progression
+              </p>
+              <VerticalTimeline events={timeline} primary={primary} />
             </div>
 
             {/* ── 3. PRODUITS + ADRESSE ── */}
@@ -346,7 +508,6 @@ export default function BrandTrackingPage({ params }: { params: { brand: string 
             {/* ── 4. TRACKING ── */}
             {settings?.show_tracking_number && result.tracking_number && (
               <div style={{ background: '#fff', borderRadius: 14, overflow: 'hidden' }}>
-                {/* Header row */}
                 <div style={{ padding: '12px 16px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                   <div>
                     <p style={{ fontSize: 10, fontWeight: 700, color: 'rgba(0,0,0,0.3)', letterSpacing: '1px', textTransform: 'uppercase', marginBottom: 2 }}>Numéro de suivi</p>
@@ -368,12 +529,10 @@ export default function BrandTrackingPage({ params }: { params: { brand: string 
                   )}
                 </div>
 
-                {/* Events accordion */}
                 {eventsOpen && result.tracking_events.length > 0 && (
                   <div style={{ borderTop: '1px solid rgba(0,0,0,0.06)', padding: '12px 16px', display: 'flex', flexDirection: 'column', gap: 0 }}>
                     {result.tracking_events.map((ev, i) => (
                       <div key={i} style={{ display: 'flex', gap: 12, paddingBottom: i < result.tracking_events.length - 1 ? 14 : 0 }}>
-                        {/* Timeline dot + line */}
                         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', flexShrink: 0 }}>
                           <div style={{
                             width: 10, height: 10, borderRadius: '50%', flexShrink: 0, marginTop: 3,
@@ -384,7 +543,6 @@ export default function BrandTrackingPage({ params }: { params: { brand: string 
                             <div style={{ width: 1, flex: 1, minHeight: 14, background: 'rgba(0,0,0,0.08)', marginTop: 3 }} />
                           )}
                         </div>
-                        {/* Content */}
                         <div style={{ flex: 1, minWidth: 0 }}>
                           <p style={{ fontSize: 13, fontWeight: i === 0 ? 700 : 500, color: i === 0 ? '#111' : 'rgba(0,0,0,0.6)', lineHeight: 1.3 }}>
                             {ev.label}
