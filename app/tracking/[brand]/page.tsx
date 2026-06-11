@@ -62,13 +62,36 @@ interface TLEvent {
 
 // ─── Carrier detection ────────────────────────────────────────────────────────
 
-const CARRIERS = {
-  colissimo:   { name: 'Colissimo',   logo: 'https://logo.clearbit.com/colissimo.fr' },
-  'colis-prive': { name: 'Colis Privé', logo: 'https://logo.clearbit.com/colisprive.com' },
-  gofo:        { name: 'Gofo',        logo: 'https://logo.clearbit.com/gofo.fr' },
-} as const
+type CarrierId = 'colissimo' | 'colis-prive' | 'gofo'
 
-type CarrierId = keyof typeof CARRIERS
+const CARRIER_NAMES: Record<CarrierId, string> = {
+  colissimo:     'Colissimo',
+  'colis-prive': 'Colis Privé',
+  gofo:          'Gofo',
+}
+
+function CarrierLogo({ id }: { id: CarrierId }) {
+  if (id === 'colissimo') return (
+    <svg width="28" height="28" viewBox="0 0 28 28" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <rect width="28" height="28" rx="7" fill="#FFD100"/>
+      {/* La Poste yellow + Colissimo blue C */}
+      <path d="M14 6C9.58 6 6 9.58 6 14c0 4.42 3.58 8 8 8 2.1 0 4-.8 5.44-2.1l-1.9-1.9C16.47 18.92 15.28 19.4 14 19.4c-2.98 0-5.4-2.42-5.4-5.4s2.42-5.4 5.4-5.4c1.28 0 2.47.48 3.38 1.26l1.9-1.9C17.84 6.72 16 6 14 6z" fill="#003D82"/>
+    </svg>
+  )
+  if (id === 'colis-prive') return (
+    <svg width="28" height="28" viewBox="0 0 28 28" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <rect width="28" height="28" rx="7" fill="#1B2A6B"/>
+      <text x="14" y="19" textAnchor="middle" fontSize="10" fontWeight="800" fill="#fff" fontFamily="Arial, sans-serif">CP</text>
+    </svg>
+  )
+  if (id === 'gofo') return (
+    <svg width="28" height="28" viewBox="0 0 28 28" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <rect width="28" height="28" rx="7" fill="#FF5C1A"/>
+      <text x="14" y="19.5" textAnchor="middle" fontSize="13" fontWeight="800" fill="#fff" fontFamily="Arial, sans-serif">G</text>
+    </svg>
+  )
+  return null
+}
 
 function detectCarrier(tracking: string): CarrierId | null {
   const t = tracking.toUpperCase().trim()
@@ -76,13 +99,13 @@ function detectCarrier(tracking: string): CarrierId | null {
   // Colissimo (La Poste) — 13 chars, specific 2-letter prefixes
   if (/^(6[A-Z]|8[LQ]|9V)\d{11}$/.test(t)) return 'colissimo'
   // Colissimo international
-  if (/^(CW|GR|EE|RR|CP)\d{9}FR$/.test(t)) return 'colissimo'
+  if (/^(CW|GR|EE|RR)\d{9}FR$/.test(t)) return 'colissimo'
 
-  // Colis Privé — numeric 13 digits starting with 37, or FCCE prefix
+  // Colis Privé — 13 digits starting with 37, or FCCE prefix
   if (/^37\d{11}$/.test(t)) return 'colis-prive'
   if (/^FCCE\d+$/.test(t))  return 'colis-prive'
 
-  // Gofo — GF prefix or GOF prefix
+  // Gofo — GF or GOF prefix
   if (/^(GF|GOF)\d+/i.test(t)) return 'gofo'
 
   return null
@@ -606,32 +629,19 @@ export default function BrandTrackingPage({ params }: { params: { brand: string 
             {/* ── 4. TRACKING ── */}
             {settings?.show_tracking_number && result.tracking_number && (() => {
               const carrierId = detectCarrier(result.tracking_number)
-              const carrier   = carrierId ? CARRIERS[carrierId] : null
               return (
               <div style={{ background: '#fff', borderRadius: 14, overflow: 'hidden' }}>
                 <div style={{ padding: '12px 16px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
-                  {/* Left: numero + carrier logo */}
+                  {/* Left: logo + numero */}
                   <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
-                    {carrier && (
-                      <div style={{
-                        width: 36, height: 36, borderRadius: 8, flexShrink: 0,
-                        border: '1px solid rgba(0,0,0,0.06)',
-                        display: 'flex', alignItems: 'center', justifyContent: 'center',
-                        background: '#fafafa', overflow: 'hidden',
-                      }}>
-                        {/* eslint-disable-next-line @next/next/no-img-element */}
-                        <img
-                          src={carrier.logo}
-                          alt={carrier.name}
-                          width={26} height={26}
-                          style={{ objectFit: 'contain', width: 26, height: 26 }}
-                          onError={(e) => { (e.target as HTMLImageElement).style.display = 'none' }}
-                        />
+                    {carrierId && (
+                      <div style={{ flexShrink: 0 }}>
+                        <CarrierLogo id={carrierId} />
                       </div>
                     )}
                     <div style={{ minWidth: 0 }}>
                       <p style={{ fontSize: 10, fontWeight: 700, color: 'rgba(0,0,0,0.3)', letterSpacing: '1px', textTransform: 'uppercase', marginBottom: 2 }}>
-                        {carrier ? carrier.name : 'Numéro de suivi'}
+                        {carrierId ? CARRIER_NAMES[carrierId] : 'Numéro de suivi'}
                       </p>
                       <p style={{ fontSize: 13, fontWeight: 600, fontFamily: 'monospace', color: '#111', letterSpacing: '0.5px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                         {result.tracking_number}
