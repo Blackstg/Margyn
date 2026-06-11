@@ -10,6 +10,14 @@ const BUCKET   = 'carrier-logos'
 const CARRIERS = ['colissimo', 'colis-prive', 'gofo'] as const
 type CarrierId = typeof CARRIERS[number]
 
+async function ensureBucket(supabase: ReturnType<typeof createAdminClient>) {
+  const { data: buckets } = await supabase.storage.listBuckets()
+  const exists = buckets?.some((b) => b.name === BUCKET)
+  if (!exists) {
+    await supabase.storage.createBucket(BUCKET, { public: true, allowedMimeTypes: ['image/*'] })
+  }
+}
+
 async function getPublicUrl(supabase: ReturnType<typeof createAdminClient>, carrier: CarrierId): Promise<string | null> {
   // Try common extensions
   for (const ext of ['png', 'jpg', 'jpeg', 'svg', 'webp']) {
@@ -24,6 +32,7 @@ async function getPublicUrl(supabase: ReturnType<typeof createAdminClient>, carr
 
 export async function GET() {
   const supabase = createAdminClient()
+  await ensureBucket(supabase)
   const logos: Partial<Record<CarrierId, string>> = {}
 
   await Promise.all(
@@ -54,6 +63,7 @@ export async function POST(req: NextRequest) {
   const path     = `${carrierId}.${ext}`
   const buffer   = await file.arrayBuffer()
   const supabase = createAdminClient()
+  await ensureBucket(supabase)
 
   // Remove old versions with other extensions first
   for (const oldExt of ['png', 'jpg', 'jpeg', 'svg', 'webp']) {
