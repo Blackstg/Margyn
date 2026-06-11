@@ -249,46 +249,46 @@ export default function BrandTrackingPage({ params }: { params: { brand: string 
         ) : (
           <>
             {/* ── 1. STATUT ── */}
-            <div style={{
-              background:   isDelivered ? '#f0fdf4' : primary,
-              borderRadius: 16,
-              padding:      '18px 20px',
-              color:        isDelivered ? '#166534' : '#fff',
-            }}>
-              <p style={{ fontSize: 10, fontWeight: 700, opacity: 0.65, letterSpacing: '1px', textTransform: 'uppercase', marginBottom: 6 }}>
+            <div style={{ background: '#fff', borderRadius: 16, padding: '18px 20px' }}>
+              <p style={{ fontSize: 10, fontWeight: 700, color: 'rgba(0,0,0,0.35)', letterSpacing: '1px', textTransform: 'uppercase', marginBottom: 10 }}>
                 Statut
               </p>
               <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12 }}>
                 <div style={{ flex: 1 }}>
-                  <p style={{ fontSize: 19, fontWeight: 800, lineHeight: 1.2, marginBottom: 6 }}>
+                  <p style={{ fontSize: 19, fontWeight: 800, color: '#111', lineHeight: 1.2, marginBottom: 6 }}>
                     {currentStep?.short}
                   </p>
-                  <p style={{ fontSize: 13, opacity: 0.85, lineHeight: 1.55 }}>
+                  <p style={{ fontSize: 13, color: 'rgba(0,0,0,0.55)', lineHeight: 1.55 }}>
                     {currentStep?.detail}
                   </p>
                 </div>
-                {/* Livraison estimée - doux */}
+                {/* Badge livraison estimée en couleur */}
                 {!isDelivered && settings && (
                   <div style={{
-                    background: 'rgba(255,255,255,0.15)', borderRadius: 12,
+                    background: primary, borderRadius: 12,
                     padding: '10px 12px', textAlign: 'center', flexShrink: 0,
                   }}>
-                    <p style={{ fontSize: 9, fontWeight: 600, opacity: 0.75, marginBottom: 4, letterSpacing: '0.5px' }}>
+                    <p style={{ fontSize: 9, fontWeight: 600, color: 'rgba(255,255,255,0.75)', marginBottom: 4, letterSpacing: '0.5px' }}>
                       LIVRAISON PRÉVUE
                     </p>
-                    <p style={{ fontSize: 12, fontWeight: 700, lineHeight: 1.4 }}>
+                    <p style={{ fontSize: 12, fontWeight: 700, color: '#fff', lineHeight: 1.4 }}>
                       {addDays(result.created_at, settings.estimated_days_min)}<br />
                       au {addDays(result.created_at, settings.estimated_days_max)}
                     </p>
+                  </div>
+                )}
+                {isDelivered && (
+                  <div style={{ background: '#f0fdf4', borderRadius: 12, padding: '10px 12px', textAlign: 'center', flexShrink: 0 }}>
+                    <p style={{ fontSize: 20 }}>🎉</p>
                   </div>
                 )}
               </div>
 
               {/* Prochaine étape */}
               {currentStep?.next && (
-                <div style={{ marginTop: 12, paddingTop: 12, borderTop: '1px solid rgba(255,255,255,0.18)', display: 'flex', alignItems: 'flex-start', gap: 8 }}>
-                  <span style={{ fontSize: 11, opacity: 0.6, flexShrink: 0, marginTop: 1 }}>→</span>
-                  <p style={{ fontSize: 12, opacity: 0.75, lineHeight: 1.5 }}>
+                <div style={{ marginTop: 12, paddingTop: 12, borderTop: '1px solid rgba(0,0,0,0.06)', display: 'flex', alignItems: 'flex-start', gap: 8 }}>
+                  <span style={{ fontSize: 11, color: 'rgba(0,0,0,0.3)', flexShrink: 0, marginTop: 1 }}>→</span>
+                  <p style={{ fontSize: 12, color: 'rgba(0,0,0,0.45)', lineHeight: 1.5 }}>
                     {currentStep.next}
                   </p>
                 </div>
