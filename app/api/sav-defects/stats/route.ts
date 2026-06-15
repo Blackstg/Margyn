@@ -46,13 +46,13 @@ export async function GET(req: NextRequest) {
 
   const { data: claims } = await admin
     .from('defect_claims')
-    .select('id, sku, product_name, quantity, status, reported_at, claim_sent_at, reship_tracking_ref, return_tracking_ref, shopify_order_id')
+    .select('id, sku, product_name, quantity, milestones, reported_at, claim_sent_at, reship_tracking_ref, return_tracking_ref, shopify_order_id')
     .eq('brand', brand)
 
   const rows = claims ?? []
 
   // ── Carte 1 : En attente de réception ──────────────────────────────────────
-  const open = rows.filter(r => r.status !== 'recu' && r.status !== 'clos')
+  const open = rows.filter(r => { const m = r.milestones ?? {}; return !m.recu && !m.clos })
   let oldestDays = 0
   for (const r of open) {
     const ref = r.claim_sent_at || r.reported_at

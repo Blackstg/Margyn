@@ -3,7 +3,7 @@
 export const dynamic = 'force-dynamic'
 
 import { useState, useEffect, useCallback, useRef } from 'react'
-import { Plus, AlertTriangle, Clock, PackageX, X, Image as ImageIcon, Search, FileText, Truck, RotateCcw, Trash2 } from 'lucide-react'
+import { Plus, AlertTriangle, Clock, PackageX, X, Image as ImageIcon, Search, FileText, Truck, RotateCcw, Trash2, Check } from 'lucide-react'
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -24,6 +24,7 @@ interface Claim {
   product_image_url: string | null
   return_label_url: string | null
   status: string
+  milestones: Record<string, string> | null
   supplier_claim_ref: string | null
   reship_tracking_ref: string | null
   return_tracking_ref: string | null
@@ -44,35 +45,24 @@ interface Stats {
 interface LineItem { variant_id: string | null; product_name: string; variant_title: string | null; sku: string | null; image_url: string | null; quantity: number }
 interface Variant { shopify_variant_id: string; product_title: string; variant_title: string | null; image_url: string | null; sku_fr: string | null; sku_cn: string | null }
 
-// ─── Statuts & types ──────────────────────────────────────────────────────────
+// ─── Jalons & types ──────────────────────────────────────────────────────────
 
-const STATUS_OPTS = [
-  'signale', 'reclamation_envoyee', 'repro_confirmee', 'etiquette_envoyee', 'retour_recu', 'reexpedie', 'recu', 'clos', 'litige',
-] as const
-
-const STATUS_LABEL: Record<string, string> = {
-  signale:             'Signalé',
-  reclamation_envoyee: 'Réclamation envoyée',
-  repro_confirmee:     'Repro confirmée',
-  etiquette_envoyee:   'Étiquette envoyée',
-  retour_recu:         'Retour reçu',
-  reexpedie:           'Réexpédié',
-  recu:                'Reçu',
-  clos:                'Clos',
-  litige:              'Litige',
+// Jalons cumulables (un dossier peut en avoir plusieurs). Clé → libellé.
+const MILESTONES_BY_TYPE: Record<string, { key: string; label: string }[]> = {
+  defaut_fournisseur: [
+    { key: 'reclamation_envoyee', label: 'Réclamation envoyée' },
+    { key: 'repro_confirmee',     label: 'Repro confirmée' },
+    { key: 'reexpedie',           label: 'Réexpédié' },
+    { key: 'recu',                label: 'Reçu' },
+  ],
+  erreur_envoi: [
+    { key: 'etiquette_envoyee', label: 'Étiquette retour' },
+    { key: 'retour_recu',       label: 'Retour reçu' },
+    { key: 'reexpedie',         label: 'Réexpédié' },
+    { key: 'recu',              label: 'Reçu' },
+  ],
 }
-
-const STATUS_COLOR: Record<string, [string, string]> = {
-  signale:             ['#F8F8F7', '#6b6b63'],
-  reclamation_envoyee: ['#eef2ff', '#4f46e5'],
-  repro_confirmee:     ['#fffbeb', '#92650a'],
-  etiquette_envoyee:   ['#eef2ff', '#4f46e5'],
-  retour_recu:         ['#eef6ff', '#1d4ed8'],
-  reexpedie:           ['#eef6ff', '#1d4ed8'],
-  recu:                ['#f0faf5', '#1a7f4b'],
-  clos:                ['#f0f0ee', '#6b6b63'],
-  litige:              ['#fff1f1', '#c7293a'],
-}
+const TERMINAL = [{ key: 'clos', label: 'Clos' }, { key: 'litige', label: 'Litige' }] as const
 
 const TYPE_LABEL: Record<string, string> = { defaut_fournisseur: 'Défaut', erreur_envoi: 'Erreur envoi' }
 const TYPE_COLOR: Record<string, [string, string]> = {
@@ -149,6 +139,13 @@ export default function SavDefectsPage() {
       body: JSON.stringify({ id, ...patch }),
     })
     loadStats()
+  }
+
+  function setMilestone(c: Claim, key: string, date: string | null) {
+    const m = { ...(c.milestones ?? {}) }
+    if (date) m[key] = date
+    else delete m[key]
+    patchClaim(c.id, { milestones: m })
   }
 
   async function deleteClaim(c: Claim) {
@@ -236,38 +233,48 @@ export default function SavDefectsPage() {
           ) : (
             <div className="divide-y divide-[#f0f0ee]">
               {visible.map(c => {
-                const open = c.status !== 'recu' && c.status !== 'clos'
+                const m = c.milestones ?? {}
+                const open = !m.recu && !m.clos
                 const days = open ? daysSince(c.claim_sent_at ?? c.reported_at) : null
                 const overdue = days !== null && days > 30
                 const isErr = c.claim_type === 'erreur_envoi'
+                const today = new Date().toISOString().slice(0, 10)
                 return (
                   <div key={c.id} className={`px-6 py-4 ${overdue ? 'bg-[#fff5f5]' : ''}`}>
 
-                    {/* Ligne 1 : type · statut · commande/date · jours · facturé · suppr. */}
+                    {/* Ligne 1 : type · commande/date · jours · facturé · clos/litige · suppr. */}
                     <div className="flex items-center gap-2.5 flex-wrap">
                       <span className="inline-flex items-center px-2 py-0.5 rounded-md text-[10px] font-semibold"
                         style={{ background: TYPE_COLOR[c.claim_type]?.[0] ?? '#F8F8F7', color: TYPE_COLOR[c.claim_type]?.[1] ?? '#6b6b63' }}>
                         {TYPE_LABEL[c.claim_type] ?? c.claim_type}
                       </span>
-                      <select value={c.status} onChange={e => patchClaim(c.id, { status: e.target.value })}
-                        className="rounded-md px-2 py-1 text-xs font-medium border-0 cursor-pointer"
-                        style={{ background: STATUS_COLOR[c.status]?.[0] ?? '#F8F8F7', color: STATUS_COLOR[c.status]?.[1] ?? '#6b6b63' }}>
-                        {STATUS_OPTS.map(s => <option key={s} value={s}>{STATUS_LABEL[s]}</option>)}
-                      </select>
                       {c.shopify_order_id && <span className="text-xs font-medium text-[#6b6b63]">{c.shopify_order_id}</span>}
                       <span className="text-xs text-[#9b9b93]">{fmtDate(c.reported_at)}</span>
                       {days !== null && (
-                        <span className={`text-xs tabular-nums font-semibold ${overdue ? 'text-[#c7293a]' : 'text-[#9b9b93]'}`}>· {days} j</span>
+                        <span className={`text-xs tabular-nums font-semibold ${overdue ? 'text-[#c7293a]' : 'text-[#9b9b93]'}`}>· ouvert {days} j</span>
                       )}
-                      <div className="ml-auto flex items-center gap-3">
+                      <div className="ml-auto flex items-center gap-2">
                         {c.charged_amount > 0 && <span className="text-xs tabular-nums text-[#6b6b63]">{fmtEur(c.charged_amount)}</span>}
                         {billedClaimIds.has(c.id) && (
                           <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-[#c7293a]">
                             <AlertTriangle size={10} /> facturé à tort
                           </span>
                         )}
+                        {TERMINAL.map(t => {
+                          const active = !!m[t.key]
+                          const danger = t.key === 'litige'
+                          return (
+                            <button key={t.key} onClick={() => setMilestone(c, t.key, active ? null : today)}
+                              className={`px-2 py-1 rounded-md text-[11px] font-medium transition-colors ${
+                                active
+                                  ? (danger ? 'bg-[#fff1f1] text-[#c7293a]' : 'bg-[#f0f0ee] text-[#1a1a18]')
+                                  : 'text-[#9b9b93] hover:bg-[#f5f5f3]'}`}>
+                              {t.label}
+                            </button>
+                          )
+                        })}
                         <button onClick={() => deleteClaim(c)} title="Supprimer le dossier"
-                          className="text-[#cfcfc8] hover:text-[#c7293a] transition-colors">
+                          className="text-[#cfcfc8] hover:text-[#c7293a] transition-colors ml-1">
                           <Trash2 size={15} />
                         </button>
                       </div>
@@ -296,7 +303,27 @@ export default function SavDefectsPage() {
                       </div>
                     </div>
 
-                    {/* Ligne 3 : champs éditables */}
+                    {/* Ligne 3 : jalons (cumulables) */}
+                    <div className="flex flex-wrap items-center gap-1.5 mt-3">
+                      {(MILESTONES_BY_TYPE[c.claim_type] ?? MILESTONES_BY_TYPE.defaut_fournisseur).map(step => {
+                        const date = m[step.key]
+                        return date ? (
+                          <span key={step.key} className="inline-flex items-center gap-1 pl-2 pr-1 py-1 rounded-md text-[11px] font-medium bg-[#f0faf5] text-[#1a7f4b]">
+                            <Check size={11} /> {step.label}
+                            <input type="date" value={date} onChange={e => setMilestone(c, step.key, e.target.value || today)}
+                              className="bg-transparent text-[10px] w-[82px] outline-none cursor-pointer text-[#1a7f4b]" />
+                            <button onClick={() => setMilestone(c, step.key, null)} className="hover:text-[#c7293a]" title="Annuler ce jalon"><X size={11} /></button>
+                          </span>
+                        ) : (
+                          <button key={step.key} onClick={() => setMilestone(c, step.key, today)}
+                            className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-[11px] font-medium border border-dashed border-[#d8d8d2] text-[#9b9b93] hover:border-[#aeb0c9] hover:text-[#6b6b63] transition-colors">
+                            <Plus size={10} /> {step.label}
+                          </button>
+                        )
+                      })}
+                    </div>
+
+                    {/* Ligne 4 : n° de suivi */}
                     <div className="flex flex-wrap items-center gap-x-5 gap-y-2 mt-3">
                       <InlineField icon={<Truck size={12} className="text-[#aeb0c9]" />} label="Réexpédition"
                         value={c.reship_tracking_ref} onSave={v => patchClaim(c.id, { reship_tracking_ref: v })} />
@@ -311,12 +338,6 @@ export default function SavDefectsPage() {
                           )}
                         </>
                       )}
-                      <label className="inline-flex items-center gap-1.5 text-xs">
-                        <span className="text-[10px] uppercase tracking-wide text-[#9b9b93]">Reçu le</span>
-                        <input type="date" defaultValue={c.received_at ?? ''}
-                          onBlur={e => { if (e.target.value !== (c.received_at ?? '')) patchClaim(c.id, { received_at: e.target.value || null }) }}
-                          className="rounded-md px-2 py-1 bg-[#f8f8f7] focus:bg-white focus:ring-1 focus:ring-[#aeb0c9] outline-none" />
-                      </label>
                     </div>
                   </div>
                 )

@@ -139,6 +139,14 @@ export async function PATCH(req: NextRequest) {
   for (const f of ['reship_tracking_ref', 'received_at', 'claim_sent_at', 'supplier_claim_ref', 'notes', 'return_tracking_ref', 'return_received_at'] as const) {
     if (body[f] !== undefined) patch[f] = body[f] || null
   }
+  // Jalons multiples : remplace l'objet milestones et dérive les colonnes de date
+  if (body.milestones !== undefined && body.milestones && typeof body.milestones === 'object') {
+    const m = body.milestones as Record<string, string>
+    patch.milestones        = m
+    patch.claim_sent_at      = m.reclamation_envoyee || m.etiquette_envoyee || null
+    patch.received_at        = m.recu || null
+    patch.return_received_at = m.retour_recu || null
+  }
   if (body.charged_amount !== undefined) patch.charged_amount = Number(body.charged_amount) || 0
   if (body.quantity !== undefined) patch.quantity = Number(body.quantity) > 0 ? Number(body.quantity) : 1
 
