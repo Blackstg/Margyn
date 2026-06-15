@@ -233,106 +233,90 @@ export default function SavDefectsPage() {
           ) : visible.length === 0 ? (
             <div className="p-10 text-center text-sm text-[#9b9b93]">Aucun dossier. Cliquez sur « Nouveau dossier ».</div>
           ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-xs">
-                <thead>
-                  <tr className="text-left text-[#9b9b93] border-b border-[#f0f0ee]">
-                    <Th>Type</Th><Th>Signalé</Th><Th>Article</Th><Th>Qté</Th><Th>Statut</Th>
-                    <Th>Jours</Th><Th>Réexpédition</Th><Th>Retour</Th><Th>Reçu le</Th><Th>Facturé</Th><Th>Pièce</Th><Th></Th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {visible.map(c => {
-                    const open = c.status !== 'recu' && c.status !== 'clos'
-                    const days = open ? daysSince(c.claim_sent_at ?? c.reported_at) : null
-                    const overdue = days !== null && days > 30
-                    const isErr = c.claim_type === 'erreur_envoi'
-                    return (
-                      <tr key={c.id} className={`border-b border-[#f5f5f3] last:border-0 ${overdue ? 'bg-[#fff5f5]' : 'hover:bg-[#fafafa]'}`}>
-                        <Td>
-                          <span className="inline-flex items-center px-2 py-0.5 rounded-md text-[10px] font-semibold"
-                            style={{ background: TYPE_COLOR[c.claim_type]?.[0] ?? '#F8F8F7', color: TYPE_COLOR[c.claim_type]?.[1] ?? '#6b6b63' }}>
-                            {TYPE_LABEL[c.claim_type] ?? c.claim_type}
+            <div className="divide-y divide-[#f0f0ee]">
+              {visible.map(c => {
+                const open = c.status !== 'recu' && c.status !== 'clos'
+                const days = open ? daysSince(c.claim_sent_at ?? c.reported_at) : null
+                const overdue = days !== null && days > 30
+                const isErr = c.claim_type === 'erreur_envoi'
+                return (
+                  <div key={c.id} className={`px-6 py-4 ${overdue ? 'bg-[#fff5f5]' : ''}`}>
+
+                    {/* Ligne 1 : type · statut · commande/date · jours · facturé · suppr. */}
+                    <div className="flex items-center gap-2.5 flex-wrap">
+                      <span className="inline-flex items-center px-2 py-0.5 rounded-md text-[10px] font-semibold"
+                        style={{ background: TYPE_COLOR[c.claim_type]?.[0] ?? '#F8F8F7', color: TYPE_COLOR[c.claim_type]?.[1] ?? '#6b6b63' }}>
+                        {TYPE_LABEL[c.claim_type] ?? c.claim_type}
+                      </span>
+                      <select value={c.status} onChange={e => patchClaim(c.id, { status: e.target.value })}
+                        className="rounded-md px-2 py-1 text-xs font-medium border-0 cursor-pointer"
+                        style={{ background: STATUS_COLOR[c.status]?.[0] ?? '#F8F8F7', color: STATUS_COLOR[c.status]?.[1] ?? '#6b6b63' }}>
+                        {STATUS_OPTS.map(s => <option key={s} value={s}>{STATUS_LABEL[s]}</option>)}
+                      </select>
+                      {c.shopify_order_id && <span className="text-xs font-medium text-[#6b6b63]">{c.shopify_order_id}</span>}
+                      <span className="text-xs text-[#9b9b93]">{fmtDate(c.reported_at)}</span>
+                      {days !== null && (
+                        <span className={`text-xs tabular-nums font-semibold ${overdue ? 'text-[#c7293a]' : 'text-[#9b9b93]'}`}>· {days} j</span>
+                      )}
+                      <div className="ml-auto flex items-center gap-3">
+                        {c.charged_amount > 0 && <span className="text-xs tabular-nums text-[#6b6b63]">{fmtEur(c.charged_amount)}</span>}
+                        {billedClaimIds.has(c.id) && (
+                          <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-[#c7293a]">
+                            <AlertTriangle size={10} /> facturé à tort
                           </span>
-                        </Td>
-                        <Td className="whitespace-nowrap text-[#6b6b63]">
-                          {fmtDate(c.reported_at)}
-                          {c.shopify_order_id && <div className="text-[10px] text-[#aeb0c9]">{c.shopify_order_id}</div>}
-                        </Td>
-                        <Td>
-                          <div className="font-medium text-[#1a1a18]">{c.sku ?? '—'}</div>
-                          {c.product_name && <div className="text-[#9b9b93] truncate max-w-[200px]">{c.product_name}</div>}
-                          {isErr && (
-                            <div className="text-[10px] text-[#c7293a] mt-0.5">
-                              reçu à tort : {c.received_product_name ?? c.received_sku ?? '—'}
-                            </div>
-                          )}
-                          {billedClaimIds.has(c.id) && (
-                            <span className="inline-flex items-center gap-1 mt-0.5 text-[10px] font-semibold text-[#c7293a]">
-                              <AlertTriangle size={10} /> facturé
-                            </span>
-                          )}
-                        </Td>
-                        <Td className="tabular-nums">{c.quantity}</Td>
-                        <Td>
-                          <select value={c.status} onChange={e => patchClaim(c.id, { status: e.target.value })}
-                            className="rounded-md px-2 py-1 text-xs font-medium border-0 cursor-pointer"
-                            style={{ background: STATUS_COLOR[c.status]?.[0] ?? '#F8F8F7', color: STATUS_COLOR[c.status]?.[1] ?? '#6b6b63' }}>
-                            {STATUS_OPTS.map(s => <option key={s} value={s}>{STATUS_LABEL[s]}</option>)}
-                          </select>
-                        </Td>
-                        <Td>
-                          {days !== null ? (
-                            <span className={`tabular-nums font-semibold ${overdue ? 'text-[#c7293a]' : 'text-[#6b6b63]'}`}>{days} j</span>
-                          ) : <span className="text-[#cfcfc8]">—</span>}
-                        </Td>
-                        <Td>
-                          <div className="flex items-center gap-1 text-[#aeb0c9]"><Truck size={11} />
-                            <input defaultValue={c.reship_tracking_ref ?? ''} placeholder="—"
-                              onBlur={e => { if (e.target.value !== (c.reship_tracking_ref ?? '')) patchClaim(c.id, { reship_tracking_ref: e.target.value || null }) }}
-                              className="w-24 rounded-md px-2 py-1 bg-[#f8f8f7] focus:bg-white focus:ring-1 focus:ring-[#aeb0c9] outline-none" />
-                          </div>
-                        </Td>
-                        <Td>
-                          {isErr ? (
-                            <div className="space-y-1">
-                              <div className="flex items-center gap-1 text-[#aeb0c9]"><RotateCcw size={11} />
-                                <input defaultValue={c.return_tracking_ref ?? ''} placeholder="—"
-                                  onBlur={e => { if (e.target.value !== (c.return_tracking_ref ?? '')) patchClaim(c.id, { return_tracking_ref: e.target.value || null }) }}
-                                  className="w-24 rounded-md px-2 py-1 bg-[#f8f8f7] focus:bg-white focus:ring-1 focus:ring-[#aeb0c9] outline-none" />
-                              </div>
-                              {c.return_label_url && (
-                                <a href={c.return_label_url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-[10px] text-[#4f46e5] hover:underline">
-                                  <FileText size={10} /> étiquette
-                                </a>
-                              )}
-                            </div>
-                          ) : <span className="text-[#cfcfc8]">—</span>}
-                        </Td>
-                        <Td>
-                          <input type="date" defaultValue={c.received_at ?? ''}
-                            onBlur={e => { if (e.target.value !== (c.received_at ?? '')) patchClaim(c.id, { received_at: e.target.value || null }) }}
-                            className="rounded-md px-2 py-1 bg-[#f8f8f7] focus:bg-white focus:ring-1 focus:ring-[#aeb0c9] outline-none" />
-                        </Td>
-                        <Td className="tabular-nums text-[#6b6b63]">{c.charged_amount > 0 ? fmtEur(c.charged_amount) : '—'}</Td>
-                        <Td>
-                          {c.photo_url ? (
-                            <a href={c.photo_url} target="_blank" rel="noreferrer">
-                              <img src={c.photo_url} alt="" className="w-9 h-9 rounded-lg object-cover border border-[#e8e8e4]" />
+                        )}
+                        <button onClick={() => deleteClaim(c)} title="Supprimer le dossier"
+                          className="text-[#cfcfc8] hover:text-[#c7293a] transition-colors">
+                          <Trash2 size={15} />
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Ligne 2 : photo + article */}
+                    <div className="flex gap-3 mt-2.5">
+                      {c.photo_url ? (
+                        <a href={c.photo_url} target="_blank" rel="noreferrer" className="shrink-0">
+                          <img src={c.photo_url} alt="" className="w-10 h-10 rounded-lg object-cover border border-[#e8e8e4]" />
+                        </a>
+                      ) : <div className="w-10 h-10 rounded-lg bg-[#f5f5f3] shrink-0" />}
+                      <div className="min-w-0">
+                        <div className="text-sm font-medium text-[#1a1a18]">
+                          {c.sku ?? '—'}
+                          <span className="text-[#9b9b93] font-normal"> · ×{c.quantity}</span>
+                        </div>
+                        {c.product_name && <div className="text-xs text-[#9b9b93]">{c.product_name}</div>}
+                        {isErr && (
+                          <div className="text-xs text-[#c7293a] mt-0.5">reçu à tort : {c.received_product_name ?? c.received_sku ?? '—'}</div>
+                        )}
+                        {c.defect_description && <div className="text-xs text-[#9b9b93] mt-0.5 italic">{c.defect_description}</div>}
+                      </div>
+                    </div>
+
+                    {/* Ligne 3 : champs éditables */}
+                    <div className="flex flex-wrap items-center gap-x-5 gap-y-2 mt-3">
+                      <InlineField icon={<Truck size={12} className="text-[#aeb0c9]" />} label="Réexpédition"
+                        value={c.reship_tracking_ref} onSave={v => patchClaim(c.id, { reship_tracking_ref: v })} />
+                      {isErr && (
+                        <>
+                          <InlineField icon={<RotateCcw size={12} className="text-[#aeb0c9]" />} label="Retour"
+                            value={c.return_tracking_ref} onSave={v => patchClaim(c.id, { return_tracking_ref: v })} />
+                          {c.return_label_url && (
+                            <a href={c.return_label_url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-xs text-[#4f46e5] hover:underline">
+                              <FileText size={11} /> étiquette retour
                             </a>
-                          ) : <span className="text-[#cfcfc8]">—</span>}
-                        </Td>
-                        <Td>
-                          <button onClick={() => deleteClaim(c)} title="Supprimer le dossier"
-                            className="text-[#cfcfc8] hover:text-[#c7293a] transition-colors">
-                            <Trash2 size={15} />
-                          </button>
-                        </Td>
-                      </tr>
-                    )
-                  })}
-                </tbody>
-              </table>
+                          )}
+                        </>
+                      )}
+                      <label className="inline-flex items-center gap-1.5 text-xs">
+                        <span className="text-[10px] uppercase tracking-wide text-[#9b9b93]">Reçu le</span>
+                        <input type="date" defaultValue={c.received_at ?? ''}
+                          onBlur={e => { if (e.target.value !== (c.received_at ?? '')) patchClaim(c.id, { received_at: e.target.value || null }) }}
+                          className="rounded-md px-2 py-1 bg-[#f8f8f7] focus:bg-white focus:ring-1 focus:ring-[#aeb0c9] outline-none" />
+                      </label>
+                    </div>
+                  </div>
+                )
+              })}
             </div>
           )}
         </div>
@@ -357,11 +341,16 @@ function Card({ title, icon, value, sub, danger }: { title: string; icon: React.
   )
 }
 
-function Th({ children }: { children?: React.ReactNode }) {
-  return <th className="px-4 py-2.5 font-semibold uppercase tracking-[0.08em] text-[10px]">{children}</th>
-}
-function Td({ children, className = '' }: { children: React.ReactNode; className?: string }) {
-  return <td className={`px-4 py-3 align-top ${className}`}>{children}</td>
+function InlineField({ icon, label, value, onSave }: { icon: React.ReactNode; label: string; value: string | null; onSave: (v: string | null) => void }) {
+  return (
+    <label className="inline-flex items-center gap-1.5 text-xs">
+      {icon}
+      <span className="text-[10px] uppercase tracking-wide text-[#9b9b93]">{label}</span>
+      <input defaultValue={value ?? ''} placeholder="—"
+        onBlur={e => { if (e.target.value !== (value ?? '')) onSave(e.target.value || null) }}
+        className="w-28 rounded-md px-2 py-1 bg-[#f8f8f7] focus:bg-white focus:ring-1 focus:ring-[#aeb0c9] outline-none" />
+    </label>
+  )
 }
 
 function NewClaimForm({ brand, onClose, onCreated }: { brand: string; onClose: () => void; onCreated: () => void }) {
