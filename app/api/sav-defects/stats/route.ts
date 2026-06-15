@@ -46,7 +46,7 @@ export async function GET(req: NextRequest) {
 
   const { data: claims } = await admin
     .from('defect_claims')
-    .select('id, sku, product_name, quantity, status, reported_at, claim_sent_at, reship_tracking_ref, shopify_order_id')
+    .select('id, sku, product_name, quantity, status, reported_at, claim_sent_at, reship_tracking_ref, return_tracking_ref, shopify_order_id')
     .eq('brand', brand)
 
   const rows = claims ?? []
@@ -82,7 +82,7 @@ export async function GET(req: NextRequest) {
 
   const billedLines: { claim_id: string; order_name: string; amount: number; isFW: boolean }[] = []
   for (const r of rows) {
-    const candidates = [r.reship_tracking_ref, r.shopify_order_id].filter(Boolean)
+    const candidates = [r.reship_tracking_ref, r.return_tracking_ref, r.shopify_order_id].filter(Boolean)
     for (const c of candidates) {
       const match = byOrderName.get(normRef(c))
       if (match && match.total_price > 0) {

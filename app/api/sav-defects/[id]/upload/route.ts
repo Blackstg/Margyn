@@ -1,6 +1,6 @@
 // POST /api/sav-defects/:id/upload
-// Accepts multipart/form-data with a 'photo' image file.
-// Uploads to Supabase Storage bucket 'defect-photos', patches photo_url, returns it.
+// Accepts multipart/form-data with a 'photo' (image) OR 'return_label' (image/PDF) file.
+// Uploads to Supabase Storage bucket 'defect-photos', patches the matching column, returns the URL.
 
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
@@ -30,24 +30,27 @@ export async function POST(
     await ensureBucket(admin)
 
     const form = await req.formData()
-    const photoBlob = form.get('photo') as File | null
-    if (!photoBlob || photoBlob.size === 0) {
-      return NextResponse.json({ error: 'photo manquante' }, { status: 400 })
+    const isLabel = form.get('return_label') instanceof Blob
+    const blob = (form.get('return_label') ?? form.get('photo')) as File | null
+    if (!blob || blob.size === 0) {
+      return NextResponse.json({ error: 'fichier manquant' }, { status: 400 })
     }
 
-    const ext  = (photoBlob.name ?? 'photo.jpg').split('.').pop() ?? 'jpg'
-    const path = `${params.id}/photo.${ext}`
-    const buf  = Buffer.from(await photoBlob.arrayBuffer())
+    const kind = isLabel ? 'return-label' : 'photo'
+    const ext  = (blob.name ?? 'file').split('.').pop() ?? (isLabel ? 'pdf' : 'jpg')
+    const path = `${params.id}/${kind}.${ext}`
+    const buf  = Buffer.from(await blob.arrayBuffer())
     const { error } = await admin.storage.from(BUCKET).upload(path, buf, {
-      contentType: photoBlob.type || 'image/jpeg',
+      contentType: blob.type || (isLabel ? 'application/pdf' : 'image/jpeg'),
       upsert: true,
     })
     if (error) throw error
 
-    const photo_url = `${process.env.NEXT_PUBLIC_SUPABASE_URL!}/storage/v1/object/public/${BUCKET}/${path}`
-    await admin.from('defect_claims').update({ photo_url, updated_at: new Date().toISOString() }).eq('id', params.id)
+    const url = `${process.env.NEXT_PUBLIC_SUPABASE_URL!}/storage/v1/object/public/${BUCKET}/${path}`
+    const column = isLabel ? 'return_label_url' : 'photo_url'
+    await admin.from('defect_claims').update({ [column]: url, updated_at: new Date().toISOString() }).eq('id', params.id)
 
-    return NextResponse.json({ photo_url })
+    return NextResponse.json({ [column]: url })
   } catch (err) {
     console.error('[sav-defects/:id/upload POST]', err)
     return NextResponse.json({ error: String(err) }, { status: 500 })
