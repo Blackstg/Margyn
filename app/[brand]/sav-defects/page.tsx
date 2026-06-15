@@ -21,6 +21,7 @@ interface Claim {
   quantity: number
   defect_description: string | null
   photo_url: string | null
+  product_image_url: string | null
   return_label_url: string | null
   status: string
   supplier_claim_ref: string | null
@@ -272,13 +273,11 @@ export default function SavDefectsPage() {
                       </div>
                     </div>
 
-                    {/* Ligne 2 : photo + article */}
+                    {/* Ligne 2 : image produit + article */}
                     <div className="flex gap-3 mt-2.5">
-                      {c.photo_url ? (
-                        <a href={c.photo_url} target="_blank" rel="noreferrer" className="shrink-0">
-                          <img src={c.photo_url} alt="" className="w-10 h-10 rounded-lg object-cover border border-[#e8e8e4]" />
-                        </a>
-                      ) : <div className="w-10 h-10 rounded-lg bg-[#f5f5f3] shrink-0" />}
+                      {c.product_image_url ? (
+                        <img src={c.product_image_url} alt="" className="w-12 h-12 rounded-lg object-cover border border-[#e8e8e4] shrink-0" />
+                      ) : <div className="w-12 h-12 rounded-lg bg-[#f5f5f3] shrink-0" />}
                       <div className="min-w-0">
                         <div className="text-sm font-medium text-[#1a1a18]">
                           {c.sku ?? '—'}
@@ -289,6 +288,11 @@ export default function SavDefectsPage() {
                           <div className="text-xs text-[#c7293a] mt-0.5">reçu à tort : {c.received_product_name ?? c.received_sku ?? '—'}</div>
                         )}
                         {c.defect_description && <div className="text-xs text-[#9b9b93] mt-0.5 italic">{c.defect_description}</div>}
+                        {c.photo_url && (
+                          <a href={c.photo_url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 mt-1 text-xs text-[#4f46e5] hover:underline">
+                            <ImageIcon size={11} /> photo du défaut
+                          </a>
+                        )}
                       </div>
                     </div>
 

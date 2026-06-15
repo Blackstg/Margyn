@@ -29,7 +29,34 @@ export async function GET(req: NextRequest) {
     .order('reported_at', { ascending: false })
     .order('created_at', { ascending: false })
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
-  return NextResponse.json({ claims: data ?? [] })
+
+  // Enrichit chaque dossier avec l'image produit (catalogue) : via le variant, sinon le SKU
+  const rows = data ?? []
+  const variantIds = [...new Set(rows.map(r => r.shopify_variant_id).filter(Boolean))] as string[]
+  const skus       = [...new Set(rows.map(r => r.sku).filter(Boolean))] as string[]
+  const imgByVariant: Record<string, string | null> = {}
+  const imgBySku: Record<string, string | null> = {}
+
+  if (variantIds.length) {
+    const { data: vs } = await admin.from('product_variants')
+      .select('shopify_variant_id, image_url').eq('brand', brand).in('shopify_variant_id', variantIds)
+    for (const v of vs ?? []) imgByVariant[v.shopify_variant_id] = v.image_url
+  }
+  if (skus.length) {
+    const { data: vs } = await admin.from('product_variants')
+      .select('image_url, sku_fr, sku_cn').eq('brand', brand)
+      .or(`sku_fr.in.(${skus.join(',')}),sku_cn.in.(${skus.join(',')})`)
+    for (const v of vs ?? []) {
+      if (v.sku_fr) imgBySku[v.sku_fr] = v.image_url
+      if (v.sku_cn) imgBySku[v.sku_cn] = v.image_url
+    }
+  }
+
+  const claims = rows.map(r => ({
+    ...r,
+    product_image_url: (r.shopify_variant_id && imgByVariant[r.shopify_variant_id]) || (r.sku && imgBySku[r.sku]) || null,
+  }))
+  return NextResponse.json({ claims })
 }
 
 export async function POST(req: NextRequest) {
