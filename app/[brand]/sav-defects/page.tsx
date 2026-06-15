@@ -3,7 +3,7 @@
 export const dynamic = 'force-dynamic'
 
 import { useState, useEffect, useCallback, useRef } from 'react'
-import { Plus, AlertTriangle, Clock, PackageX, X, Image as ImageIcon, Search, FileText, Truck, RotateCcw } from 'lucide-react'
+import { Plus, AlertTriangle, Clock, PackageX, X, Image as ImageIcon, Search, FileText, Truck, RotateCcw, Trash2 } from 'lucide-react'
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -150,6 +150,14 @@ export default function SavDefectsPage() {
     loadStats()
   }
 
+  async function deleteClaim(c: Claim) {
+    const label = c.product_name || c.sku || c.shopify_order_id || 'ce dossier'
+    if (!confirm(`Supprimer définitivement ${label} ?`)) return
+    setClaims(cs => cs.filter(x => x.id !== c.id))
+    await fetch(`/api/sav-defects?id=${c.id}`, { method: 'DELETE' })
+    loadStats()
+  }
+
   const billedClaimIds = new Set(stats?.wronglyBilled.lines.map(l => l.claim_id) ?? [])
   const visible = claims.filter(c => typeFilter === 'all' || c.claim_type === typeFilter)
 
@@ -230,7 +238,7 @@ export default function SavDefectsPage() {
                 <thead>
                   <tr className="text-left text-[#9b9b93] border-b border-[#f0f0ee]">
                     <Th>Type</Th><Th>Signalé</Th><Th>Article</Th><Th>Qté</Th><Th>Statut</Th>
-                    <Th>Jours</Th><Th>Réexpédition</Th><Th>Retour</Th><Th>Reçu le</Th><Th>Facturé</Th><Th>Pièce</Th>
+                    <Th>Jours</Th><Th>Réexpédition</Th><Th>Retour</Th><Th>Reçu le</Th><Th>Facturé</Th><Th>Pièce</Th><Th></Th>
                   </tr>
                 </thead>
                 <tbody>
@@ -314,6 +322,12 @@ export default function SavDefectsPage() {
                             </a>
                           ) : <span className="text-[#cfcfc8]">—</span>}
                         </Td>
+                        <Td>
+                          <button onClick={() => deleteClaim(c)} title="Supprimer le dossier"
+                            className="text-[#cfcfc8] hover:text-[#c7293a] transition-colors">
+                            <Trash2 size={15} />
+                          </button>
+                        </Td>
                       </tr>
                     )
                   })}
@@ -343,7 +357,7 @@ function Card({ title, icon, value, sub, danger }: { title: string; icon: React.
   )
 }
 
-function Th({ children }: { children: React.ReactNode }) {
+function Th({ children }: { children?: React.ReactNode }) {
   return <th className="px-4 py-2.5 font-semibold uppercase tracking-[0.08em] text-[10px]">{children}</th>
 }
 function Td({ children, className = '' }: { children: React.ReactNode; className?: string }) {

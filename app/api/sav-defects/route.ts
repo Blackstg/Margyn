@@ -2,9 +2,12 @@
 // GET    ?brand=moom               → liste triée reported_at desc
 // POST   { ...champs }             → crée un dossier, retourne la row (avec id)
 // PATCH  { id, ...champs }         → édition inline (status / reship_tracking_ref / received_at …)
+// DELETE ?id=<uuid>                → supprime un dossier (+ ses fichiers Storage)
 
 import { NextRequest, NextResponse } from 'next/server'
 import { createAdminClient } from '@/lib/supabase'
+
+const BUCKET = 'defect-photos'
 
 export const dynamic = 'force-dynamic'
 
@@ -71,6 +74,23 @@ export async function POST(req: NextRequest) {
     .single()
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
   return NextResponse.json({ claim: data })
+}
+
+export async function DELETE(req: NextRequest) {
+  const id = req.nextUrl.searchParams.get('id')
+  if (!id) return NextResponse.json({ error: 'id manquant' }, { status: 400 })
+
+  const admin = createAdminClient()
+
+  // Supprime les fichiers Storage du dossier (best-effort)
+  const { data: files } = await admin.storage.from(BUCKET).list(id)
+  if (files?.length) {
+    await admin.storage.from(BUCKET).remove(files.map(f => `${id}/${f.name}`))
+  }
+
+  const { error } = await admin.from('defect_claims').delete().eq('id', id)
+  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+  return NextResponse.json({ ok: true })
 }
 
 export async function PATCH(req: NextRequest) {
