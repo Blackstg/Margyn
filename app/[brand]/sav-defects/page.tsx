@@ -449,16 +449,12 @@ export default function SavDefectsPage() {
 
                                 <InlineField icon={<Truck size={12} className="text-[#aeb0c9]" />} label="Tracking" compact
                                   value={c.reship_tracking_ref} onSave={v => patchClaim(c.id, { reship_tracking_ref: v })} />
-                                {isErr && (
-                                  <>
-                                    <InlineField icon={<RotateCcw size={12} className="text-[#aeb0c9]" />} label="Retour" compact
-                                      value={c.return_tracking_ref} onSave={v => patchClaim(c.id, { return_tracking_ref: v })} />
-                                    {c.return_label_url && (
-                                      <a href={c.return_label_url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-[11px] text-[#4f46e5] hover:underline">
-                                        <FileText size={11} /> étiquette
-                                      </a>
-                                    )}
-                                  </>
+                                <InlineField icon={<RotateCcw size={12} className="text-[#aeb0c9]" />} label="Retour" compact
+                                  value={c.return_tracking_ref} onSave={v => patchClaim(c.id, { return_tracking_ref: v })} />
+                                {c.return_label_url && (
+                                  <a href={c.return_label_url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-[11px] text-[#4f46e5] hover:underline">
+                                    <FileText size={11} /> étiquette
+                                  </a>
                                 )}
                                 <InlineField icon={<Layers size={12} className="text-[#aeb0c9]" />} label="Lot" compact
                                   value={c.production_batch} onSave={v => patchClaim(c.id, { production_batch: v })} />
@@ -706,16 +702,12 @@ function NewClaimForm({ brand, onClose, onCreated }: { brand: string; onClose: (
             </div>
           )}
 
-          {type === 'erreur_envoi' && (
-            <>
-              <Field label="N° suivi retour">
-                <input value={form.return_tracking_ref} onChange={e => upd('return_tracking_ref', e.target.value)} className={input} />
-              </Field>
-              <Field label="Tracking (nouvel envoi)">
-                <input value={form.reship_tracking_ref} onChange={e => upd('reship_tracking_ref', e.target.value)} className={input} />
-              </Field>
-            </>
-          )}
+          <Field label="N° suivi retour">
+            <input value={form.return_tracking_ref} onChange={e => upd('return_tracking_ref', e.target.value)} className={input} />
+          </Field>
+          <Field label="Tracking (nouvel envoi)">
+            <input value={form.reship_tracking_ref} onChange={e => upd('reship_tracking_ref', e.target.value)} className={input} />
+          </Field>
         </div>
 
         {/* Uploads */}
@@ -726,14 +718,12 @@ function NewClaimForm({ brand, onClose, onCreated }: { brand: string; onClose: (
               <ImageIcon size={15} /> <span className="truncate">{photo ? photo.name : 'Photo'}</span>
             </button>
           </Field>
-          {type === 'erreur_envoi' && (
-            <Field label="Étiquette de retour">
-              <input ref={labelRef} type="file" accept="image/*,application/pdf" onChange={e => setLabel(e.target.files?.[0] ?? null)} className="hidden" />
-              <button type="button" onClick={() => labelRef.current?.click()} className="flex items-center gap-2 px-3 py-2 rounded-xl border border-[#e8e8e4] text-sm text-[#6b6b63] hover:bg-[#f8f8f7] w-full">
-                <FileText size={15} /> <span className="truncate">{label ? label.name : 'Étiquette'}</span>
-              </button>
-            </Field>
-          )}
+          <Field label="Étiquette de retour">
+            <input ref={labelRef} type="file" accept="image/*,application/pdf" onChange={e => setLabel(e.target.files?.[0] ?? null)} className="hidden" />
+            <button type="button" onClick={() => labelRef.current?.click()} className="flex items-center gap-2 px-3 py-2 rounded-xl border border-[#e8e8e4] text-sm text-[#6b6b63] hover:bg-[#f8f8f7] w-full">
+              <FileText size={15} /> <span className="truncate">{label ? label.name : 'Étiquette'}</span>
+            </button>
+          </Field>
         </div>
 
         {error && <p className="text-xs text-[#c7293a]">{error}</p>}
