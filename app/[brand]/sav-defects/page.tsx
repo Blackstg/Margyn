@@ -26,6 +26,7 @@ interface Claim {
   status: string
   milestones: Record<string, string> | null
   production_batch: string | null
+  validated_by: string | null
   supplier_claim_ref: string | null
   reship_tracking_ref: string | null
   return_tracking_ref: string | null
@@ -63,7 +64,7 @@ const MILESTONES_BY_TYPE: Record<string, { key: string; label: string }[]> = {
     { key: 'recu',              label: 'Reçu' },
   ],
 }
-const TERMINAL = [{ key: 'clos', label: 'Clos' }, { key: 'litige', label: 'Litige' }] as const
+const VALIDATORS = ['Hao', 'Lily', 'Forrest', 'Autre'] as const
 
 const ALL_STEP_LABELS: Record<string, string> = {
   reclamation_envoyee: 'Réclamation envoyée', repro_confirmee: 'Repro confirmée',
@@ -126,7 +127,7 @@ function exportPdf(groups: [string, Claim[]][], monthLabel: string) {
       <td>${esc(c.shopify_order_id ?? '—')}<br><span class="muted">${esc(fmtDate(c.reported_at))}</span></td>
       <td>${c.product_image_url ? `<img src="${esc(c.product_image_url)}">` : ''}</td>
       <td><b>${esc(c.sku ?? '—')}</b> ×${c.quantity}<br>${esc(c.product_name ?? '')}${c.claim_type === 'erreur_envoi' ? `<br><span class="red">reçu : ${esc(c.received_product_name ?? c.received_sku ?? '—')}</span>` : ''}${c.defect_description ? `<br><span class="muted">${esc(c.defect_description)}</span>` : ''}</td>
-      <td>${esc(milestonesSummary(c.milestones))}</td>
+      <td>${esc(milestonesSummary(c.milestones))}${c.validated_by ? `<br><span class="muted">validé : ${esc(c.validated_by)}</span>` : ''}</td>
       <td>${esc(c.reship_tracking_ref ?? '—')}${c.return_tracking_ref ? `<br>ret. ${esc(c.return_tracking_ref)}` : ''}</td>
       <td>${c.charged_amount > 0 ? esc(fmtEur(c.charged_amount)) : '—'}</td>
       <td>${c.photo_url ? `<img src="${esc(c.photo_url)}">` : ''}</td>
@@ -390,19 +391,15 @@ export default function SavDefectsPage() {
                                   {billedClaimIds.has(c.id) && (
                                     <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-[#c7293a]"><AlertTriangle size={10} /> facturé</span>
                                   )}
-                                  {TERMINAL.map(t => {
-                                    const active = !!m[t.key]
-                                    const danger = t.key === 'litige'
-                                    return (
-                                      <button key={t.key} onClick={() => setMilestone(c, t.key, active ? null : today)}
-                                        className={`px-2 py-0.5 rounded-md text-[11px] font-medium transition-colors ${
-                                          active
-                                            ? (danger ? 'bg-[#fff1f1] text-[#c7293a]' : 'bg-[#f0f0ee] text-[#1a1a18]')
-                                            : 'text-[#cfcfc8] hover:bg-[#f5f5f3] hover:text-[#6b6b63]'}`}>
-                                        {t.label}
-                                      </button>
-                                    )
-                                  })}
+                                  <div className={`inline-flex items-center gap-1 rounded-md pl-1.5 pr-0.5 py-0.5 ${c.validated_by ? 'bg-[#f0faf5]' : 'bg-[#f5f5f3]'}`}>
+                                    {c.validated_by && <CheckCircle2 size={12} className="text-[#1a7f4b]" />}
+                                    <select value={c.validated_by ?? ''} onChange={e => patchClaim(c.id, { validated_by: e.target.value || null })}
+                                      title="Validé par (reproduction + réexpédition)"
+                                      className={`bg-transparent text-[11px] font-medium border-0 outline-none cursor-pointer ${c.validated_by ? 'text-[#1a7f4b]' : 'text-[#9b9b93]'}`}>
+                                      <option value="">Validé par…</option>
+                                      {VALIDATORS.map(n => <option key={n} value={n}>{n}</option>)}
+                                    </select>
+                                  </div>
                                   <button onClick={() => deleteClaim(c)} title="Supprimer le dossier"
                                     className="text-[#cfcfc8] hover:text-[#c7293a] transition-colors"><Trash2 size={14} /></button>
                                 </div>
@@ -450,7 +447,7 @@ export default function SavDefectsPage() {
 
                                 <span className="w-px h-4 bg-[#e8e8e4]" />
 
-                                <InlineField icon={<Truck size={12} className="text-[#aeb0c9]" />} label="Réexp." compact
+                                <InlineField icon={<Truck size={12} className="text-[#aeb0c9]" />} label="Tracking" compact
                                   value={c.reship_tracking_ref} onSave={v => patchClaim(c.id, { reship_tracking_ref: v })} />
                                 {isErr && (
                                   <>
@@ -714,7 +711,7 @@ function NewClaimForm({ brand, onClose, onCreated }: { brand: string; onClose: (
               <Field label="N° suivi retour">
                 <input value={form.return_tracking_ref} onChange={e => upd('return_tracking_ref', e.target.value)} className={input} />
               </Field>
-              <Field label="N° réexpédition">
+              <Field label="Tracking (nouvel envoi)">
                 <input value={form.reship_tracking_ref} onChange={e => upd('reship_tracking_ref', e.target.value)} className={input} />
               </Field>
             </>
