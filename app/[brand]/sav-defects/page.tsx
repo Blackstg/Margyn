@@ -353,118 +353,119 @@ export default function SavDefectsPage() {
                         const steps = MILESTONES_BY_TYPE[c.claim_type] ?? MILESTONES_BY_TYPE.defaut_fournisseur
                         const done = steps.filter(s => m[s.key]).length
                         return (
-                          <div key={c.id} className={`px-6 py-4 ${overdue ? 'bg-[#fff5f5]' : ''} ${m.clos ? 'opacity-60' : ''}`}>
+                          <div key={c.id} className={`px-5 py-3 grid grid-cols-[auto_minmax(0,1fr)] gap-3 ${overdue ? 'bg-[#fff5f5]' : 'hover:bg-[#fafafa]'} ${m.clos ? 'opacity-60' : ''} transition-colors`}>
 
-                            {/* Ligne 1 : type · commande/date · jours · facturé · clos/litige · suppr. */}
-                            <div className="flex items-center gap-2.5 flex-wrap">
-                              <span className="inline-flex items-center px-2 py-0.5 rounded-md text-[10px] font-semibold"
-                                style={{ background: TYPE_COLOR[c.claim_type]?.[0] ?? '#F8F8F7', color: TYPE_COLOR[c.claim_type]?.[1] ?? '#6b6b63' }}>
-                                {TYPE_LABEL[c.claim_type] ?? c.claim_type}
-                              </span>
-                              {c.shopify_order_id && <span className="text-xs font-medium text-[#6b6b63]">{c.shopify_order_id}</span>}
-                              <span className="text-xs text-[#9b9b93]">{fmtDate(c.reported_at)}</span>
-                              {days !== null && (
-                                <span className={`text-xs tabular-nums font-semibold ${overdue ? 'text-[#c7293a]' : 'text-[#9b9b93]'}`}>· ouvert {days} j</span>
-                              )}
-                              <div className="ml-auto flex items-center gap-2">
-                                {c.charged_amount > 0 && <span className="text-xs tabular-nums text-[#6b6b63]">{fmtEur(c.charged_amount)}</span>}
-                                {billedClaimIds.has(c.id) && (
-                                  <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-[#c7293a]">
-                                    <AlertTriangle size={10} /> facturé à tort
+                            {/* Col 1 : visuels (produit + photo défaut) */}
+                            <div className="flex gap-1.5">
+                              {c.product_image_url ? (
+                                <img src={c.product_image_url} alt="" className="w-12 h-12 rounded-lg object-cover border border-[#e8e8e4]" />
+                              ) : <div className="w-12 h-12 rounded-lg bg-[#f5f5f3]" />}
+                              {c.photo_url && (
+                                <button onClick={() => setLightbox(c.photo_url)} title="Photo du défaut — cliquer pour agrandir"
+                                  className="relative group w-12 h-12 rounded-lg overflow-hidden border-2 border-[#c7293a]/30">
+                                  <img src={c.photo_url} alt="défaut" className="w-full h-full object-cover" />
+                                  <span className="absolute inset-0 bg-black/0 group-hover:bg-black/30 flex items-center justify-center transition-colors">
+                                    <Maximize2 size={13} className="text-white opacity-0 group-hover:opacity-100" />
                                   </span>
+                                </button>
+                              )}
+                            </div>
+
+                            {/* Col 2 : contenu */}
+                            <div className="min-w-0">
+
+                              {/* Header */}
+                              <div className="flex items-center gap-2 flex-wrap">
+                                <span className="inline-flex items-center px-2 py-0.5 rounded-md text-[10px] font-semibold"
+                                  style={{ background: TYPE_COLOR[c.claim_type]?.[0] ?? '#F8F8F7', color: TYPE_COLOR[c.claim_type]?.[1] ?? '#6b6b63' }}>
+                                  {TYPE_LABEL[c.claim_type] ?? c.claim_type}
+                                </span>
+                                {c.shopify_order_id && <span className="text-xs font-semibold text-[#1a1a18]">{c.shopify_order_id}</span>}
+                                <span className="text-xs text-[#9b9b93]">{fmtDate(c.reported_at)}</span>
+                                {days !== null && (
+                                  <span className={`text-xs tabular-nums font-semibold ${overdue ? 'text-[#c7293a]' : 'text-[#9b9b93]'}`}>· ouvert {days} j</span>
                                 )}
-                                {TERMINAL.map(t => {
-                                  const active = !!m[t.key]
-                                  const danger = t.key === 'litige'
-                                  return (
-                                    <button key={t.key} onClick={() => setMilestone(c, t.key, active ? null : today)}
-                                      className={`px-2 py-1 rounded-md text-[11px] font-medium transition-colors ${
-                                        active
-                                          ? (danger ? 'bg-[#fff1f1] text-[#c7293a]' : 'bg-[#f0f0ee] text-[#1a1a18]')
-                                          : 'text-[#9b9b93] hover:bg-[#f5f5f3]'}`}>
-                                      {t.label}
+                                <div className="ml-auto flex items-center gap-1.5">
+                                  {c.charged_amount > 0 && <span className="text-xs tabular-nums text-[#6b6b63]">{fmtEur(c.charged_amount)}</span>}
+                                  {billedClaimIds.has(c.id) && (
+                                    <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-[#c7293a]"><AlertTriangle size={10} /> facturé</span>
+                                  )}
+                                  {TERMINAL.map(t => {
+                                    const active = !!m[t.key]
+                                    const danger = t.key === 'litige'
+                                    return (
+                                      <button key={t.key} onClick={() => setMilestone(c, t.key, active ? null : today)}
+                                        className={`px-2 py-0.5 rounded-md text-[11px] font-medium transition-colors ${
+                                          active
+                                            ? (danger ? 'bg-[#fff1f1] text-[#c7293a]' : 'bg-[#f0f0ee] text-[#1a1a18]')
+                                            : 'text-[#cfcfc8] hover:bg-[#f5f5f3] hover:text-[#6b6b63]'}`}>
+                                        {t.label}
+                                      </button>
+                                    )
+                                  })}
+                                  <button onClick={() => deleteClaim(c)} title="Supprimer le dossier"
+                                    className="text-[#cfcfc8] hover:text-[#c7293a] transition-colors"><Trash2 size={14} /></button>
+                                </div>
+                              </div>
+
+                              {/* Article */}
+                              <div className="text-sm mt-1 leading-snug">
+                                <span className="font-semibold text-[#1a1a18]">{c.sku ?? '—'}</span>
+                                <span className="text-[#9b9b93]"> ·×{c.quantity}</span>
+                                {c.product_name && <span className="text-[#6b6b63]"> — {c.product_name}</span>}
+                                {isErr && <span className="text-[#c7293a]"> · reçu à tort : {c.received_product_name ?? c.received_sku ?? '—'}</span>}
+                              </div>
+                              {(c.defect_description || c.supplier_claim_ref) && (
+                                <div className="text-[11px] text-[#9b9b93] mt-0.5 truncate">
+                                  {c.defect_description && <span className="italic">« {c.defect_description} »</span>}
+                                  {c.defect_description && c.supplier_claim_ref && <span> · </span>}
+                                  {c.supplier_claim_ref && <span>Réf. récl. {c.supplier_claim_ref}</span>}
+                                </div>
+                              )}
+
+                              {/* Bande : progression + jalons · | · suivi + lot */}
+                              <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1.5 mt-2">
+                                <div className="flex items-center gap-1.5">
+                                  <div className="w-12 h-1 rounded-full bg-[#f0f0ee] overflow-hidden">
+                                    <div className="h-full bg-[#1a7f4b] transition-all" style={{ width: `${(done / steps.length) * 100}%` }} />
+                                  </div>
+                                  <span className="text-[10px] font-semibold text-[#9b9b93] tabular-nums">{done}/{steps.length}</span>
+                                </div>
+                                {steps.map(step => {
+                                  const date = m[step.key]
+                                  return date ? (
+                                    <span key={step.key} className="inline-flex items-center gap-1 pl-2 pr-1 py-0.5 rounded-md text-[11px] font-medium bg-[#f0faf5] text-[#1a7f4b]">
+                                      <Check size={11} /> {step.label}
+                                      <input type="date" value={date} onChange={e => setMilestone(c, step.key, e.target.value || today)}
+                                        className="bg-transparent text-[10px] w-[78px] outline-none cursor-pointer text-[#1a7f4b]" />
+                                      <button onClick={() => setMilestone(c, step.key, null)} className="hover:text-[#c7293a]" title="Annuler ce jalon"><X size={11} /></button>
+                                    </span>
+                                  ) : (
+                                    <button key={step.key} onClick={() => setMilestone(c, step.key, today)}
+                                      className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-medium border border-dashed border-[#d8d8d2] text-[#9b9b93] hover:border-[#aeb0c9] hover:text-[#6b6b63] transition-colors">
+                                      <Plus size={10} /> {step.label}
                                     </button>
                                   )
                                 })}
-                                <button onClick={() => deleteClaim(c)} title="Supprimer le dossier"
-                                  className="text-[#cfcfc8] hover:text-[#c7293a] transition-colors ml-1">
-                                  <Trash2 size={15} />
-                                </button>
-                              </div>
-                            </div>
 
-                            {/* Ligne 2 : visuels (produit + photo défaut) + article */}
-                            <div className="flex gap-3 mt-2.5">
-                              <div className="flex flex-col gap-1 shrink-0">
-                                {c.product_image_url ? (
-                                  <img src={c.product_image_url} alt="" className="w-14 h-14 rounded-lg object-cover border border-[#e8e8e4]" />
-                                ) : <div className="w-14 h-14 rounded-lg bg-[#f5f5f3]" />}
-                                {c.photo_url && (
-                                  <button onClick={() => setLightbox(c.photo_url)} title="Agrandir la photo du défaut"
-                                    className="relative group w-14 h-14 rounded-lg overflow-hidden border-2 border-[#c7293a]/30">
-                                    <img src={c.photo_url} alt="défaut" className="w-full h-full object-cover" />
-                                    <span className="absolute inset-0 bg-black/0 group-hover:bg-black/30 flex items-center justify-center transition-colors">
-                                      <Maximize2 size={14} className="text-white opacity-0 group-hover:opacity-100" />
-                                    </span>
-                                  </button>
-                                )}
-                              </div>
-                              <div className="min-w-0 flex-1">
-                                <div className="text-sm font-medium text-[#1a1a18]">
-                                  {c.sku ?? '—'}
-                                  <span className="text-[#9b9b93] font-normal"> · ×{c.quantity}</span>
-                                </div>
-                                {c.product_name && <div className="text-xs text-[#9b9b93]">{c.product_name}</div>}
+                                <span className="w-px h-4 bg-[#e8e8e4]" />
+
+                                <InlineField icon={<Truck size={12} className="text-[#aeb0c9]" />} label="Réexp." compact
+                                  value={c.reship_tracking_ref} onSave={v => patchClaim(c.id, { reship_tracking_ref: v })} />
                                 {isErr && (
-                                  <div className="text-xs text-[#c7293a] mt-0.5">reçu à tort : {c.received_product_name ?? c.received_sku ?? '—'}</div>
+                                  <>
+                                    <InlineField icon={<RotateCcw size={12} className="text-[#aeb0c9]" />} label="Retour" compact
+                                      value={c.return_tracking_ref} onSave={v => patchClaim(c.id, { return_tracking_ref: v })} />
+                                    {c.return_label_url && (
+                                      <a href={c.return_label_url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-[11px] text-[#4f46e5] hover:underline">
+                                        <FileText size={11} /> étiquette
+                                      </a>
+                                    )}
+                                  </>
                                 )}
-                                {c.defect_description && <div className="text-xs text-[#6b6b63] mt-0.5 italic">« {c.defect_description} »</div>}
-                                {c.supplier_claim_ref && <div className="text-[11px] text-[#9b9b93] mt-0.5">Réf. réclamation : {c.supplier_claim_ref}</div>}
-                                {c.photo_url && <div className="text-[10px] text-[#c7293a]/70 mt-0.5">↑ photo du défaut (cliquer pour agrandir)</div>}
+                                <InlineField icon={<Layers size={12} className="text-[#aeb0c9]" />} label="Lot" compact
+                                  value={c.production_batch} onSave={v => patchClaim(c.id, { production_batch: v })} />
                               </div>
-                            </div>
-
-                            {/* Ligne 3 : progression + jalons (cumulables) */}
-                            <div className="flex flex-wrap items-center gap-1.5 mt-3">
-                              <span className="text-[10px] font-semibold text-[#9b9b93] tabular-nums">{done}/{steps.length}</span>
-                              <div className="w-14 h-1 rounded-full bg-[#f0f0ee] overflow-hidden mr-1">
-                                <div className="h-full bg-[#1a7f4b] transition-all" style={{ width: `${(done / steps.length) * 100}%` }} />
-                              </div>
-                              {steps.map(step => {
-                                const date = m[step.key]
-                                return date ? (
-                                  <span key={step.key} className="inline-flex items-center gap-1 pl-2 pr-1 py-1 rounded-md text-[11px] font-medium bg-[#f0faf5] text-[#1a7f4b]">
-                                    <Check size={11} /> {step.label}
-                                    <input type="date" value={date} onChange={e => setMilestone(c, step.key, e.target.value || today)}
-                                      className="bg-transparent text-[10px] w-[82px] outline-none cursor-pointer text-[#1a7f4b]" />
-                                    <button onClick={() => setMilestone(c, step.key, null)} className="hover:text-[#c7293a]" title="Annuler ce jalon"><X size={11} /></button>
-                                  </span>
-                                ) : (
-                                  <button key={step.key} onClick={() => setMilestone(c, step.key, today)}
-                                    className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-[11px] font-medium border border-dashed border-[#d8d8d2] text-[#9b9b93] hover:border-[#aeb0c9] hover:text-[#6b6b63] transition-colors">
-                                    <Plus size={10} /> {step.label}
-                                  </button>
-                                )
-                              })}
-                            </div>
-
-                            {/* Ligne 4 : suivi + lot */}
-                            <div className="flex flex-wrap items-center gap-x-5 gap-y-2 mt-3">
-                              <InlineField icon={<Truck size={12} className="text-[#aeb0c9]" />} label="Réexpédition"
-                                value={c.reship_tracking_ref} onSave={v => patchClaim(c.id, { reship_tracking_ref: v })} />
-                              {isErr && (
-                                <>
-                                  <InlineField icon={<RotateCcw size={12} className="text-[#aeb0c9]" />} label="Retour"
-                                    value={c.return_tracking_ref} onSave={v => patchClaim(c.id, { return_tracking_ref: v })} />
-                                  {c.return_label_url && (
-                                    <a href={c.return_label_url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-xs text-[#4f46e5] hover:underline">
-                                      <FileText size={11} /> étiquette retour
-                                    </a>
-                                  )}
-                                </>
-                              )}
-                              <InlineField icon={<Layers size={12} className="text-[#aeb0c9]" />} label="Lot prod."
-                                value={c.production_batch} onSave={v => patchClaim(c.id, { production_batch: v })} />
                             </div>
                           </div>
                         )
@@ -504,14 +505,14 @@ function Card({ title, icon, value, sub, danger }: { title: string; icon: React.
   )
 }
 
-function InlineField({ icon, label, value, onSave }: { icon: React.ReactNode; label: string; value: string | null; onSave: (v: string | null) => void }) {
+function InlineField({ icon, label, value, onSave, compact }: { icon: React.ReactNode; label: string; value: string | null; onSave: (v: string | null) => void; compact?: boolean }) {
   return (
-    <label className="inline-flex items-center gap-1.5 text-xs">
+    <label className="inline-flex items-center gap-1 text-xs">
       {icon}
       <span className="text-[10px] uppercase tracking-wide text-[#9b9b93]">{label}</span>
       <input defaultValue={value ?? ''} placeholder="—"
         onBlur={e => { if (e.target.value !== (value ?? '')) onSave(e.target.value || null) }}
-        className="w-28 rounded-md px-2 py-1 bg-[#f8f8f7] focus:bg-white focus:ring-1 focus:ring-[#aeb0c9] outline-none" />
+        className={`${compact ? 'w-20' : 'w-28'} rounded-md px-2 py-0.5 bg-[#f8f8f7] focus:bg-white focus:ring-1 focus:ring-[#aeb0c9] outline-none`} />
     </label>
   )
 }
