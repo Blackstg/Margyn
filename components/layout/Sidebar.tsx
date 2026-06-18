@@ -229,7 +229,7 @@ export default function Sidebar({ isOpen, collapsed, onToggleCollapse }: Sidebar
         {role === null ? null : NAV_SECTIONS.map(section => {
           const items = section.items.filter(({ key, brandLock }) => {
             if (role === 'delivery') return key === 'delivery'
-            if (role === 'sav')     return key === 'sav' || key === 'sav-krom' || key === 'delivery'
+            if (role === 'sav')     return key === 'sav' || key === 'sav-krom' || key === 'sav-defects' || key === 'delivery'
             // Shared pages: always visible
             if (brandLock === null) return true
             // Brand-locked: only visible when currently ON that brand
