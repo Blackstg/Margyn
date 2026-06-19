@@ -102,7 +102,7 @@ export function normalize(accepted: any): Track17Result | null {
     const fr = STAGE_LABELS[e.stage] ?? translateDesc(e.description) ?? e.stage ?? '—'
     return {
       label:    fr,
-      message:  (STAGE_LABELS[e.stage] && e.description) ? e.description : null,
+      message:  null, // on évite les descriptions brutes (souvent en anglais) — le libellé FR suffit
       date:     e.time_iso ?? e.time_utc ?? null,
       location: [e.address?.city, e.address?.country].filter(Boolean).join(', ') || e.location || null,
     }

@@ -133,28 +133,47 @@ function fmtDateTime(iso: string | null | undefined): string | null {
          d.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })
 }
 
-// Timeline à partir des VRAIS événements transporteur (17Track)
+// Grandes étapes claires (rassurantes), pilotées par les vrais événements transporteur.
+// Le journal complet reste accessible via « voir le détail ».
+const RT_PHASES: { key: string; title: string; desc: string; match?: RegExp }[] = [
+  { key: 'confirmed', title: 'Commande confirmée',     desc: 'Nous avons bien reçu votre commande.' },
+  { key: 'shipped',   title: 'Colis expédié',          desc: 'Votre colis a été préparé et confié au transporteur.',
+    match: /étiquette|expédition reçues|pris en charge|centre de tri \((départ|origine)\)/i },
+  { key: 'intl',      title: 'En route vers la France', desc: 'Votre colis voyage à l’international.',
+    match: /transit|vol international|aéroport|douane \(départ\)|export/i },
+  { key: 'arrived',   title: 'Arrivé en France',        desc: 'Votre colis est arrivé dans le pays de destination.',
+    match: /vol international arrivé|avis d’arrivée|tri \(destination\)/i },
+  { key: 'customs',   title: 'Dédouanement',            desc: 'Les formalités douanières sont prises en charge.',
+    match: /dédouanement (à l’import|import)/i },
+  { key: 'delivery',  title: 'En cours de livraison',   desc: 'Votre colis a été remis au transporteur local pour la livraison finale.',
+    match: /remis au transporteur local|en cours de livraison/i },
+  { key: 'delivered', title: 'Livré',                   desc: 'Votre colis a été livré. Bonne réception !',
+    match: /^livré$/i },
+]
+
 function buildRealTimeline(result: TrackingResult): TLEvent[] {
   const delivered = result.step === 5
-  const out: TLEvent[] = [{
-    status: 'done', title: 'Commande confirmée', time: fmtDate(result.created_at),
-    est: false, desc: 'Votre commande a bien été enregistrée et validée.',
-  }]
-  const chrono = [...result.tracking_events].reverse() // plus ancien → plus récent
-  chrono.forEach((e, i) => {
-    const isLatest = i === chrono.length - 1
-    out.push({
-      status: (delivered || !isLatest) ? 'done' : 'current',
-      title:  e.label,
-      time:   fmtDateTime(e.date),
-      est:    false,
-      desc:   [e.location, e.message].filter(Boolean).join(' · '),
-    })
-  })
-  if (!delivered) {
-    out.push({ status: 'upcoming', title: 'Livraison', time: null, est: false, desc: 'Votre colis vous sera remis prochainement.' })
+  // date la plus récente atteinte pour chaque phase (events triés du + récent au + ancien)
+  const dateFor: Record<string, string> = {}
+  for (const e of result.tracking_events) {
+    for (const p of RT_PHASES) {
+      if (p.match && p.match.test(e.label) && !dateFor[p.key]) dateFor[p.key] = e.date
+    }
   }
-  return out
+  const reached = RT_PHASES.map(p =>
+    p.key === 'confirmed' ? true : p.key === 'delivered' ? (delivered || !!dateFor.delivered) : !!dateFor[p.key]
+  )
+  let lastReached = 0
+  reached.forEach((r, i) => { if (r) lastReached = i })
+
+  return RT_PHASES.map((p, i): TLEvent => {
+    const status: TLStatus = i < lastReached ? 'done' : i === lastReached ? (delivered ? 'done' : 'current') : 'upcoming'
+    const rawDate = p.key === 'confirmed' ? result.created_at : dateFor[p.key]
+    const time = status === 'upcoming' ? null
+      : p.key === 'confirmed' ? fmtDate(rawDate)
+      : (rawDate ? fmtDateTime(rawDate) : null)
+    return { status, title: p.title, time, est: false, desc: p.desc }
+  })
 }
 
 // ─── buildTimeline ────────────────────────────────────────────────────────────
