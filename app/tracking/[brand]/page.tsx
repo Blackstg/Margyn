@@ -137,18 +137,16 @@ function fmtDateTime(iso: string | null | undefined): string | null {
 // Grandes étapes claires (rassurantes), pilotées par les vrais événements transporteur.
 // Le journal complet reste accessible via « voir le détail ».
 const RT_PHASES: { key: string; title: string; desc: string; match?: RegExp }[] = [
-  { key: 'confirmed', title: 'Commande confirmée',     desc: 'Nous avons bien reçu votre commande.' },
-  { key: 'shipped',   title: 'Colis expédié',          desc: 'Votre colis a été préparé et confié au transporteur.',
+  { key: 'confirmed',  title: 'Commande confirmée',    desc: 'Nous avons bien reçu votre commande.' },
+  { key: 'shipped',    title: 'Colis expédié',         desc: 'Votre colis a été préparé et confié au transporteur.',
     match: /étiquette|expédition reçues|pris en charge|centre de tri \((départ|origine)\)/i },
-  { key: 'intl',      title: 'En route vers la France', desc: 'Votre colis voyage à l’international.',
+  { key: 'transit',    title: 'Acheminement en cours', desc: 'Votre colis est en cours d’acheminement vers vous.',
     match: /transit|vol international|aéroport|douane \(départ\)|export/i },
-  { key: 'arrived',   title: 'Arrivé en France',        desc: 'Votre colis est arrivé dans le pays de destination.',
-    match: /vol international arrivé|avis d’arrivée|tri \(destination\)/i },
-  { key: 'customs',   title: 'Dédouanement',            desc: 'Les formalités douanières sont prises en charge.',
-    match: /dédouanement (à l’import|import)/i },
-  { key: 'delivery',  title: 'En cours de livraison',   desc: 'Votre colis a été remis au transporteur local pour la livraison finale.',
+  { key: 'processing', title: 'Traitement en cours',   desc: 'Votre colis est pris en charge avant la livraison.',
+    match: /vol international arrivé|avis d’arrivée|tri \(destination\)|dédouanement (à l’import|import)/i },
+  { key: 'delivery',   title: 'En cours de livraison', desc: 'Votre colis a été remis au transporteur local pour la livraison finale.',
     match: /remis au transporteur local|en cours de livraison/i },
-  { key: 'delivered', title: 'Livré',                   desc: 'Votre colis a été livré. Bonne réception !',
+  { key: 'delivered',  title: 'Livré',                 desc: 'Votre colis a été livré. Bonne réception !',
     match: /^livré$/i },
 ]
 
