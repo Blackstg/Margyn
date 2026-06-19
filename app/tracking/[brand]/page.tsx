@@ -583,12 +583,12 @@ export default function BrandTrackingPage({ params }: { params: { brand: string 
                   const end = new Date(result.created_at); end.setDate(end.getDate() + settings.estimated_days_max)
                   const passed = end.getTime() < Date.now()
                   return (
-                    <div style={{ background: primary, borderRadius: 12, padding: '10px 12px', textAlign: 'center', flexShrink: 0, minWidth: 96 }}>
+                    <div style={{ background: primary, borderRadius: 12, padding: '10px 12px', textAlign: 'center', flexShrink: 0, width: passed ? 116 : undefined, minWidth: 96 }}>
                       <p style={{ fontSize: 9, fontWeight: 600, color: 'rgba(255,255,255,0.75)', marginBottom: 4, letterSpacing: '0.5px' }}>
-                        {passed ? 'STATUT' : 'LIVRAISON PRÉVUE'}
+                        LIVRAISON
                       </p>
-                      <p style={{ fontSize: 12, fontWeight: 700, color: '#fff', lineHeight: 1.4 }}>
-                        {passed ? 'Livraison imminente — en cours d’acheminement' : <>{addDays(result.created_at, settings.estimated_days_min)}<br />au {addDays(result.created_at, settings.estimated_days_max)}</>}
+                      <p style={{ fontSize: 12, fontWeight: 700, color: '#fff', lineHeight: 1.35 }}>
+                        {passed ? 'En cours d’acheminement' : <>{addDays(result.created_at, settings.estimated_days_min)}<br />au {addDays(result.created_at, settings.estimated_days_max)}</>}
                       </p>
                     </div>
                   )
