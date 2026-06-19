@@ -46,6 +46,7 @@ interface TrackingResult {
   tracking_events: TrackingEvent[]
   step:            number
   has_carrier_data?: boolean
+  carrier_eta?:    { from: string | null; to: string | null } | null
 }
 
 // ─── Timeline types ───────────────────────────────────────────────────────────
@@ -151,8 +152,27 @@ const RT_PHASES: { key: string; title: string; desc: string; match?: RegExp }[] 
     match: /^livré$/i },
 ]
 
-function buildRealTimeline(result: TrackingResult): TLEvent[] {
+// Date de livraison estimée, TOUJOURS dans le futur (rassurant) :
+// ETA transporteur si dispo → sinon commande + délai → si dépassée, glissante depuis le dernier event.
+function estimatedDeliveryDate(result: TrackingResult, settings: TrackingSettings | null): Date | null {
+  const now = Date.now()
+  let d: Date | null = null
+  if (result.carrier_eta?.to) d = new Date(result.carrier_eta.to)
+  else if (settings) { d = new Date(result.created_at); d.setDate(d.getDate() + settings.estimated_days_max) }
+  if (!d) return null
+  if (d.getTime() < now) {
+    const latest = result.tracking_events?.[0]?.date
+    d = latest ? new Date(latest) : new Date()
+    d.setDate(d.getDate() + 3)
+    if (d.getTime() < now) { d = new Date(); d.setDate(d.getDate() + 2) }
+  }
+  return d
+}
+
+function buildRealTimeline(result: TrackingResult, settings: TrackingSettings | null): TLEvent[] {
   const delivered = result.step === 5
+  const estDate = estimatedDeliveryDate(result, settings)
+  const estStr  = estDate ? estDate.toLocaleDateString('fr-FR', { day: 'numeric', month: 'long' }) : null
   // date la plus récente atteinte pour chaque phase (events triés du + récent au + ancien)
   const dateFor: Record<string, string> = {}
   for (const e of result.tracking_events) {
@@ -169,9 +189,12 @@ function buildRealTimeline(result: TrackingResult): TLEvent[] {
   return RT_PHASES.map((p, i): TLEvent => {
     const status: TLStatus = i < lastReached ? 'done' : i === lastReached ? (delivered ? 'done' : 'current') : 'upcoming'
     const rawDate = p.key === 'confirmed' ? result.created_at : dateFor[p.key]
-    const time = status === 'upcoming' ? null
-      : p.key === 'confirmed' ? fmtDate(rawDate)
-      : (rawDate ? fmtDateTime(rawDate) : null)
+    // Étapes à venir : date estimée (sur "Livré"), badge "estimé"
+    if (status === 'upcoming') {
+      const est = p.key === 'delivered' ? estStr : null
+      return { status, title: p.title, time: est, est: !!est, desc: p.desc }
+    }
+    const time = p.key === 'confirmed' ? fmtDate(rawDate) : (rawDate ? fmtDateTime(rawDate) : null)
     return { status, title: p.title, time, est: false, desc: p.desc }
   })
 }
@@ -507,7 +530,7 @@ export default function BrandTrackingPage({ params }: { params: { brand: string 
   const primary     = settings?.brand_color || '#111'
   const isDelivered = result?.step === 5
 
-  const timeline     = result ? (result.has_carrier_data ? buildRealTimeline(result) : buildTimeline(result, settings)) : []
+  const timeline     = result ? (result.has_carrier_data ? buildRealTimeline(result, settings) : buildTimeline(result, settings)) : []
   const currentEvent = timeline.find(e => e.status === 'current')
     ?? [...timeline].reverse().find(e => e.status === 'done')
 
@@ -629,17 +652,17 @@ export default function BrandTrackingPage({ params }: { params: { brand: string 
                   )}
                 </div>
 
-                {/* Delivery estimate badge */}
-                {!isDelivered && settings && (() => {
-                  const end = new Date(result.created_at); end.setDate(end.getDate() + settings.estimated_days_max)
-                  const passed = end.getTime() < Date.now()
+                {/* Delivery estimate badge — date estimée (toujours future) */}
+                {!isDelivered && (() => {
+                  const est = estimatedDeliveryDate(result, settings)
+                  if (!est) return null
                   return (
-                    <div style={{ background: primary, borderRadius: 12, padding: '10px 12px', textAlign: 'center', flexShrink: 0, width: passed ? 116 : undefined, minWidth: 96 }}>
+                    <div style={{ background: primary, borderRadius: 12, padding: '10px 12px', textAlign: 'center', flexShrink: 0, minWidth: 96, maxWidth: 130 }}>
                       <p style={{ fontSize: 9, fontWeight: 600, color: 'rgba(255,255,255,0.75)', marginBottom: 4, letterSpacing: '0.5px' }}>
-                        LIVRAISON
+                        LIVRAISON ESTIMÉE
                       </p>
-                      <p style={{ fontSize: 12, fontWeight: 700, color: '#fff', lineHeight: 1.35 }}>
-                        {passed ? 'En cours d’acheminement' : <>{addDays(result.created_at, settings.estimated_days_min)}<br />au {addDays(result.created_at, settings.estimated_days_max)}</>}
+                      <p style={{ fontSize: 13, fontWeight: 700, color: '#fff', lineHeight: 1.35 }}>
+                        {est.toLocaleDateString('fr-FR', { day: 'numeric', month: 'long' })}
                       </p>
                     </div>
                   )
