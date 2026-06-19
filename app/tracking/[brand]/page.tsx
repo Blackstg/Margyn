@@ -45,6 +45,7 @@ interface TrackingResult {
   tracking_number: string | null
   tracking_events: TrackingEvent[]
   step:            number
+  has_carrier_data?: boolean
 }
 
 // ─── Timeline types ───────────────────────────────────────────────────────────
@@ -123,6 +124,37 @@ function addDays(iso: string, days: number) {
 function fmtDate(iso: string | null | undefined): string | null {
   if (!iso) return null
   return new Date(iso).toLocaleDateString('fr-FR', { day: 'numeric', month: 'long' })
+}
+
+function fmtDateTime(iso: string | null | undefined): string | null {
+  if (!iso) return null
+  const d = new Date(iso)
+  return d.toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' }) + ', ' +
+         d.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })
+}
+
+// Timeline à partir des VRAIS événements transporteur (17Track)
+function buildRealTimeline(result: TrackingResult): TLEvent[] {
+  const delivered = result.step === 5
+  const out: TLEvent[] = [{
+    status: 'done', title: 'Commande confirmée', time: fmtDate(result.created_at),
+    est: false, desc: 'Votre commande a bien été enregistrée et validée.',
+  }]
+  const chrono = [...result.tracking_events].reverse() // plus ancien → plus récent
+  chrono.forEach((e, i) => {
+    const isLatest = i === chrono.length - 1
+    out.push({
+      status: (delivered || !isLatest) ? 'done' : 'current',
+      title:  e.label,
+      time:   fmtDateTime(e.date),
+      est:    false,
+      desc:   [e.location, e.message].filter(Boolean).join(' · '),
+    })
+  })
+  if (!delivered) {
+    out.push({ status: 'upcoming', title: 'Livraison', time: null, est: false, desc: 'Votre colis vous sera remis prochainement.' })
+  }
+  return out
 }
 
 // ─── buildTimeline ────────────────────────────────────────────────────────────
@@ -456,7 +488,7 @@ export default function BrandTrackingPage({ params }: { params: { brand: string 
   const primary     = settings?.brand_color || '#111'
   const isDelivered = result?.step === 5
 
-  const timeline     = result ? buildTimeline(result, settings) : []
+  const timeline     = result ? (result.has_carrier_data ? buildRealTimeline(result) : buildTimeline(result, settings)) : []
   const currentEvent = timeline.find(e => e.status === 'current')
     ?? [...timeline].reverse().find(e => e.status === 'done')
 

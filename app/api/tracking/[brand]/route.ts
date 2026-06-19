@@ -1,6 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createAdminClient } from '@/lib/supabase'
-import { register, getTrackInfo, normalize, type Track17Result } from '@/lib/track17'
+import { register, getTrackInfo, normalize, mergeResults, CARRIER, type Track17Result, type TrackItem } from '@/lib/track17'
+
+// Transporteurs à interroger par marque (Moom expédie via YunExpress + Colissimo en fin de course)
+const BRAND_CARRIERS: Record<string, (number | undefined)[]> = {
+  moom: [CARRIER.YUNEXPRESS, undefined], // YunExpress (journal détaillé) + auto (Colissimo, livraison finale)
+}
 
 // Cache 17Track (Supabase) : frais < 30 min et non livré → on réutilise sans rappeler l'API
 async function getOrRefresh17(
@@ -18,15 +23,20 @@ async function getOrRefresh17(
   if (fresh && row?.delivered) return rowResult()
   if (fresh && (row?.events?.length ?? 0) > 0) return rowResult()
 
-  // Enregistre une seule fois, puis interroge
-  if (!row?.registered) { try { await register([number]) } catch { /* ignore */ } }
+  const carriers = BRAND_CARRIERS[brand] ?? [undefined]
+  const items: TrackItem[] = carriers.map(c => (c ? { number, carrier: c } : { number }))
 
-  let result: Track17Result | null = null
-  try {
-    const j = await getTrackInfo([number])
-    const acc = j?.data?.accepted?.[0]
-    if (acc) result = normalize(acc)
-  } catch { /* ignore */ }
+  // Enregistre (1×) chaque transporteur candidat, puis interroge et fusionne
+  if (!row?.registered) { try { await register(items) } catch { /* ignore */ } }
+
+  const results = await Promise.all(items.map(async (it) => {
+    try {
+      const j = await getTrackInfo([it])
+      const acc = j?.data?.accepted?.[0]
+      return acc ? normalize(acc) : null
+    } catch { return null }
+  }))
+  const result = mergeResults(results)
 
   await admin.from('carrier_tracking').upsert({
     tracking_number: number, brand, order_name: orderName,
@@ -36,12 +46,12 @@ async function getOrRefresh17(
     delivered:  result?.delivered ?? row?.delivered ?? false,
     eta_from:   result?.eta_from ?? null,
     eta_to:     result?.eta_to ?? null,
-    events:     result?.events ?? row?.events ?? [],
+    events:     (result?.events?.length ? result.events : row?.events) ?? [],
     registered: true,
     updated_at: new Date().toISOString(),
   }, { onConflict: 'tracking_number' })
 
-  return result ?? rowResult()
+  return (result?.events.length ? result : rowResult())
 }
 
 const SHOPIFY: Record<string, { shop: string; token: string }> = {
@@ -221,13 +231,15 @@ export async function POST(
     let finalEvents = trackingEvents
     let finalStep   = computeStep(order)
     let carrierEta: { from: string | null; to: string | null } | null = null
+    let hasCarrierData = false
     if (fulfillment?.tracking_number && process.env.TRACK17_API_KEY) {
       try {
         const t17 = await getOrRefresh17(fulfillment.tracking_number, brand, order.name)
         if (t17 && t17.events.length > 0) {
-          finalEvents = t17.events
-          finalStep   = t17.step
-          carrierEta  = { from: t17.eta_from, to: t17.eta_to }
+          finalEvents    = t17.events
+          finalStep      = t17.step
+          carrierEta     = { from: t17.eta_from, to: t17.eta_to }
+          hasCarrierData = true
         }
       } catch (e) {
         console.error('[tracking 17track]', e)
@@ -256,10 +268,11 @@ export async function POST(
         city:     addr.city     ?? '',
         zip:      addr.zip      ?? '',
       } : null,
-      tracking_number: fulfillment?.tracking_number ?? null,
-      tracking_events: finalEvents,
-      step:            finalStep,
-      carrier_eta:     carrierEta,
+      tracking_number:  fulfillment?.tracking_number ?? null,
+      tracking_events:  finalEvents,
+      step:             finalStep,
+      carrier_eta:      carrierEta,
+      has_carrier_data: hasCarrierData,
     })
   } catch (err) {
     console.error(`[tracking/${brand}]`, err)
