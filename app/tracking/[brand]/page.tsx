@@ -142,6 +142,8 @@ function buildTimeline(result: TrackingResult, settings: TrackingSettings | null
   function estDate(idx: number): string {
     const fraction = STEP_OFFSETS[idx] / 12  // 12 = max fixed offset
     const days = Math.round(min + fraction * (max - min))
+    const d = new Date(result.created_at); d.setDate(d.getDate() + days)
+    if (d.getTime() < Date.now()) return idx === 9 ? 'très prochainement' : 'à venir'
     const date = addDays(result.created_at, days)
     return idx === 9 ? `au plus tard le ${date}` : `~ ${date}`
   }
@@ -577,17 +579,20 @@ export default function BrandTrackingPage({ params }: { params: { brand: string 
                 </div>
 
                 {/* Delivery estimate badge */}
-                {!isDelivered && settings && (
-                  <div style={{ background: primary, borderRadius: 12, padding: '10px 12px', textAlign: 'center', flexShrink: 0 }}>
-                    <p style={{ fontSize: 9, fontWeight: 600, color: 'rgba(255,255,255,0.75)', marginBottom: 4, letterSpacing: '0.5px' }}>
-                      LIVRAISON PRÉVUE
-                    </p>
-                    <p style={{ fontSize: 12, fontWeight: 700, color: '#fff', lineHeight: 1.4 }}>
-                      {addDays(result.created_at, settings.estimated_days_min)}<br />
-                      au {addDays(result.created_at, settings.estimated_days_max)}
-                    </p>
-                  </div>
-                )}
+                {!isDelivered && settings && (() => {
+                  const end = new Date(result.created_at); end.setDate(end.getDate() + settings.estimated_days_max)
+                  const passed = end.getTime() < Date.now()
+                  return (
+                    <div style={{ background: primary, borderRadius: 12, padding: '10px 12px', textAlign: 'center', flexShrink: 0, minWidth: 96 }}>
+                      <p style={{ fontSize: 9, fontWeight: 600, color: 'rgba(255,255,255,0.75)', marginBottom: 4, letterSpacing: '0.5px' }}>
+                        {passed ? 'STATUT' : 'LIVRAISON PRÉVUE'}
+                      </p>
+                      <p style={{ fontSize: 12, fontWeight: 700, color: '#fff', lineHeight: 1.4 }}>
+                        {passed ? 'Livraison imminente — en cours d’acheminement' : <>{addDays(result.created_at, settings.estimated_days_min)}<br />au {addDays(result.created_at, settings.estimated_days_max)}</>}
+                      </p>
+                    </div>
+                  )
+                })()}
                 {isDelivered && (
                   <div style={{ background: '#f0fdf4', borderRadius: 12, padding: '10px 12px', textAlign: 'center', flexShrink: 0 }}>
                     <p style={{ fontSize: 20 }}>🎉</p>
