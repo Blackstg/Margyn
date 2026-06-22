@@ -18,6 +18,8 @@ export interface MapOrder {
   address1: string
   city: string
   zip: string
+  lat?: number | null
+  lng?: number | null
   zone: Zone
   panel_count: number
 }
@@ -90,10 +92,17 @@ export default function OrdersMap({ orders, selectedOrders, onToggle, height = 4
       map.on('load', async () => {
         if (cancelled) return
 
-        // Geocode all orders in parallel
+        // Resolve coordinates. Prefer Shopify's geocoded lat/lng (accurate) and only
+        // fall back to Mapbox geocoding of the free-text address when they're missing
+        // — re-geocoding plain text mismatches rural/generic street names (e.g. #10159
+        // "ancienne route nationale" resolved to dept 21 instead of 62).
         await Promise.all(
           orders.map(async (o) => {
             if (coordsCache.current.has(o.order_name)) return
+            if (typeof o.lng === 'number' && typeof o.lat === 'number') {
+              coordsCache.current.set(o.order_name, [o.lng, o.lat])
+              return
+            }
             const coord = await geocodeAddress(`${o.address1}, ${o.city} ${o.zip}, France`, token)
             if (coord) coordsCache.current.set(o.order_name, coord)
           })

@@ -61,6 +61,8 @@ interface ShopifyOrder {
   address2?: string
   city: string
   zip: string
+  lat?: number | null
+  lng?: number | null
   zone: Zone
   panel_count: number
   panel_details: PanelItem[]
@@ -877,6 +879,8 @@ function PlanificateurView() {
                   address1: o.address1,
                   city: o.city,
                   zip: o.zip,
+                  lat: o.lat,
+                  lng: o.lng,
                   zone: o.zone as 'nord-est' | 'nord-ouest' | 'sud-est' | 'sud-ouest',
                   panel_count: o.panel_count,
                 }))}

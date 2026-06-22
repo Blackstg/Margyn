@@ -104,6 +104,8 @@ interface ShopifyShippingAddress {
   city:       string
   zip:        string
   phone:      string | null
+  latitude:   number | null
+  longitude:  number | null
 }
 
 interface ShopifyOrder {
@@ -274,6 +276,8 @@ export async function GET() {
       address2:          string
       city:              string
       zip:               string
+      lat:               number | null
+      lng:               number | null
       zone:              Zone
       panel_count:       number
       panel_details:     { sku: string; variant_title: string; title: string; qty: number }[]
@@ -390,6 +394,11 @@ export async function GET() {
         address2:          addr?.address2 ?? '',
         city:              addr?.city ?? '',
         zip,
+        // Shopify-provided geocoding — accurate and preferred over re-geocoding the
+        // free-text address (which mismatches rural/generic street names, e.g. #10159
+        // "ancienne route nationale" landed in dept 21 instead of 62 via Mapbox).
+        lat:               typeof addr?.latitude  === 'number' ? addr.latitude  : null,
+        lng:               typeof addr?.longitude === 'number' ? addr.longitude : null,
         zone,
         panel_count,
         panel_details,
