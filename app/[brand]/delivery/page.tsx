@@ -642,9 +642,9 @@ function PlanificateurView() {
       const token = process.env.NEXT_PUBLIC_MAPBOX_TOKEN ?? ''
       const stops = [...tour.stops].sort((a, b) => a.sequence - b.sequence)
 
-      // 1. Geocode all stop addresses
+      // 1. Geocode all stop addresses (address2-aware, see stopGeoQuery)
       const coords: ([number, number] | null)[] = await Promise.all(
-        stops.map((s) => geocodeForMap(`${s.address1}, ${s.city} ${s.zip}, France`, token))
+        stops.map((s) => geocodeForMap(stopGeoQuery(s), token))
       )
 
       // Filter out stops that failed geocoding
@@ -2231,6 +2231,14 @@ function nearestNeighborTSP(
   return result
 }
 
+// Build the geocoding query for a stop. address2 often holds the real street name
+// when address1 is only the house number (e.g. #10174 "4" / "Avenue Virginie"), so
+// it must be included or Mapbox mismatches to the wrong town.
+function stopGeoQuery(s: { address1: string; address2?: string | null; city: string; zip: string }): string {
+  const line2 = s.address2?.trim() ? `${s.address2.trim()}, ` : ''
+  return `${s.address1}, ${line2}${s.city} ${s.zip}, France`
+}
+
 async function geocodeForMap(address: string, token: string): Promise<[number, number] | null> {
   try {
     const res = await fetch(
@@ -2528,10 +2536,7 @@ function LivreurView() {
       await Promise.all(
         sortedStopsForETA.map(async (stop) => {
           if (coordsCache.current.has(stop.id)) return
-          const coord = await geocodeForMap(
-            `${stop.address1}, ${stop.city} ${stop.zip}, France`,
-            token
-          )
+          const coord = await geocodeForMap(stopGeoQuery(stop), token)
           if (coord) coordsCache.current.set(stop.id, coord)
         })
       )
@@ -2605,7 +2610,7 @@ function LivreurView() {
         await Promise.all(
           sortedStopsForETA.map(async (stop) => {
             if (coordsCache.current.has(stop.id)) return
-            const coord = await geocodeForMap(`${stop.address1}, ${stop.city} ${stop.zip}, France`, token)
+            const coord = await geocodeForMap(stopGeoQuery(stop), token)
             if (coord) coordsCache.current.set(stop.id, coord)
           })
         )
@@ -2670,7 +2675,7 @@ function LivreurView() {
   const tourMapsUrl = (() => {
     const pending = sortedStops.filter((s) => s.status !== 'delivered' && s.status !== 'failed')
     if (pending.length === 0) return ''
-    const waypoints = pending.map((s) => encodeURIComponent(`${s.address1}, ${s.city} ${s.zip}, France`))
+    const waypoints = pending.map((s) => encodeURIComponent(stopGeoQuery(s)))
     return `https://www.google.com/maps/dir/${encodeURIComponent(DEPOT)}/${waypoints.join('/')}`
   })()
 
@@ -3742,10 +3747,10 @@ function LivreurView() {
   }
 
   const navMapsUrl = currentStop
-    ? `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(`${currentStop.address1}, ${currentStop.city} ${currentStop.zip}, France`)}&travelmode=driving`
+    ? `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(stopGeoQuery(currentStop))}&travelmode=driving`
     : ''
   const navWazeUrl = currentStop
-    ? `https://waze.com/ul?q=${encodeURIComponent(`${currentStop.address1}, ${currentStop.city}, France`)}&navigate=yes`
+    ? `https://waze.com/ul?q=${encodeURIComponent(stopGeoQuery(currentStop))}&navigate=yes`
     : ''
 
   return (

@@ -16,11 +16,20 @@ interface MapStop {
   order_name: string
   customer_name: string
   address1: string
+  address2?: string
   city: string
   zip: string
   sequence: number
   status: 'pending' | 'delivered' | 'failed' | 'partial'
   panel_details?: PanelItem[]
+}
+
+// Build the geocoding query. address2 often carries the actual street name when the
+// customer put only the house number in address1 (e.g. #10174 "4" + "Avenue Virginie"),
+// so it must be included or Mapbox mismatches to a wrong town.
+function fullAddress(s: { address1: string; address2?: string; city: string; zip: string }): string {
+  const line2 = s.address2?.trim() ? `${s.address2.trim()}, ` : ''
+  return `${s.address1}, ${line2}${s.city} ${s.zip}, France`
 }
 
 // Dépôt Bourges — Saint-Germain-du-Puy
@@ -159,7 +168,7 @@ export default function TourMap({ stops, onBack, precomputedCoords, onMarkDelive
       const geocoded: ([number, number] | null)[] = await Promise.all(
         sortedStops.map(async (s) => {
           if (precomputedCoords?.has(s.id)) return precomputedCoords.get(s.id)!
-          return geocodeAddress(`${s.address1}, ${s.city} ${s.zip}, France`, token)
+          return geocodeAddress(fullAddress(s), token)
         })
       )
       if (cancelled) return
