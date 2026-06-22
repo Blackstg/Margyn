@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react'
 import type mapboxgl from 'mapbox-gl'
+import { geoAddress } from '@/lib/delivery/geo'
 
 export interface PlannedStop {
   id:            string
@@ -101,31 +102,15 @@ export default function LivreurOverviewMap({ plannedStops, unplannedOrders, heig
       await new Promise<void>(res => map.once('load', () => res()))
       if (cancelled) return
 
-      // Build a geocodable address.
-      // Shopify sometimes stores only the street number in address1 and the street name in address2
-      // (e.g. address1="4", address2="Avenue Virginie"). Combine them when address1 is digits-only.
-      function buildAddress(address1: string, address2: string | undefined, city: string, zip: string) {
-        const isNumberOnly = /^\d+$/.test(address1.trim())
-        let street: string
-        if (isNumberOnly && address2) {
-          street = `${address1} ${address2}`
-        } else if (isNumberOnly) {
-          street = ''  // no street name at all — fall back to city+zip
-        } else {
-          street = address1
-        }
-        return street ? `${street}, ${city} ${zip}, France` : `${city} ${zip}, France`
-      }
-
-      // Geocode everything in parallel
+      // Geocode everything in parallel (address2-aware, see geoAddress)
       const allAddresses: { key: string; address: string }[] = [
         ...plannedStops.map(s => ({
           key:     `stop:${s.id}`,
-          address: buildAddress(s.address1, s.address2, s.city, s.zip),
+          address: geoAddress(s),
         })),
         ...unplannedOrders.map(o => ({
           key:     `order:${o.order_name}`,
-          address: buildAddress(o.address1, o.address2, o.city, o.zip),
+          address: geoAddress(o),
         })),
       ]
 

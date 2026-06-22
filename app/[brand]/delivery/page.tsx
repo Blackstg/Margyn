@@ -7,6 +7,7 @@ import nextDynamic from 'next/dynamic'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { createBrowserClient } from '@supabase/auth-helpers-nextjs'
 import { useBrand } from '@/context/BrandContext'
+import { geoAddress } from '@/lib/delivery/geo'
 import { ChevronDown, ChevronUp, ChevronLeft, ChevronRight, Trash2, Mail, Plus, X, MapPin, Package, Truck, Map as MapIcon, Search, Pencil, Check, MessageSquare, GripVertical, Printer, RefreshCw, Clock } from 'lucide-react'
 import {
   DndContext, DragEndEvent, DragOverlay, DragStartEvent,
@@ -642,9 +643,9 @@ function PlanificateurView() {
       const token = process.env.NEXT_PUBLIC_MAPBOX_TOKEN ?? ''
       const stops = [...tour.stops].sort((a, b) => a.sequence - b.sequence)
 
-      // 1. Geocode all stop addresses (address2-aware, see stopGeoQuery)
+      // 1. Geocode all stop addresses (address2-aware, see geoAddress)
       const coords: ([number, number] | null)[] = await Promise.all(
-        stops.map((s) => geocodeForMap(stopGeoQuery(s), token))
+        stops.map((s) => geocodeForMap(geoAddress(s), token))
       )
 
       // Filter out stops that failed geocoding
@@ -877,6 +878,7 @@ function PlanificateurView() {
                   order_name: o.order_name,
                   customer_name: o.customer_name,
                   address1: o.address1,
+                  address2: o.address2,
                   city: o.city,
                   zip: o.zip,
                   lat: o.lat,
@@ -1274,6 +1276,7 @@ function PlanificateurView() {
                       order_name:    s.order_name,
                       customer_name: s.customer_name,
                       address1:      s.address1,
+                      address2:      s.address2,
                       city:          s.city,
                       zip:           s.zip,
                       panel_count:   s.panel_count,
@@ -2231,14 +2234,6 @@ function nearestNeighborTSP(
   return result
 }
 
-// Build the geocoding query for a stop. address2 often holds the real street name
-// when address1 is only the house number (e.g. #10174 "4" / "Avenue Virginie"), so
-// it must be included or Mapbox mismatches to the wrong town.
-function stopGeoQuery(s: { address1: string; address2?: string | null; city: string; zip: string }): string {
-  const line2 = s.address2?.trim() ? `${s.address2.trim()}, ` : ''
-  return `${s.address1}, ${line2}${s.city} ${s.zip}, France`
-}
-
 async function geocodeForMap(address: string, token: string): Promise<[number, number] | null> {
   try {
     const res = await fetch(
@@ -2536,7 +2531,7 @@ function LivreurView() {
       await Promise.all(
         sortedStopsForETA.map(async (stop) => {
           if (coordsCache.current.has(stop.id)) return
-          const coord = await geocodeForMap(stopGeoQuery(stop), token)
+          const coord = await geocodeForMap(geoAddress(stop), token)
           if (coord) coordsCache.current.set(stop.id, coord)
         })
       )
@@ -2610,7 +2605,7 @@ function LivreurView() {
         await Promise.all(
           sortedStopsForETA.map(async (stop) => {
             if (coordsCache.current.has(stop.id)) return
-            const coord = await geocodeForMap(stopGeoQuery(stop), token)
+            const coord = await geocodeForMap(geoAddress(stop), token)
             if (coord) coordsCache.current.set(stop.id, coord)
           })
         )
@@ -2675,7 +2670,7 @@ function LivreurView() {
   const tourMapsUrl = (() => {
     const pending = sortedStops.filter((s) => s.status !== 'delivered' && s.status !== 'failed')
     if (pending.length === 0) return ''
-    const waypoints = pending.map((s) => encodeURIComponent(stopGeoQuery(s)))
+    const waypoints = pending.map((s) => encodeURIComponent(geoAddress(s)))
     return `https://www.google.com/maps/dir/${encodeURIComponent(DEPOT)}/${waypoints.join('/')}`
   })()
 
@@ -3260,7 +3255,7 @@ function LivreurView() {
               customer_name:    order.customer_name,
               email:            order.email,
               address1:         order.address1,
-              address2:         '',
+              address2:         order.address2 ?? '',
               city:             order.city,
               zip:              order.zip,
               zone:             order.zone,
@@ -3316,7 +3311,7 @@ function LivreurView() {
             customer_name:    order.customer_name,
             email:            order.email,
             address1:         order.address1,
-            address2:         '',
+            address2:         order.address2 ?? '',
             city:             order.city,
             zip:              order.zip,
             zone:             order.zone,
@@ -3747,10 +3742,10 @@ function LivreurView() {
   }
 
   const navMapsUrl = currentStop
-    ? `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(stopGeoQuery(currentStop))}&travelmode=driving`
+    ? `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(geoAddress(currentStop))}&travelmode=driving`
     : ''
   const navWazeUrl = currentStop
-    ? `https://waze.com/ul?q=${encodeURIComponent(stopGeoQuery(currentStop))}&navigate=yes`
+    ? `https://waze.com/ul?q=${encodeURIComponent(geoAddress(currentStop))}&navigate=yes`
     : ''
 
   return (
@@ -4461,6 +4456,7 @@ interface SavEntry {
   zip: string
   zone: Zone
   address1: string
+  address2?: string
   panel_count: number
   panel_details: PanelItem[]
   tour_name: string | null
@@ -4592,7 +4588,7 @@ function buildSavEntries(toursRaw: any[], ordersRaw: ShopifyOrder[]): SavEntry[]
       result.push({
         id: stop.id, order_name: stop.order_name, customer_name: stop.customer_name,
         email: stop.email, city: stop.city, zip: stop.zip, zone: stop.zone,
-        address1: stop.address1, panel_count: stop.panel_count,
+        address1: stop.address1, address2: stop.address2, panel_count: stop.panel_count,
         panel_details: stop.panel_details ?? [],
         tour_name: tour.name, tour_status: tour.status,
         tour_planned_date: tour.planned_date, tour_zone: tour.zone ?? null,
@@ -4615,6 +4611,7 @@ function buildSavEntries(toursRaw: any[], ordersRaw: ShopifyOrder[]): SavEntry[]
       id: `order-${order.order_name}`, order_name: order.order_name,
       customer_name: order.customer_name, email: order.email,
       city: order.city, zip: order.zip, zone: order.zone, address1: order.address1,
+      address2: order.address2,
       panel_count: order.panel_count, panel_details: order.panel_details ?? [],
       tour_name: null, tour_status: null, tour_planned_date: null, tour_zone: null,
       tour_total_stops: 0, tour_delivered_stops: 0, stops_before: 0,
@@ -4896,6 +4893,7 @@ function SavView() {
                     .map(e => ({
                       id: e.id,
                       address1: e.address1,
+                      address2: e.address2,
                       city: e.city,
                       zip: e.zip,
                       customer_name: e.customer_name,

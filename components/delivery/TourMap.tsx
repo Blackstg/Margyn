@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { ChevronLeft, CheckCircle2 } from 'lucide-react'
 import type mapboxgl from 'mapbox-gl'
+import { geoAddress } from '@/lib/delivery/geo'
 
 interface PanelItem {
   title: string
@@ -22,14 +23,6 @@ interface MapStop {
   sequence: number
   status: 'pending' | 'delivered' | 'failed' | 'partial'
   panel_details?: PanelItem[]
-}
-
-// Build the geocoding query. address2 often carries the actual street name when the
-// customer put only the house number in address1 (e.g. #10174 "4" + "Avenue Virginie"),
-// so it must be included or Mapbox mismatches to a wrong town.
-function fullAddress(s: { address1: string; address2?: string; city: string; zip: string }): string {
-  const line2 = s.address2?.trim() ? `${s.address2.trim()}, ` : ''
-  return `${s.address1}, ${line2}${s.city} ${s.zip}, France`
 }
 
 // Dépôt Bourges — Saint-Germain-du-Puy
@@ -110,6 +103,7 @@ export interface NearbyOrder {
   customer_name: string
   email: string
   address1: string
+  address2?: string
   city: string
   zip: string
   zone: string
@@ -168,7 +162,7 @@ export default function TourMap({ stops, onBack, precomputedCoords, onMarkDelive
       const geocoded: ([number, number] | null)[] = await Promise.all(
         sortedStops.map(async (s) => {
           if (precomputedCoords?.has(s.id)) return precomputedCoords.get(s.id)!
-          return geocodeAddress(fullAddress(s), token)
+          return geocodeAddress(geoAddress(s), token)
         })
       )
       if (cancelled) return
@@ -283,9 +277,7 @@ export default function TourMap({ stops, onBack, precomputedCoords, onMarkDelive
 
       await Promise.all(nearbyOrders.map(async (order) => {
         if (nearbyMarkerElsRef.current[order.order_name]) return // already placed
-        const coord = await geocodeAddress(
-          `${order.address1}, ${order.city} ${order.zip}, France`, token
-        )
+        const coord = await geocodeAddress(geoAddress(order), token)
         if (cancelled || !coord || !mapRef.current) return
 
         const el = makeNearbyMarkerEl()

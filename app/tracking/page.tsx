@@ -3,6 +3,7 @@
 import { useState, FormEvent } from 'react'
 import Image from 'next/image'
 import nextDynamic from 'next/dynamic'
+import { geoAddress } from '@/lib/delivery/geo'
 
 const TrackingMap = nextDynamic(() => import('@/components/delivery/TrackingMap'), { ssr: false })
 
@@ -117,9 +118,7 @@ export default function TrackingPage() {
     setError(null)
   }
 
-  const mapAddress = result?.address
-    ? [result.address.address1, result.address.city, result.address.zip, 'France'].filter(Boolean).join(', ')
-    : null
+  const mapAddress = result?.address ? geoAddress(result.address) : null
 
   return (
     <div className="min-h-screen flex flex-col" style={{ backgroundColor: '#f1ebe7' }}>

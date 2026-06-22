@@ -2,10 +2,12 @@
 
 import { useEffect, useRef } from 'react'
 import type mapboxgl from 'mapbox-gl'
+import { geoAddress } from '@/lib/delivery/geo'
 
 export interface SavStop {
   id: string
   address1: string
+  address2?: string
   city: string
   zip: string
   customer_name: string
@@ -107,7 +109,7 @@ export default function SavPositionMap({ stops, height = 320 }: Props) {
 
       // Geocode all stops in parallel
       const coords = await Promise.all(
-        stops.map(s => geocodeAddress(`${s.address1}, ${s.city} ${s.zip}, France`, token))
+        stops.map(s => geocodeAddress(geoAddress(s), token))
       )
       if (cancelled) return
 

@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react'
 import type mapboxgl from 'mapbox-gl'
+import { geoAddress } from '@/lib/delivery/geo'
 
 type Zone = 'nord-est' | 'nord-ouest' | 'sud-est' | 'sud-ouest'
 
@@ -16,6 +17,7 @@ export interface MapOrder {
   order_name: string
   customer_name: string
   address1: string
+  address2?: string | null
   city: string
   zip: string
   lat?: number | null
@@ -103,7 +105,7 @@ export default function OrdersMap({ orders, selectedOrders, onToggle, height = 4
               coordsCache.current.set(o.order_name, [o.lng, o.lat])
               return
             }
-            const coord = await geocodeAddress(`${o.address1}, ${o.city} ${o.zip}, France`, token)
+            const coord = await geocodeAddress(geoAddress(o), token)
             if (coord) coordsCache.current.set(o.order_name, coord)
           })
         )

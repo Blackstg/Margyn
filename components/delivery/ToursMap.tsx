@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react'
 import type mapboxgl from 'mapbox-gl'
+import { geoAddress } from '@/lib/delivery/geo'
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -10,6 +11,7 @@ export interface TourMapStop {
   order_name:    string
   customer_name: string
   address1:      string
+  address2?:     string
   city:          string
   zip:           string
   panel_count:   number
@@ -80,7 +82,7 @@ async function geocodeQuery(query: string, token: string): Promise<[number, numb
 
 // Tries: full address → zip + city → city alone → zip alone
 async function geocode(
-  stop: { address1: string; city: string; zip: string },
+  stop: { address1: string; address2?: string; city: string; zip: string },
   token: string
 ): Promise<[number, number] | null> {
   const city = stop.city?.trim() || ''
@@ -88,10 +90,10 @@ async function geocode(
   const addr = stop.address1?.trim() || ''
 
   const attempts = [
-    addr && city && zip ? `${addr}, ${city} ${zip}, France` : null,
-    city && zip         ? `${zip} ${city}, France`           : null,
-    city                ? `${city}, France`                  : null,
-    zip                 ? `${zip}, France`                   : null,
+    addr && city && zip ? geoAddress(stop)         : null,
+    city && zip         ? `${zip} ${city}, France` : null,
+    city                ? `${city}, France`        : null,
+    zip                 ? `${zip}, France`         : null,
   ].filter(Boolean) as string[]
 
   for (const q of attempts) {

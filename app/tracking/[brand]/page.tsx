@@ -3,6 +3,7 @@
 import { useState, FormEvent, useEffect } from 'react'
 import Image from 'next/image'
 import nextDynamic from 'next/dynamic'
+import { geoAddress } from '@/lib/delivery/geo'
 
 const TrackingMap = nextDynamic(() => import('@/components/delivery/TrackingMap'), { ssr: false })
 
@@ -810,7 +811,7 @@ export default function BrandTrackingPage({ params }: { params: { brand: string 
             {/* ── 5. MAP ── */}
             {settings?.show_address && result.address && (
               <div style={{ borderRadius: 16, overflow: 'hidden', height: 200 }}>
-                <TrackingMap address={[result.address.address1, result.address.zip, result.address.city, 'France'].filter(Boolean).join(', ')} />
+                <TrackingMap address={geoAddress(result.address)} />
               </div>
             )}
           </>
