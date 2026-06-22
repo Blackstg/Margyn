@@ -143,6 +143,7 @@ export default function LivreurOverviewMap({ plannedStops, unplannedOrders, heig
           const popup = new mgl.Popup({ offset: 12, closeButton: false }).setHTML(`
             <div style="font-size:12px;line-height:1.6">
               <div style="font-weight:700;color:#1a1a2e">${s.customer_name}</div>
+              <div style="font-family:ui-monospace,monospace;color:#888;font-size:11px">${s.order_name}</div>
               <div style="color:#6b6b63">${s.city}</div>
               <div style="color:${s.tour_color};font-weight:600;font-size:11px">${s.tour_name}</div>
               <div style="color:#1a1a2e;font-weight:600">${s.panel_count} panneau${s.panel_count !== 1 ? 'x' : ''}</div>
@@ -177,6 +178,7 @@ export default function LivreurOverviewMap({ plannedStops, unplannedOrders, heig
           const popup = new mgl.Popup({ offset: 12, closeButton: false }).setHTML(`
             <div style="font-size:12px;line-height:1.6">
               <div style="font-weight:700;color:#1a1a2e">${o.customer_name}</div>
+              <div style="font-family:ui-monospace,monospace;color:#888;font-size:11px">${o.order_name}</div>
               <div style="color:#6b6b63">${o.city}</div>
               <div style="color:#f59e0b;font-weight:600;font-size:11px">${o.is_preorder ? 'Précommande' : 'Non planifiée'}</div>
               <div style="color:#1a1a2e;font-weight:600">${o.panel_count} panneau${o.panel_count !== 1 ? 'x' : ''}</div>

@@ -240,6 +240,7 @@ export default function ToursMap({ tours, height = 480 }: Props) {
         const popup = new mgl.Popup({ offset: 14, closeButton: false, maxWidth: '220px' }).setHTML(`
           <div style="font-size:12px;line-height:1.6;font-family:system-ui,sans-serif">
             <div style="font-weight:700;color:#1a1a2e">${stop.customer_name || stop.order_name}</div>
+            <div style="font-family:ui-monospace,monospace;color:#888;font-size:11px">${stop.order_name}</div>
             <div style="color:#6b6b63">${stop.address1 ? stop.address1 + ', ' : ''}${stop.city} ${stop.zip}</div>
             <div style="margin-top:4px;display:flex;align-items:center;gap:6px">
               <span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:${color};flex-shrink:0"></span>

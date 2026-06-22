@@ -131,6 +131,7 @@ export default function OrdersMap({ orders, selectedOrders, onToggle, height = 4
               new mgl.Popup({ offset: 12, closeButton: false }).setHTML(
                 `<div style="font-size:13px;line-height:1.5">
                   <strong>${order.customer_name}</strong><br>
+                  <span style="font-family:ui-monospace,monospace;color:#888;font-size:11px">${order.order_name}</span><br>
                   <span style="color:#555">${order.city}</span><br>
                   <span style="color:#1a7f4b;font-weight:600">${order.panel_count} panneau${order.panel_count !== 1 ? 'x' : ''}</span>
                 </div>`
