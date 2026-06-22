@@ -15,6 +15,9 @@ function getAdmin() {
 // ─── Panel helpers (mirrors delivery/orders/route.ts) ─────────────────────────
 
 const isSample     = (t: string) => /échantillon|echantillon|sample/i.test(t)
+// Shopify gratuity line ("Tip"/"Pourboire") — not a physical good (e.g. #10229).
+const isTip        = (t: string) => /^\s*(tip|pourboire|gratuit[ée]|gratuity)\s*$/i.test(t)
+const isNonGoods   = (t: string) => isSample(t) || isTip(t)
 const isPanel      = (t: string) => /panneau/i.test(t)
 const isExtPanel   = (t: string) => /extpanel|ext[_\s-]?panel/i.test(t)
 const isAkupanel60 = (t: string) => /akupanel.{0,10}60/i.test(t)
@@ -80,9 +83,9 @@ export async function POST(
     if (!shopifyRes.ok) throw new Error(`Shopify ${shopifyRes.status}: ${await shopifyRes.text()}`)
     const { order } = await shopifyRes.json() as { order: ShopifyOrder }
 
-    // 3. Recompute panel_details (remaining unfulfilled, non-sample items)
+    // 3. Recompute panel_details (remaining unfulfilled, non-sample/non-tip items)
     const unfulfilled  = remainingLineItems(order)
-    const panelItems   = unfulfilled.filter((li) => !isSample(li.title))
+    const panelItems   = unfulfilled.filter((li) => !isNonGoods(li.title))
 
     // Fetch SKUs for variant IDs that have no inline SKU
     const variantIds = panelItems

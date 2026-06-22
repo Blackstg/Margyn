@@ -59,6 +59,11 @@ function isInternalOrder(tags: string, customerName: string, email: string): boo
 
 // ─── Line-item filters ────────────────────────────────────────────────────────
 const isSample = (title: string) => /échantillon|echantillon|sample/i.test(title)
+// Shopify gratuity line item ("Tip" / "Pourboire") — not a physical product, must
+// never appear in the loading list (e.g. order #10229).
+const isTip = (title: string) => /^\s*(tip|pourboire|gratuit[ée]|gratuity)\s*$/i.test(title)
+// Items that are not physical goods to load/deliver.
+const isNonGoods = (title: string) => isSample(title) || isTip(title)
 // Only actual advertising panels count toward the 100-slot tour capacity.
 // Colles, accessories and other consumables are in panel_details for the
 // loading list but must not inflate the panel_count.
@@ -313,7 +318,7 @@ export async function GET() {
 
       // Bug 2 fix: start from remaining (unshipped) Shopify line items
       const unfulfilled   = remainingLineItems(order)
-      const panelUnfulfilled = unfulfilled.filter((li) => !isSample(li.title))
+      const panelUnfulfilled = unfulfilled.filter((li) => !isNonGoods(li.title))
 
       // Bug 2 fix (Supabase): subtract quantities already delivered in Steero
       const deliveredByKey = deliveredQtyMap.get(order.name)
