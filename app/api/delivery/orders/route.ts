@@ -67,7 +67,10 @@ const isNonGoods = (title: string) => isSample(title) || isTip(title)
 // Only actual advertising panels count toward the 100-slot tour capacity.
 // Colles, accessories and other consumables are in panel_details for the
 // loading list but must not inflate the panel_count.
-const isPanel    = (title: string) => /panneau/i.test(title)
+// Stonepanel ("Stonepanel™ | Feuille de pierre") is a delivery panel too, but its
+// title says "Stonepanel" not "panneau" — match it explicitly so it counts toward
+// the tour capacity instead of being shipped via La Poste.
+const isPanel    = (title: string) => /panneau|stonepanel/i.test(title)
 // Exterior panels: packaged 4/box → ceil(qty/4) slots
 const isExtPanel = (title: string) => /extpanel|ext[_\s-]?panel/i.test(title)
 // Akupanel 60 (60×60 cm): 2 panels = 1 slot → ceil(qty/2) slots

@@ -18,7 +18,8 @@ const isSample     = (t: string) => /échantillon|echantillon|sample/i.test(t)
 // Shopify gratuity line ("Tip"/"Pourboire") — not a physical good (e.g. #10229).
 const isTip        = (t: string) => /^\s*(tip|pourboire|gratuit[ée]|gratuity)\s*$/i.test(t)
 const isNonGoods   = (t: string) => isSample(t) || isTip(t)
-const isPanel      = (t: string) => /panneau/i.test(t)
+// Stonepanel is a delivery panel too (title says "Stonepanel", not "panneau").
+const isPanel      = (t: string) => /panneau|stonepanel/i.test(t)
 const isExtPanel   = (t: string) => /extpanel|ext[_\s-]?panel/i.test(t)
 const isAkupanel60 = (t: string) => /akupanel.{0,10}60/i.test(t)
 const panelSlots   = (t: string, qty: number) => {
