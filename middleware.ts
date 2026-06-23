@@ -117,13 +117,15 @@ export async function middleware(req: NextRequest) {
     return response
   }
 
-  // ── Role: sav → support pages + billing (checked before brand access) ─────
+  // ── Role: sav → support pages + billing, scoped to the user's brands ──────
+  // Falls through to the brand-access + brand-lock checks below, so a SAV user
+  // only reaches a brand-locked page (e.g. Krom SAV) if they actually have that
+  // brand — no cross-brand access via direct URL.
   if (role === 'sav') {
     const allowed = ['billing', 'sav', 'sav-krom', 'sav-defects', 'delivery']
     if (!allowed.includes(pageSeg)) {
-      return NextResponse.redirect(new URL(`/moom/sav`, req.url))
+      return NextResponse.redirect(new URL(`/${defaultBrand}/billing`, req.url))
     }
-    return response
   }
 
   // ── Check user has access to this brand ───────────────────────────────────
