@@ -1,22 +1,19 @@
 import { createServerClient } from '@supabase/auth-helpers-nextjs'
 import { NextResponse } from 'next/server'
 import type { NextRequest } from 'next/server'
+import {
+  BRANDS, BRAND_LOCK as BRAND_LOCKED, FEATURES,
+  effectiveFeatures, effectiveBrands, homePath, isAdminRole,
+  type Brand, type FeatureKey,
+} from '@/lib/access'
 
-const VALID_BRANDS = ['bowa', 'moom', 'krom'] as const
-type Brand = typeof VALID_BRANDS[number]
+const VALID_BRANDS = BRANDS
 
-// Pages that only belong to one specific brand
-const BRAND_LOCKED: Record<string, Brand> = {
-  delivery:   'bowa',
-  invoices:   'moom',
-  stock:      'moom',
-  products:   'moom',
-  sav:        'moom',
-  'sav-krom': 'krom',
-}
-
-// All pages that live under /[brand]/
-const ALL_BRAND_PAGES = ['dashboard', 'campaigns', 'creatives', 'settings', 'reorder', 'billing', ...Object.keys(BRAND_LOCKED)]
+// All pages that live under /[brand]/ (features + the admin-only pages)
+const ALL_BRAND_PAGES = [
+  'settings', 'users',
+  ...FEATURES.map(f => f.key),
+]
 
 export async function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl
@@ -109,7 +106,7 @@ export async function middleware(req: NextRequest) {
 
   const pageSeg = pathname.split('/')[2] ?? ''
 
-  // ── Role: delivery → only /bowa/delivery (checked before brand access) ────
+  // ── Role: delivery → only /bowa/delivery (full-screen driver app) ─────────
   if (role === 'delivery') {
     if (urlBrand !== 'bowa' || pageSeg !== 'delivery') {
       return NextResponse.redirect(new URL(`/bowa/delivery`, req.url))
@@ -117,29 +114,27 @@ export async function middleware(req: NextRequest) {
     return response
   }
 
-  // ── Role: sav → support pages + billing, scoped to the user's brands ──────
-  // Falls through to the brand-access + brand-lock checks below, so a SAV user
-  // only reaches a brand-locked page (e.g. Krom SAV) if they actually have that
-  // brand — no cross-brand access via direct URL.
-  if (role === 'sav') {
-    const allowed = ['billing', 'sav', 'sav-krom', 'sav-defects', 'delivery']
-    if (!allowed.includes(pageSeg)) {
-      return NextResponse.redirect(new URL(`/${defaultBrand}/billing`, req.url))
-    }
+  const feats      = effectiveFeatures(role, user.user_metadata?.features as string[] | undefined)
+  const userBrands = effectiveBrands(role, brands)
+
+  // ── Feature gate: restricted roles only reach their allowed sections ──────
+  // (settings & users are admin-only → never present in a feature list)
+  if (feats !== 'all' && !feats.includes(pageSeg as FeatureKey)) {
+    return NextResponse.redirect(new URL(homePath(feats, userBrands, defaultBrand), req.url))
   }
 
-  // ── Check user has access to this brand ───────────────────────────────────
-  if (brands && !brands.includes(urlBrand)) {
-    return NextResponse.redirect(new URL(`/${defaultBrand}/dashboard`, req.url))
+  // ── Brand access: the URL brand must be one the user has (admins = all) ───
+  if (!isAdminRole(role) && !userBrands.includes(urlBrand)) {
+    return NextResponse.redirect(new URL(homePath(feats, userBrands, defaultBrand), req.url))
   }
 
-  // ── Brand-locked page on wrong brand → redirect to correct brand ──────────
+  // ── Brand-locked page on wrong brand → redirect to the correct brand ──────
   if (pageSeg && BRAND_LOCKED[pageSeg] && BRAND_LOCKED[pageSeg] !== urlBrand) {
     const correctBrand = BRAND_LOCKED[pageSeg]
-    if (!brands || brands.includes(correctBrand)) {
+    if (isAdminRole(role) || userBrands.includes(correctBrand)) {
       return NextResponse.redirect(new URL(`/${correctBrand}/${pageSeg}`, req.url))
     }
-    return NextResponse.redirect(new URL(`/${defaultBrand}/dashboard`, req.url))
+    return NextResponse.redirect(new URL(homePath(feats, userBrands, defaultBrand), req.url))
   }
 
   return response

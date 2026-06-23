@@ -4,11 +4,12 @@ import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
 import {
   LayoutDashboard, BarChart2, PackageOpen, Settings, LogOut,
-  Boxes, FileText, Tag, Truck, Headphones, ChevronLeft, ChevronRight, Sparkles, Receipt, PackageX,
+  Boxes, FileText, Tag, Truck, Headphones, ChevronLeft, ChevronRight, Sparkles, Receipt, PackageX, Users,
 } from 'lucide-react'
 import { createBrowserClient } from '@supabase/auth-helpers-nextjs'
 import { useState, useEffect } from 'react'
 import DataFreshness from './DataFreshness'
+import { effectiveFeatures, effectiveBrands, isAdminRole } from '@/lib/access'
 
 // ─── Brand config ─────────────────────────────────────────────────────────────
 
@@ -64,15 +65,13 @@ const NAV_SECTIONS: { label: string; items: NavItem[] }[] = [
       { key: 'sav-krom',    icon: Headphones, label: 'SAV Krom', brandLock: 'krom' },
     ],
   },
+  {
+    label: 'Admin',
+    items: [
+      { key: 'users', icon: Users, label: 'Accès', brandLock: null },
+    ],
+  },
 ]
-
-// Nav keys each restricted role may see. Admins (any other role) see everything.
-// Items are then further filtered by the current brand (brandLock) like for admins,
-// so a SAV user browsing Bowa sees Bowa items only, and Moom items only on Moom.
-const ROLE_KEYS: Record<string, string[]> = {
-  delivery: ['delivery'],
-  sav:      ['billing', 'delivery', 'sav', 'sav-defects', 'sav-krom'],
-}
 
 // Pages the brand-selector can jump to when switching brands
 const BRAND_PAGES: Record<string, string[]> = {
@@ -99,7 +98,8 @@ export default function Sidebar({ isOpen, collapsed, onToggleCollapse }: Sidebar
   )
 
   const [pendingCount, setPendingCount]   = useState(0)
-  const [allowedBrands, setAllowedBrands] = useState<string[] | null>(null)
+  const [metaBrands, setMetaBrands]       = useState<string[] | null>(null)
+  const [metaFeatures, setMetaFeatures]   = useState<string[] | null>(null)
   const [role, setRole] = useState<string | null>(() => {
     if (typeof window !== 'undefined') return localStorage.getItem('bowa_role')
     return null
@@ -129,9 +129,8 @@ export default function Sidebar({ isOpen, collapsed, onToggleCollapse }: Sidebar
       const r = (meta?.role as string | undefined) ?? 'admin'
       setRole(r)
       localStorage.setItem('bowa_role', r)
-    })
-    supabase.from('user_brands').select('brand').then(({ data }) => {
-      if (data) setAllowedBrands(data.map((r: { brand: string }) => r.brand))
+      setMetaBrands(Array.isArray(meta?.brands) ? (meta!.brands as string[]) : null)
+      setMetaFeatures(Array.isArray(meta?.features) ? (meta!.features as string[]) : null)
     })
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
@@ -153,9 +152,11 @@ export default function Sidebar({ isOpen, collapsed, onToggleCollapse }: Sidebar
 
   if (!isOpen) return null
 
-  const isAdmin          = role !== 'delivery' && role !== 'sav'
-  // Brand selector shows for anyone with access to more than one brand (incl. SAV)
-  const showBrandSelector = !!allowedBrands && allowedBrands.length > 1
+  const isAdmin          = isAdminRole(role)
+  const allowedBrands    = effectiveBrands(role, metaBrands)  // admins → all brands
+  const feats            = effectiveFeatures(role, metaFeatures)  // 'all' for admins
+  // Brand selector shows for anyone with access to more than one brand (incl. staff)
+  const showBrandSelector = allowedBrands.length > 1
   const settingsHref     = `/${currentBrand ?? 'bowa'}/settings`
 
   const w = collapsed ? 'w-[72px]' : 'w-[240px]'
@@ -182,7 +183,7 @@ export default function Sidebar({ isOpen, collapsed, onToggleCollapse }: Sidebar
         <div className={`mx-3 mb-4 ${collapsed ? 'mx-2' : ''}`}>
           {collapsed ? (
             <div className="flex flex-col items-center gap-1.5">
-              {allowedBrands!.map(b => (
+              {allowedBrands.map(b => (
                 <button key={b} onClick={() => selectBrand(b)} className="group relative">
                   <div className={`w-9 h-9 rounded-xl overflow-hidden ring-2 transition-all ${
                     currentBrand === b ? 'ring-[#aeb0c9] opacity-100' : 'ring-transparent opacity-30 hover:opacity-60'
@@ -201,7 +202,7 @@ export default function Sidebar({ isOpen, collapsed, onToggleCollapse }: Sidebar
           ) : (
             <div className="space-y-1">
               <p className="text-[10px] font-semibold uppercase tracking-widest text-white/25 px-2 mb-2">Marque</p>
-              {allowedBrands!.map(b => (
+              {allowedBrands.map(b => (
                 <button
                   key={b}
                   onClick={() => selectBrand(b)}
@@ -236,10 +237,11 @@ export default function Sidebar({ isOpen, collapsed, onToggleCollapse }: Sidebar
       {/* ── Nav ──────────────────────────────────────────────────────────── */}
       <nav className="flex-1 overflow-y-auto px-3 space-y-5 pb-4">
         {role === null ? null : NAV_SECTIONS.map(section => {
-          const allowedKeys = ROLE_KEYS[role]  // undefined → admin → all keys
           const items = section.items.filter(({ key, brandLock }) => {
-            // Role gate: restricted roles only see their allowed keys
-            if (allowedKeys && !allowedKeys.includes(key)) return false
+            // 'users' (Accès) is admin-only
+            if (key === 'users') return isAdmin
+            // Feature gate: restricted roles only see their allowed features
+            if (feats !== 'all' && !(feats as string[]).includes(key)) return false
             // Shared pages: always visible
             if (brandLock === null) return true
             // Brand-locked: only visible when currently ON that brand
