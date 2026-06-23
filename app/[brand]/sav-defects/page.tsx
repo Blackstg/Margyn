@@ -49,30 +49,30 @@ interface Variant { shopify_variant_id: string; product_title: string; variant_t
 
 // ─── Jalons & types ──────────────────────────────────────────────────────────
 
-// Jalons cumulables (un dossier peut en avoir plusieurs). Clé → libellé.
+// Cumulative milestones (a case can have several). Key → label.
 const MILESTONES_BY_TYPE: Record<string, { key: string; label: string }[]> = {
   defaut_fournisseur: [
-    { key: 'reclamation_envoyee', label: 'Réclamation envoyée' },
-    { key: 'repro_confirmee',     label: 'Repro confirmée' },
-    { key: 'reexpedie',           label: 'Réexpédié' },
-    { key: 'recu',                label: 'Reçu' },
+    { key: 'reclamation_envoyee', label: 'Claim sent' },
+    { key: 'repro_confirmee',     label: 'Defect confirmed' },
+    { key: 'reexpedie',           label: 'Reshipped' },
+    { key: 'recu',                label: 'Received' },
   ],
   erreur_envoi: [
-    { key: 'etiquette_envoyee', label: 'Étiquette retour' },
-    { key: 'retour_recu',       label: 'Retour reçu' },
-    { key: 'reexpedie',         label: 'Réexpédié' },
-    { key: 'recu',              label: 'Reçu' },
+    { key: 'etiquette_envoyee', label: 'Return label' },
+    { key: 'retour_recu',       label: 'Return received' },
+    { key: 'reexpedie',         label: 'Reshipped' },
+    { key: 'recu',              label: 'Received' },
   ],
 }
-const VALIDATORS = ['Hao', 'Lily', 'Forrest', 'Autre'] as const
+const VALIDATORS = ['Hao', 'Lily', 'Forrest', 'Other'] as const
 
 const ALL_STEP_LABELS: Record<string, string> = {
-  reclamation_envoyee: 'Réclamation envoyée', repro_confirmee: 'Repro confirmée',
-  etiquette_envoyee: 'Étiquette retour', retour_recu: 'Retour reçu',
-  reexpedie: 'Réexpédié', recu: 'Reçu', clos: 'Clos', litige: 'Litige',
+  reclamation_envoyee: 'Claim sent', repro_confirmee: 'Defect confirmed',
+  etiquette_envoyee: 'Return label', retour_recu: 'Return received',
+  reexpedie: 'Reshipped', recu: 'Received', clos: 'Closed', litige: 'Dispute',
 }
 
-const TYPE_LABEL: Record<string, string> = { defaut_fournisseur: 'Défaut', erreur_envoi: 'Erreur envoi' }
+const TYPE_LABEL: Record<string, string> = { defaut_fournisseur: 'Defect', erreur_envoi: 'Shipping error' }
 const TYPE_COLOR: Record<string, [string, string]> = {
   defaut_fournisseur: ['#fffbeb', '#92650a'],
   erreur_envoi:       ['#eef6ff', '#1d4ed8'],
@@ -81,11 +81,11 @@ const TYPE_COLOR: Record<string, [string, string]> = {
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 const fmtEur = (n: number) =>
-  new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR', maximumFractionDigits: 0 }).format(n)
+  new Intl.NumberFormat('en-GB', { style: 'currency', currency: 'EUR', maximumFractionDigits: 0 }).format(n)
 
 function fmtDate(s: string | null): string {
   if (!s) return '—'
-  return new Date(s + 'T00:00:00').toLocaleDateString('fr-FR', { day: '2-digit', month: 'short' })
+  return new Date(s + 'T00:00:00').toLocaleDateString('en-GB', { day: '2-digit', month: 'short' })
 }
 
 function daysSince(s: string | null): number | null {
@@ -98,7 +98,7 @@ function monthOptions(): { value: string; label: string }[] {
   const d = new Date()
   for (let i = 0; i < 12; i++) {
     const ym = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
-    opts.push({ value: ym, label: d.toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' }) })
+    opts.push({ value: ym, label: d.toLocaleDateString('en-GB', { month: 'long', year: 'numeric' }) })
     d.setMonth(d.getMonth() - 1)
   }
   return opts
@@ -112,30 +112,30 @@ function variantLabel(v: Variant): string {
 function milestonesSummary(m: Record<string, string> | null): string {
   if (!m) return '—'
   const keys = Object.keys(m)
-  if (!keys.length) return 'Signalé'
+  if (!keys.length) return 'Reported'
   return keys.map(k => `${ALL_STEP_LABELS[k] ?? k} (${fmtDate(m[k])})`).join(', ')
 }
 
 const esc = (s: unknown) => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]!))
 
-// Construit une vue imprimable (1 ligne / dossier) et lance l'impression → "Enregistrer en PDF"
+// Builds a printable view (1 row / case) and triggers print → "Save as PDF"
 function exportPdf(groups: [string, Claim[]][], monthLabel: string) {
   const rows = groups.map(([batch, list]) => {
-    const head = `<tr><td colspan="8" class="lot">Lot : ${esc(batch)} — ${list.length} dossier(s)</td></tr>`
+    const head = `<tr><td colspan="8" class="lot">Batch: ${esc(batch)} — ${list.length} case(s)</td></tr>`
     const body = list.map(c => `<tr>
       <td>${esc(TYPE_LABEL[c.claim_type] ?? c.claim_type)}</td>
       <td>${esc(c.shopify_order_id ?? '—')}<br><span class="muted">${esc(fmtDate(c.reported_at))}</span></td>
       <td>${c.product_image_url ? `<img src="${esc(c.product_image_url)}">` : ''}</td>
-      <td><b>${esc(c.sku ?? '—')}</b> ×${c.quantity}<br>${esc(c.product_name ?? '')}${c.claim_type === 'erreur_envoi' ? `<br><span class="red">reçu : ${esc(c.received_product_name ?? c.received_sku ?? '—')}</span>` : ''}${c.defect_description ? `<br><span class="muted">${esc(c.defect_description)}</span>` : ''}</td>
-      <td>${esc(milestonesSummary(c.milestones))}${c.validated_by ? `<br><span class="muted">validé : ${esc(c.validated_by)}</span>` : ''}</td>
-      <td>${esc(c.reship_tracking_ref ?? '—')}${c.return_tracking_ref ? `<br>ret. ${esc(c.return_tracking_ref)}` : ''}</td>
+      <td><b>${esc(c.sku ?? '—')}</b> ×${c.quantity}<br>${esc(c.product_name ?? '')}${c.claim_type === 'erreur_envoi' ? `<br><span class="red">received: ${esc(c.received_product_name ?? c.received_sku ?? '—')}</span>` : ''}${c.defect_description ? `<br><span class="muted">${esc(c.defect_description)}</span>` : ''}</td>
+      <td>${esc(milestonesSummary(c.milestones))}${c.validated_by ? `<br><span class="muted">validated: ${esc(c.validated_by)}</span>` : ''}</td>
+      <td>${esc(c.reship_tracking_ref ?? '—')}${c.return_tracking_ref ? `<br>return ${esc(c.return_tracking_ref)}` : ''}</td>
       <td>${c.charged_amount > 0 ? esc(fmtEur(c.charged_amount)) : '—'}</td>
       <td>${c.photo_url ? `<img src="${esc(c.photo_url)}">` : ''}</td>
     </tr>`).join('')
     return head + body
   }).join('')
 
-  const html = `<!doctype html><html><head><meta charset="utf-8"><title>SAV Mōom — ${esc(monthLabel)}</title>
+  const html = `<!doctype html><html><head><meta charset="utf-8"><title>After-sales Mōom — ${esc(monthLabel)}</title>
   <style>
     *{font-family:-apple-system,Segoe UI,Roboto,sans-serif;box-sizing:border-box}
     body{margin:24px;color:#1a1a18}
@@ -148,16 +148,16 @@ function exportPdf(groups: [string, Claim[]][], monthLabel: string) {
     .muted{color:#9b9b93} .red{color:#c7293a} .muted,.red{font-size:10px}
     @media print{body{margin:12mm}}
   </style></head><body>
-  <h1>SAV / Défauts &amp; erreurs d'envoi — Mōom</h1>
-  <p class="sub">Export du ${esc(fmtDate(new Date().toISOString().slice(0, 10)))} · période ${esc(monthLabel)}</p>
+  <h1>After-sales / Defects &amp; shipping errors — Mōom</h1>
+  <p class="sub">Exported on ${esc(fmtDate(new Date().toISOString().slice(0, 10)))} · period ${esc(monthLabel)}</p>
   <table><thead><tr>
-    <th>Type</th><th>Commande</th><th>Img</th><th>Article</th><th>Jalons</th><th>Suivi</th><th>Facturé</th><th>Photo</th>
+    <th>Type</th><th>Order</th><th>Img</th><th>Item</th><th>Milestones</th><th>Tracking</th><th>Billed</th><th>Photo</th>
   </tr></thead><tbody>${rows}</tbody></table>
   <script>window.onload=function(){setTimeout(function(){window.print()},300)}</script>
   </body></html>`
 
   const win = window.open('', '_blank')
-  if (!win) { alert('Autorisez les pop-ups pour exporter le PDF.'); return }
+  if (!win) { alert('Please allow pop-ups to export the PDF.'); return }
   win.document.write(html)
   win.document.close()
 }
@@ -211,15 +211,15 @@ export default function SavDefectsPage() {
   }
 
   async function deleteClaim(c: Claim) {
-    const label = c.product_name || c.sku || c.shopify_order_id || 'ce dossier'
-    if (!confirm(`Supprimer définitivement ${label} ?`)) return
+    const label = c.product_name || c.sku || c.shopify_order_id || 'this case'
+    if (!confirm(`Permanently delete ${label}?`)) return
     setClaims(cs => cs.filter(x => x.id !== c.id))
     await fetch(`/api/sav-defects?id=${c.id}`, { method: 'DELETE' })
     loadStats()
   }
 
   async function closeBatch(batch: string, n: number) {
-    if (!confirm(`Clôturer le lot « ${batch} » ? Les ${n} dossier(s) passeront en Clos.`)) return
+    if (!confirm(`Close batch "${batch}"? The ${n} case(s) will be marked Closed.`)) return
     await fetch('/api/sav-defects/close-batch', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ brand: BRAND, batch }),
@@ -253,7 +253,7 @@ export default function SavDefectsPage() {
         <div className="flex items-start justify-between gap-4">
           <div>
             <p className="text-[10px] font-semibold uppercase tracking-[0.1em] text-[#aeb0c9] mb-1">Mōom</p>
-            <h1 className="text-xl font-bold text-[#1a1a2e]">SAV / Défauts &amp; erreurs d&apos;envoi</h1>
+            <h1 className="text-xl font-bold text-[#1a1a2e]">After-sales / Defects &amp; shipping errors</h1>
           </div>
           <div className="flex items-center gap-2">
             <select
@@ -268,30 +268,30 @@ export default function SavDefectsPage() {
               disabled={visible.length === 0}
               className="flex items-center gap-2 px-3 py-2 rounded-xl bg-white border border-[#e8e8e4] text-[#1a1a2e] text-xs font-semibold hover:bg-[#f8f8f7] disabled:opacity-40 transition-colors"
             >
-              <Printer size={14} /> Exporter PDF
+              <Printer size={14} /> Export PDF
             </button>
             <button
               onClick={() => setShowForm(true)}
               className="flex items-center gap-2 px-4 py-2 rounded-xl bg-[#1a1a2e] text-white text-xs font-semibold hover:bg-[#2a2a3e] transition-colors"
             >
-              <Plus size={14} /> Nouveau dossier
+              <Plus size={14} /> New case
             </button>
           </div>
         </div>
 
         {/* 3 cartes */}
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-          <Card title="En attente de réception" icon={<Clock size={14} className="text-[#aeb0c9]" />}
+          <Card title="Awaiting receipt" icon={<Clock size={14} className="text-[#aeb0c9]" />}
             value={stats ? String(stats.awaiting.count) : '—'}
-            sub={stats && stats.awaiting.count > 0 ? `plus ancien : ${stats.awaiting.oldest_days} j` : 'aucun dossier ouvert'} />
-          <Card title="Envois SAV facturés à tort" icon={<AlertTriangle size={14} className="text-[#c7293a]" />}
+            sub={stats && stats.awaiting.count > 0 ? `oldest: ${stats.awaiting.oldest_days} d` : 'no open case'} />
+          <Card title="After-sales shipments wrongly billed" icon={<AlertTriangle size={14} className="text-[#c7293a]" />}
             value={stats ? fmtEur(stats.wronglyBilled.total_amount) : '—'}
-            sub={stats ? `${stats.wronglyBilled.lines.length} ligne(s) à contester` : ''}
+            sub={stats ? `${stats.wronglyBilled.lines.length} line(s) to dispute` : ''}
             danger={!!stats && stats.wronglyBilled.total_amount > 0} />
           <div className="bg-white rounded-[20px] shadow-[0_2px_16px_rgba(0,0,0,0.06)] p-5">
             <div className="flex items-center gap-1.5 mb-3">
               <PackageX size={14} className="text-[#aeb0c9]" />
-              <p className="text-[10px] font-semibold text-[#6b6b63] uppercase tracking-[0.1em]">Taux de défaut par SKU</p>
+              <p className="text-[10px] font-semibold text-[#6b6b63] uppercase tracking-[0.1em]">Defect rate by SKU</p>
             </div>
             {stats && stats.topSkus.length > 0 ? (
               <div className="space-y-1.5">
@@ -302,16 +302,16 @@ export default function SavDefectsPage() {
                   </div>
                 ))}
               </div>
-            ) : <p className="text-xs text-[#9b9b93]">Aucun défaut ce mois.</p>}
+            ) : <p className="text-xs text-[#9b9b93]">No defects this month.</p>}
           </div>
         </div>
 
         {/* Table */}
         <div className="bg-white rounded-[20px] shadow-[0_2px_16px_rgba(0,0,0,0.06)] overflow-hidden">
           <div className="flex items-center justify-between px-6 py-4 border-b border-[#f0f0ee]">
-            <p className="text-[10px] font-semibold text-[#6b6b63] uppercase tracking-[0.1em]">Dossiers ({visible.length})</p>
+            <p className="text-[10px] font-semibold text-[#6b6b63] uppercase tracking-[0.1em]">Cases ({visible.length})</p>
             <div className="inline-flex items-center bg-[#F8F8F7] rounded-lg p-0.5 gap-0.5">
-              {([['all', 'Tous'], ['defaut_fournisseur', 'Défauts'], ['erreur_envoi', 'Erreurs envoi']] as const).map(([k, lbl]) => (
+              {([['all', 'All'], ['defaut_fournisseur', 'Defects'], ['erreur_envoi', 'Shipping errors']] as const).map(([k, lbl]) => (
                 <button key={k} onClick={() => setTypeFilter(k)}
                   className={`px-3 py-1.5 rounded-md text-xs font-medium transition-all ${typeFilter === k ? 'bg-white text-[#1a1a18] shadow-sm' : 'text-[#6b6b63] hover:text-[#1a1a18]'}`}>
                   {lbl}
@@ -320,9 +320,9 @@ export default function SavDefectsPage() {
             </div>
           </div>
           {loading ? (
-            <div className="p-10 text-center text-sm text-[#9b9b93]">Chargement…</div>
+            <div className="p-10 text-center text-sm text-[#9b9b93]">Loading…</div>
           ) : visible.length === 0 ? (
-            <div className="p-10 text-center text-sm text-[#9b9b93]">Aucun dossier. Cliquez sur « Nouveau dossier ».</div>
+            <div className="p-10 text-center text-sm text-[#9b9b93]">No cases. Click "New case".</div>
           ) : (
             <div>
               {groups.map(([batch, list]) => {
@@ -333,12 +333,12 @@ export default function SavDefectsPage() {
                     {/* En-tête de lot */}
                     <div className="flex items-center gap-2 px-6 py-2.5 bg-[#fafafa] border-b border-[#f0f0ee]">
                       <Layers size={13} className="text-[#aeb0c9]" />
-                      <span className="text-xs font-semibold text-[#1a1a2e]">{hasBatch ? `Lot ${batch}` : 'Sans lot'}</span>
-                      <span className="text-[10px] text-[#9b9b93]">· {list.length} dossier(s){openCount > 0 ? ` · ${openCount} en attente` : ' · tous traités ✓'}</span>
+                      <span className="text-xs font-semibold text-[#1a1a2e]">{hasBatch ? `Batch ${batch}` : 'No batch'}</span>
+                      <span className="text-[10px] text-[#9b9b93]">· {list.length} case(s){openCount > 0 ? ` · ${openCount} pending` : ' · all handled ✓'}</span>
                       {hasBatch && openCount > 0 && (
                         <button onClick={() => closeBatch(batch, openCount)}
                           className="ml-auto inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-[11px] font-semibold text-[#1a7f4b] hover:bg-[#1a7f4b]/10 transition-colors">
-                          <CheckCircle2 size={12} /> Clôturer le lot
+                          <CheckCircle2 size={12} /> Close batch
                         </button>
                       )}
                     </div>
@@ -362,9 +362,9 @@ export default function SavDefectsPage() {
                                 <img src={c.product_image_url} alt="" className="w-12 h-12 rounded-lg object-cover border border-[#e8e8e4]" />
                               ) : <div className="w-12 h-12 rounded-lg bg-[#f5f5f3]" />}
                               {c.photo_url && (
-                                <button onClick={() => setLightbox(c.photo_url)} title="Photo du défaut — cliquer pour agrandir"
+                                <button onClick={() => setLightbox(c.photo_url)} title="Defect photo — click to enlarge"
                                   className="relative group w-12 h-12 rounded-lg overflow-hidden border-2 border-[#c7293a]/30">
-                                  <img src={c.photo_url} alt="défaut" className="w-full h-full object-cover" />
+                                  <img src={c.photo_url} alt="defect" className="w-full h-full object-cover" />
                                   <span className="absolute inset-0 bg-black/0 group-hover:bg-black/30 flex items-center justify-center transition-colors">
                                     <Maximize2 size={13} className="text-white opacity-0 group-hover:opacity-100" />
                                   </span>
@@ -389,18 +389,18 @@ export default function SavDefectsPage() {
                                 <div className="ml-auto flex items-center gap-1.5">
                                   {c.charged_amount > 0 && <span className="text-xs tabular-nums text-[#6b6b63]">{fmtEur(c.charged_amount)}</span>}
                                   {billedClaimIds.has(c.id) && (
-                                    <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-[#c7293a]"><AlertTriangle size={10} /> facturé</span>
+                                    <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-[#c7293a]"><AlertTriangle size={10} /> billed</span>
                                   )}
                                   <div className={`inline-flex items-center gap-1 rounded-md pl-1.5 pr-0.5 py-0.5 ${c.validated_by ? 'bg-[#f0faf5]' : 'bg-[#f5f5f3]'}`}>
                                     {c.validated_by && <CheckCircle2 size={12} className="text-[#1a7f4b]" />}
                                     <select value={c.validated_by ?? ''} onChange={e => patchClaim(c.id, { validated_by: e.target.value || null })}
-                                      title="Validé par (reproduction + réexpédition)"
+                                      title="Validated by (reproduction + reshipment)"
                                       className={`bg-transparent text-[11px] font-medium border-0 outline-none cursor-pointer ${c.validated_by ? 'text-[#1a7f4b]' : 'text-[#9b9b93]'}`}>
-                                      <option value="">Validé par…</option>
+                                      <option value="">Validated by…</option>
                                       {VALIDATORS.map(n => <option key={n} value={n}>{n}</option>)}
                                     </select>
                                   </div>
-                                  <button onClick={() => deleteClaim(c)} title="Supprimer le dossier"
+                                  <button onClick={() => deleteClaim(c)} title="Delete case"
                                     className="text-[#cfcfc8] hover:text-[#c7293a] transition-colors"><Trash2 size={14} /></button>
                                 </div>
                               </div>
@@ -410,13 +410,13 @@ export default function SavDefectsPage() {
                                 <span className="font-semibold text-[#1a1a18]">{c.sku ?? '—'}</span>
                                 <span className="text-[#9b9b93]"> ·×{c.quantity}</span>
                                 {c.product_name && <span className="text-[#6b6b63]"> — {c.product_name}</span>}
-                                {isErr && <span className="text-[#c7293a]"> · reçu à tort : {c.received_product_name ?? c.received_sku ?? '—'}</span>}
+                                {isErr && <span className="text-[#c7293a]"> · wrongly received: {c.received_product_name ?? c.received_sku ?? '—'}</span>}
                               </div>
                               {(c.defect_description || c.supplier_claim_ref) && (
                                 <div className="text-[11px] text-[#9b9b93] mt-0.5 truncate">
-                                  {c.defect_description && <span className="italic">« {c.defect_description} »</span>}
+                                  {c.defect_description && <span className="italic">“{c.defect_description}”</span>}
                                   {c.defect_description && c.supplier_claim_ref && <span> · </span>}
-                                  {c.supplier_claim_ref && <span>Réf. récl. {c.supplier_claim_ref}</span>}
+                                  {c.supplier_claim_ref && <span>Claim ref. {c.supplier_claim_ref}</span>}
                                 </div>
                               )}
 
@@ -435,7 +435,7 @@ export default function SavDefectsPage() {
                                       <Check size={11} /> {step.label}
                                       <input type="date" value={date} onChange={e => setMilestone(c, step.key, e.target.value || today)}
                                         className="bg-transparent text-[10px] w-[78px] outline-none cursor-pointer text-[#1a7f4b]" />
-                                      <button onClick={() => setMilestone(c, step.key, null)} className="hover:text-[#c7293a]" title="Annuler ce jalon"><X size={11} /></button>
+                                      <button onClick={() => setMilestone(c, step.key, null)} className="hover:text-[#c7293a]" title="Remove milestone"><X size={11} /></button>
                                     </span>
                                   ) : (
                                     <button key={step.key} onClick={() => setMilestone(c, step.key, today)}
@@ -449,14 +449,14 @@ export default function SavDefectsPage() {
 
                                 <InlineField icon={<Truck size={12} className="text-[#aeb0c9]" />} label="Tracking" compact
                                   value={c.reship_tracking_ref} onSave={v => patchClaim(c.id, { reship_tracking_ref: v })} />
-                                <InlineField icon={<RotateCcw size={12} className="text-[#aeb0c9]" />} label="Retour" compact
+                                <InlineField icon={<RotateCcw size={12} className="text-[#aeb0c9]" />} label="Return" compact
                                   value={c.return_tracking_ref} onSave={v => patchClaim(c.id, { return_tracking_ref: v })} />
                                 {c.return_label_url && (
                                   <a href={c.return_label_url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-[11px] text-[#4f46e5] hover:underline">
-                                    <FileText size={11} /> étiquette
+                                    <FileText size={11} /> label
                                   </a>
                                 )}
-                                <InlineField icon={<Layers size={12} className="text-[#aeb0c9]" />} label="Lot" compact
+                                <InlineField icon={<Layers size={12} className="text-[#aeb0c9]" />} label="Batch" compact
                                   value={c.production_batch} onSave={v => patchClaim(c.id, { production_batch: v })} />
                               </div>
                             </div>
@@ -476,7 +476,7 @@ export default function SavDefectsPage() {
 
       {lightbox && (
         <div className="fixed inset-0 z-[60] bg-black/80 flex items-center justify-center p-6" onClick={() => setLightbox(null)}>
-          <img src={lightbox} alt="défaut" className="max-w-full max-h-full rounded-lg shadow-2xl" />
+          <img src={lightbox} alt="defect" className="max-w-full max-h-full rounded-lg shadow-2xl" />
           <button className="absolute top-4 right-4 text-white/70 hover:text-white"><X size={28} /></button>
         </div>
       )}
@@ -577,10 +577,10 @@ function NewClaimForm({ brand, onClose, onCreated }: { brand: string; onClose: (
 
   async function submit() {
     if (type === 'erreur_envoi' && (!form.shopify_order_id || !form.received_sku)) {
-      setError('Renseignez la commande et l\'article reçu à tort.'); return
+      setError('Please fill in the order and the wrongly received item.'); return
     }
     if (type === 'defaut_fournisseur' && !form.sku.trim() && !form.defect_description.trim()) {
-      setError('Renseignez au moins un SKU ou une description.'); return
+      setError('Please provide at least a SKU or a description.'); return
     }
     setSaving(true); setError('')
     try {
@@ -603,13 +603,13 @@ function NewClaimForm({ brand, onClose, onCreated }: { brand: string; onClose: (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4" onClick={onClose}>
       <div className="bg-white rounded-[20px] shadow-xl w-full max-w-lg max-h-[90vh] overflow-y-auto p-6 space-y-4" onClick={e => e.stopPropagation()}>
         <div className="flex items-center justify-between">
-          <h2 className="text-base font-bold text-[#1a1a18]">Nouveau dossier</h2>
+          <h2 className="text-base font-bold text-[#1a1a18]">New case</h2>
           <button onClick={onClose} className="text-[#9b9b93] hover:text-[#1a1a18]"><X size={18} /></button>
         </div>
 
         {/* Type toggle */}
         <div className="inline-flex w-full bg-[#F8F8F7] rounded-xl p-0.5 gap-0.5">
-          {([['defaut_fournisseur', 'Défaut fournisseur'], ['erreur_envoi', "Erreur d'envoi"]] as const).map(([k, lbl]) => (
+          {([['defaut_fournisseur', 'Supplier defect'], ['erreur_envoi', 'Shipping error']] as const).map(([k, lbl]) => (
             <button key={k} onClick={() => setType(k)}
               className={`flex-1 px-3 py-2 rounded-lg text-xs font-semibold transition-all ${type === k ? 'bg-white text-[#1a1a18] shadow-sm' : 'text-[#6b6b63]'}`}>
               {lbl}
@@ -618,14 +618,14 @@ function NewClaimForm({ brand, onClose, onCreated }: { brand: string; onClose: (
         </div>
 
         {/* Lookup commande */}
-        <Field label={type === 'erreur_envoi' ? 'N° commande (obligatoire)' : 'N° commande (optionnel)'}>
+        <Field label={type === 'erreur_envoi' ? 'Order no. (required)' : 'Order no. (optional)'}>
           <div className="flex gap-2">
             <input value={orderInput} onChange={e => setOrderInput(e.target.value)}
               onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); lookupOrder() } }}
               className={input} placeholder="#1234" />
             <button type="button" onClick={lookupOrder} disabled={lookingUp}
               className="flex items-center gap-1.5 px-3 rounded-xl bg-[#1a1a2e] text-white text-xs font-semibold hover:bg-[#2a2a3e] disabled:opacity-50 shrink-0">
-              <Search size={13} /> {lookingUp ? '…' : 'Chercher'}
+              <Search size={13} /> {lookingUp ? '…' : 'Search'}
             </button>
           </div>
         </Field>
@@ -636,7 +636,7 @@ function NewClaimForm({ brand, onClose, onCreated }: { brand: string; onClose: (
         {lineItems && lineItems.length > 0 && (
           <div className="space-y-1.5">
             <p className="text-[10px] font-semibold uppercase tracking-[0.08em] text-[#9b9b93]">
-              {type === 'erreur_envoi' ? 'Article commandé (correct, à réexpédier)' : 'Sélectionnez l\'article concerné'}
+              {type === 'erreur_envoi' ? 'Ordered item (correct, to reship)' : 'Select the affected item'}
             </p>
             <div className="space-y-1 max-h-44 overflow-y-auto">
               {lineItems.map((li, i) => {
@@ -658,37 +658,37 @@ function NewClaimForm({ brand, onClose, onCreated }: { brand: string; onClose: (
           </div>
         )}
         {lineItems && lineItems.length === 0 && !lookupErr && (
-          <p className="text-xs text-[#9b9b93]">Aucun article trouvé pour cette commande.</p>
+          <p className="text-xs text-[#9b9b93]">No item found for this order.</p>
         )}
 
         {/* Article reçu à tort (erreur d'envoi) */}
         {type === 'erreur_envoi' && (
-          <Field label="Article reçu à tort (catalogue)">
+          <Field label="Wrongly received item (catalogue)">
             <select value={variants.find(v => (v.sku_fr ?? v.sku_cn) === form.received_sku)?.shopify_variant_id ?? ''}
               onChange={e => selectReceived(e.target.value)} className={input}>
-              <option value="">— Sélectionner —</option>
+              <option value="">— Select —</option>
               {variants.map(v => <option key={v.shopify_variant_id} value={v.shopify_variant_id}>{variantLabel(v)}</option>)}
             </select>
           </Field>
         )}
 
         <div className="grid grid-cols-2 gap-3">
-          <Field label="Date signalement">
+          <Field label="Report date">
             <input type="date" value={form.reported_at} onChange={e => upd('reported_at', e.target.value)} className={input} />
           </Field>
-          <Field label="Quantité">
+          <Field label="Quantity">
             <input type="number" min={1} value={form.quantity} onChange={e => upd('quantity', e.target.value)} className={input} />
           </Field>
 
           <div className="col-span-2">
-            <Field label="Lot de production (réf. commande fournisseur)">
-              <input value={form.production_batch} onChange={e => upd('production_batch', e.target.value)} className={input} placeholder="ex. PO-2026-07" />
+            <Field label="Production batch (supplier PO ref.)">
+              <input value={form.production_batch} onChange={e => upd('production_batch', e.target.value)} className={input} placeholder="e.g. PO-2026-07" />
             </Field>
           </div>
 
           {type === 'defaut_fournisseur' && (
             <div className="col-span-2">
-              <Field label="SKU (si pas de commande)">
+              <Field label="SKU (if no order)">
                 <input value={form.sku} onChange={e => upd('sku', e.target.value)} className={input} placeholder="MOOM-XXX" />
               </Field>
             </div>
@@ -696,16 +696,16 @@ function NewClaimForm({ brand, onClose, onCreated }: { brand: string; onClose: (
 
           {type === 'defaut_fournisseur' && (
             <div className="col-span-2">
-              <Field label="Description du défaut">
+              <Field label="Defect description">
                 <textarea value={form.defect_description} onChange={e => upd('defect_description', e.target.value)} rows={3} className={input} />
               </Field>
             </div>
           )}
 
-          <Field label="N° suivi retour">
+          <Field label="Return tracking no.">
             <input value={form.return_tracking_ref} onChange={e => upd('return_tracking_ref', e.target.value)} className={input} />
           </Field>
-          <Field label="Tracking (nouvel envoi)">
+          <Field label="Tracking (new shipment)">
             <input value={form.reship_tracking_ref} onChange={e => upd('reship_tracking_ref', e.target.value)} className={input} />
           </Field>
         </div>
@@ -718,10 +718,10 @@ function NewClaimForm({ brand, onClose, onCreated }: { brand: string; onClose: (
               <ImageIcon size={15} /> <span className="truncate">{photo ? photo.name : 'Photo'}</span>
             </button>
           </Field>
-          <Field label="Étiquette de retour">
+          <Field label="Return label">
             <input ref={labelRef} type="file" accept="image/*,application/pdf" onChange={e => setLabel(e.target.files?.[0] ?? null)} className="hidden" />
             <button type="button" onClick={() => labelRef.current?.click()} className="flex items-center gap-2 px-3 py-2 rounded-xl border border-[#e8e8e4] text-sm text-[#6b6b63] hover:bg-[#f8f8f7] w-full">
-              <FileText size={15} /> <span className="truncate">{label ? label.name : 'Étiquette'}</span>
+              <FileText size={15} /> <span className="truncate">{label ? label.name : 'Label'}</span>
             </button>
           </Field>
         </div>
@@ -729,9 +729,9 @@ function NewClaimForm({ brand, onClose, onCreated }: { brand: string; onClose: (
         {error && <p className="text-xs text-[#c7293a]">{error}</p>}
 
         <div className="flex justify-end gap-2 pt-1">
-          <button onClick={onClose} className="px-4 py-2 rounded-xl text-sm text-[#6b6b63] hover:bg-[#f8f8f7]">Annuler</button>
+          <button onClick={onClose} className="px-4 py-2 rounded-xl text-sm text-[#6b6b63] hover:bg-[#f8f8f7]">Cancel</button>
           <button onClick={submit} disabled={saving} className="px-4 py-2 rounded-xl bg-[#1a1a2e] text-white text-sm font-semibold hover:bg-[#2a2a3e] disabled:opacity-50">
-            {saving ? 'Enregistrement…' : 'Créer le dossier'}
+            {saving ? 'Saving…' : 'Create case'}
           </button>
         </div>
       </div>
