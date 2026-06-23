@@ -66,6 +66,14 @@ const NAV_SECTIONS: { label: string; items: NavItem[] }[] = [
   },
 ]
 
+// Nav keys each restricted role may see. Admins (any other role) see everything.
+// Items are then further filtered by the current brand (brandLock) like for admins,
+// so a SAV user browsing Bowa sees Bowa items only, and Moom items only on Moom.
+const ROLE_KEYS: Record<string, string[]> = {
+  delivery: ['delivery'],
+  sav:      ['billing', 'delivery', 'sav', 'sav-defects', 'sav-krom'],
+}
+
 // Pages the brand-selector can jump to when switching brands
 const BRAND_PAGES: Record<string, string[]> = {
   bowa: ['dashboard', 'campaigns', 'creatives', 'settings', 'reorder', 'billing', 'delivery'],
@@ -146,7 +154,8 @@ export default function Sidebar({ isOpen, collapsed, onToggleCollapse }: Sidebar
   if (!isOpen) return null
 
   const isAdmin          = role !== 'delivery' && role !== 'sav'
-  const showBrandSelector = isAdmin && allowedBrands && allowedBrands.length > 1
+  // Brand selector shows for anyone with access to more than one brand (incl. SAV)
+  const showBrandSelector = !!allowedBrands && allowedBrands.length > 1
   const settingsHref     = `/${currentBrand ?? 'bowa'}/settings`
 
   const w = collapsed ? 'w-[72px]' : 'w-[240px]'
@@ -227,9 +236,10 @@ export default function Sidebar({ isOpen, collapsed, onToggleCollapse }: Sidebar
       {/* ── Nav ──────────────────────────────────────────────────────────── */}
       <nav className="flex-1 overflow-y-auto px-3 space-y-5 pb-4">
         {role === null ? null : NAV_SECTIONS.map(section => {
+          const allowedKeys = ROLE_KEYS[role]  // undefined → admin → all keys
           const items = section.items.filter(({ key, brandLock }) => {
-            if (role === 'delivery') return key === 'delivery'
-            if (role === 'sav')     return key === 'sav' || key === 'sav-krom' || key === 'sav-defects' || key === 'delivery'
+            // Role gate: restricted roles only see their allowed keys
+            if (allowedKeys && !allowedKeys.includes(key)) return false
             // Shared pages: always visible
             if (brandLock === null) return true
             // Brand-locked: only visible when currently ON that brand

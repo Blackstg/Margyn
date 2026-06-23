@@ -117,9 +117,9 @@ export async function middleware(req: NextRequest) {
     return response
   }
 
-  // ── Role: sav → only sav/sav-krom/delivery (checked before brand access) ──
+  // ── Role: sav → support pages + billing (checked before brand access) ─────
   if (role === 'sav') {
-    const allowed = ['sav', 'sav-krom', 'sav-defects', 'delivery']
+    const allowed = ['billing', 'sav', 'sav-krom', 'sav-defects', 'delivery']
     if (!allowed.includes(pageSeg)) {
       return NextResponse.redirect(new URL(`/moom/sav`, req.url))
     }
