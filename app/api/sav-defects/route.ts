@@ -76,10 +76,19 @@ export async function POST(req: NextRequest) {
   }
 
   const admin = createAdminClient()
+
+  // Auto-attach to the brand's current (open) production batch — no free text,
+  // so "01"/"Lot 01"/"LOT 01" duplicates can't happen anymore.
+  const brand = body.brand ?? 'moom'
+  const { data: batchRows } = await admin
+    .from('defect_batches').select('label, closed_at, number')
+    .eq('brand', brand).order('number', { ascending: false })
+  const activeBatch = (batchRows ?? []).find(b => !b.closed_at) ?? (batchRows ?? [])[0] ?? null
+
   const { data, error } = await admin
     .from('defect_claims')
     .insert({
-      brand:                 body.brand ?? 'moom',
+      brand,
       claim_type,
       reported_at:           body.reported_at || new Date().toISOString().slice(0, 10),
       sku:                   sku || null,
@@ -94,7 +103,7 @@ export async function POST(req: NextRequest) {
       supplier_claim_ref:    body.supplier_claim_ref?.toString().trim() || null,
       reship_tracking_ref:   body.reship_tracking_ref?.toString().trim() || null,
       return_tracking_ref:   body.return_tracking_ref?.toString().trim() || null,
-      production_batch:      body.production_batch?.toString().trim() || null,
+      production_batch:      activeBatch?.label ?? null,
       validated_by:          body.validated_by?.toString().trim() || null,
       charged_amount:        Number(body.charged_amount) || 0,
       notes:                 body.notes?.toString().trim() || null,
@@ -138,7 +147,7 @@ export async function PATCH(req: NextRequest) {
       patch.claim_sent_at = body.claim_sent_at || new Date().toISOString().slice(0, 10)
     }
   }
-  for (const f of ['reship_tracking_ref', 'received_at', 'claim_sent_at', 'supplier_claim_ref', 'notes', 'return_tracking_ref', 'return_received_at', 'production_batch', 'validated_by'] as const) {
+  for (const f of ['reship_tracking_ref', 'received_at', 'claim_sent_at', 'supplier_claim_ref', 'notes', 'return_tracking_ref', 'return_received_at', 'validated_by'] as const) {
     if (body[f] !== undefined) patch[f] = body[f] || null
   }
   // Jalons multiples : remplace l'objet milestones et dérive les colonnes de date

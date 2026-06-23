@@ -3,7 +3,11 @@
 export const dynamic = 'force-dynamic'
 
 import { useState, useEffect, useCallback, useRef } from 'react'
-import { Plus, AlertTriangle, Clock, PackageX, X, Image as ImageIcon, Search, FileText, Truck, RotateCcw, Trash2, Check, Layers, Printer, CheckCircle2, Maximize2 } from 'lucide-react'
+import { Plus, AlertTriangle, Clock, PackageX, X, Image as ImageIcon, Search, FileText, Truck, RotateCcw, Trash2, Check, Layers, Printer, CheckCircle2, Maximize2, ArrowRightCircle } from 'lucide-react'
+import { createBrowserClient } from '@supabase/auth-helpers-nextjs'
+import { isAdminRole } from '@/lib/access'
+
+interface Batch { id: string; number: number; label: string; created_at: string; closed_at: string | null }
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -227,12 +231,41 @@ export default function SavDefectsPage() {
   const [typeFilter, setTypeFilter] = useState<'all' | 'defaut_fournisseur' | 'erreur_envoi'>('all')
   const [showForm, setShowForm] = useState(false)
   const [lightbox, setLightbox] = useState<string | null>(null)
+  const [activeBatch, setActiveBatch] = useState<Batch | null>(null)
+  const [isAdmin, setIsAdmin] = useState(false)
+  const [switching, setSwitching] = useState(false)
 
   const loadClaims = useCallback(async () => {
     const res = await fetch(`/api/sav-defects?brand=${BRAND}`)
     const data = await res.json()
     setClaims(data.claims ?? [])
   }, [])
+
+  const loadBatch = useCallback(async () => {
+    const res = await fetch(`/api/sav-defects/batches?brand=${BRAND}`)
+    const data = await res.json()
+    setActiveBatch(data.active ?? null)
+  }, [])
+
+  useEffect(() => {
+    const supabase = createBrowserClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!)
+    supabase.auth.getUser().then(({ data }) => setIsAdmin(isAdminRole(data.user?.user_metadata?.role as string | undefined)))
+    loadBatch()
+  }, [loadBatch])
+
+  async function startNextBatch() {
+    if (!activeBatch) return
+    const next = `Lot ${String(activeBatch.number + 1).padStart(2, '0')}`
+    if (!confirm(`Clôturer ${activeBatch.label} et démarrer ${next} ?\n\nLes nouveaux dossiers seront rattachés à ${next}.`)) return
+    setSwitching(true)
+    try {
+      await fetch('/api/sav-defects/batches', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ brand: BRAND }),
+      })
+      await loadBatch()
+    } finally { setSwitching(false) }
+  }
 
   const loadStats = useCallback(async () => {
     const res = await fetch(`/api/sav-defects/stats?brand=${BRAND}&month=${month}`)
@@ -332,6 +365,29 @@ export default function SavDefectsPage() {
             </button>
           </div>
         </div>
+
+        {/* Lot en cours */}
+        {activeBatch && (
+          <div className="flex items-center gap-3 rounded-[16px] bg-[#1a1a2e] text-white px-5 py-3.5 flex-wrap">
+            <Layers size={16} className="text-[#aeb0c9] shrink-0" />
+            <div className="min-w-0">
+              <span className="text-[10px] font-semibold uppercase tracking-[0.1em] text-white/40">Lot en cours</span>
+              <div className="flex items-baseline gap-2">
+                <span className="text-base font-bold">{activeBatch.label}</span>
+                <span className="text-[11px] text-white/50">
+                  démarré le {fmtDate(activeBatch.created_at.slice(0, 10))} · {claims.filter(c => (c.production_batch ?? '') === activeBatch.label).length} dossier(s)
+                </span>
+              </div>
+            </div>
+            <span className="text-[11px] text-white/45 ml-1 hidden md:inline">· les nouveaux dossiers y sont rattachés automatiquement</span>
+            {isAdmin && (
+              <button onClick={startNextBatch} disabled={switching}
+                className="ml-auto inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white/10 hover:bg-white/15 text-white text-xs font-semibold transition-colors disabled:opacity-50">
+                <ArrowRightCircle size={14} /> {switching ? '…' : `Démarrer Lot ${String(activeBatch.number + 1).padStart(2, '0')}`}
+              </button>
+            )}
+          </div>
+        )}
 
         {/* 3 cartes */}
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
@@ -510,8 +566,6 @@ export default function SavDefectsPage() {
                                     <FileText size={11} /> label
                                   </a>
                                 )}
-                                <InlineField icon={<Layers size={12} className="text-[#aeb0c9]" />} label="Batch" compact
-                                  value={c.production_batch} onSave={v => patchClaim(c.id, { production_batch: v })} />
                               </div>
                             </div>
                           </div>
@@ -526,7 +580,7 @@ export default function SavDefectsPage() {
         </div>
       </div>
 
-      {showForm && <NewClaimForm brand={BRAND} onClose={() => setShowForm(false)} onCreated={() => { setShowForm(false); reload() }} />}
+      {showForm && <NewClaimForm brand={BRAND} activeBatchLabel={activeBatch?.label ?? null} onClose={() => setShowForm(false)} onCreated={() => { setShowForm(false); reload() }} />}
 
       {lightbox && (
         <div className="fixed inset-0 z-[60] bg-black/80 flex items-center justify-center p-6" onClick={() => setLightbox(null)}>
@@ -564,14 +618,13 @@ function InlineField({ icon, label, value, onSave, compact }: { icon: React.Reac
   )
 }
 
-function NewClaimForm({ brand, onClose, onCreated }: { brand: string; onClose: () => void; onCreated: () => void }) {
+function NewClaimForm({ brand, activeBatchLabel, onClose, onCreated }: { brand: string; activeBatchLabel: string | null; onClose: () => void; onCreated: () => void }) {
   const [type, setType] = useState<'defaut_fournisseur' | 'erreur_envoi'>('defaut_fournisseur')
   const [form, setForm] = useState({
     reported_at: new Date().toISOString().slice(0, 10),
     quantity: '1', defect_description: '',
     sku: '', product_name: '', shopify_order_id: '', shopify_variant_id: '',
     received_sku: '', received_product_name: '', reship_tracking_ref: '', return_tracking_ref: '',
-    production_batch: '',
   })
   const [orderInput, setOrderInput] = useState('')
   const [lineItems, setLineItems]   = useState<LineItem[] | null>(null)
@@ -735,8 +788,12 @@ function NewClaimForm({ brand, onClose, onCreated }: { brand: string; onClose: (
           </Field>
 
           <div className="col-span-2">
-            <Field label="Production batch (supplier PO ref.)">
-              <input value={form.production_batch} onChange={e => upd('production_batch', e.target.value)} className={input} placeholder="e.g. PO-2026-07" />
+            <Field label="Production batch">
+              <div className="flex items-center gap-2 px-3 py-2 rounded-xl bg-[#f8f8f7] border border-[#e8e8e4] text-sm">
+                <Layers size={14} className="text-[#aeb0c9]" />
+                <span className="font-semibold text-[#1a1a18]">{activeBatchLabel ?? '—'}</span>
+                <span className="text-[11px] text-[#9b9b93]">· lot en cours (automatique)</span>
+              </div>
             </Field>
           </div>
 
