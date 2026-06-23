@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createServerClient } from '@supabase/auth-helpers-nextjs'
 import { createClient } from '@supabase/supabase-js'
 import { cookies } from 'next/headers'
-import { isAdminRole, BRANDS, FEATURES, type Brand, type FeatureKey } from '@/lib/access'
+import { isOwner, BRANDS, FEATURES, type Brand, type FeatureKey } from '@/lib/access'
 
 export const dynamic = 'force-dynamic'
 
@@ -14,7 +14,7 @@ function serviceClient() {
   )
 }
 
-// Verify the caller is an authenticated admin (via their session cookie).
+// Verify the caller is the authenticated owner (full-brand admin) via their cookie.
 async function requireAdmin(): Promise<{ ok: true } | { ok: false; res: NextResponse }> {
   const store = await cookies()
   const supabase = createServerClient(
@@ -29,8 +29,9 @@ async function requireAdmin(): Promise<{ ok: true } | { ok: false; res: NextResp
   )
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return { ok: false, res: NextResponse.json({ error: 'Non authentifié' }, { status: 401 }) }
-  if (!isAdminRole(user.user_metadata?.role as string | undefined)) {
-    return { ok: false, res: NextResponse.json({ error: 'Accès réservé aux admins' }, { status: 403 }) }
+  const m = user.user_metadata ?? {}
+  if (!isOwner(m.role as string | undefined, m.brands as string[] | undefined)) {
+    return { ok: false, res: NextResponse.json({ error: 'Accès réservé au propriétaire' }, { status: 403 }) }
   }
   return { ok: true }
 }

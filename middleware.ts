@@ -3,7 +3,7 @@ import { NextResponse } from 'next/server'
 import type { NextRequest } from 'next/server'
 import {
   BRANDS, BRAND_LOCK as BRAND_LOCKED, FEATURES,
-  effectiveFeatures, effectiveBrands, homePath, isAdminRole,
+  effectiveFeatures, effectiveBrands, homePath, isOwner,
   type Brand, type FeatureKey,
 } from '@/lib/access'
 
@@ -116,25 +116,31 @@ export async function middleware(req: NextRequest) {
 
   const feats      = effectiveFeatures(role, user.user_metadata?.features as string[] | undefined)
   const userBrands = effectiveBrands(role, brands)
+  const home       = homePath(feats, userBrands, defaultBrand)
 
-  // ── Feature gate: restricted roles only reach their allowed sections ──────
-  // (settings & users are admin-only → never present in a feature list)
-  if (feats !== 'all' && !feats.includes(pageSeg as FeatureKey)) {
-    return NextResponse.redirect(new URL(homePath(feats, userBrands, defaultBrand), req.url))
+  // ── Access management (Accès) is owner-only ───────────────────────────────
+  if (pageSeg === 'users' && !isOwner(role, brands)) {
+    return NextResponse.redirect(new URL(home, req.url))
   }
 
-  // ── Brand access: the URL brand must be one the user has (admins = all) ───
-  if (!isAdminRole(role) && !userBrands.includes(urlBrand)) {
-    return NextResponse.redirect(new URL(homePath(feats, userBrands, defaultBrand), req.url))
+  // ── Feature gate: restricted roles only reach their allowed sections ──────
+  if (feats !== 'all' && !feats.includes(pageSeg as FeatureKey)) {
+    return NextResponse.redirect(new URL(home, req.url))
+  }
+
+  // ── Brand access: the URL brand MUST be one the user has — applies to ALL
+  //    users including admins (per-brand data is confidential) ──────────────
+  if (!userBrands.includes(urlBrand)) {
+    return NextResponse.redirect(new URL(home, req.url))
   }
 
   // ── Brand-locked page on wrong brand → redirect to the correct brand ──────
   if (pageSeg && BRAND_LOCKED[pageSeg] && BRAND_LOCKED[pageSeg] !== urlBrand) {
     const correctBrand = BRAND_LOCKED[pageSeg]
-    if (isAdminRole(role) || userBrands.includes(correctBrand)) {
+    if (userBrands.includes(correctBrand)) {
       return NextResponse.redirect(new URL(`/${correctBrand}/${pageSeg}`, req.url))
     }
-    return NextResponse.redirect(new URL(homePath(feats, userBrands, defaultBrand), req.url))
+    return NextResponse.redirect(new URL(home, req.url))
   }
 
   return response

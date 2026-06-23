@@ -68,10 +68,20 @@ export function effectiveFeatures(
   return ROLE_DEFAULT_FEATURES[role ?? ''] ?? []
 }
 
-// Brands a user may use. Admins get every brand; others get their assigned list.
+// Brands a user may use. ALWAYS scoped to their explicit `brands` list — being an
+// admin grants feature access, NOT cross-brand access (confidential per-brand data).
+// Only an UNSET brands list means full access, and only for an admin (the owner).
 export function effectiveBrands(role?: string | null, brands?: string[] | null): Brand[] {
-  if (isAdminRole(role)) return BRANDS
-  return (brands ?? []).filter((b): b is Brand => (BRANDS as string[]).includes(b))
+  if (brands == null) return isAdminRole(role) ? BRANDS : []
+  return brands.filter((b): b is Brand => (BRANDS as string[]).includes(b))
+}
+
+// Owner = admin with access to every brand (or unrestricted brands). Only the
+// owner manages user access. A brand-scoped admin (e.g. Bowa-only) is NOT an owner.
+export function isOwner(role?: string | null, brands?: string[] | null): boolean {
+  if (!isAdminRole(role)) return false
+  if (brands == null) return true
+  return BRANDS.every(b => brands.includes(b))
 }
 
 // First landing page a restricted user can actually reach (for redirects).
