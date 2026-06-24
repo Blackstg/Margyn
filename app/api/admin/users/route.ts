@@ -55,6 +55,7 @@ export async function GET() {
         role:     (m.role as string | undefined) ?? 'admin',
         brands:   Array.isArray(m.brands)   ? (m.brands as string[])   : [],
         features: Array.isArray(m.features) ? (m.features as string[]) : null,
+        owner:    isOwner(m.role as string | undefined, m.brands as string[] | undefined),
       }
     })
     .sort((a, b) => a.email.localeCompare(b.email))
@@ -80,6 +81,12 @@ export async function PATCH(req: NextRequest) {
   const admin = serviceClient()
   const { data: cur, error: getErr } = await admin.auth.admin.getUserById(body.id)
   if (getErr || !cur.user) return NextResponse.json({ error: getErr?.message ?? 'Utilisateur introuvable' }, { status: 404 })
+
+  // Protect the owner: their access can't be edited from the panel (anti-lockout)
+  const cm = cur.user.user_metadata ?? {}
+  if (isOwner(cm.role as string | undefined, cm.brands as string[] | undefined)) {
+    return NextResponse.json({ error: 'Le propriétaire ne peut pas être modifié ici' }, { status: 403 })
+  }
 
   const next = { ...(cur.user.user_metadata ?? {}), role, brands, features }
   const { error } = await admin.auth.admin.updateUserById(body.id, { user_metadata: next })

@@ -12,13 +12,17 @@ interface ApiUser {
   role: string
   brands: string[]
   features: string[] | null
+  owner: boolean
 }
 
+// Roles assignable from the panel. "Owner" (accès complet) is not assignable —
+// it's shown read-only. An "Admin" here = toutes les fonctionnalités MAIS
+// uniquement sur les marques cochées (pas un accès à tout).
 const ROLE_OPTIONS: { value: string; label: string; hint: string; icon: React.ReactNode }[] = [
-  { value: 'admin',       label: 'Admin',       hint: 'Accès complet à toutes les marques et fonctionnalités', icon: <Shield size={14} /> },
-  { value: 'sav',         label: 'Staff / SAV', hint: 'Accès limité aux marques et fonctionnalités cochées',   icon: <Headphones size={14} /> },
-  { value: 'delivery',    label: 'Livreur',     hint: 'Application livreur uniquement (Bowa)',                  icon: <Truck size={14} /> },
-  { value: 'logistician', label: 'Logisticien', hint: 'Page de réconciliation uniquement',                     icon: <ClipboardList size={14} /> },
+  { value: 'admin',       label: 'Admin (marques cochées)', hint: 'Toutes les fonctionnalités, UNIQUEMENT sur les marques cochées ci-dessous', icon: <Shield size={14} /> },
+  { value: 'sav',         label: 'Staff',       hint: 'Accès limité aux marques ET aux fonctionnalités cochées', icon: <Headphones size={14} /> },
+  { value: 'delivery',    label: 'Livreur',     hint: 'Application livreur uniquement (Bowa)',                    icon: <Truck size={14} /> },
+  { value: 'logistician', label: 'Logisticien', hint: 'Page de réconciliation uniquement',                       icon: <ClipboardList size={14} /> },
 ]
 
 // Group features by section for display
@@ -79,6 +83,18 @@ function UserCard({ user }: { user: ApiUser }) {
 
   const restricted = role === 'sav'
 
+  // The owner is shown read-only and cannot be edited from the panel (anti-lockout)
+  if (user.owner) {
+    return (
+      <div className="bg-white rounded-[18px] shadow-[0_2px_16px_rgba(0,0,0,0.06)] p-5 flex items-center justify-between gap-3 flex-wrap">
+        <span className="font-semibold text-[#1a1a2e] text-sm">{user.email}</span>
+        <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-[#1a7f4b] bg-[#f0faf5] px-3 py-1.5 rounded-lg">
+          <Shield size={14} /> Propriétaire · accès complet à tout
+        </span>
+      </div>
+    )
+  }
+
   function toggleBrand(b: Brand) {
     setSaved(false)
     setBrands(prev => prev.includes(b) ? prev.filter(x => x !== b) : [...prev, b])
@@ -121,12 +137,12 @@ function UserCard({ user }: { user: ApiUser }) {
 
       <p className="text-[11px] text-[#9b9b93] mt-1">{ROLE_OPTIONS.find(r => r.value === role)?.hint}</p>
 
-      {/* Brands + features (only for restricted staff) */}
-      {restricted && (
+      {/* Brands (admin + staff) + features (staff only) */}
+      {(role === 'admin' || role === 'sav') && (
         <div className="mt-4 space-y-4">
           {/* Brands */}
           <div>
-            <p className="text-[10px] font-semibold uppercase tracking-[0.08em] text-[#9b9b93] mb-1.5">Marques</p>
+            <p className="text-[10px] font-semibold uppercase tracking-[0.08em] text-[#9b9b93] mb-1.5">Marques accessibles</p>
             <div className="flex flex-wrap gap-1.5">
               {BRANDS.map(b => {
                 const on = brands.includes(b)
@@ -142,7 +158,12 @@ function UserCard({ user }: { user: ApiUser }) {
             </div>
           </div>
 
-          {/* Features grouped by section */}
+          {/* Features grouped by section — staff only (admin = toutes) */}
+          {!restricted ? (
+            <p className="text-xs text-[#1a7f4b] bg-[#f0faf5] rounded-lg px-3 py-2">
+              ✓ Toutes les fonctionnalités, mais uniquement sur les marques cochées ci-dessus.
+            </p>
+          ) : (
           <div>
             <p className="text-[10px] font-semibold uppercase tracking-[0.08em] text-[#9b9b93] mb-1.5">Fonctionnalités</p>
             <div className="space-y-2.5">
@@ -172,6 +193,7 @@ function UserCard({ user }: { user: ApiUser }) {
               ))}
             </div>
           </div>
+          )}
         </div>
       )}
     </div>
