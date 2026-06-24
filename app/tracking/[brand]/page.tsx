@@ -49,6 +49,24 @@ interface TrackingResult {
   step:            number
   has_carrier_data?: boolean
   carrier_eta?:    { from: string | null; to: string | null } | null
+  carrier_name?:   string | null
+}
+
+// Local (final-mile) carrier name = drop the cross-border consolidator (YunExpress)
+function localCarrier(name?: string | null): string | null {
+  if (!name) return null
+  const parts = name.split(/\s*\+\s*/).map(s => s.trim()).filter(s => s && !/yunexpress/i.test(s))
+  return parts.join(' / ') || null
+}
+
+// "En cours de livraison" — rendre l'étape concrète (transporteur local + ville)
+function deliveryDesc(result: TrackingResult): string {
+  const city    = result.address?.city?.trim()
+  const carrier = localCarrier(result.carrier_name)
+  if (carrier && city) return `Votre colis est en cours de livraison par ${carrier} à ${city}.`
+  if (city)            return `Votre colis est en cours de livraison à ${city} et arrivera très bientôt.`
+  if (carrier)         return `Votre colis est en cours de livraison par ${carrier}.`
+  return 'Votre colis est en tournée de livraison, il arrivera très bientôt.'
 }
 
 // ─── Timeline types ───────────────────────────────────────────────────────────
@@ -204,6 +222,7 @@ function buildRealTimeline(result: TrackingResult, settings: TrackingSettings | 
 
   return RT_PHASES.map((p, i): TLEvent => {
     const status: TLStatus = i < lastReached ? 'done' : i === lastReached ? (delivered ? 'done' : 'current') : 'upcoming'
+    const desc = p.key === 'delivery' ? deliveryDesc(result) : p.desc
     const rawDate = p.key === 'confirmed'
       ? result.created_at
       : p.key === 'delivered'
@@ -212,10 +231,10 @@ function buildRealTimeline(result: TrackingResult, settings: TrackingSettings | 
     // Étapes à venir : date estimée (sur "Livré"), badge "estimé"
     if (status === 'upcoming') {
       const est = p.key === 'delivered' ? estStr : null
-      return { status, title: p.title, time: est, est: !!est, desc: p.desc }
+      return { status, title: p.title, time: est, est: !!est, desc }
     }
     const time = p.key === 'confirmed' ? fmtDate(rawDate) : (rawDate ? fmtDateTime(rawDate) : null)
-    return { status, title: p.title, time, est: false, desc: p.desc }
+    return { status, title: p.title, time, est: false, desc }
   })
 }
 

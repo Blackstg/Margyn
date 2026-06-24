@@ -232,6 +232,7 @@ export async function POST(
     let finalEvents = trackingEvents
     let finalStep   = computeStep(order)
     let carrierEta: { from: string | null; to: string | null } | null = null
+    let carrierName: string | null = null
     let hasCarrierData = false
     if (fulfillment?.tracking_number && process.env.TRACK17_API_KEY) {
       try {
@@ -240,6 +241,7 @@ export async function POST(
           finalEvents    = t17.events
           finalStep      = t17.step
           carrierEta     = { from: t17.eta_from, to: t17.eta_to }
+          carrierName    = t17.carrier_name
           hasCarrierData = true
         }
       } catch (e) {
@@ -273,6 +275,7 @@ export async function POST(
       tracking_events:  finalEvents,
       step:             finalStep,
       carrier_eta:      carrierEta,
+      carrier_name:     carrierName,
       has_carrier_data: hasCarrierData,
     })
   } catch (err) {
