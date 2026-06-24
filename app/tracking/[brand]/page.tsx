@@ -79,7 +79,21 @@ interface TLEvent {
   time:    string | null   // real date only on 'done'
   est:     boolean         // amber "estimé" badge on 'upcoming'
   desc:    string
+  place?:  string | null   // lieu réel (ville/pays) — affiché sur l'étape courante
   nextup?: string          // hint shown below 'current' dot only
+}
+
+// Pays (codes ISO) → nom FR, pour afficher un lieu lisible sur l'étape courante
+const COUNTRY_FR: Record<string, string> = {
+  FR: 'France', BE: 'Belgique', DE: 'Allemagne', NL: 'Pays-Bas', ES: 'Espagne',
+  IT: 'Italie', LU: 'Luxembourg', GB: 'Royaume-Uni', CH: 'Suisse', CN: 'Chine',
+  PT: 'Portugal',
+}
+function prettyPlace(loc: string | null | undefined): string | null {
+  if (!loc) return null
+  const parts = loc.split(',').map(s => s.trim()).filter(Boolean)
+  const mapped = parts.map(p => (/^[A-Za-z]{2}$/.test(p) ? (COUNTRY_FR[p.toUpperCase()] ?? p) : p))
+  return mapped.join(', ') || null
 }
 
 // ─── Carrier detection ────────────────────────────────────────────────────────
@@ -209,10 +223,11 @@ function buildRealTimeline(result: TrackingResult, settings: TrackingSettings | 
   // récente atteinte par phase ; maxIdx = phase la plus avancée vue dans les events.
   const dateFor: Record<string, string> = {}
   let currentIdx = 0  // phase du dernier événement = où le colis se trouve MAINTENANT
+  let currentPlace: string | null = null
   for (const e of result.tracking_events) {  // triés du + récent au + ancien
     const idx = phaseIndexFromCode(e.code)
     if (idx == null) continue
-    if (currentIdx === 0) currentIdx = idx   // 1er event (= le + récent) → pas courant
+    if (currentIdx === 0) { currentIdx = idx; currentPlace = prettyPlace(e.location) }  // + récent → pas courant
     const key = RT_PHASES[idx].key
     if (!dateFor[key]) dateFor[key] = e.date
   }
@@ -236,7 +251,8 @@ function buildRealTimeline(result: TrackingResult, settings: TrackingSettings | 
       return { status, title: p.title, time: est, est: !!est, desc }
     }
     const time = p.key === 'confirmed' ? fmtDate(rawDate) : (rawDate ? fmtDateTime(rawDate) : null)
-    return { status, title: p.title, time, est: false, desc }
+    const place = status === 'current' ? currentPlace : null
+    return { status, title: p.title, time, est: false, desc, place }
   })
 }
 
@@ -478,6 +494,13 @@ function VerticalTimeline({ events, primary }: { events: TLEvent[]; primary: str
                     lineHeight: 1.5,
                   }}>
                     {ev.desc}
+                  </p>
+                )}
+
+                {/* Lieu réel sur l'étape en cours (ex. « 📍 Roissy, France ») */}
+                {isCurrent && ev.place && (
+                  <p style={{ fontSize: 11.5, color: '#16a34a', fontWeight: 600, marginTop: 5, display: 'flex', alignItems: 'center', gap: 4 }}>
+                    <span style={{ fontSize: 11 }}>📍</span> {ev.place}
                   </p>
                 )}
 
