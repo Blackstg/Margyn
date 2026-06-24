@@ -244,7 +244,6 @@ function estimatedDeliveryDate(result: TrackingResult, settings: TrackingSetting
 function buildRealTimeline(result: TrackingResult, settings: TrackingSettings | null): TLEvent[] {
   const delivered = result.step === 5
   const estDate = estimatedDeliveryDate(result, settings)
-  const estStr  = estDate ? estDate.toLocaleDateString('fr-FR', { day: 'numeric', month: 'long' }) : null
 
   // On affiche TOUTES les étapes franchies du trajet (chacune avec sa date) pour
   // qu'il n'y ait pas de grand vide qui inquiète. Les events sont triés du + récent
@@ -266,6 +265,20 @@ function buildRealTimeline(result: TrackingResult, settings: TrackingSettings | 
   const lastReached = delivered ? PHASE_IDX.delivered : Math.min(maxIdx, PHASE_IDX.delivery)
   const currentPlace = placeByIdx[lastReached] ?? null
 
+  // Date estimée pour CHAQUE étape non encore atteinte : on répartit les étapes à
+  // venir entre maintenant (ou la dernière étape franchie) et la livraison estimée.
+  const estForIdx: Record<number, string> = {}
+  const upcoming = RT_PHASES.map((_, i) => i).filter(i => i > lastReached)
+  if (upcoming.length && estDate) {
+    const lastDate = dateFor[RT_PHASES[lastReached].key] ?? result.created_at
+    const startMs  = Math.max(Date.now(), new Date(lastDate).getTime())
+    const endMs    = Math.max(estDate.getTime(), startMs)
+    upcoming.forEach((idx, k) => {
+      const ms = startMs + (endMs - startMs) * ((k + 1) / upcoming.length)
+      estForIdx[idx] = new Date(ms).toLocaleDateString('fr-FR', { day: 'numeric', month: 'long' })
+    })
+  }
+
   return RT_PHASES.map((p, i): TLEvent => {
     const status: TLStatus = i < lastReached ? 'done' : i === lastReached ? (delivered ? 'done' : 'current') : 'upcoming'
     const desc = p.key === 'delivery' ? deliveryDesc(result) : p.desc
@@ -274,9 +287,9 @@ function buildRealTimeline(result: TrackingResult, settings: TrackingSettings | 
       : p.key === 'delivered'
         ? (dateFor.delivered ?? (delivered ? result.tracking_events?.[0]?.date : undefined))
         : dateFor[p.key]
-    // Étapes à venir : date estimée (sur "Livré"), badge "estimé"
+    // Étapes à venir : date estimée sur CHACUNE, badge "estimé"
     if (status === 'upcoming') {
-      const est = p.key === 'delivered' ? estStr : null
+      const est = estForIdx[i] ?? null
       return { status, title: p.title, time: est, est: !!est, desc }
     }
     const time = p.key === 'confirmed' ? fmtDate(rawDate) : (rawDate ? fmtDateTime(rawDate) : null)
