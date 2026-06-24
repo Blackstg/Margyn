@@ -181,7 +181,7 @@ const RT_PHASES: { key: string; title: string; desc: string }[] = [
   { key: 'confirmed',  title: 'Commande confirmée',     desc: 'Nous avons bien reçu votre commande.' },
   { key: 'prepared',   title: 'Commande en préparation', desc: 'Votre commande est préparée avec soin. La préparation peut prendre quelques jours avant l’expédition.' },
   { key: 'shipped',    title: 'Colis expédié',          desc: 'Votre colis a quitté notre centre et est en route.' },
-  { key: 'transit',    title: 'Acheminement en cours',  desc: 'Votre colis est en cours d’acheminement vers vous.' },
+  { key: 'transit',    title: 'Au centre de tri',  desc: 'Votre colis est en cours d’acheminement vers vous.' },
   { key: 'processing', title: 'Traitement en cours',    desc: 'Votre colis est pris en charge avant la livraison.' },
   { key: 'delivery',   title: 'En cours de livraison',  desc: 'Votre colis est en tournée de livraison.' },
   { key: 'delivered',  title: 'Livré',                  desc: 'Votre colis a été livré. Bonne réception !' },
