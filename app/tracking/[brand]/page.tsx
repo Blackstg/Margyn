@@ -89,11 +89,18 @@ const COUNTRY_FR: Record<string, string> = {
   IT: 'Italie', LU: 'Luxembourg', GB: 'Royaume-Uni', CH: 'Suisse', CN: 'Chine',
   PT: 'Portugal',
 }
+const titleCase = (s: string) => s.toLowerCase().replace(/(^|[\s'-])([a-zà-ÿ])/g, (_, sep, c) => sep + c.toUpperCase())
+// "PARIS, PARIS, FR" → "Paris, France" ; "HOOFDDORP, NORTH HOLLAND, NL" → "Hoofddorp, Pays-Bas" ; "FR" → "France"
 function prettyPlace(loc: string | null | undefined): string | null {
   if (!loc) return null
-  const parts = loc.split(',').map(s => s.trim()).filter(Boolean)
-  const mapped = parts.map(p => (/^[A-Za-z]{2}$/.test(p) ? (COUNTRY_FR[p.toUpperCase()] ?? p) : p))
-  return mapped.join(', ') || null
+  let parts = loc.split(',').map(s => s.trim()).filter(Boolean)
+  parts = parts.filter((p, i) => i === 0 || p.toUpperCase() !== parts[i - 1].toUpperCase()) // dédoublonne
+  if (!parts.length) return null
+  const last = parts[parts.length - 1]
+  const country = /^[A-Za-z]{2}$/.test(last) ? (COUNTRY_FR[last.toUpperCase()] ?? last) : titleCase(last)
+  const cityTok = parts[0]
+  const city = /^[A-Za-z]{2}$/.test(cityTok) ? (COUNTRY_FR[cityTok.toUpperCase()] ?? cityTok) : titleCase(cityTok)
+  return parts.length === 1 || city === country ? city : `${city}, ${country}`
 }
 
 // ─── Carrier detection ────────────────────────────────────────────────────────

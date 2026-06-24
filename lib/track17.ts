@@ -111,7 +111,9 @@ export function normalize(accepted: any): Track17Result | null {
       label:    fr,
       message:  null, // on évite les descriptions brutes (souvent en anglais) — le libellé FR suffit
       date:     e.time_iso ?? e.time_utc ?? null,
-      location: [e.address?.city, e.address?.country].filter(Boolean).join(', ') || e.location || null,
+      // e.location ("PARIS, PARIS, FR") est plus riche que address (souvent juste le
+      // pays) → on le préfère ; le nettoyage (ville + pays) se fait à l'affichage.
+      location: e.location || [e.address?.city, e.address?.country].filter(Boolean).join(', ') || null,
       code:     e.sub_status ?? e.stage ?? null,
     }
   })).filter((e: Track17Event) => !!e.date)
