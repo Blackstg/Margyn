@@ -175,31 +175,52 @@ function fmtDateTime(iso: string | null | undefined): string | null {
          d.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })
 }
 
-// Grandes étapes claires (rassurantes), pilotées par les vrais événements transporteur.
-// Le journal complet reste accessible via « voir le détail ».
+// Grandes étapes claires (rassurantes) qui suivent le vrai trajet d'un colis
+// cross-border (entrepôt → vol international → dédouanement → centre de tri du
+// pays → livraison). Assez d'étapes pour qu'il n'y ait jamais de grand vide qui
+// inquiète le client. Le journal complet reste dans « voir le détail ».
 const RT_PHASES: { key: string; title: string; desc: string }[] = [
-  { key: 'confirmed',  title: 'Commande confirmée',     desc: 'Nous avons bien reçu votre commande.' },
-  { key: 'prepared',   title: 'Commande en préparation', desc: 'Votre commande est préparée avec soin. La préparation peut prendre quelques jours avant l’expédition.' },
-  { key: 'shipped',    title: 'Colis expédié',          desc: 'Votre colis a quitté notre centre et est en route.' },
-  { key: 'transit',    title: 'Au centre de tri',  desc: 'Votre colis est en cours d’acheminement vers vous.' },
-  { key: 'processing', title: 'Traitement en cours',    desc: 'Votre colis est pris en charge avant la livraison.' },
-  { key: 'delivery',   title: 'En cours de livraison',  desc: 'Votre colis est en tournée de livraison.' },
-  { key: 'delivered',  title: 'Livré',                  desc: 'Votre colis a été livré. Bonne réception !' },
+  { key: 'confirmed', title: 'Commande confirmée',      desc: 'Nous avons bien reçu votre commande.' },
+  { key: 'prepared',  title: 'Commande en préparation', desc: 'Votre commande est préparée avec soin. La préparation peut prendre quelques jours avant l’expédition.' },
+  { key: 'shipped',   title: 'Colis expédié',           desc: 'Votre colis a quitté notre entrepôt et est en route.' },
+  { key: 'transit',   title: 'En transit international', desc: 'Votre colis voyage vers votre pays. Cette étape peut prendre plusieurs jours, c’est tout à fait normal.' },
+  { key: 'customs',   title: 'Dédouanement',            desc: 'Votre colis passe les formalités douanières d’importation.' },
+  { key: 'sorting',   title: 'Au centre de tri',        desc: 'Votre colis est arrivé dans votre pays et est en cours de tri.' },
+  { key: 'delivery',  title: 'En cours de livraison',   desc: 'Votre colis est en tournée de livraison.' },
+  { key: 'delivered', title: 'Livré',                   desc: 'Votre colis a été livré. Bonne réception !' },
 ]
 const PHASE_IDX: Record<string, number> = Object.fromEntries(RT_PHASES.map((p, i) => [p.key, i]))
 
-// Map a 17Track canonical sub_status/stage to a timeline phase index. Reliable
-// across carriers/languages (no description-text guessing).
-function phaseIndexFromCode(code: string | null): number | null {
-  if (!code) return null
-  const c = code.toLowerCase()
-  if (c.startsWith('delivered'))                                 return PHASE_IDX.delivered
+// Code pays (dernier token ISO de la localisation), ex. "PARIS, PARIS, FR" → "FR"
+function countryOf(loc: string | null | undefined): string | null {
+  if (!loc) return null
+  const parts = loc.split(',').map(s => s.trim()).filter(Boolean)
+  const last = parts[parts.length - 1]
+  return last && /^[A-Za-z]{2}$/.test(last) ? last.toUpperCase() : null
+}
+
+// Phase d'un événement. Hybride : sub_status canonique pour les statuts fiables
+// (livré / en livraison / douane / info reçue), puis libellé + pays pour la
+// granularité du transit (presque tous les events sont "InTransit_Other").
+// `dest` = pays de destination (FR), pour distinguer le hub étranger du centre
+// de tri d'arrivée.
+function phaseFromEvent(label: string, code: string | null, country: string | null, dest: string): number | null {
+  const c = (code ?? '').toLowerCase()
+  if (c.startsWith('delivered'))                                            return PHASE_IDX.delivered
   if (c.startsWith('outfordelivery') || c.startsWith('availableforpickup')) return PHASE_IDX.delivery
-  if (c.includes('customs'))                                     return PHASE_IDX.processing
-  if (c.includes('arrival'))                                     return PHASE_IDX.transit
-  if (c.includes('pickedup') || c.includes('departure'))         return PHASE_IDX.shipped
-  if (c.startsWith('intransit') || c === 'exception' || c.startsWith('exception')) return PHASE_IDX.transit
-  if (c.startsWith('inforeceived'))                              return PHASE_IDX.prepared
+  if (c.startsWith('inforeceived'))                                         return PHASE_IDX.prepared
+
+  const L = label.toLowerCase()
+  if (/en cours de livraison|out for delivery/.test(L))                     return PHASE_IDX.delivery
+  if (/dédouanement\s*(à l’import|à l'import|import)/.test(L) || c.includes('customs')) return PHASE_IDX.customs
+  // Arrivé physiquement dans le pays de destination → centre de tri
+  if (country === dest && /(centre de tri|sort facility|départ du centre|remis au transporteur local|livraison|tri)/.test(L))
+    return PHASE_IDX.sorting
+  // Départ de l'entrepôt d'origine
+  if (/centre de tri \((départ|origine)\)|origin facility|pris en charge/.test(L)) return PHASE_IDX.shipped
+  if (c.startsWith('inforeceived') || /informations d’expédition|information received|préparation/.test(L)) return PHASE_IDX.prepared
+  // Tout le reste du voyage = transit international
+  if (c.startsWith('intransit') || c.startsWith('exception') || L.length > 0)  return PHASE_IDX.transit
   return null
 }
 
@@ -225,24 +246,25 @@ function buildRealTimeline(result: TrackingResult, settings: TrackingSettings | 
   const estDate = estimatedDeliveryDate(result, settings)
   const estStr  = estDate ? estDate.toLocaleDateString('fr-FR', { day: 'numeric', month: 'long' }) : null
 
-  // Phases pilotées par le sub_status CANONIQUE de chaque événement (fiable,
-  // multi-transporteurs) — plus de devinette sur le texte. dateFor = date la plus
-  // récente atteinte par phase ; maxIdx = phase la plus avancée vue dans les events.
+  // On affiche TOUTES les étapes franchies du trajet (chacune avec sa date) pour
+  // qu'il n'y ait pas de grand vide qui inquiète. Les events sont triés du + récent
+  // au + ancien : en écrasant dateFor, on garde la date d'ENTRÉE (la plus ancienne)
+  // dans chaque phase → dates croissantes. placeByIdx garde le lieu le + récent.
+  const dest = 'FR'  // Moom & Krom livrent en France
   const dateFor: Record<string, string> = {}
-  let currentIdx = 0  // phase du dernier événement = où le colis se trouve MAINTENANT
-  let currentPlace: string | null = null
-  for (const e of result.tracking_events) {  // triés du + récent au + ancien
-    const idx = phaseIndexFromCode(e.code)
+  const placeByIdx: Record<number, string | null> = {}
+  let maxIdx = 0
+  for (const e of result.tracking_events) {  // du + récent au + ancien
+    const idx = phaseFromEvent(e.label, e.code, countryOf(e.location), dest)
     if (idx == null) continue
-    if (currentIdx === 0) { currentIdx = idx; currentPlace = prettyPlace(e.location) }  // + récent → pas courant
-    const key = RT_PHASES[idx].key
-    if (!dateFor[key]) dateFor[key] = e.date
+    if (idx > maxIdx) maxIdx = idx
+    dateFor[RT_PHASES[idx].key] = e.date
+    if (placeByIdx[idx] == null) placeByIdx[idx] = prettyPlace(e.location)
   }
-  // Le pas courant suit la position réelle la plus récente. Évite qu'une étape plus
-  // avancée dans le modèle (ex. dédouanement) affiche une date ANTÉRIEURE au pas
-  // courant alors que le colis a continué à avancer ensuite (cf. #1135).
-  // "Livré" UNIQUEMENT si le transporteur confirme le statut Delivered (step 5).
-  const lastReached = delivered ? PHASE_IDX.delivered : Math.min(currentIdx, PHASE_IDX.delivery)
+  // "Livré" UNIQUEMENT si le transporteur confirme le statut Delivered (step 5),
+  // sinon on plafonne à "En cours de livraison".
+  const lastReached = delivered ? PHASE_IDX.delivered : Math.min(maxIdx, PHASE_IDX.delivery)
+  const currentPlace = placeByIdx[lastReached] ?? null
 
   return RT_PHASES.map((p, i): TLEvent => {
     const status: TLStatus = i < lastReached ? 'done' : i === lastReached ? (delivered ? 'done' : 'current') : 'upcoming'
