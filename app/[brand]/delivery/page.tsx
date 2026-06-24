@@ -2465,12 +2465,20 @@ function LivreurView() {
       let selected: Tour | undefined
       setSelectedTourId(prev => {
         const kept = prev && all.find((t) => t.id === prev) ? prev : (() => {
-          const inProgress = all.find((t: Tour) => t.status === 'in_progress')
+          const active = all.filter((t: Tour) => t.status !== 'completed')
+          // 1. a tour already underway
+          const inProgress = active.find((t: Tour) => t.status === 'in_progress')
           if (inProgress) return inProgress.id
-          const todayTour = all.find((t: Tour) => t.planned_date === today)
-          if (todayTour) return todayTour.id
-          const upcoming = [...all]
-            .filter((t: Tour) => t.planned_date && t.planned_date >= today)
+          // 2. the current/overdue tour: most recent one due today or earlier and
+          //    NOT finished. An unfinished tour must not disappear just because its
+          //    planned date passed (what made Khalid "lose" his tour the next day).
+          const dueNow = active
+            .filter((t: Tour) => t.planned_date && t.planned_date <= today)
+            .sort((a: Tour, b: Tour) => b.planned_date.localeCompare(a.planned_date))[0]
+          if (dueNow) return dueNow.id
+          // 3. otherwise the soonest upcoming tour
+          const upcoming = active
+            .filter((t: Tour) => t.planned_date && t.planned_date > today)
             .sort((a: Tour, b: Tour) => a.planned_date.localeCompare(b.planned_date))[0]
           return upcoming?.id ?? all[0]?.id ?? prev
         })()
