@@ -146,9 +146,11 @@ const RT_PHASES: { key: string; title: string; desc: string; match?: RegExp }[] 
   { key: 'transit',    title: 'Acheminement en cours',  desc: 'Votre colis est en cours d’acheminement vers vous.',
     match: /transit|vol international|aéroport|douane \(départ\)|export/i },
   { key: 'processing', title: 'Traitement en cours',    desc: 'Votre colis est pris en charge avant la livraison.',
-    match: /vol international arrivé|avis d’arrivée|tri \(destination\)|dédouanement (à l’import|import)/i },
-  { key: 'delivery',   title: 'En cours de livraison',  desc: 'Votre colis a été remis au transporteur local pour la livraison finale.',
-    match: /remis au transporteur local|en cours de livraison/i },
+    // « remis au transporteur local » (handoff YunExpress, parfois à l'étranger) =
+    // acheminement, PAS encore la livraison finale. Cf. #1139 Krom (transporteur belge).
+    match: /vol international arrivé|avis d’arrivée|tri \(destination\)|dédouanement (à l’import|import)|remis au transporteur local|transmis au transporteur local/i },
+  { key: 'delivery',   title: 'En cours de livraison',  desc: 'Votre colis est en tournée de livraison.',
+    match: /en cours de livraison/i },
   { key: 'delivered',  title: 'Livré',                  desc: 'Votre colis a été livré. Bonne réception !',
     match: /^livré$/i },
 ]
