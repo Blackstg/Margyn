@@ -181,15 +181,22 @@ function buildRealTimeline(result: TrackingResult, settings: TrackingSettings | 
       if (p.match && p.match.test(e.label) && !dateFor[p.key]) dateFor[p.key] = e.date
     }
   }
+  // "Livré" n'est atteint que si le transporteur le confirme réellement (step 5).
+  // On NE se fie PAS au libellé d'un événement : "will be delivered to…" ou autres
+  // formulations ne doivent jamais marquer le colis comme livré (cf. #1139 Krom).
   const reached = RT_PHASES.map(p =>
-    p.key === 'confirmed' ? true : p.key === 'delivered' ? (delivered || !!dateFor.delivered) : !!dateFor[p.key]
+    p.key === 'confirmed' ? true : p.key === 'delivered' ? delivered : !!dateFor[p.key]
   )
   let lastReached = 0
   reached.forEach((r, i) => { if (r) lastReached = i })
 
   return RT_PHASES.map((p, i): TLEvent => {
     const status: TLStatus = i < lastReached ? 'done' : i === lastReached ? (delivered ? 'done' : 'current') : 'upcoming'
-    const rawDate = p.key === 'confirmed' ? result.created_at : dateFor[p.key]
+    const rawDate = p.key === 'confirmed'
+      ? result.created_at
+      : p.key === 'delivered'
+        ? (dateFor.delivered ?? (delivered ? result.tracking_events?.[0]?.date : undefined))
+        : dateFor[p.key]
     // Étapes à venir : date estimée (sur "Livré"), badge "estimé"
     if (status === 'upcoming') {
       const est = p.key === 'delivered' ? estStr : null

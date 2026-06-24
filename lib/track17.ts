@@ -45,7 +45,11 @@ const TRANSLATIONS: [RegExp, string][] = [
   [/start customs clear(a|e)nce|customs clearance/i,       'Dédouanement à l’import en cours'],
   [/clear(a|e)nce processing completed - import/i,         'Dédouanement import terminé'],
   [/departed from facility/i,                              'Départ du centre'],
-  [/delivered/i,                                           'Livré'],
+  // "will be delivered to X" = transfert au transporteur local, PAS une livraison.
+  // Doit passer AVANT le motif générique /delivered/ ci-dessous.
+  [/will be delivered to|handed over to|transferred to/i,  'Transmis au transporteur local'],
+  // Livraison réelle uniquement (évite les faux positifs type "will be delivered")
+  [/successfully delivered|delivered to (the )?(recipient|consignee|addressee|customer)|package delivered|proof of delivery|^delivered$|colis (a été )?livré|remis au destinataire/i, 'Livré'],
 ]
 function translateDesc(d: string | null): string | null {
   if (!d) return null
