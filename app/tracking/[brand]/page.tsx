@@ -554,6 +554,11 @@ export default function BrandTrackingPage({ params }: { params: { brand: string 
         try {
           sessionStorage.setItem(SESSION_KEY(brand), JSON.stringify({ email: em, orderName: on, result: data }))
         } catch { /* ignore */ }
+        // Reflect the lookup in the address bar → unique, shareable tracking link
+        try {
+          const q = `?order=${encodeURIComponent(on)}&email=${encodeURIComponent(em)}`
+          window.history.replaceState(null, '', `${window.location.pathname}${q}`)
+        } catch { /* ignore */ }
       }
     } catch {
       setError('Erreur réseau. Veuillez réessayer.')
@@ -571,6 +576,7 @@ export default function BrandTrackingPage({ params }: { params: { brand: string 
     setResult(null)
     setError(null)
     try { sessionStorage.removeItem(SESSION_KEY(brand)) } catch { /* ignore */ }
+    try { window.history.replaceState(null, '', window.location.pathname) } catch { /* ignore */ }
   }
 
   return (
