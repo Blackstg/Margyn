@@ -208,17 +208,19 @@ function buildRealTimeline(result: TrackingResult, settings: TrackingSettings | 
   // multi-transporteurs) — plus de devinette sur le texte. dateFor = date la plus
   // récente atteinte par phase ; maxIdx = phase la plus avancée vue dans les events.
   const dateFor: Record<string, string> = {}
-  let maxIdx = 0
+  let currentIdx = 0  // phase du dernier événement = où le colis se trouve MAINTENANT
   for (const e of result.tracking_events) {  // triés du + récent au + ancien
     const idx = phaseIndexFromCode(e.code)
     if (idx == null) continue
-    if (idx > maxIdx) maxIdx = idx
+    if (currentIdx === 0) currentIdx = idx   // 1er event (= le + récent) → pas courant
     const key = RT_PHASES[idx].key
     if (!dateFor[key]) dateFor[key] = e.date
   }
+  // Le pas courant suit la position réelle la plus récente. Évite qu'une étape plus
+  // avancée dans le modèle (ex. dédouanement) affiche une date ANTÉRIEURE au pas
+  // courant alors que le colis a continué à avancer ensuite (cf. #1135).
   // "Livré" UNIQUEMENT si le transporteur confirme le statut Delivered (step 5).
-  // Sinon on plafonne à "En cours de livraison" même si un event semblait dire livré.
-  const lastReached = delivered ? PHASE_IDX.delivered : Math.min(maxIdx, PHASE_IDX.delivery)
+  const lastReached = delivered ? PHASE_IDX.delivered : Math.min(currentIdx, PHASE_IDX.delivery)
 
   return RT_PHASES.map((p, i): TLEvent => {
     const status: TLStatus = i < lastReached ? 'done' : i === lastReached ? (delivered ? 'done' : 'current') : 'upcoming'
