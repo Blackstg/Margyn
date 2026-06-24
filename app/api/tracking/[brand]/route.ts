@@ -5,7 +5,7 @@ import { register, getTrackInfo, normalize, mergeResults, CARRIER, type Track17R
 // Transporteurs à interroger par marque (Moom expédie via YunExpress + Colissimo en fin de course)
 const BRAND_CARRIERS: Record<string, (number | undefined)[]> = {
   moom: [CARRIER.YUNEXPRESS, undefined], // YunExpress (journal détaillé) + auto (Colissimo, livraison finale)
-  krom: [CARRIER.COLISSIMO, undefined],  // Colissimo (La Poste) + auto (GOFO et autres)
+  krom: [CARRIER.YUNEXPRESS, undefined], // YunExpress (journal détaillé) + auto (Colis Privé / Colissimo / GOFO)
 }
 
 // Cache 17Track (Supabase) : frais < 30 min et non livré → on réutilise sans rappeler l'API
