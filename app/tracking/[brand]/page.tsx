@@ -35,6 +35,7 @@ interface TrackingEvent {
   message:  string | null
   date:     string
   location: string | null
+  code:     string | null  // 17Track canonical sub_status/stage
 }
 
 interface TrackingResult {
@@ -137,23 +138,31 @@ function fmtDateTime(iso: string | null | undefined): string | null {
 
 // Grandes étapes claires (rassurantes), pilotées par les vrais événements transporteur.
 // Le journal complet reste accessible via « voir le détail ».
-const RT_PHASES: { key: string; title: string; desc: string; match?: RegExp }[] = [
+const RT_PHASES: { key: string; title: string; desc: string }[] = [
   { key: 'confirmed',  title: 'Commande confirmée',     desc: 'Nous avons bien reçu votre commande.' },
-  { key: 'prepared',   title: 'Commande en préparation', desc: 'Votre commande est préparée avec soin. La préparation peut prendre quelques jours avant l’expédition.',
-    match: /étiquette|expédition reçues|informations d’expédition|pris en charge/i },
-  { key: 'shipped',    title: 'Colis expédié',          desc: 'Votre colis a quitté notre centre et est en route.',
-    match: /centre de tri \((départ|origine)\)|départ du centre de tri/i },
-  { key: 'transit',    title: 'Acheminement en cours',  desc: 'Votre colis est en cours d’acheminement vers vous.',
-    match: /transit|vol international|aéroport|douane \(départ\)|export/i },
-  { key: 'processing', title: 'Traitement en cours',    desc: 'Votre colis est pris en charge avant la livraison.',
-    // « remis au transporteur local » (handoff YunExpress, parfois à l'étranger) =
-    // acheminement, PAS encore la livraison finale. Cf. #1139 Krom (transporteur belge).
-    match: /vol international arrivé|avis d’arrivée|tri \(destination\)|dédouanement (à l’import|import)|remis au transporteur local|transmis au transporteur local/i },
-  { key: 'delivery',   title: 'En cours de livraison',  desc: 'Votre colis est en tournée de livraison.',
-    match: /en cours de livraison/i },
-  { key: 'delivered',  title: 'Livré',                  desc: 'Votre colis a été livré. Bonne réception !',
-    match: /^livré$/i },
+  { key: 'prepared',   title: 'Commande en préparation', desc: 'Votre commande est préparée avec soin. La préparation peut prendre quelques jours avant l’expédition.' },
+  { key: 'shipped',    title: 'Colis expédié',          desc: 'Votre colis a quitté notre centre et est en route.' },
+  { key: 'transit',    title: 'Acheminement en cours',  desc: 'Votre colis est en cours d’acheminement vers vous.' },
+  { key: 'processing', title: 'Traitement en cours',    desc: 'Votre colis est pris en charge avant la livraison.' },
+  { key: 'delivery',   title: 'En cours de livraison',  desc: 'Votre colis est en tournée de livraison.' },
+  { key: 'delivered',  title: 'Livré',                  desc: 'Votre colis a été livré. Bonne réception !' },
 ]
+const PHASE_IDX: Record<string, number> = Object.fromEntries(RT_PHASES.map((p, i) => [p.key, i]))
+
+// Map a 17Track canonical sub_status/stage to a timeline phase index. Reliable
+// across carriers/languages (no description-text guessing).
+function phaseIndexFromCode(code: string | null): number | null {
+  if (!code) return null
+  const c = code.toLowerCase()
+  if (c.startsWith('delivered'))                                 return PHASE_IDX.delivered
+  if (c.startsWith('outfordelivery') || c.startsWith('availableforpickup')) return PHASE_IDX.delivery
+  if (c.includes('customs'))                                     return PHASE_IDX.processing
+  if (c.includes('arrival'))                                     return PHASE_IDX.transit
+  if (c.includes('pickedup') || c.includes('departure'))         return PHASE_IDX.shipped
+  if (c.startsWith('intransit') || c === 'exception' || c.startsWith('exception')) return PHASE_IDX.transit
+  if (c.startsWith('inforeceived'))                              return PHASE_IDX.prepared
+  return null
+}
 
 // Date de livraison estimée, TOUJOURS dans le futur (rassurant) :
 // ETA transporteur si dispo → sinon commande + délai → si dépassée, glissante depuis le dernier event.
@@ -176,21 +185,22 @@ function buildRealTimeline(result: TrackingResult, settings: TrackingSettings | 
   const delivered = result.step === 5
   const estDate = estimatedDeliveryDate(result, settings)
   const estStr  = estDate ? estDate.toLocaleDateString('fr-FR', { day: 'numeric', month: 'long' }) : null
-  // date la plus récente atteinte pour chaque phase (events triés du + récent au + ancien)
+
+  // Phases pilotées par le sub_status CANONIQUE de chaque événement (fiable,
+  // multi-transporteurs) — plus de devinette sur le texte. dateFor = date la plus
+  // récente atteinte par phase ; maxIdx = phase la plus avancée vue dans les events.
   const dateFor: Record<string, string> = {}
-  for (const e of result.tracking_events) {
-    for (const p of RT_PHASES) {
-      if (p.match && p.match.test(e.label) && !dateFor[p.key]) dateFor[p.key] = e.date
-    }
+  let maxIdx = 0
+  for (const e of result.tracking_events) {  // triés du + récent au + ancien
+    const idx = phaseIndexFromCode(e.code)
+    if (idx == null) continue
+    if (idx > maxIdx) maxIdx = idx
+    const key = RT_PHASES[idx].key
+    if (!dateFor[key]) dateFor[key] = e.date
   }
-  // "Livré" n'est atteint que si le transporteur le confirme réellement (step 5).
-  // On NE se fie PAS au libellé d'un événement : "will be delivered to…" ou autres
-  // formulations ne doivent jamais marquer le colis comme livré (cf. #1139 Krom).
-  const reached = RT_PHASES.map(p =>
-    p.key === 'confirmed' ? true : p.key === 'delivered' ? delivered : !!dateFor[p.key]
-  )
-  let lastReached = 0
-  reached.forEach((r, i) => { if (r) lastReached = i })
+  // "Livré" UNIQUEMENT si le transporteur confirme le statut Delivered (step 5).
+  // Sinon on plafonne à "En cours de livraison" même si un event semblait dire livré.
+  const lastReached = delivered ? PHASE_IDX.delivered : Math.min(maxIdx, PHASE_IDX.delivery)
 
   return RT_PHASES.map((p, i): TLEvent => {
     const status: TLStatus = i < lastReached ? 'done' : i === lastReached ? (delivered ? 'done' : 'current') : 'upcoming'

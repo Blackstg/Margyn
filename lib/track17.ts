@@ -75,7 +75,10 @@ export function statusToStep(status: string): number {
   }
 }
 
-export interface Track17Event { label: string; message: string | null; date: string; location: string | null }
+// `code` = 17Track canonical sub_status/stage (e.g. InTransit_CustomsReleased,
+// OutForDelivery, Delivered_Other). Drives the timeline reliably, independent of
+// the (carrier-specific, multilingual) description text.
+export interface Track17Event { label: string; message: string | null; date: string; location: string | null; code: string | null }
 export interface Track17Result {
   status: string; step: number; delivered: boolean
   carrier_name: string | null; eta_from: string | null; eta_to: string | null
@@ -109,6 +112,7 @@ export function normalize(accepted: any): Track17Result | null {
       message:  null, // on évite les descriptions brutes (souvent en anglais) — le libellé FR suffit
       date:     e.time_iso ?? e.time_utc ?? null,
       location: [e.address?.city, e.address?.country].filter(Boolean).join(', ') || e.location || null,
+      code:     e.sub_status ?? e.stage ?? null,
     }
   })).filter((e: Track17Event) => !!e.date)
 
