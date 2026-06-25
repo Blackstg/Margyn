@@ -1002,6 +1002,7 @@ function PlanificateurView() {
                               <div key={i} className="flex items-center gap-1.5 text-[10px]">
                                 <span className="font-mono text-[#6b6b63] bg-[#f5f5f3] px-1.5 py-0.5 rounded shrink-0">{item.sku || '—'}</span>
                                 <span className="text-[#6b6b63] truncate">{item.title}</span>
+                                {item.variant_title && <span className="text-[#1a1a2e] font-medium shrink-0">· {item.variant_title}</span>}
                                 <span className="font-semibold text-[#1a1a2e] shrink-0">×{item.qty}</span>
                               </div>
                             ))}
@@ -1048,6 +1049,7 @@ function PlanificateurView() {
                               <div key={i} className="flex items-center gap-1.5 text-[10px]">
                                 <span className="font-mono text-[#6b6b63] bg-[#e2e8f0] px-1.5 py-0.5 rounded shrink-0">{item.sku || '—'}</span>
                                 <span className="text-[#6b6b63] truncate">{item.title}</span>
+                                {item.variant_title && <span className="text-[#1a1a2e] font-medium shrink-0">· {item.variant_title}</span>}
                                 <span className="font-semibold text-[#1a1a2e] shrink-0">×{item.qty}</span>
                               </div>
                             ))}
@@ -1643,6 +1645,7 @@ function PlanificateurView() {
                                             <div key={i} className="flex items-center gap-1">
                                               <span className="font-mono bg-white border border-[#e8e8e4] px-1 rounded text-[9px] shrink-0">{item.sku?.trim() || '—'}</span>
                                               <span className="truncate">{item.title}</span>
+                                              {item.variant_title && <span className="shrink-0 font-medium text-[#1a1a2e]">· {item.variant_title}</span>}
                                               <span className="shrink-0 font-semibold text-[#1a1a2e]">×{item.qty}</span>
                                             </div>
                                           ))}
@@ -3427,6 +3430,7 @@ function LivreurView() {
                               <span className="font-mono text-[#9b9b93] bg-[#f5f5f3] px-1.5 py-0.5 rounded shrink-0">{item.sku}</span>
                             )}
                             <span className="text-[#1a1a2e] truncate">{item.title}</span>
+                            {item.variant_title && <span className="text-[#6b6b63] font-medium shrink-0">· {item.variant_title}</span>}
                           </div>
                         ))}
                       </div>
@@ -4008,8 +4012,8 @@ function LivreurView() {
                 {currentStop.panel_details.map((item, i) => (
                   <div key={i} className="flex items-center gap-3 bg-[#f5f5f3] rounded-[12px] px-4 py-3">
                     <div className="flex-1 min-w-0">
-                      {item.sku?.trim() && (
-                        <div className="font-mono text-xs text-[#6b6b63]">{item.sku.trim()}</div>
+                      {(item.sku?.trim() || item.variant_title) && (
+                        <div className="font-mono text-xs text-[#6b6b63]">{item.sku?.trim() || item.variant_title}</div>
                       )}
                       <div className="font-medium text-[#1a1a2e] text-sm leading-tight">{item.title}</div>
                     </div>
@@ -4242,7 +4246,7 @@ function LivreurView() {
                     <div key={i} className={`flex items-center gap-3 rounded-[12px] px-3 py-2.5 border ${isShort ? 'bg-[#fff7ed] border-[#fed7aa]' : 'bg-[#f5f5f3] border-transparent'}`}>
                       <div className="flex-1 min-w-0">
                         <p className="text-sm font-medium text-[#1a1a2e] truncate">{item.title}</p>
-                        {item.sku && <p className="text-[10px] text-[#9b9b93] font-mono">{item.sku}</p>}
+                        {(item.sku || item.variant_title) && <p className="text-[10px] text-[#9b9b93] font-mono">{item.sku || item.variant_title}</p>}
                         {isShort && <p className="text-[10px] text-[#c2680a] font-semibold">Manque {item.qty - delivered}</p>}
                       </div>
                       <div className="flex items-center gap-2 shrink-0">
@@ -5214,7 +5218,7 @@ function SavView() {
                     {selected.panel_details.map((p, i) => (
                       <div key={i} className={`flex items-center justify-between px-3 py-2 text-xs ${i > 0 ? 'border-t border-[#f5f5f3]' : ''}`}>
                         <div className="min-w-0">
-                          <span className="font-mono text-[#9b9b93] mr-2">{p.sku || '—'}</span>
+                          <span className="font-mono text-[#9b9b93] mr-2">{p.sku || p.variant_title || '—'}</span>
                           <span className="text-[#1a1a2e] truncate">{p.title}</span>
                         </div>
                         <span className="font-semibold text-[#1a1a2e] ml-4 flex-shrink-0">×{p.qty}</span>
