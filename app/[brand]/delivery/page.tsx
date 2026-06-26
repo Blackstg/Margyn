@@ -4995,6 +4995,7 @@ function SavView() {
               {filtered.map((entry) => {
                 const cfg = SAV_STATUS_CONFIG[entry.sav_status]
                 const isSelected = selected?.id === entry.id
+                const driverNote = entry.comment?.trim()
                 const weekInfo = entry.tour_planned_date
                   ? getWeekRange(entry.tour_planned_date).start
                   : null
@@ -5005,12 +5006,20 @@ function SavView() {
                     className={`w-full text-left px-3.5 py-2.5 rounded-[12px] border transition-all ${
                       isSelected
                         ? 'border-[#aeb0c9] bg-[#f0f0fb]'
-                        : 'border-[#f0f0ee] bg-[#fafaf8] hover:bg-[#f5f5f3]'
+                        : driverNote
+                          ? 'border-[#fdba74] bg-[#fff7ed] hover:bg-[#ffedd5]'
+                          : 'border-[#f0f0ee] bg-[#fafaf8] hover:bg-[#f5f5f3]'
                     }`}
                   >
                     <div className="flex items-center justify-between gap-1.5 mb-0.5">
                       <span className="font-mono text-xs font-bold text-[#1a1a2e]">{entry.order_name}</span>
                       <div className="flex items-center gap-1 flex-shrink-0">
+                        {driverNote && (
+                          <span title={driverNote} className="w-4 h-4 rounded-full bg-[#ea580c] text-white flex items-center justify-center text-[9px]">💬</span>
+                        )}
+                        {entry.photo_url && (
+                          <span title="Photo du livreur" className="w-4 h-4 rounded-full bg-[#dbeafe] text-[#1d4ed8] flex items-center justify-center text-[9px]">📷</span>
+                        )}
                         {entry.sav_note && (
                           <span title={entry.sav_note} className="w-4 h-4 rounded-full bg-[#fef3c7] text-[#d97706] flex items-center justify-center text-[9px]">📝</span>
                         )}
@@ -5023,6 +5032,12 @@ function SavView() {
                       </div>
                     </div>
                     <div className="text-xs text-[#6b6b63] truncate">{entry.customer_name} · {entry.city}</div>
+                    {driverNote && (
+                      <div className="mt-1 flex items-start gap-1 rounded-[8px] bg-[#ffedd5] px-2 py-1">
+                        <span className="text-[10px] shrink-0 leading-snug">💬</span>
+                        <span className="text-[11px] text-[#9a3412] leading-snug line-clamp-2">{driverNote}</span>
+                      </div>
+                    )}
                     {entry.tour_name && (
                       <div className="text-[10px] text-[#9b9b93] mt-0.5 truncate">
                         {entry.tour_name}{weekInfo ? ` · ${weekInfo}` : ''}
@@ -5229,6 +5244,17 @@ function SavView() {
                   <p className="text-xs text-[#9b9b93]">—</p>
                 )}
               </div>
+
+              {/* ── Note du livreur (alerte SAV) ── */}
+              {selected.comment?.trim() && (
+                <div className="rounded-[12px] bg-[#fff7ed] border border-[#fdba74] px-3 py-2.5">
+                  <p className="text-[10px] font-semibold uppercase tracking-[0.08em] text-[#c2680a] mb-1">💬 Note du livreur</p>
+                  <p className="text-sm text-[#7c2d12] leading-snug whitespace-pre-wrap">{selected.comment}</p>
+                  {selected.delivered_at && (
+                    <p className="text-[10px] text-[#c2680a]/70 mt-1">{new Date(selected.delivered_at).toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' })}</p>
+                  )}
+                </div>
+              )}
 
               {/* ── Note SAV pour le livreur ── */}
               {selected.stop_status !== null && (
