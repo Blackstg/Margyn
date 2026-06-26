@@ -2415,24 +2415,42 @@ function LivreurView() {
     try {
       const completedAt = new Date().toISOString()
 
-      // Calculate total km from geocoded coordinates in sequence
+      // Distance réelle parcourue : route Mapbox (dépôt → arrêts en séquence → dépôt).
       const stopsInOrder = [...tour.stops].sort((a, b) => a.sequence - b.sequence)
+      const orderedCoords = stopsInOrder
+        .map(s => coordsCache.current.get(s.id))
+        .filter((c): c is [number, number] => !!c)
       let totalKm = 0
-      const MAX_LEG_KM = 200  // garde-fou : un arrêt mal géocodé ne doit pas gonfler le total
-      for (let i = 0; i < stopsInOrder.length - 1; i++) {
-        const a = coordsCache.current.get(stopsInOrder[i].id)
-        const b = coordsCache.current.get(stopsInOrder[i + 1].id)
-        if (a && b) {
-          // Haversine distance
+      const token = process.env.NEXT_PUBLIC_MAPBOX_TOKEN ?? ''
+
+      // 1) Distance routière réelle via l'API Directions (aller-retour dépôt)
+      const wps: [number, number][] = [DEPOT_COORDS, ...orderedCoords, DEPOT_COORDS]
+      if (token && orderedCoords.length >= 1 && wps.length <= 25) {
+        try {
+          const coordStr = wps.map(c => c.join(',')).join(';')
+          const res = await fetch(`https://api.mapbox.com/directions/v5/mapbox/driving/${coordStr}?overview=false&access_token=${token}`)
+          if (res.ok) {
+            const data = await res.json()
+            const meters = data.routes?.[0]?.distance
+            if (typeof meters === 'number') totalKm = Math.round(meters / 1000)
+          }
+        } catch { /* repli ci-dessous */ }
+      }
+
+      // 2) Repli : haversine plafonné (API indispo ou > 25 waypoints)
+      if (totalKm === 0 && orderedCoords.length >= 2) {
+        const MAX_LEG_KM = 200
+        let km = 0
+        for (let i = 0; i < orderedCoords.length - 1; i++) {
+          const a = orderedCoords[i], b = orderedCoords[i + 1]
           const R = 6371
           const dLat = (b[1] - a[1]) * Math.PI / 180
           const dLon = (b[0] - a[0]) * Math.PI / 180
           const h = Math.sin(dLat/2)**2 + Math.cos(a[1]*Math.PI/180) * Math.cos(b[1]*Math.PI/180) * Math.sin(dLon/2)**2
-          const leg = R * 2 * Math.atan2(Math.sqrt(h), Math.sqrt(1-h))
-          totalKm += Math.min(leg, MAX_LEG_KM)
+          km += Math.min(R * 2 * Math.atan2(Math.sqrt(h), Math.sqrt(1-h)), MAX_LEG_KM)
         }
+        totalKm = Math.round(km)
       }
-      totalKm = Math.round(totalKm)
 
       const r = await fetch(`/api/delivery/tours/${tour.id}`, {
         method: 'PATCH',
