@@ -2852,7 +2852,7 @@ function LivreurView() {
   if (screen === 'celebration' && celebrationStats) {
     const { durationMs, delivered, failed, panels, totalKm } = celebrationStats
     return (
-      <div className="w-full flex flex-col items-center gap-6 py-8">
+      <div className="w-full max-w-md mx-auto flex flex-col items-center gap-6 py-8 px-4">
         {/* Trophy */}
         <div className="text-7xl">🏆</div>
         <div className="text-center">
@@ -2862,24 +2862,24 @@ function LivreurView() {
 
         {/* Stats grid */}
         <div className="w-full grid grid-cols-2 gap-3">
-          <div className="rounded-[18px] bg-[#1a1a2e] px-5 py-5 flex flex-col items-center gap-1">
-            <p className="text-3xl font-bold text-[#4ade80]">{formatDuration(durationMs)}</p>
-            <p className="text-xs text-white/50 uppercase tracking-wide">Durée</p>
+          <div className="rounded-[18px] bg-[#1a1a2e] px-3 py-5 flex flex-col items-center gap-1 min-w-0">
+            <p className="text-2xl font-bold text-[#4ade80] text-center leading-tight break-words max-w-full">{formatDuration(durationMs)}</p>
+            <p className="text-[11px] text-white/50 uppercase tracking-wide">Durée</p>
           </div>
-          <div className="rounded-[18px] bg-white border border-[#e8e8e4] px-5 py-5 flex flex-col items-center gap-1">
-            <p className="text-3xl font-bold text-[#1a1a2e]">{totalKm} km</p>
-            <p className="text-xs text-[#9b9b93] uppercase tracking-wide">Parcourus</p>
+          <div className="rounded-[18px] bg-white border border-[#e8e8e4] px-3 py-5 flex flex-col items-center gap-1 min-w-0">
+            <p className="text-2xl font-bold text-[#1a1a2e] text-center leading-tight break-words max-w-full">{totalKm} km</p>
+            <p className="text-[11px] text-[#9b9b93] uppercase tracking-wide">Parcourus</p>
           </div>
-          <div className="rounded-[18px] bg-white border border-[#e8e8e4] px-5 py-5 flex flex-col items-center gap-1">
-            <div className="flex items-baseline gap-2">
-              <p className="text-3xl font-bold text-[#1a1a2e]">{delivered}</p>
-              {failed > 0 && <p className="text-base font-semibold text-red-400">/ {failed} ✗</p>}
+          <div className="rounded-[18px] bg-white border border-[#e8e8e4] px-3 py-5 flex flex-col items-center gap-1 min-w-0">
+            <div className="flex items-baseline gap-1.5">
+              <p className="text-2xl font-bold text-[#1a1a2e]">{delivered}</p>
+              {failed > 0 && <p className="text-sm font-semibold text-red-400">/ {failed} ✗</p>}
             </div>
-            <p className="text-xs text-[#9b9b93] uppercase tracking-wide">Livraisons</p>
+            <p className="text-[11px] text-[#9b9b93] uppercase tracking-wide">Livraisons</p>
           </div>
-          <div className="rounded-[18px] bg-white border border-[#e8e8e4] px-5 py-5 flex flex-col items-center gap-1">
-            <p className="text-3xl font-bold text-[#1a1a2e]">{panels}</p>
-            <p className="text-xs text-[#9b9b93] uppercase tracking-wide">Panneaux</p>
+          <div className="rounded-[18px] bg-white border border-[#e8e8e4] px-3 py-5 flex flex-col items-center gap-1 min-w-0">
+            <p className="text-2xl font-bold text-[#1a1a2e]">{panels}</p>
+            <p className="text-[11px] text-[#9b9b93] uppercase tracking-wide">Panneaux</p>
           </div>
         </div>
 
