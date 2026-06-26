@@ -4791,6 +4791,16 @@ function SavView() {
     if (entry.comment?.trim()) markNotesSeen([noteKey(entry)])  // ouvrir = lu
   }
 
+  // Sur desktop, ouvrir la 1re commande par défaut pour ne pas laisser le panneau
+  // de droite vide. (Sélection passive : ne marque PAS la note comme lue.)
+  useEffect(() => {
+    if (selected || loading || filtered.length === 0) return
+    if (typeof window !== 'undefined' && !window.matchMedia('(min-width: 768px)').matches) return
+    setSelected(filtered[0])
+    setNoteValue(filtered[0].sav_note ?? '')
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loading, selected, filtered.length])
+
   // Build live tour widgets from entries (updated by polling)
   const liveToursMap = new Map<string, SavEntry>()
   for (const e of entries) {
