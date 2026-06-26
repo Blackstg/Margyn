@@ -4958,7 +4958,7 @@ function SavView() {
 
     <div className="flex flex-col md:flex-row gap-4 items-start">
       {/* ── Left: search + list ── */}
-      <div className={`flex-shrink-0 ${selected ? 'hidden md:block md:w-[300px]' : 'w-full md:flex-1 md:max-w-xl'}`}>
+      <div className={`flex-shrink-0 ${selected ? 'hidden md:block md:w-2/5' : 'w-full md:flex-1 md:max-w-xl'}`}>
         <div className="rounded-[20px] shadow-[0_2px_16px_rgba(0,0,0,0.06)] bg-white p-5">
           <div className="flex items-center justify-between mb-3">
             <h2 className="text-base font-semibold text-[#1a1a2e]">SAV — Suivi livraisons</h2>
