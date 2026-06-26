@@ -4692,6 +4692,12 @@ function SavView() {
   const [emailOpen, setEmailOpen] = useState(false)
   const [statusFilter, setStatusFilter] = useState<SavStatus | 'all'>('all')
   const [tourFilter, setTourFilter]     = useState<string>('all')
+  const [notesOnly, setNotesOnly]       = useState(false)
+  const [bellOpen, setBellOpen]         = useState(false)
+  const [seenNotes, setSeenNotes]       = useState<Set<string>>(() => {
+    if (typeof window === 'undefined') return new Set()
+    try { return new Set<string>(JSON.parse(localStorage.getItem('bowa_sav_seen_notes') || '[]')) } catch { return new Set() }
+  })
   const [editingNote, setEditingNote]   = useState(false)
   const [noteValue, setNoteValue]       = useState('')
   const [savingNote, setSavingNote]     = useState(false)
@@ -4740,6 +4746,7 @@ function SavView() {
   }, [entries])
 
   const filtered = entries.filter((e) => {
+    if (notesOnly && !e.comment?.trim()) return false
     if (statusFilter !== 'all' && e.sav_status !== statusFilter) return false
     if (tourFilter === '') { if (e.tour_name) return false }
     else if (tourFilter !== 'all' && e.tour_name !== tourFilter) return false
@@ -4752,6 +4759,21 @@ function SavView() {
       (e.email ?? '').toLowerCase().includes(q)
     )
   })
+
+  // ── Notes livreur : alertes + notifications (non-lues persistées) ───────────
+  const noteKey = (e: SavEntry) => `${e.id}::${(e.comment ?? '').trim()}`
+  const notedEntries = entries
+    .filter(e => e.comment?.trim())
+    .sort((a, b) => (b.delivered_at ?? '').localeCompare(a.delivered_at ?? ''))
+  const unseenNotes = notedEntries.filter(e => !seenNotes.has(noteKey(e)))
+  function markNotesSeen(keys: string[]) {
+    setSeenNotes(prev => {
+      const next = new Set(prev)
+      keys.forEach(k => next.add(k))
+      try { localStorage.setItem('bowa_sav_seen_notes', JSON.stringify([...next])) } catch { /* ignore */ }
+      return next
+    })
+  }
 
   function handleCopy() {
     if (!selected) return
@@ -4766,6 +4788,7 @@ function SavView() {
     setEmailOpen(false)
     setEditingNote(false)
     setNoteValue(entry.sav_note ?? '')
+    if (entry.comment?.trim()) markNotesSeen([noteKey(entry)])  // ouvrir = lu
   }
 
   // Build live tour widgets from entries (updated by polling)
@@ -4927,7 +4950,64 @@ function SavView() {
       {/* ── Left: search + list ── */}
       <div className={`flex-shrink-0 ${selected ? 'hidden md:block md:w-[300px]' : 'w-full md:flex-1 md:max-w-xl'}`}>
         <div className="rounded-[20px] shadow-[0_2px_16px_rgba(0,0,0,0.06)] bg-white p-5">
-          <h2 className="text-base font-semibold text-[#1a1a2e] mb-3">SAV — Suivi livraisons</h2>
+          <div className="flex items-center justify-between mb-3">
+            <h2 className="text-base font-semibold text-[#1a1a2e]">SAV — Suivi livraisons</h2>
+            {/* Cloche de notifications — notes livreur non lues */}
+            <div className="relative">
+              <button
+                onClick={() => setBellOpen(o => !o)}
+                className="relative w-9 h-9 rounded-full bg-[#f5f5f3] hover:bg-[#ece9e4] flex items-center justify-center transition-colors"
+                title="Notes des livreurs"
+              >
+                <span className="text-base">🔔</span>
+                {unseenNotes.length > 0 && (
+                  <span className="absolute -top-0.5 -right-0.5 min-w-[18px] h-[18px] px-1 rounded-full bg-[#ea580c] text-white text-[10px] font-bold flex items-center justify-center ring-2 ring-white">
+                    {unseenNotes.length}
+                  </span>
+                )}
+              </button>
+              {bellOpen && (
+                <>
+                  <div className="fixed inset-0 z-30" onClick={() => setBellOpen(false)} />
+                  <div className="absolute right-0 mt-2 w-80 max-h-[60vh] overflow-y-auto bg-white rounded-[14px] shadow-[0_8px_32px_rgba(0,0,0,0.18)] border border-[#eee] z-40">
+                    <div className="flex items-center justify-between px-3.5 py-2.5 border-b border-[#f0f0ee] sticky top-0 bg-white">
+                      <span className="text-xs font-semibold text-[#1a1a2e]">Notes des livreurs ({notedEntries.length})</span>
+                      {unseenNotes.length > 0 && (
+                        <button
+                          onClick={() => markNotesSeen(notedEntries.map(noteKey))}
+                          className="text-[11px] font-medium text-[#ea580c] hover:underline"
+                        >
+                          Tout marquer comme lu
+                        </button>
+                      )}
+                    </div>
+                    {notedEntries.length === 0 ? (
+                      <p className="px-3.5 py-6 text-center text-xs text-[#9b9b93]">Aucune note de livreur</p>
+                    ) : (
+                      notedEntries.map(e => {
+                        const unseen = !seenNotes.has(noteKey(e))
+                        return (
+                          <button
+                            key={e.id}
+                            onClick={() => { selectEntry(e); setBellOpen(false); setNotesOnly(false) }}
+                            className={`w-full text-left px-3.5 py-2.5 border-b border-[#f5f5f3] hover:bg-[#fafaf8] transition-colors ${unseen ? 'bg-[#fff7ed]' : ''}`}
+                          >
+                            <div className="flex items-center gap-1.5">
+                              {unseen && <span className="w-1.5 h-1.5 rounded-full bg-[#ea580c] shrink-0" />}
+                              <span className="font-mono text-[11px] font-bold text-[#1a1a2e]">{e.order_name}</span>
+                              <span className="text-[11px] text-[#6b6b63] truncate">· {e.customer_name}</span>
+                            </div>
+                            <p className="text-[11px] text-[#9a3412] leading-snug mt-0.5 line-clamp-2">💬 {e.comment}</p>
+                            {e.tour_name && <p className="text-[10px] text-[#9b9b93] mt-0.5 truncate">{e.tour_name}</p>}
+                          </button>
+                        )
+                      })
+                    )}
+                  </div>
+                </>
+              )}
+            </div>
+          </div>
 
           {/* Status chips */}
           <div className="flex flex-wrap gap-1.5 mb-3">
@@ -4953,6 +5033,15 @@ function SavView() {
                 </button>
               )
             })}
+            {/* Filtre dédié : commandes avec une note du livreur (visibles même tournée finie) */}
+            <button
+              onClick={() => setNotesOnly(v => !v)}
+              className="flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold transition-colors"
+              style={{ background: notesOnly ? '#ea580c' : '#ffedd5', color: notesOnly ? '#fff' : '#9a3412' }}
+            >
+              💬 Notes livreur
+              <span className="text-[10px] opacity-80">{notedEntries.length}</span>
+            </button>
           </div>
 
           {/* Tour select */}
