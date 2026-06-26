@@ -133,6 +133,26 @@ function formatDuration(ms: number): string {
   return parts.join(' ')
 }
 
+// Durée réelle d'une tournée. started_at→completed_at peut s'étaler sur plusieurs
+// jours (tournée démarrée puis clôturée un autre jour) → aberrant. Au-delà de 14h
+// on se rabat sur la fenêtre réelle des livraisons (1re → dernière livraison).
+const MAX_TOUR_MS = 14 * 60 * 60 * 1000
+function saneDurationMs(
+  startedAt: string | null | undefined,
+  completedAt: string | null | undefined,
+  stops: { delivered_at?: string | null }[],
+): number {
+  const times = (stops ?? [])
+    .map(s => s.delivered_at).filter(Boolean)
+    .map(t => new Date(t as string).getTime())
+    .sort((a, b) => a - b)
+  const completedMs = completedAt ? new Date(completedAt).getTime() : (times[times.length - 1] ?? 0)
+  const startMs     = startedAt   ? new Date(startedAt).getTime()   : (times[0] ?? completedMs)
+  let d = completedMs - startMs
+  if (d > MAX_TOUR_MS || d < 0) d = times.length >= 2 ? times[times.length - 1] - times[0] : 0
+  return d
+}
+
 
 
 const TOUR_STATUS_LABELS: Record<TourStatus, { label: string; color: string }> = {
@@ -1514,9 +1534,7 @@ function PlanificateurView() {
                       {isExpanded && tour.completed_at && (
                         <div className="mx-3 mb-2 rounded-[10px] bg-[#f8f7f5] border border-[#e8e8e4] px-4 py-3 grid grid-cols-4 gap-3 text-center">
                           {(() => {
-                            const durationMs = tour.started_at && tour.completed_at
-                              ? new Date(tour.completed_at).getTime() - new Date(tour.started_at).getTime()
-                              : 0
+                            const durationMs = saneDurationMs(tour.started_at, tour.completed_at, tour.stops)
                             const delivered = tour.stops.filter(s => s.status === 'delivered' || s.status === 'partial').length
                             const failed    = tour.stops.filter(s => s.status === 'failed').length
                             const panels    = tour.stops.filter(s => s.status === 'delivered' || s.status === 'partial').reduce((n, s) => n + s.panel_count, 0)
@@ -2400,6 +2418,7 @@ function LivreurView() {
       // Calculate total km from geocoded coordinates in sequence
       const stopsInOrder = [...tour.stops].sort((a, b) => a.sequence - b.sequence)
       let totalKm = 0
+      const MAX_LEG_KM = 200  // garde-fou : un arrêt mal géocodé ne doit pas gonfler le total
       for (let i = 0; i < stopsInOrder.length - 1; i++) {
         const a = coordsCache.current.get(stopsInOrder[i].id)
         const b = coordsCache.current.get(stopsInOrder[i + 1].id)
@@ -2409,7 +2428,8 @@ function LivreurView() {
           const dLat = (b[1] - a[1]) * Math.PI / 180
           const dLon = (b[0] - a[0]) * Math.PI / 180
           const h = Math.sin(dLat/2)**2 + Math.cos(a[1]*Math.PI/180) * Math.cos(b[1]*Math.PI/180) * Math.sin(dLon/2)**2
-          totalKm += R * 2 * Math.atan2(Math.sqrt(h), Math.sqrt(1-h))
+          const leg = R * 2 * Math.atan2(Math.sqrt(h), Math.sqrt(1-h))
+          totalKm += Math.min(leg, MAX_LEG_KM)
         }
       }
       totalKm = Math.round(totalKm)
@@ -2435,7 +2455,7 @@ function LivreurView() {
         .filter(s => s.status === 'delivered' || s.status === 'partial')
         .reduce((sum, s) => sum + s.panel_count, 0)
 
-      const durationMs = startedAt ? new Date(completedAt).getTime() - new Date(startedAt).getTime() : 0
+      const durationMs = saneDurationMs(startedAt, completedAt, stopsInOrder)
       setCelebrationStats({ durationMs, delivered, failed, panels, totalKm })
       setScreen('celebration')
 
