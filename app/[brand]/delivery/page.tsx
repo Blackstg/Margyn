@@ -3717,9 +3717,10 @@ function LivreurView() {
           </div>
         )}
 
-        {/* Validate button — fixed bottom */}
+        {/* Validate button — fixed bottom (respecte la barre d'accueil iPhone) */}
         {allChecked && (
-          <div className="fixed bottom-6 left-0 right-0 flex justify-center px-6">
+          <div className="fixed bottom-0 left-0 right-0 flex justify-center px-6 pt-3"
+            style={{ paddingBottom: 'calc(1.25rem + env(safe-area-inset-bottom))' }}>
             <button
               onClick={() => {
                 const resumeIdx = sortedStops.findIndex(s => s.status !== 'delivered' && s.status !== 'failed')
