@@ -149,6 +149,22 @@ export default function AnnualChart({ data, loading }: Props) {
   const currentOp = focus === 'prev'    ? 0.3 : 1
   const prevOp    = focus === 'current' ? 0.3 : 1
 
+  // ── Récap à l'année (cumul YTD, comparé à la même période N-1) ───────────────
+  const past            = data.filter((d) => !d.isFuture)
+  const totalCA         = past.reduce((s, d) => s + d.ca, 0)
+  const totalMargin     = past.reduce((s, d) => s + d.net_margin, 0)
+  const totalCAprev     = past.reduce((s, d) => s + d.ca_prev, 0)
+  const totalMarginPrev = past.reduce((s, d) => s + d.net_margin_prev, 0)
+  const marginPct       = totalCA > 0 ? (totalMargin / totalCA) * 100 : 0
+  const caYoY           = totalCAprev > 0 ? ((totalCA - totalCAprev) / totalCAprev) * 100 : null
+  const marginYoY       = totalMarginPrev > 0 ? ((totalMargin - totalMarginPrev) / totalMarginPrev) * 100 : null
+  const yoyBadge = (v: number | null) =>
+    v === null ? null : (
+      <span className={`text-[10px] font-semibold ${v >= 0 ? 'text-[#1a7f4b]' : 'text-[#c7293a]'}`}>
+        {v >= 0 ? '+' : ''}{v.toFixed(0)}% vs {currentYear - 1}
+      </span>
+    )
+
   return (
     <div className="bg-white rounded-[20px] shadow-[0_2px_16px_rgba(0,0,0,0.06)] p-5">
 
@@ -335,6 +351,25 @@ export default function AnnualChart({ data, loading }: Props) {
               )}
             </>
           )}
+        </div>
+      )}
+
+      {/* ── Récap à l'année ─────────────────────────────────────────────────── */}
+      {!loading && past.length > 0 && (
+        <div className="mt-5 pt-4 border-t border-[#f0ede9] grid grid-cols-2 gap-3">
+          <div className="rounded-[14px] bg-[#faf9f8] px-4 py-3">
+            <p className="text-[10px] font-semibold uppercase tracking-[0.1em] text-[#aeb0c9]">CA à l&apos;année</p>
+            <p className="text-2xl font-bold text-[#1a1a2e] tabular-nums mt-0.5">{fmtEur(totalCA)}</p>
+            <div className="mt-0.5">{yoyBadge(caYoY)}</div>
+          </div>
+          <div className="rounded-[14px] bg-[#faf9f8] px-4 py-3">
+            <p className="text-[10px] font-semibold uppercase tracking-[0.1em] text-[#aeb0c9]">Marge à l&apos;année</p>
+            <p className="text-2xl font-bold text-[#1a1a2e] tabular-nums mt-0.5">{fmtEur(totalMargin)}</p>
+            <div className="mt-0.5 flex items-center gap-2 flex-wrap">
+              <span className="text-[10px] text-[#6b6b63]">{marginPct.toFixed(0)}% du CA</span>
+              {yoyBadge(marginYoY)}
+            </div>
+          </div>
         </div>
       )}
     </div>

@@ -667,10 +667,19 @@ async function fetchInventory(brand: Brand): Promise<InventoryItem[]> {
     }
   }
 
+  // « Commande en cours » = production saisie sur la page Réappro (localStorage/brand)
+  let inProd: Record<string, number> = {}
+  try {
+    const raw = typeof window !== 'undefined' ? localStorage.getItem(`reorder_inprod_${brand}`) : null
+    if (raw) inProd = JSON.parse(raw) as Record<string, number>
+  } catch { /* ignore */ }
+
   return (variantsRes.data ?? []).map((v) => {
     const totalSold = sold30.get(v.shopify_variant_id) ?? 0
     const dailyVelocity = totalSold / 30
-    const coverage_days = dailyVelocity > 0 ? v.stock_quantity / dailyVelocity : null
+    const qty_in_production = inProd[v.shopify_variant_id] ?? 0
+    // Couverture calculée sur le stock effectif (réel + commande en cours)
+    const coverage_days = dailyVelocity > 0 ? (v.stock_quantity + qty_in_production) / dailyVelocity : null
     return {
       title: v.product_title,
       variant_title: v.variant_title ?? null,
@@ -679,6 +688,7 @@ async function fetchInventory(brand: Brand): Promise<InventoryItem[]> {
       stock_alert_threshold: 0,
       image_url: v.image_url,
       coverage_days,
+      qty_in_production,
       shopify_variant_id: v.shopify_variant_id,
     } as InventoryItem
   })

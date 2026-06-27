@@ -17,7 +17,8 @@ export interface InventoryItem {
   sell_price: number | null
   stock_alert_threshold: number
   image_url?: string | null
-  coverage_days?: number | null
+  coverage_days?: number | null   // calculée sur stock + production (commande en cours)
+  qty_in_production?: number       // « commande en cours » (production en localStorage Réappro)
   shopify_variant_id?: string
 }
 
@@ -94,12 +95,16 @@ function SkeletonRow() {
 // ─── ProductsView ─────────────────────────────────────────────────────────────
 
 export default function ProductsView({ bestSellers, inventory, loading, stockThreshold }: Props) {
+  // Stock effectif = stock réel + commande en cours (production). coverage_days est
+  // déjà calculée sur ce stock effectif côté fetchInventory.
+  const effStock = (i: InventoryItem) => i.stock_quantity + (i.qty_in_production ?? 0)
+
   const criticalItems = inventory
     .filter((item) => {
       if (item.title.toLowerCase().includes('strap')) return false
       if (item.title.includes(' + ')) return false
       if (item.coverage_days != null) return item.coverage_days < 60
-      return item.stock_quantity <= stockThreshold * 2
+      return effStock(item) <= stockThreshold * 2
     })
     .sort(urgencySort)
     .slice(0, 8)
@@ -108,7 +113,7 @@ export default function ProductsView({ bestSellers, inventory, loading, stockThr
     if (item.title.toLowerCase().includes('strap')) return false
     if (item.title.includes(' + ')) return false
     if (item.coverage_days != null) return item.coverage_days < 30
-    return item.stock_quantity <= stockThreshold
+    return effStock(item) <= stockThreshold
   }).length
 
   return (
@@ -251,6 +256,9 @@ export default function ProductsView({ bestSellers, inventory, loading, stockThr
                     <p className={`text-sm font-bold tabular-nums ${stockColor}`}>
                       {item.stock_quantity}
                     </p>
+                    {(item.qty_in_production ?? 0) > 0 && (
+                      <p className="text-[10px] font-semibold text-[#1d4ed8] tabular-nums">+{item.qty_in_production} en commande</p>
+                    )}
                     <div className="flex items-center justify-end gap-1.5">
                       <p className="text-[10px] text-[#9b9b93]">unités</p>
                       <CoverageBadge days={item.coverage_days} />
