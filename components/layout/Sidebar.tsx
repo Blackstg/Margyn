@@ -4,7 +4,7 @@ import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
 import {
   LayoutDashboard, BarChart2, PackageOpen, Settings, LogOut,
-  Boxes, FileText, Tag, Truck, Headphones, ChevronLeft, ChevronRight, Sparkles, Receipt, PackageX, Users,
+  Boxes, FileText, Tag, Truck, Headphones, ChevronLeft, ChevronRight, ChevronDown, Sparkles, Receipt, PackageX, Users,
 } from 'lucide-react'
 import { createBrowserClient } from '@supabase/auth-helpers-nextjs'
 import { useState, useEffect } from 'react'
@@ -201,33 +201,31 @@ export default function Sidebar({ isOpen, collapsed, onToggleCollapse }: Sidebar
               ))}
             </div>
           ) : (
-            <div className="space-y-1">
-              <p className="text-[10px] font-semibold uppercase tracking-widest text-white/25 px-2 mb-2">Marque</p>
-              {allowedBrands.map(b => (
-                <button
-                  key={b}
-                  onClick={() => selectBrand(b)}
-                  className={`w-full flex items-center gap-3 px-3 py-2 rounded-xl transition-all text-left ${
-                    currentBrand === b
-                      ? 'bg-white/10 text-white'
-                      : 'text-white/40 hover:text-white/70 hover:bg-white/5'
-                  }`}
-                >
-                  <div className={`w-7 h-7 rounded-lg overflow-hidden shrink-0 ring-1 transition-all ${
-                    currentBrand === b ? 'ring-[#aeb0c9]/60' : 'ring-white/10'
-                  }`}>
-                    {BRAND_LOGOS[b]
-                      ? <img src={BRAND_LOGOS[b]} alt={b} className="w-full h-full object-cover" />
-                      : <span className="w-full h-full bg-[#aeb0c9]/30 flex items-center justify-center text-white text-[10px] font-bold">{b[0].toUpperCase()}</span>
+            // Select compact (1 ligne) pour gagner de la place dans la sidebar
+            (() => {
+              const cur = currentBrand && allowedBrands.includes(currentBrand) ? currentBrand : allowedBrands[0]
+              return (
+                <div className="relative flex items-center gap-2 px-2.5 py-2 rounded-xl bg-white/5 ring-1 ring-white/10">
+                  <div className="w-6 h-6 rounded-md overflow-hidden shrink-0 ring-1 ring-[#aeb0c9]/40">
+                    {BRAND_LOGOS[cur]
+                      ? <img src={BRAND_LOGOS[cur]} alt={cur} className="w-full h-full object-cover" />
+                      : <span className="w-full h-full bg-[#aeb0c9]/30 flex items-center justify-center text-white text-[10px] font-bold">{cur[0].toUpperCase()}</span>
                     }
                   </div>
-                  <span className="text-sm font-medium">{BRAND_LABELS[b] ?? b}</span>
-                  {currentBrand === b && (
-                    <span className="ml-auto w-1.5 h-1.5 rounded-full bg-[#aeb0c9] shrink-0" />
-                  )}
-                </button>
-              ))}
-            </div>
+                  <select
+                    value={cur}
+                    onChange={(e) => selectBrand(e.target.value)}
+                    className="flex-1 min-w-0 bg-transparent text-sm font-medium text-white outline-none cursor-pointer appearance-none"
+                    aria-label="Marque"
+                  >
+                    {allowedBrands.map(b => (
+                      <option key={b} value={b} className="text-[#1a1a2e]">{BRAND_LABELS[b] ?? b}</option>
+                    ))}
+                  </select>
+                  <ChevronDown size={15} className="text-white/40 shrink-0 pointer-events-none" />
+                </div>
+              )
+            })()
           )}
         </div>
       )}
