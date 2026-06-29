@@ -203,7 +203,7 @@ export default function Sidebar({ isOpen, collapsed, onToggleCollapse }: Sidebar
           ) : (
             // Select compact (1 ligne) pour gagner de la place dans la sidebar
             (() => {
-              const cur = currentBrand && allowedBrands.includes(currentBrand) ? currentBrand : allowedBrands[0]
+              const cur = currentBrand && (allowedBrands as string[]).includes(currentBrand) ? currentBrand : allowedBrands[0]
               return (
                 <div className="relative flex items-center gap-2 px-2.5 py-2 rounded-xl bg-white/5 ring-1 ring-white/10">
                   <div className="w-6 h-6 rounded-md overflow-hidden shrink-0 ring-1 ring-[#aeb0c9]/40">
