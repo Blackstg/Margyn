@@ -40,13 +40,15 @@ function fmtDate(d: Date): string {
 }
 
 // ─── Cron entry-point (GET) ───────────────────────────────────────────────────
-// Syncs last 7 days (not just yesterday) so conversions attributed with a delay
-// (Pinterest uses 30-day view window) are recaptured on subsequent cron runs.
+// Resynchronise les 30 derniers jours (= fenêtre d'attribution Pinctest 30j) pour
+// que les conversions attribuées avec retard (fenêtre Pinterest 30j) soient
+// recapturées : sinon un jour
+// figé après 7j ne reçoit jamais ses conversions tardives → revenue/ROAS sous-estimés.
 
 export async function GET(req: NextRequest) {
   const today = new Date()
   const from  = new Date(today)
-  from.setDate(from.getDate() - 7)
+  from.setDate(from.getDate() - 30)
 
   const url = new URL(req.url)
   url.searchParams.set('from', fmtDate(from))
