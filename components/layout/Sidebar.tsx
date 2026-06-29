@@ -98,6 +98,7 @@ export default function Sidebar({ isOpen, collapsed, onToggleCollapse }: Sidebar
   )
 
   const [pendingCount, setPendingCount]   = useState(0)
+  const [brandMenuOpen, setBrandMenuOpen] = useState(false)
   const [metaBrands, setMetaBrands]       = useState<string[] | null>(null)
   const [metaFeatures, setMetaFeatures]   = useState<string[] | null>(null)
   const [role, setRole] = useState<string | null>(() => {
@@ -201,28 +202,46 @@ export default function Sidebar({ isOpen, collapsed, onToggleCollapse }: Sidebar
               ))}
             </div>
           ) : (
-            // Select compact (1 ligne) pour gagner de la place dans la sidebar
+            // Dropdown personnalisé (assorti à la sidebar) — compact + design contrôlé
             (() => {
               const cur = currentBrand && (allowedBrands as string[]).includes(currentBrand) ? currentBrand : allowedBrands[0]
+              const logo = (b: string, size: string) => (
+                <div className={`${size} rounded-md overflow-hidden shrink-0 ring-1 ring-[#aeb0c9]/40`}>
+                  {BRAND_LOGOS[b]
+                    ? <img src={BRAND_LOGOS[b]} alt={b} className="w-full h-full object-cover" />
+                    : <span className="w-full h-full bg-[#aeb0c9]/30 flex items-center justify-center text-white text-[10px] font-bold">{b[0].toUpperCase()}</span>}
+                </div>
+              )
               return (
-                <div className="relative flex items-center gap-2 px-2.5 py-2 rounded-xl bg-white/5 ring-1 ring-white/10">
-                  <div className="w-6 h-6 rounded-md overflow-hidden shrink-0 ring-1 ring-[#aeb0c9]/40">
-                    {BRAND_LOGOS[cur]
-                      ? <img src={BRAND_LOGOS[cur]} alt={cur} className="w-full h-full object-cover" />
-                      : <span className="w-full h-full bg-[#aeb0c9]/30 flex items-center justify-center text-white text-[10px] font-bold">{cur[0].toUpperCase()}</span>
-                    }
-                  </div>
-                  <select
-                    value={cur}
-                    onChange={(e) => selectBrand(e.target.value)}
-                    className="flex-1 min-w-0 bg-transparent text-sm font-medium text-white outline-none cursor-pointer appearance-none"
-                    aria-label="Marque"
+                <div className="relative">
+                  <button
+                    onClick={() => setBrandMenuOpen(o => !o)}
+                    className="w-full flex items-center gap-2 px-2.5 py-2 rounded-xl bg-white/5 ring-1 ring-white/10 hover:bg-white/10 transition-colors"
                   >
-                    {allowedBrands.map(b => (
-                      <option key={b} value={b} className="text-[#1a1a2e]">{BRAND_LABELS[b] ?? b}</option>
-                    ))}
-                  </select>
-                  <ChevronDown size={15} className="text-white/40 shrink-0 pointer-events-none" />
+                    {logo(cur, 'w-6 h-6')}
+                    <span className="flex-1 min-w-0 text-left text-sm font-medium text-white truncate">{BRAND_LABELS[cur] ?? cur}</span>
+                    <ChevronDown size={15} className={`text-white/40 shrink-0 transition-transform ${brandMenuOpen ? 'rotate-180' : ''}`} />
+                  </button>
+                  {brandMenuOpen && (
+                    <>
+                      <div className="fixed inset-0 z-40" onClick={() => setBrandMenuOpen(false)} />
+                      <div className="absolute left-0 right-0 top-full mt-1.5 z-50 rounded-xl bg-[#1a1a2e] ring-1 ring-white/10 shadow-[0_8px_32px_rgba(0,0,0,0.4)] p-1">
+                        {allowedBrands.map(b => (
+                          <button
+                            key={b}
+                            onClick={() => { setBrandMenuOpen(false); selectBrand(b) }}
+                            className={`w-full flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-left transition-colors ${
+                              b === cur ? 'bg-white/10 text-white' : 'text-white/60 hover:bg-white/5 hover:text-white'
+                            }`}
+                          >
+                            {logo(b, 'w-6 h-6')}
+                            <span className="flex-1 min-w-0 text-sm font-medium truncate">{BRAND_LABELS[b] ?? b}</span>
+                            {b === cur && <span className="w-1.5 h-1.5 rounded-full bg-[#aeb0c9] shrink-0" />}
+                          </button>
+                        ))}
+                      </div>
+                    </>
+                  )}
                 </div>
               )
             })()
