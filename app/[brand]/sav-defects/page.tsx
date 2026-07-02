@@ -3,9 +3,10 @@
 export const dynamic = 'force-dynamic'
 
 import { useState, useEffect, useCallback, useRef } from 'react'
-import { Plus, AlertTriangle, Clock, PackageX, X, Image as ImageIcon, Search, FileText, Truck, RotateCcw, Trash2, Check, Layers, Printer, CheckCircle2, Maximize2, ArrowRightCircle } from 'lucide-react'
+import { Plus, AlertTriangle, Clock, PackageX, X, Image as ImageIcon, Search, FileText, Truck, RotateCcw, Trash2, Check, Layers, Printer, CheckCircle2, Maximize2, ArrowRightCircle, Link2 } from 'lucide-react'
 import { createBrowserClient } from '@supabase/auth-helpers-nextjs'
 import { isAdminRole } from '@/lib/access'
+import { buildDefectReportHtml } from '@/lib/sav/defect-report'
 
 interface Batch { id: string; number: number; label: string; created_at: string; closed_at: string | null }
 
@@ -70,12 +71,6 @@ const MILESTONES_BY_TYPE: Record<string, { key: string; label: string }[]> = {
 }
 const VALIDATORS = ['Hao', 'Lily', 'Forrest', 'Other'] as const
 
-const ALL_STEP_LABELS: Record<string, string> = {
-  reclamation_envoyee: 'Claim sent', repro_confirmee: 'Defect confirmed',
-  etiquette_envoyee: 'Return label', retour_recu: 'Return received',
-  reexpedie: 'Reshipped', recu: 'Received', clos: 'Closed', litige: 'Dispute',
-}
-
 const TYPE_LABEL: Record<string, string> = { defaut_fournisseur: 'Defect', erreur_envoi: 'Shipping error' }
 const TYPE_COLOR: Record<string, [string, string]> = {
   defaut_fournisseur: ['#fffbeb', '#92650a'],
@@ -113,107 +108,10 @@ function variantLabel(v: Variant): string {
   return `${v.product_title}${v.variant_title ? ' · ' + v.variant_title : ''}${sku ? ` (${sku})` : ''}`
 }
 
-function milestonesSummary(m: Record<string, string> | null): string {
-  if (!m) return '—'
-  const keys = Object.keys(m)
-  if (!keys.length) return 'Reported'
-  return keys.map(k => `${ALL_STEP_LABELS[k] ?? k} (${fmtDate(m[k])})`).join(', ')
-}
-
-const esc = (s: unknown) => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]!))
-
-// Builds a printable view (1 row / case) and triggers print → "Save as PDF"
+// Export PDF : ouvre le rapport dans un onglet et lance l'impression (→ « Save as PDF »)
 function exportPdf(groups: [string, Claim[]][], monthLabel: string) {
-  const all = groups.flatMap(([, list]) => list)
-
-  // ── Action summary for the supplier ─────────────────────────────────────────
-  // Aggregate quantities by item so the supplier instantly sees how many units of
-  // each SKU to reproduce, and how many wrongly-shipped units must NOT be billed.
-  type Agg = { label: string; qty: number }
-  function aggregate(claims: Claim[], keyOf: (c: Claim) => string, labelOf: (c: Claim) => string): Agg[] {
-    const m = new Map<string, Agg>()
-    for (const c of claims) {
-      const k = keyOf(c) || '—'
-      const cur = m.get(k) ?? { label: labelOf(c), qty: 0 }
-      cur.qty += c.quantity || 0
-      m.set(k, cur)
-    }
-    return [...m.values()].sort((a, b) => b.qty - a.qty)
-  }
-  const itemLabel = (sku: string | null, name: string | null) =>
-    `${sku ? `<b>${esc(sku)}</b>` : ''}${sku && name ? ' · ' : ''}${name ? esc(name) : ''}` || '—'
-
-  const toRepro = aggregate(
-    all.filter(c => c.claim_type === 'defaut_fournisseur'),
-    c => c.sku ?? c.product_name ?? '',
-    c => itemLabel(c.sku, c.product_name),
-  )
-  const noBill = aggregate(
-    all.filter(c => c.claim_type === 'erreur_envoi'),
-    c => c.received_sku ?? c.received_product_name ?? '',
-    c => itemLabel(c.received_sku, c.received_product_name),
-  )
-  const sumTable = (items: Agg[], emptyMsg: string) => items.length
-    ? items.map(it => `<tr><td>${it.label}</td><td class="qty">×${it.qty}</td></tr>`).join('')
-      + `<tr class="tot"><td>Total</td><td class="qty">×${items.reduce((s, i) => s + i.qty, 0)}</td></tr>`
-    : `<tr><td colspan="2" class="muted">${emptyMsg}</td></tr>`
-
-  const rows = groups.map(([batch, list]) => {
-    const head = `<tr><td colspan="8" class="lot">Batch: ${esc(batch)} — ${list.length} case(s)</td></tr>`
-    const body = list.map(c => `<tr>
-      <td>${esc(TYPE_LABEL[c.claim_type] ?? c.claim_type)}</td>
-      <td>${esc(c.shopify_order_id ?? '—')}<br><span class="muted">${esc(fmtDate(c.reported_at))}</span></td>
-      <td>${c.product_image_url ? `<img src="${esc(c.product_image_url)}">` : ''}</td>
-      <td><b>${esc(c.sku ?? '—')}</b> <span class="qtytag">×${c.quantity}</span><br>${esc(c.product_name ?? '')}${c.claim_type === 'erreur_envoi' ? `<br><span class="red">received in error: ${esc(c.received_product_name ?? c.received_sku ?? '—')} ×${c.quantity}</span>` : ''}${c.defect_description ? `<br><span class="muted">${esc(c.defect_description)}</span>` : ''}</td>
-      <td>${esc(milestonesSummary(c.milestones))}</td>
-      <td>${esc(c.reship_tracking_ref ?? '—')}${c.return_tracking_ref ? `<br>return ${esc(c.return_tracking_ref)}` : ''}</td>
-      <td>${c.validated_by ? esc(c.validated_by) : '<span class="muted">—</span>'}</td>
-      <td>${c.photo_url ? `<img src="${esc(c.photo_url)}">` : ''}</td>
-    </tr>`).join('')
-    return head + body
-  }).join('')
-
-  const html = `<!doctype html><html><head><meta charset="utf-8"><title>After-sales Mōom — ${esc(monthLabel)}</title>
-  <style>
-    *{font-family:-apple-system,Segoe UI,Roboto,sans-serif;box-sizing:border-box}
-    body{margin:24px;color:#1a1a18}
-    h1{font-size:18px;margin:0 0 2px} .sub{color:#6b6b63;font-size:12px;margin:0 0 16px}
-    table{width:100%;border-collapse:collapse;font-size:11px}
-    th{text-align:left;background:#f5f5f3;padding:6px 8px;font-size:9px;text-transform:uppercase;letter-spacing:.05em;color:#6b6b63}
-    td{padding:6px 8px;border-bottom:1px solid #eee;vertical-align:top}
-    td.lot{background:#eef2ff;font-weight:700;color:#1a1a2e;font-size:11px}
-    img{width:38px;height:38px;object-fit:cover;border-radius:6px;border:1px solid #e8e8e4}
-    .muted{color:#9b9b93} .red{color:#c7293a} .muted,.red{font-size:10px}
-    .qtytag{display:inline-block;background:#1a1a2e;color:#fff;border-radius:5px;padding:0 5px;font-size:10px;font-weight:700}
-    .summary{display:flex;gap:14px;margin:4px 0 20px;page-break-inside:avoid}
-    .sumbox{flex:1;border:1px solid #e8e8e4;border-radius:8px;overflow:hidden}
-    .sumbox h2{margin:0;padding:8px 10px;font-size:11px;color:#fff;font-weight:700}
-    .sumbox.repro h2{background:#1a7f4b} .sumbox.nobill h2{background:#c7293a}
-    .sumbox table{font-size:11px} .sumbox td{padding:5px 10px;border-bottom:1px solid #f0f0ee;vertical-align:top}
-    .sumbox td.qty{text-align:right;font-weight:700;white-space:nowrap}
-    .sumbox tr.tot td{border-top:2px solid #e8e8e4;font-weight:800;background:#fafafa}
-    @media print{body{margin:12mm}}
-  </style></head><body>
-  <h1>After-sales / Defects &amp; shipping errors — Mōom</h1>
-  <p class="sub">Exported on ${esc(fmtDate(new Date().toISOString().slice(0, 10)))} · period ${esc(monthLabel)}</p>
-
-  <div class="summary">
-    <div class="sumbox repro">
-      <h2>🔁 To reproduce &amp; reship — defective units</h2>
-      <table><tbody>${sumTable(toRepro, 'No defective items.')}</tbody></table>
-    </div>
-    <div class="sumbox nobill">
-      <h2>🚫 Returned in error — do NOT bill us</h2>
-      <table><tbody>${sumTable(noBill, 'No shipping errors.')}</tbody></table>
-    </div>
-  </div>
-
-  <table><thead><tr>
-    <th>Type</th><th>Order</th><th>Img</th><th>Item</th><th>Milestones</th><th>Tracking</th><th>Validated by</th><th>Photo</th>
-  </tr></thead><tbody>${rows}</tbody></table>
-  <script>window.onload=function(){setTimeout(function(){window.print()},300)}</script>
-  </body></html>`
-
+  const claims = groups.flatMap(([, list]) => list)
+  const html = buildDefectReportHtml(claims, { monthLabel, autoPrint: true })
   const win = window.open('', '_blank')
   if (!win) { alert('Please allow pop-ups to export the PDF.'); return }
   win.document.write(html)
@@ -272,6 +170,19 @@ export default function SavDefectsPage() {
     const data = await res.json()
     setStats(data)
   }, [month])
+
+  // Ouvre le rapport dans un nouvel onglet à une URL réelle partageable au fournisseur.
+  // On ouvre l'onglet AVANT le fetch (geste utilisateur) pour éviter le blocage popup.
+  function openSupplierReport() {
+    const w = window.open('', '_blank')
+    fetch(`/api/sav-defects/report-link?brand=${BRAND}`)
+      .then(r => r.json())
+      .then(({ url }) => {
+        if (!url) throw new Error('no url')
+        if (w) w.location.href = url; else window.open(url, '_blank')
+      })
+      .catch(() => { if (w) w.close(); alert('Impossible de générer le lien.') })
+  }
 
   const reload = useCallback(() => {
     setLoading(true)
@@ -356,6 +267,14 @@ export default function SavDefectsPage() {
               className="flex items-center gap-2 px-3 py-2 rounded-xl bg-white border border-[#e8e8e4] text-[#1a1a2e] text-xs font-semibold hover:bg-[#f8f8f7] disabled:opacity-40 transition-colors"
             >
               <Printer size={14} /> Export PDF
+            </button>
+            <button
+              onClick={openSupplierReport}
+              disabled={visible.length === 0}
+              title="Ouvre un lien partageable au fournisseur"
+              className="flex items-center gap-2 px-3 py-2 rounded-xl bg-white border border-[#e8e8e4] text-[#1a1a2e] text-xs font-semibold hover:bg-[#f8f8f7] disabled:opacity-40 transition-colors"
+            >
+              <Link2 size={14} /> Lien fournisseur
             </button>
             <button
               onClick={() => setShowForm(true)}
