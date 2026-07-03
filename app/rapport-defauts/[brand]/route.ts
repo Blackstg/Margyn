@@ -23,13 +23,38 @@ export async function GET(req: NextRequest, { params }: { params: { brand: strin
 
   const { data, error } = await admin
     .from('defect_claims')
-    .select('claim_type, reported_at, sku, product_name, shopify_order_id, received_sku, received_product_name, quantity, defect_description, photo_url, product_image_url, milestones, production_batch, validated_by, reship_tracking_ref, return_tracking_ref')
+    .select('claim_type, reported_at, sku, product_name, shopify_order_id, shopify_variant_id, received_sku, received_product_name, quantity, defect_description, photo_url, milestones, production_batch, validated_by, reship_tracking_ref, return_tracking_ref')
     .eq('brand', brand)
     .order('reported_at', { ascending: false })
 
   if (error) return new NextResponse('Erreur de chargement du rapport.', { status: 500 })
 
-  const html = buildDefectReportHtml((data ?? []) as DefectClaim[], { autoPrint: false })
+  const rows = data ?? []
+
+  // Enrichit chaque dossier avec l'image produit (catalogue) : via le variant, sinon le SKU
+  // — même logique que /api/sav-defects (product_image_url n'est pas stocké en base).
+  const imgByVariant: Record<string, string | null> = {}
+  const imgBySku: Record<string, string | null> = {}
+  const variantIds = [...new Set(rows.map(r => r.shopify_variant_id).filter(Boolean))] as string[]
+  if (variantIds.length) {
+    const { data: vs } = await admin.from('product_variants')
+      .select('shopify_variant_id, image_url').eq('brand', brand).in('shopify_variant_id', variantIds)
+    for (const v of vs ?? []) imgByVariant[v.shopify_variant_id] = v.image_url
+  }
+  {
+    const { data: vs } = await admin.from('product_variants')
+      .select('image_url, sku_fr, sku_cn').eq('brand', brand)
+    for (const v of vs ?? []) {
+      if (v.sku_fr) imgBySku[v.sku_fr] = v.image_url
+      if (v.sku_cn) imgBySku[v.sku_cn] = v.image_url
+    }
+  }
+  const claims = rows.map(r => ({
+    ...r,
+    product_image_url: (r.shopify_variant_id && imgByVariant[r.shopify_variant_id]) || (r.sku && imgBySku[r.sku]) || null,
+  }))
+
+  const html = buildDefectReportHtml(claims as DefectClaim[], { autoPrint: false })
   return new NextResponse(html, {
     status: 200,
     headers: { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' },
