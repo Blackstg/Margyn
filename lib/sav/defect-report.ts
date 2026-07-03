@@ -93,12 +93,12 @@ export function buildDefectReportHtml(
     const body = list.map(c => `<tr>
       <td>${esc(TYPE_LABEL[c.claim_type] ?? c.claim_type)}</td>
       <td>${esc(c.shopify_order_id ?? '—')}<br><span class="muted">${esc(fmtDate(c.reported_at))}</span></td>
-      <td>${c.product_image_url ? `<img src="${esc(c.product_image_url)}">` : ''}</td>
+      <td>${c.product_image_url ? `<img class="zoom" src="${esc(c.product_image_url)}">` : ''}</td>
       <td><b>${esc(c.sku ?? '—')}</b> <span class="qtytag">×${c.quantity}</span><br>${esc(c.product_name ?? '')}${c.claim_type === 'erreur_envoi' ? `<br><span class="red">received in error: ${esc(c.received_product_name ?? c.received_sku ?? '—')} ×${c.quantity}</span>` : ''}${c.defect_description ? `<br><span class="muted">${esc(c.defect_description)}</span>` : ''}</td>
       <td>${esc(milestonesSummary(c.milestones))}</td>
       <td>${esc(c.reship_tracking_ref ?? '—')}${c.return_tracking_ref ? `<br>return ${esc(c.return_tracking_ref)}` : ''}</td>
       <td>${c.validated_by ? esc(c.validated_by) : '<span class="muted">—</span>'}</td>
-      <td>${c.photo_url ? `<img src="${esc(c.photo_url)}">` : ''}</td>
+      <td>${c.photo_url ? `<img class="zoom" src="${esc(c.photo_url)}">` : ''}</td>
     </tr>`).join('')
     return head + body
   }).join('')
@@ -119,6 +119,9 @@ export function buildDefectReportHtml(
     td{padding:6px 8px;border-bottom:1px solid #eee;vertical-align:top}
     td.lot{background:#eef2ff;font-weight:700;color:#1a1a2e;font-size:11px}
     img{width:38px;height:38px;object-fit:cover;border-radius:6px;border:1px solid #e8e8e4}
+    img.zoom{cursor:zoom-in} img.zoom:hover{border-color:#1a1a2e}
+    .lightbox{display:none;position:fixed;inset:0;background:rgba(0,0,0,.88);z-index:9999;align-items:center;justify-content:center;cursor:zoom-out}
+    .lightbox img{width:auto;height:auto;max-width:94vw;max-height:94vh;border-radius:10px;border:none;box-shadow:0 8px 40px rgba(0,0,0,.5)}
     .muted{color:#9b9b93} .red{color:#c7293a} .muted,.red{font-size:10px}
     .qtytag{display:inline-block;background:#1a1a2e;color:#fff;border-radius:5px;padding:0 5px;font-size:10px;font-weight:700}
     .summary{display:flex;gap:14px;margin:4px 0 20px;page-break-inside:avoid}
@@ -150,5 +153,7 @@ export function buildDefectReportHtml(
     <th>Type</th><th>Order</th><th>Img</th><th>Item</th><th>Milestones</th><th>Tracking</th><th>Validated by</th><th>Photo</th>
   </tr></thead><tbody>${rows}</tbody></table>
   ${printBtn.startsWith('<script') ? printBtn : ''}
+  <div id="lb" class="lightbox no-print"><img alt=""></div>
+  <script>document.addEventListener('click',function(e){var lb=document.getElementById('lb');if(e.target.classList&&e.target.classList.contains('zoom')){lb.firstElementChild.src=e.target.src;lb.style.display='flex';}else if(e.target===lb||e.target===lb.firstElementChild){lb.style.display='none';}});document.addEventListener('keydown',function(e){if(e.key==='Escape')document.getElementById('lb').style.display='none';});</script>
   </body></html>`
 }
