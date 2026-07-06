@@ -202,23 +202,36 @@ function countryOf(loc: string | null | undefined): string | null {
 // Phase d'un événement. Hybride : sub_status canonique pour les statuts fiables
 // (livré / en livraison / douane / info reçue), puis libellé + pays pour la
 // granularité du transit (presque tous les events sont "InTransit_Other").
-// `dest` = pays de destination (FR), pour distinguer le hub étranger du centre
-// de tri d'arrivée.
-function phaseFromEvent(label: string, code: string | null, country: string | null, dest: string): number | null {
+// `country` = pays de l'event. Le colis part de Chine (CN) ; dès qu'il est en
+// Europe (hors CN) c'est le côté destination — le hub de dédouanement + tri
+// YunExpress est en Belgique (Liège) MÊME pour une livraison en France, donc on
+// ne peut pas exiger le pays de destination exact, seulement « hors origine ».
+function phaseFromEvent(label: string, code: string | null, country: string | null): number | null {
   const c = (code ?? '').toLowerCase()
   if (c.startsWith('delivered'))                                            return PHASE_IDX.delivered
   if (c.startsWith('outfordelivery') || c.startsWith('availableforpickup')) return PHASE_IDX.delivery
   if (c.startsWith('inforeceived'))                                         return PHASE_IDX.prepared
 
   const L = label.toLowerCase()
-  if (/en cours de livraison|out for delivery/.test(L))                     return PHASE_IDX.delivery
-  if (/dédouanement\s*(à l’import|à l'import|import)/.test(L) || c.includes('customs')) return PHASE_IDX.customs
-  // Arrivé physiquement dans le pays de destination → centre de tri
-  if (country === dest && /(centre de tri|sort facility|départ du centre|remis au transporteur local|livraison|tri)/.test(L))
+  const destSide = !!country && country !== 'CN'          // déjà en Europe
+  const isOrigin = /origine|départ|export|origin/.test(L) // event côté départ (Chine)
+
+  // Livraison finale (tournée du transporteur local)
+  if (/en cours de livraison|out for delivery/.test(L)) return PHASE_IDX.delivery
+
+  // Dédouanement à l'import (surtout pas l'export/déclaration au départ)
+  if (!isOrigin && (/dédouanement|douane|customs clear/.test(L) || c.includes('customs')))
+    return PHASE_IDX.customs
+
+  // Tri / arrivée dans la région de destination / remise au transporteur local.
+  // NB : « Transmis au transporteur local » (pré-généré « will be delivered to X »)
+  // est du bruit et NE compte pas — seul « remis au transporteur local » (réel) compte.
+  if (destSide && /centre de tri|sort facility|arrived at hub|\bhub\b|départ du centre|ready for outbound|outbound|remis au transporteur local|livraison|\btri\b/.test(L))
     return PHASE_IDX.sorting
-  // Départ de l'entrepôt d'origine
+
+  // Départ de l'entrepôt d'origine (Chine)
   if (/centre de tri \((départ|origine)\)|origin facility|pris en charge/.test(L)) return PHASE_IDX.shipped
-  if (c.startsWith('inforeceived') || /informations d’expédition|information received|préparation/.test(L)) return PHASE_IDX.prepared
+  if (/informations d’expédition|information received|préparation/.test(L)) return PHASE_IDX.prepared
   // Tout le reste du voyage = transit international
   if (c.startsWith('intransit') || c.startsWith('exception') || L.length > 0)  return PHASE_IDX.transit
   return null
@@ -249,12 +262,11 @@ function buildRealTimeline(result: TrackingResult, settings: TrackingSettings | 
   // qu'il n'y ait pas de grand vide qui inquiète. Les events sont triés du + récent
   // au + ancien : en écrasant dateFor, on garde la date d'ENTRÉE (la plus ancienne)
   // dans chaque phase → dates croissantes. placeByIdx garde le lieu le + récent.
-  const dest = 'FR'  // Moom & Krom livrent en France
   const dateFor: Record<string, string> = {}
   const placeByIdx: Record<number, string | null> = {}
   let maxIdx = 0
   for (const e of result.tracking_events) {  // du + récent au + ancien
-    const idx = phaseFromEvent(e.label, e.code, countryOf(e.location), dest)
+    const idx = phaseFromEvent(e.label, e.code, countryOf(e.location))
     if (idx == null) continue
     if (idx > maxIdx) maxIdx = idx
     dateFor[RT_PHASES[idx].key] = e.date
@@ -273,8 +285,13 @@ function buildRealTimeline(result: TrackingResult, settings: TrackingSettings | 
     const lastDate = dateFor[RT_PHASES[lastReached].key] ?? result.created_at
     const startMs  = Math.max(Date.now(), new Date(lastDate).getTime())
     const endMs    = Math.max(estDate.getTime(), startMs)
+    const DAY = 24 * 3600 * 1000
+    let prevMs = startMs
     upcoming.forEach((idx, k) => {
-      const ms = startMs + (endMs - startMs) * ((k + 1) / upcoming.length)
+      // Réparti entre maintenant et la livraison estimée, mais avec AU MOINS 1 jour
+      // d'écart entre chaque étape (sinon plusieurs étapes tombent le même jour).
+      const ms = Math.max(startMs + (endMs - startMs) * ((k + 1) / upcoming.length), prevMs + DAY)
+      prevMs = ms
       estForIdx[idx] = new Date(ms).toLocaleDateString('fr-FR', { day: 'numeric', month: 'long' })
     })
   }

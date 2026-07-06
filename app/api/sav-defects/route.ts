@@ -147,7 +147,7 @@ export async function PATCH(req: NextRequest) {
       patch.claim_sent_at = body.claim_sent_at || new Date().toISOString().slice(0, 10)
     }
   }
-  for (const f of ['reship_tracking_ref', 'received_at', 'claim_sent_at', 'supplier_claim_ref', 'notes', 'return_tracking_ref', 'return_received_at', 'validated_by'] as const) {
+  for (const f of ['reship_tracking_ref', 'received_at', 'claim_sent_at', 'supplier_claim_ref', 'notes', 'return_tracking_ref', 'return_received_at', 'validated_by', 'production_batch'] as const) {
     if (body[f] !== undefined) patch[f] = body[f] || null
   }
   // Jalons multiples : remplace l'objet milestones et dérive les colonnes de date
