@@ -141,7 +141,7 @@ export function mergeResults(results: (Track17Result | null)[]): Track17Result |
     status:       delivered ? 'Delivered' : (withEvents[0]?.status ?? 'NotFound'),
     step:         delivered ? 5 : Math.max(2, ...rs.map(r => r.step)),
     delivered,
-    carrier_name: rs.map(r => r.carrier_name).filter(Boolean).join(' + ') || null,
+    carrier_name: [...new Set(rs.flatMap(r => (r.carrier_name ?? '').split(' + ')).map(s => s.trim()).filter(Boolean))].join(' + ') || null,
     eta_from:     rs.map(r => r.eta_from).find(Boolean) ?? null,
     eta_to:       rs.map(r => r.eta_to).find(Boolean) ?? null,
     events,

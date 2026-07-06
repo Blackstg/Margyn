@@ -37,7 +37,15 @@ async function getOrRefresh17(
       return acc ? normalize(acc) : null
     } catch { return null }
   }))
-  const result = mergeResults(results)
+  const freshResult = mergeResults(results)
+
+  // Ne JAMAIS perdre l'historique. 17Track renvoie parfois moins d'events à un
+  // instant T (ex. le provider YunExpress absent de la réponse alors que seul
+  // Colis Privé répond) — on écrasait alors tout le détail (Chine → Belgique →
+  // dédouanement → France). Le trajet étant forward-only, on fusionne toujours
+  // le résultat frais avec ce qui est déjà stocké (union + dédup + step max).
+  const prior  = rowResult()
+  const result = mergeResults([freshResult, prior].filter(Boolean) as Track17Result[]) ?? freshResult ?? prior
 
   await admin.from('carrier_tracking').upsert({
     tracking_number: number, brand, order_name: orderName,
@@ -45,14 +53,14 @@ async function getOrRefresh17(
     status:     result?.status ?? row?.status ?? null,
     step:       result?.step ?? row?.step ?? null,
     delivered:  result?.delivered ?? row?.delivered ?? false,
-    eta_from:   result?.eta_from ?? null,
-    eta_to:     result?.eta_to ?? null,
-    events:     (result?.events?.length ? result.events : row?.events) ?? [],
+    eta_from:   result?.eta_from ?? row?.eta_from ?? null,
+    eta_to:     result?.eta_to ?? row?.eta_to ?? null,
+    events:     result?.events ?? [],
     registered: true,
     updated_at: new Date().toISOString(),
   }, { onConflict: 'tracking_number' })
 
-  return (result?.events.length ? result : rowResult())
+  return result ?? prior
 }
 
 const SHOPIFY: Record<string, { shop: string; token: string }> = {
