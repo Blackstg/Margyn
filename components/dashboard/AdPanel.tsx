@@ -69,11 +69,12 @@ interface Props {
   activePlatforms: string[]
   loading:         boolean
   periodLabel:     string
+  maturing?:       boolean   // fenêtre glissante récente → ROAS des derniers jours encore en maturation
 }
 
 // ─── AdPanel ──────────────────────────────────────────────────────────────────
 
-export default function AdPanel({ spendData, roasData, activePlatforms, loading, periodLabel }: Props) {
+export default function AdPanel({ spendData, roasData, activePlatforms, loading, periodLabel, maturing }: Props) {
   const [roasTarget, setRoasTarget] = useState(3.0)
 
   useEffect(() => {
@@ -237,6 +238,17 @@ export default function AdPanel({ spendData, roasData, activePlatforms, loading,
         </div>
 
       </div>
+
+      {/* Rappel maturation — les ventes s'attribuent jusqu'à ~30 j après le clic
+          (Pinterest surtout), donc le ROAS des jours récents part bas puis monte.
+          Masqué sur un mois passé (déjà mûr). */}
+      {maturing && !loading && spendData.some((d) => d.spend > 0) && (
+        <div className="px-5 py-2.5 border-t border-[#f0f0ee] bg-[#fafaf8]">
+          <p className="text-[11px] text-[#9b9b93] leading-snug">
+            ⓘ Le ROAS des jours récents est encore en <span className="font-medium text-[#6b6b63]">maturation</span> : les ventes s&apos;attribuent jusqu&apos;à ~30&nbsp;jours après le clic (Pinterest), il augmente donc dans les jours qui suivent. Les fenêtres courtes (7&nbsp;j) partent toujours basses.
+          </p>
+        </div>
+      )}
     </div>
   )
 }

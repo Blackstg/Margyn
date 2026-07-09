@@ -1117,6 +1117,7 @@ Stock faible (<20 unités): ${lowStock || 'Aucun'}`
               activePlatforms={roasActivePlatforms}
               loading={loading}
               periodLabel={chartLabel}
+              maturing={!selectedMonth}
             />
 
             {/* Products */}
