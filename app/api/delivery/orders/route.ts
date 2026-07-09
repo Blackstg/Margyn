@@ -219,15 +219,18 @@ export async function GET() {
 
     // Parallel: Shopify orders + Supabase stop data
     const admin = getAdmin()
-    const [allOrders, { data: assignedStops }, { data: failedStops }, { data: deliveredStops }] =
+    const [allOrders, { data: assignedStops }, { data: failedStops }, { data: deliveredStops }, { data: partialStops }] =
       await Promise.all([
         fetchShopifyOrders(shop, token),
 
-        // Non-failed stops in non-cancelled tours → order is already being handled
+        // Stops still "in progress" (not failed, not partial) in non-cancelled tours
+        // → order is already being handled, don't replan.
+        // NB: 'partial' est exclu → le reliquat non livré doit revenir à planifier.
         admin.from('delivery_stops')
           .select('order_name, delivery_tours!inner(status)')
           .neq('delivery_tours.status', 'cancelled')
-          .neq('status', 'failed'),
+          .neq('status', 'failed')
+          .neq('status', 'partial'),
 
         // Failed stops → needs replan
         admin.from('delivery_stops')
@@ -241,6 +244,13 @@ export async function GET() {
         admin.from('delivery_stops')
           .select('order_name, panel_details')
           .eq('status', 'delivered'),
+
+        // Partial stops → l'article a été livré en partie (rupture de stock au chargement).
+        // On soustrait la qté RÉELLEMENT livrée (partial_delivered) et on fait
+        // réapparaître le reliquat dans « à planifier » (badge ⚠ à replanifier).
+        admin.from('delivery_stops')
+          .select('order_name, partial_delivered')
+          .eq('status', 'partial'),
       ])
 
     console.log(`[delivery/orders] Shopify: ${allOrders.length} orders fetched`)
@@ -249,22 +259,35 @@ export async function GET() {
     const assignedOrderNames = new Set(
       (assignedStops ?? []).map((s: { order_name: string }) => s.order_name)
     )
-    const replanOrderNames = new Set(
-      (failedStops ?? []).map((s: { order_name: string }) => s.order_name)
-    )
+    // Failed + partiellement livrées → à replanifier (badge ⚠)
+    const replanOrderNames = new Set([
+      ...(failedStops  ?? []).map((s: { order_name: string }) => s.order_name),
+      ...(partialStops ?? []).map((s: { order_name: string }) => s.order_name),
+    ])
 
     // Bug 2 fix: map of order_name → { item_key → delivered_qty }
     // item_key = sku if available, else title
     const deliveredQtyMap = new Map<string, Map<string, number>>()
+    const addDelivered = (orderName: string, key: string, qty: number) => {
+      if (!key || qty <= 0) return
+      const byKey = deliveredQtyMap.get(orderName) ?? new Map<string, number>()
+      byKey.set(key, (byKey.get(key) ?? 0) + qty)
+      deliveredQtyMap.set(orderName, byKey)
+    }
+    // Stops entièrement livrés → toute la qté planifiée est livrée
     for (const stop of (deliveredStops ?? [])) {
       const details = (stop.panel_details ?? []) as { sku?: string; title?: string; qty?: number }[]
-      const byKey = deliveredQtyMap.get(stop.order_name) ?? new Map<string, number>()
       for (const item of details) {
-        const key = item.sku?.trim() || item.title?.trim() || ''
-        if (!key) continue
-        byKey.set(key, (byKey.get(key) ?? 0) + (item.qty ?? 0))
+        addDelivered(stop.order_name, item.sku?.trim() || item.title?.trim() || '', item.qty ?? 0)
       }
-      deliveredQtyMap.set(stop.order_name, byKey)
+    }
+    // Stops partiels → seule la qté réellement livrée (qty_delivered) est soustraite ;
+    // le reste (qty_ordered − qty_delivered) réapparaît automatiquement à planifier.
+    for (const stop of (partialStops ?? [])) {
+      const details = (stop.partial_delivered ?? []) as { sku?: string; title?: string; qty_delivered?: number }[]
+      for (const item of details) {
+        addDelivered(stop.order_name, item.sku?.trim() || item.title?.trim() || '', item.qty_delivered ?? 0)
+      }
     }
 
     // First pass: build drafts
