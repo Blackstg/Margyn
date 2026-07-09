@@ -4117,6 +4117,20 @@ function LivreurView() {
                   </span>
                 )}
               </div>
+              <button
+                onClick={() => {
+                  const seed: Record<number, number> = {}
+                  const pd = currentStop.partial_delivered
+                  if (pd) (currentStop.panel_details ?? []).forEach((item, i) => {
+                    const m = pd.find(p => (p.sku && item.sku && p.sku === item.sku) || p.title === item.title)
+                    if (m) seed[i] = m.qty_delivered
+                  })
+                  setPartialQtys(seed); setPartialNote(''); setCommentMode('partial')
+                }}
+                className="w-full py-2.5 rounded-[12px] border border-[#fed7aa] bg-white text-sm font-semibold text-[#92400e] active:bg-[#fff7ed] transition-colors"
+              >
+                ↩ Pas tout livré ? Corriger la quantité
+              </button>
               {currentStop.comment && (
                 <div className="rounded-[12px] bg-[#f0fdf4] border border-[#bbf7d0] px-3 py-2">
                   <p className="text-xs text-[#1a7f4b]">💬 {currentStop.comment}</p>
@@ -4156,6 +4170,20 @@ function LivreurView() {
                   ))}
                 </div>
               )}
+              <button
+                onClick={() => {
+                  const seed: Record<number, number> = {}
+                  const pd = currentStop.partial_delivered
+                  if (pd) (currentStop.panel_details ?? []).forEach((item, i) => {
+                    const m = pd.find(p => (p.sku && item.sku && p.sku === item.sku) || p.title === item.title)
+                    if (m) seed[i] = m.qty_delivered
+                  })
+                  setPartialQtys(seed); setPartialNote(''); setCommentMode('partial')
+                }}
+                className="w-full py-2.5 rounded-[12px] border border-[#fed7aa] bg-white text-sm font-semibold text-[#92400e] active:bg-[#fff7ed] transition-colors"
+              >
+                ↩ Corriger la quantité livrée
+              </button>
               {currentStop.comment && (
                 <div className="rounded-[12px] bg-[#fff7ed] border border-[#fed7aa] px-3 py-2">
                   <p className="text-xs text-[#c2680a]">💬 {currentStop.comment}</p>
@@ -4674,12 +4702,103 @@ function buildSavEntries(toursRaw: any[], ordersRaw: ShopifyOrder[]): SavEntry[]
   return result
 }
 
+// Corrige la quantité réellement livrée d'un arrêt (planif) → convertit en
+// livraison partielle si tout n'a pas été livré, et le reliquat réapparaît
+// automatiquement dans « à planifier ». Réutilise le champ partial_delivered.
+function CorrectDeliveryModal({
+  stopId, orderName, items, onClose, onDone,
+}: {
+  stopId: string
+  orderName: string
+  items: { sku: string; title: string; qty_ordered: number; qty_delivered: number }[]
+  onClose: () => void
+  onDone: () => void
+}) {
+  const [qtys, setQtys]   = useState<number[]>(items.map(it => Math.max(0, Math.min(it.qty_ordered, it.qty_delivered))))
+  const [saving, setSaving] = useState(false)
+  const anyShort = qtys.some((q, i) => q < items[i].qty_ordered)
+
+  async function save() {
+    setSaving(true)
+    const partial_delivered = items.map((it, i) => ({
+      sku: it.sku, title: it.title, qty_ordered: it.qty_ordered,
+      qty_delivered: Math.max(0, Math.min(it.qty_ordered, qtys[i])),
+    }))
+    const fullyDelivered = partial_delivered.every(p => p.qty_delivered >= p.qty_ordered)
+    try {
+      await fetch(`/api/delivery/stops/${stopId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          status: fullyDelivered ? 'delivered' : 'partial',
+          partial_delivered: fullyDelivered ? null : partial_delivered,
+        }),
+      })
+      onDone()
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-[80] flex items-end sm:items-center justify-center bg-black/40 p-0 sm:p-4" onClick={onClose}>
+      <div className="bg-white w-full sm:max-w-md rounded-t-[20px] sm:rounded-[20px] max-h-[88vh] overflow-y-auto p-5 space-y-4" onClick={e => e.stopPropagation()}>
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <h2 className="text-base font-bold text-[#1a1a2e]">Quantité réellement livrée</h2>
+            <p className="text-xs text-[#9b9b93] mt-0.5">{orderName} · le reliquat repart à planifier</p>
+          </div>
+          <button onClick={onClose} className="text-[#9b9b93] hover:text-[#1a1a2e]"><X size={18} /></button>
+        </div>
+
+        <div className="space-y-2">
+          {items.map((it, i) => {
+            const delivered = qtys[i]
+            const isShort   = delivered < it.qty_ordered
+            return (
+              <div key={i} className={`flex items-center gap-3 rounded-[12px] px-3 py-2.5 border ${isShort ? 'bg-[#fff7ed] border-[#fed7aa]' : 'bg-[#f5f5f3] border-transparent'}`}>
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-medium text-[#1a1a2e] truncate">{it.title}</p>
+                  {it.sku && <p className="text-[10px] text-[#9b9b93] font-mono">{it.sku}</p>}
+                  {isShort && <p className="text-[10px] text-[#c2680a] font-semibold">Reste {it.qty_ordered - delivered} à livrer</p>}
+                </div>
+                <div className="flex items-center gap-2 shrink-0">
+                  <button
+                    onClick={() => setQtys(q => q.map((v, j) => j === i ? Math.max(0, v - 1) : v))}
+                    disabled={delivered <= 0}
+                    className="w-8 h-8 rounded-full border border-[#e8e8e4] bg-white text-lg font-bold leading-none disabled:opacity-30 active:bg-[#f5f5f3] flex items-center justify-center"
+                  >−</button>
+                  <span className={`w-12 text-center text-base font-bold tabular-nums ${isShort ? 'text-[#c2680a]' : 'text-[#1a1a2e]'}`}>{delivered}<span className="text-[11px] text-[#9b9b93]">/{it.qty_ordered}</span></span>
+                  <button
+                    onClick={() => setQtys(q => q.map((v, j) => j === i ? Math.min(it.qty_ordered, v + 1) : v))}
+                    disabled={delivered >= it.qty_ordered}
+                    className="w-8 h-8 rounded-full border border-[#e8e8e4] bg-white text-lg font-bold leading-none disabled:opacity-30 active:bg-[#f5f5f3] flex items-center justify-center"
+                  >+</button>
+                </div>
+              </div>
+            )
+          })}
+        </div>
+
+        <div className="flex gap-2 pt-1">
+          <button onClick={onClose} className="flex-1 py-2.5 rounded-[12px] border border-[#e8e8e4] text-sm font-medium text-[#6b6b63]">Annuler</button>
+          <button onClick={save} disabled={saving}
+            className="flex-[2] py-2.5 rounded-[12px] bg-[#1a1a2e] text-white text-sm font-semibold disabled:opacity-50">
+            {saving ? 'Enregistrement…' : anyShort ? 'Remettre le reste à planifier' : 'Marquer tout livré'}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 function SavView() {
   const [search, setSearch]     = useState('')
   const [entries, setEntries]   = useState<SavEntry[]>([])
   const [loading, setLoading]   = useState(true)
   const [selected, setSelected] = useState<SavEntry | null>(null)
   const [copied, setCopied]     = useState(false)
+  const [correctingStop, setCorrectingStop] = useState<SavEntry | null>(null)
 
   // Refs for polling — avoid stale closures
   const cachedOrdersRef = useRef<ShopifyOrder[]>([])
@@ -5449,6 +5568,16 @@ function SavView() {
                 </div>
               )}
 
+              {/* ── Remettre à planifier (corriger la qté livrée) ── */}
+              {(selected.stop_status === 'delivered' || selected.stop_status === 'partial') && (selected.panel_details?.length ?? 0) > 0 && (
+                <button
+                  onClick={() => setCorrectingStop(selected)}
+                  className="w-full py-2.5 rounded-[12px] border border-[#fed7aa] bg-[#fffbeb] text-sm font-semibold text-[#92400e] hover:bg-[#fef3c7] transition-colors"
+                >
+                  ↩ Pas tout livré ? Remettre le reste à planifier
+                </button>
+              )}
+
               {/* ── Livraison partielle ── */}
               {selected.sav_status === 'partial' && selected.partial_delivered && (
                 <div>
@@ -5559,6 +5688,30 @@ function SavView() {
           </div>
         )
       })()}
+
+      {correctingStop && (
+        <CorrectDeliveryModal
+          stopId={correctingStop.id}
+          orderName={correctingStop.order_name}
+          items={
+            correctingStop.partial_delivered && correctingStop.partial_delivered.length > 0
+              ? correctingStop.partial_delivered.map(p => ({ sku: p.sku, title: p.title, qty_ordered: p.qty_ordered, qty_delivered: p.qty_delivered }))
+              : (correctingStop.panel_details ?? []).map(p => ({ sku: p.sku, title: p.title, qty_ordered: p.qty, qty_delivered: p.qty }))
+          }
+          onClose={() => setCorrectingStop(null)}
+          onDone={async () => {
+            setCorrectingStop(null)
+            try {
+              const [toursData, ordersData] = await Promise.all([
+                fetch('/api/delivery/tours', { cache: 'no-store' }).then(r => r.json()),
+                fetch('/api/delivery/orders').then(r => r.json()),
+              ])
+              cachedOrdersRef.current = ordersData.orders ?? []
+              applyEntries(buildSavEntries(toursData.tours ?? [], cachedOrdersRef.current))
+            } catch (e) { console.error(e) }
+          }}
+        />
+      )}
     </div>
     </div>
   )
