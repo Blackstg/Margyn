@@ -39,11 +39,19 @@ export async function POST(req: NextRequest) {
   const params      = `${dateParams}${brandParam}`
   const headers     = { Authorization: `Bearer ${secret}` }
 
+  // Pinterest attribue les conversions jusqu'à 30 jours après le clic. Une fenêtre
+  // de 3 jours (comme Meta/Google) laisserait le mois en cours sous-estimé toute la
+  // journée (revenue/ROAS trop bas) car les jours J-4 à J-30 ne seraient rafraîchis
+  // qu'une fois/jour par le cron dédié. On resync donc 30 jours pour Pinterest.
+  const pFrom = new Date(today)
+  pFrom.setDate(pFrom.getDate() - 30)
+  const pinterestParams = `from=${fmtDate(pFrom)}&to=${fmtDate(today)}${brandParam}`
+
   const [meta, shopify, google, pinterest] = await Promise.allSettled([
-    fetch(`${base}/api/meta/sync?${params}`,       { method: 'POST', headers }),
-    fetch(`${base}/api/shopify/sync?${params}`,    { method: 'POST', headers }),
-    fetch(`${base}/api/google-ads/sync?${params}`, { method: 'POST', headers }),
-    fetch(`${base}/api/pinterest/sync?${params}`,  { method: 'POST', headers }),
+    fetch(`${base}/api/meta/sync?${params}`,          { method: 'POST', headers }),
+    fetch(`${base}/api/shopify/sync?${params}`,       { method: 'POST', headers }),
+    fetch(`${base}/api/google-ads/sync?${params}`,    { method: 'POST', headers }),
+    fetch(`${base}/api/pinterest/sync?${pinterestParams}`, { method: 'POST', headers }),
   ])
 
   const parse = async (r: PromiseSettledResult<Response>) => {
