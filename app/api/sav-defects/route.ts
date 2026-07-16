@@ -17,7 +17,7 @@ const STATUSES = [
   'reexpedie', 'recu', 'clos', 'litige',
 ] as const
 
-const CLAIM_TYPES = ['defaut_fournisseur', 'erreur_envoi'] as const
+const CLAIM_TYPES = ['defaut_fournisseur', 'erreur_envoi', 'livraison_incomplete'] as const
 
 export async function GET(req: NextRequest) {
   const brand = req.nextUrl.searchParams.get('brand') ?? 'moom'
@@ -70,6 +70,10 @@ export async function POST(req: NextRequest) {
   if (claim_type === 'erreur_envoi') {
     if (!shopify_order_id || !received_sku) {
       return NextResponse.json({ error: 'commande + article reçu à tort requis' }, { status: 400 })
+    }
+  } else if (claim_type === 'livraison_incomplete') {
+    if (!shopify_order_id || (!sku && !body.product_name)) {
+      return NextResponse.json({ error: 'commande + article manquant requis' }, { status: 400 })
     }
   } else if (!sku && !defect_description) {
     return NextResponse.json({ error: 'sku ou description requis' }, { status: 400 })

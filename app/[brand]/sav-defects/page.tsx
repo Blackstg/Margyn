@@ -68,13 +68,20 @@ const MILESTONES_BY_TYPE: Record<string, { key: string; label: string }[]> = {
     { key: 'reexpedie',         label: 'Reshipped' },
     { key: 'recu',              label: 'Received' },
   ],
+  livraison_incomplete: [
+    { key: 'reclamation_envoyee', label: 'Claim sent' },
+    { key: 'repro_confirmee',     label: 'Reship agreed (their cost)' },
+    { key: 'reexpedie',           label: 'Reshipped' },
+    { key: 'recu',                label: 'Received' },
+  ],
 }
 const VALIDATORS = ['Hao', 'Lily', 'Forrest', 'Other'] as const
 
-const TYPE_LABEL: Record<string, string> = { defaut_fournisseur: 'Defect', erreur_envoi: 'Shipping error' }
+const TYPE_LABEL: Record<string, string> = { defaut_fournisseur: 'Defect', erreur_envoi: 'Shipping error', livraison_incomplete: 'Incomplete delivery' }
 const TYPE_COLOR: Record<string, [string, string]> = {
   defaut_fournisseur: ['#fffbeb', '#92650a'],
   erreur_envoi:       ['#eef6ff', '#1d4ed8'],
+  livraison_incomplete: ['#f5f3ff', '#6d28d9'],
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -126,7 +133,7 @@ export default function SavDefectsPage() {
   const [stats, setStats]   = useState<Stats | null>(null)
   const [loading, setLoading] = useState(true)
   const [month, setMonth]   = useState(() => monthOptions()[0].value)
-  const [typeFilter, setTypeFilter] = useState<'all' | 'defaut_fournisseur' | 'erreur_envoi'>('all')
+  const [typeFilter, setTypeFilter] = useState<'all' | 'defaut_fournisseur' | 'erreur_envoi' | 'livraison_incomplete'>('all')
   const [showForm, setShowForm] = useState(false)
   const [lightbox, setLightbox] = useState<string | null>(null)
   const [activeBatch, setActiveBatch] = useState<Batch | null>(null)
@@ -340,7 +347,7 @@ export default function SavDefectsPage() {
           <div className="flex items-center justify-between px-6 py-4 border-b border-[#f0f0ee]">
             <p className="text-[10px] font-semibold text-[#6b6b63] uppercase tracking-[0.1em]">Cases ({visible.length})</p>
             <div className="inline-flex items-center bg-[#F8F8F7] rounded-lg p-0.5 gap-0.5">
-              {([['all', 'All'], ['defaut_fournisseur', 'Defects'], ['erreur_envoi', 'Shipping errors']] as const).map(([k, lbl]) => (
+              {([['all', 'All'], ['defaut_fournisseur', 'Defects'], ['erreur_envoi', 'Shipping errors'], ['livraison_incomplete', 'Incomplete']] as const).map(([k, lbl]) => (
                 <button key={k} onClick={() => setTypeFilter(k)}
                   className={`px-3 py-1.5 rounded-md text-xs font-medium transition-all ${typeFilter === k ? 'bg-white text-[#1a1a18] shadow-sm' : 'text-[#6b6b63] hover:text-[#1a1a18]'}`}>
                   {lbl}
@@ -440,6 +447,7 @@ export default function SavDefectsPage() {
                                 <span className="text-[#9b9b93]"> ·×{c.quantity}</span>
                                 {c.product_name && <span className="text-[#6b6b63]"> — {c.product_name}</span>}
                                 {isErr && <span className="text-[#c7293a]"> · wrongly received: {c.received_product_name ?? c.received_sku ?? '—'}</span>}
+                                {c.claim_type === 'livraison_incomplete' && <span className="text-[#6d28d9]"> · missing ×{c.quantity} — reship at supplier&apos;s cost</span>}
                               </div>
                               {(c.defect_description || c.supplier_claim_ref) && (
                                 <div className="text-[11px] text-[#9b9b93] mt-0.5 truncate">
@@ -538,7 +546,7 @@ function InlineField({ icon, label, value, onSave, compact }: { icon: React.Reac
 }
 
 function NewClaimForm({ brand, activeBatchLabel, onClose, onCreated }: { brand: string; activeBatchLabel: string | null; onClose: () => void; onCreated: () => void }) {
-  const [type, setType] = useState<'defaut_fournisseur' | 'erreur_envoi'>('defaut_fournisseur')
+  const [type, setType] = useState<'defaut_fournisseur' | 'erreur_envoi' | 'livraison_incomplete'>('defaut_fournisseur')
   const [form, setForm] = useState({
     reported_at: new Date().toISOString().slice(0, 10),
     quantity: '1', defect_description: '',
@@ -605,6 +613,9 @@ function NewClaimForm({ brand, activeBatchLabel, onClose, onCreated }: { brand: 
     if (type === 'erreur_envoi' && (!form.shopify_order_id || !form.received_sku)) {
       setError('Please fill in the order and the wrongly received item.'); return
     }
+    if (type === 'livraison_incomplete' && (!form.shopify_order_id || (!form.sku.trim() && !form.product_name.trim()))) {
+      setError('Please look up the order and select the missing item.'); return
+    }
     if (type === 'defaut_fournisseur' && !form.sku.trim() && !form.defect_description.trim()) {
       setError('Please provide at least a SKU or a description.'); return
     }
@@ -635,16 +646,22 @@ function NewClaimForm({ brand, activeBatchLabel, onClose, onCreated }: { brand: 
 
         {/* Type toggle */}
         <div className="inline-flex w-full bg-[#F8F8F7] rounded-xl p-0.5 gap-0.5">
-          {([['defaut_fournisseur', 'Supplier defect'], ['erreur_envoi', 'Shipping error']] as const).map(([k, lbl]) => (
+          {([['defaut_fournisseur', 'Supplier defect'], ['erreur_envoi', 'Shipping error'], ['livraison_incomplete', 'Incomplete']] as const).map(([k, lbl]) => (
             <button key={k} onClick={() => setType(k)}
-              className={`flex-1 px-3 py-2 rounded-lg text-xs font-semibold transition-all ${type === k ? 'bg-white text-[#1a1a18] shadow-sm' : 'text-[#6b6b63]'}`}>
+              className={`flex-1 px-2 py-2 rounded-lg text-[11px] font-semibold transition-all ${type === k ? 'bg-white text-[#1a1a18] shadow-sm' : 'text-[#6b6b63]'}`}>
               {lbl}
             </button>
           ))}
         </div>
 
+        {type === 'livraison_incomplete' && (
+          <div className="rounded-xl bg-[#f5f3ff] border border-[#ddd6fe] px-3 py-2 text-[11px] text-[#6d28d9]">
+            Order shipped incomplete. Select the <b>missing</b> item(s) and the missing quantity. The supplier must reship them <b>at their cost</b>, and the initial shipping must be re-billed for the actual (lighter) weight.
+          </div>
+        )}
+
         {/* Lookup commande */}
-        <Field label={type === 'erreur_envoi' ? 'Order no. (required)' : 'Order no. (optional)'}>
+        <Field label={type === 'defaut_fournisseur' ? 'Order no. (optional)' : 'Order no. (required)'}>
           <div className="flex gap-2">
             <input value={orderInput} onChange={e => setOrderInput(e.target.value)}
               onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); lookupOrder() } }}
@@ -662,7 +679,7 @@ function NewClaimForm({ brand, activeBatchLabel, onClose, onCreated }: { brand: 
         {lineItems && lineItems.length > 0 && (
           <div className="space-y-1.5">
             <p className="text-[10px] font-semibold uppercase tracking-[0.08em] text-[#9b9b93]">
-              {type === 'erreur_envoi' ? 'Ordered item (correct, to reship)' : 'Select the affected item'}
+              {type === 'erreur_envoi' ? 'Ordered item (correct, to reship)' : type === 'livraison_incomplete' ? 'Select the MISSING item' : 'Select the affected item'}
             </p>
             <div className="space-y-1 max-h-44 overflow-y-auto">
               {lineItems.map((li, i) => {
@@ -702,7 +719,7 @@ function NewClaimForm({ brand, activeBatchLabel, onClose, onCreated }: { brand: 
           <Field label="Report date">
             <input type="date" value={form.reported_at} onChange={e => upd('reported_at', e.target.value)} className={input} />
           </Field>
-          <Field label="Quantity">
+          <Field label={type === 'livraison_incomplete' ? 'Missing quantity' : 'Quantity'}>
             <input type="number" min={1} value={form.quantity} onChange={e => upd('quantity', e.target.value)} className={input} />
           </Field>
 
@@ -728,6 +745,14 @@ function NewClaimForm({ brand, activeBatchLabel, onClose, onCreated }: { brand: 
             <div className="col-span-2">
               <Field label="Defect description">
                 <textarea value={form.defect_description} onChange={e => upd('defect_description', e.target.value)} rows={3} className={input} />
+              </Field>
+            </div>
+          )}
+
+          {type === 'livraison_incomplete' && (
+            <div className="col-span-2">
+              <Field label="Note (e.g. received 3/5, customer wants reship)">
+                <textarea value={form.defect_description} onChange={e => upd('defect_description', e.target.value)} rows={2} className={input} placeholder="Received 3 of 5 — 2 missing" />
               </Field>
             </div>
           )}

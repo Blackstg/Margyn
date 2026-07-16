@@ -20,7 +20,7 @@ export interface DefectClaim {
   return_tracking_ref: string | null
 }
 
-const TYPE_LABEL: Record<string, string> = { defaut_fournisseur: 'Defect', erreur_envoi: 'Shipping error' }
+const TYPE_LABEL: Record<string, string> = { defaut_fournisseur: 'Defect', erreur_envoi: 'Shipping error', livraison_incomplete: 'Missing item' }
 const STEP_LABELS: Record<string, string> = {
   reclamation_envoyee: 'Claim sent', repro_confirmee: 'Defect confirmed',
   etiquette_envoyee: 'Return label', retour_recu: 'Return received',
@@ -83,6 +83,11 @@ export function buildDefectReportHtml(
     c => c.received_sku ?? c.received_product_name ?? '',
     c => itemLabel(c.received_sku, c.received_product_name),
   )
+  const missing = aggregate(
+    all.filter(c => c.claim_type === 'livraison_incomplete'),
+    c => c.sku ?? c.product_name ?? '',
+    c => itemLabel(c.sku, c.product_name),
+  )
   const sumTable = (items: Agg[], emptyMsg: string) => items.length
     ? items.map(it => `<tr><td>${it.label}</td><td class="qty">×${it.qty}</td></tr>`).join('')
       + `<tr class="tot"><td>Total</td><td class="qty">×${items.reduce((s, i) => s + i.qty, 0)}</td></tr>`
@@ -94,7 +99,7 @@ export function buildDefectReportHtml(
       <td>${esc(TYPE_LABEL[c.claim_type] ?? c.claim_type)}</td>
       <td>${esc(c.shopify_order_id ?? '—')}<br><span class="muted">${esc(fmtDate(c.reported_at))}</span></td>
       <td>${c.product_image_url ? `<img class="zoom" src="${esc(c.product_image_url)}">` : ''}</td>
-      <td><b>${esc(c.sku ?? '—')}</b> <span class="qtytag">×${c.quantity}</span><br>${esc(c.product_name ?? '')}${c.claim_type === 'erreur_envoi' ? `<br><span class="red">received in error: ${esc(c.received_product_name ?? c.received_sku ?? '—')} ×${c.quantity}</span>` : ''}${c.defect_description ? `<br><span class="muted">${esc(c.defect_description)}</span>` : ''}</td>
+      <td><b>${esc(c.sku ?? '—')}</b> <span class="qtytag">×${c.quantity}</span><br>${esc(c.product_name ?? '')}${c.claim_type === 'erreur_envoi' ? `<br><span class="red">received in error: ${esc(c.received_product_name ?? c.received_sku ?? '—')} ×${c.quantity}</span>` : ''}${c.claim_type === 'livraison_incomplete' ? `<br><span class="purple">missing ×${c.quantity} — reship at your cost</span>` : ''}${c.defect_description ? `<br><span class="muted">${esc(c.defect_description)}</span>` : ''}</td>
       <td>${esc(milestonesSummary(c.milestones))}</td>
       <td>${esc(c.reship_tracking_ref ?? '—')}${c.return_tracking_ref ? `<br>return ${esc(c.return_tracking_ref)}` : ''}</td>
       <td>${c.validated_by ? esc(c.validated_by) : '<span class="muted">—</span>'}</td>
@@ -122,12 +127,13 @@ export function buildDefectReportHtml(
     img.zoom{cursor:zoom-in} img.zoom:hover{border-color:#1a1a2e}
     .lightbox{display:none;position:fixed;inset:0;background:rgba(0,0,0,.88);z-index:9999;align-items:center;justify-content:center;cursor:zoom-out}
     .lightbox img{width:auto;height:auto;max-width:94vw;max-height:94vh;border-radius:10px;border:none;box-shadow:0 8px 40px rgba(0,0,0,.5)}
-    .muted{color:#9b9b93} .red{color:#c7293a} .muted,.red{font-size:10px}
+    .muted{color:#9b9b93} .red{color:#c7293a} .purple{color:#6d28d9} .muted,.red,.purple{font-size:10px}
     .qtytag{display:inline-block;background:#1a1a2e;color:#fff;border-radius:5px;padding:0 5px;font-size:10px;font-weight:700}
     .summary{display:flex;gap:14px;margin:4px 0 20px;page-break-inside:avoid}
     .sumbox{flex:1;border:1px solid #e8e8e4;border-radius:8px;overflow:hidden}
     .sumbox h2{margin:0;padding:8px 10px;font-size:11px;color:#fff;font-weight:700}
-    .sumbox.repro h2{background:#1a7f4b} .sumbox.nobill h2{background:#c7293a}
+    .sumbox.repro h2{background:#1a7f4b} .sumbox.nobill h2{background:#c7293a} .sumbox.missing h2{background:#6d28d9}
+    .notice{background:#f5f3ff;border:1px solid #ddd6fe;color:#5b21b6;border-radius:8px;padding:8px 12px;font-size:11px;margin:0 0 18px}
     .sumbox table{font-size:11px} .sumbox td{padding:5px 10px;border-bottom:1px solid #f0f0ee;vertical-align:top}
     .sumbox td.qty{text-align:right;font-weight:700;white-space:nowrap}
     .sumbox tr.tot td{border-top:2px solid #e8e8e4;font-weight:800;background:#fafafa}
@@ -147,7 +153,12 @@ export function buildDefectReportHtml(
       <h2>🚫 Returned in error — do NOT bill us</h2>
       <table><tbody>${sumTable(noBill, 'No shipping errors.')}</tbody></table>
     </div>
+    <div class="sumbox missing">
+      <h2>📦 Missing (incomplete order) — reship at YOUR cost</h2>
+      <table><tbody>${sumTable(missing, 'No incomplete deliveries.')}</tbody></table>
+    </div>
   </div>
+  ${missing.length ? `<p class="notice">⚠ Incomplete deliveries: fewer items were shipped than ordered. Please (1) <b>adjust the initial shipping charge</b> to the actual weight shipped, and (2) <b>reship the missing units at your cost</b> if the customer requests them.</p>` : ''}
 
   <table><thead><tr>
     <th>Type</th><th>Order</th><th>Img</th><th>Item</th><th>Milestones</th><th>Tracking</th><th>Validated by</th><th>Photo</th>
