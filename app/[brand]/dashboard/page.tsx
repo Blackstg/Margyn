@@ -701,7 +701,7 @@ async function fetchInventory(brand: Brand): Promise<InventoryItem[]> {
 async function fetchStockValuation(brand: Brand): Promise<StockValuation> {
   const [variantsRes, productsRes] = await Promise.all([
     supabase.from('product_variants')
-      .select('shopify_product_id, product_title, variant_title, stock_quantity, cost_price, sell_price, image_url')
+      .select('shopify_variant_id, shopify_product_id, product_title, variant_title, stock_quantity, cost_price, sell_price, image_url')
       .eq('brand', brand),
     supabase.from('products')
       .select('shopify_id, cost_price, sell_price')
@@ -715,26 +715,39 @@ async function fetchStockValuation(brand: Brand): Promise<StockValuation> {
     prodSell.set(p.shopify_id, p.sell_price ?? null)
   }
 
+  // « Commande en cours » = production saisie sur la page Réappro (localStorage/brand),
+  // par variante. Même source que fetchInventory.
+  let inProd: Record<string, number> = {}
+  try {
+    const raw = typeof window !== 'undefined' ? localStorage.getItem(`reorder_inprod_${brand}`) : null
+    if (raw) inProd = JSON.parse(raw) as Record<string, number>
+  } catch { /* ignore */ }
+
   let totalCost = 0, totalRetail = 0, units = 0, skusMissingCost = 0
+  let prodUnits = 0, prodCostTotal = 0, prodRetail = 0
   const items: StockValItem[] = []
   for (const v of variantsRes.data ?? []) {
-    const qty = Math.max(0, v.stock_quantity ?? 0)
-    if (qty === 0) continue
+    const qty     = Math.max(0, v.stock_quantity ?? 0)
+    const qtyProd = Math.max(0, inProd[v.shopify_variant_id] ?? 0)
+    if (qty === 0 && qtyProd === 0) continue
     const pid    = v.shopify_product_id ?? ''
     const cost   = v.cost_price ?? (pid ? prodCost.get(pid) ?? null : null)
     const retail = v.sell_price ?? (pid ? prodSell.get(pid) ?? null : null)
     const blocked = cost != null ? qty * cost : 0
-    if (cost == null) skusMissingCost++
+    if (cost == null && qty > 0) skusMissingCost++
     totalCost   += blocked
     totalRetail += retail != null ? qty * retail : 0
     units       += qty
+    prodUnits      += qtyProd
+    prodCostTotal  += cost   != null ? qtyProd * cost   : 0
+    prodRetail     += retail != null ? qtyProd * retail : 0
     items.push({
       title: v.product_title, variant_title: v.variant_title ?? null,
-      qty, cost, retail, blocked, image_url: v.image_url ?? null,
+      qty, qty_prod: qtyProd, cost, retail, blocked, image_url: v.image_url ?? null,
     })
   }
-  items.sort((a, b) => b.blocked - a.blocked)
-  return { totalCost, totalRetail, units, skusMissingCost, items }
+  items.sort((a, b) => (b.blocked + (b.qty_prod * (b.cost ?? 0))) - (a.blocked + (a.qty_prod * (a.cost ?? 0))))
+  return { totalCost, totalRetail, units, skusMissingCost, items, prodUnits, prodCost: prodCostTotal, prodRetail }
 }
 
 async function fetchSparklines(brand: Brand, from: string, to: string): Promise<SparklineData> {

@@ -7,6 +7,7 @@ export interface StockValItem {
   title:         string
   variant_title: string | null
   qty:           number
+  qty_prod:      number   // quantité en production (à recevoir)
   cost:          number | null
   retail:        number | null
   blocked:       number   // qty × cost (0 si coût inconnu)
@@ -14,11 +15,14 @@ export interface StockValItem {
 }
 
 export interface StockValuation {
-  totalCost:       number   // trésorerie immobilisée (coût d'achat)
-  totalRetail:     number   // valeur de revente potentielle
+  totalCost:       number   // trésorerie immobilisée (coût d'achat, stock reçu)
+  totalRetail:     number   // valeur de revente potentielle (stock reçu)
   units:           number
   skusMissingCost: number   // variantes en stock sans prix d'achat renseigné
   items:           StockValItem[]
+  prodUnits:       number   // unités en production (à recevoir)
+  prodCost:        number   // coût d'achat engagé en production
+  prodRetail:      number   // valeur de revente potentielle de la production
 }
 
 const fmtEur = (n: number) =>
@@ -30,7 +34,7 @@ export default function StockValuationPanel({ data, loading }: { data: StockValu
   if (loading) {
     return <div className="bg-white rounded-[20px] shadow-[0_2px_16px_rgba(0,0,0,0.06)] h-[180px] animate-pulse" />
   }
-  if (!data || data.units === 0) {
+  if (!data || (data.units === 0 && data.prodUnits === 0)) {
     return (
       <div className="bg-white rounded-[20px] shadow-[0_2px_16px_rgba(0,0,0,0.06)] p-6">
         <p className="text-sm text-[#9b9b93]">Aucun stock valorisable.</p>
@@ -40,6 +44,7 @@ export default function StockValuationPanel({ data, loading }: { data: StockValu
 
   const margin    = data.totalRetail - data.totalCost
   const marginPct = data.totalRetail > 0 ? (margin / data.totalRetail) * 100 : 0
+  const hasProd   = data.prodUnits > 0
   const rows = expanded ? data.items : data.items.slice(0, 8)
 
   return (
@@ -50,18 +55,32 @@ export default function StockValuationPanel({ data, loading }: { data: StockValu
         <p className="text-[10px] font-semibold uppercase tracking-[0.1em] text-[#aeb0c9]">
           Trésorerie immobilisée en stock
         </p>
-        <span className="text-[11px] text-[#9b9b93] ml-auto tabular-nums">{data.units.toLocaleString('fr-FR')} unités</span>
+        <span className="text-[11px] text-[#9b9b93] ml-auto tabular-nums">
+          {data.units.toLocaleString('fr-FR')} u. en stock{hasProd ? ` · ${data.prodUnits.toLocaleString('fr-FR')} en production` : ''}
+        </span>
       </div>
 
       {/* 3 chiffres clés */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-px bg-[#f0f0ee] mt-4 border-y border-[#f0f0ee]">
         <div className="bg-white p-5">
-          <p className="text-[11px] text-[#6b6b63] mb-1">Tréso bloquée (coût d&apos;achat)</p>
+          <p className="text-[11px] text-[#6b6b63] mb-1">Tréso bloquée (stock reçu)</p>
           <p className="text-2xl font-bold tabular-nums text-[#1a1a2e]">{fmtEur(data.totalCost)}</p>
+          {hasProd && (
+            <p className="text-[11px] text-[#6b6b63] mt-1">
+              + <span className="font-semibold text-[#b45309]">{fmtEur(data.prodCost)}</span> en production<br />
+              <span className="text-[#9b9b93]">= {fmtEur(data.totalCost + data.prodCost)} engagé au total</span>
+            </p>
+          )}
         </div>
         <div className="bg-white p-5">
           <p className="text-[11px] text-[#6b6b63] mb-1">Valeur revente potentielle</p>
           <p className="text-2xl font-bold tabular-nums text-[#1a7f4b]">{fmtEur(data.totalRetail)}</p>
+          {hasProd && (
+            <p className="text-[11px] text-[#6b6b63] mt-1">
+              + <span className="font-semibold text-[#1a7f4b]">{fmtEur(data.prodRetail)}</span> en production<br />
+              <span className="text-[#9b9b93]">= {fmtEur(data.totalRetail + data.prodRetail)} au total</span>
+            </p>
+          )}
         </div>
         <div className="bg-white p-5">
           <p className="text-[11px] text-[#6b6b63] mb-1">Marge potentielle</p>
@@ -83,6 +102,7 @@ export default function StockValuationPanel({ data, loading }: { data: StockValu
             <tr className="text-[#9b9b93]">
               <th className="text-left font-medium py-1.5 pl-3">Produit</th>
               <th className="text-right font-medium py-1.5">Stock</th>
+              {hasProd && <th className="text-right font-medium py-1.5">En prod</th>}
               <th className="text-right font-medium py-1.5">Coût u.</th>
               <th className="text-right font-medium py-1.5 pr-3">Tréso bloquée</th>
               <th className="text-right font-medium py-1.5 pr-3 hidden sm:table-cell">Revente pot.</th>
@@ -104,6 +124,7 @@ export default function StockValuationPanel({ data, loading }: { data: StockValu
                   </div>
                 </td>
                 <td className="text-right tabular-nums text-[#6b6b63]">{it.qty.toLocaleString('fr-FR')}</td>
+                {hasProd && <td className="text-right tabular-nums text-[#b45309]">{it.qty_prod > 0 ? `+${it.qty_prod.toLocaleString('fr-FR')}` : '—'}</td>}
                 <td className="text-right tabular-nums text-[#6b6b63]">{it.cost != null ? fmtEur(it.cost) : '—'}</td>
                 <td className="text-right tabular-nums font-semibold text-[#1a1a2e] pr-3">{it.cost != null ? fmtEur(it.blocked) : '—'}</td>
                 <td className="text-right tabular-nums text-[#1a7f4b] pr-3 hidden sm:table-cell">{it.retail != null ? fmtEur(it.qty * it.retail) : '—'}</td>
