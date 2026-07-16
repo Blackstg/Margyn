@@ -641,7 +641,17 @@ async function fetchBestSellers(brand: Brand, from: string, to: string): Promise
     .slice(0, 6)
 }
 
-async function fetchInventory(brand: Brand): Promise<InventoryItem[]> {
+// Productions en cours (persistées côté serveur, page Réappro).
+async function fetchInProduction(brand: Brand): Promise<Record<string, number>> {
+  try {
+    const r = await fetch(`/api/reorder/production?brand=${brand}`, { cache: 'no-store' })
+    if (!r.ok) return {}
+    const { map } = await r.json() as { map?: Record<string, number> }
+    return map ?? {}
+  } catch { return {} }
+}
+
+async function fetchInventory(brand: Brand, inProd: Record<string, number> = {}): Promise<InventoryItem[]> {
   const velocityFrom = new Date()
   velocityFrom.setDate(velocityFrom.getDate() - 30)
   const velocityFromStr = fmt(velocityFrom)
@@ -668,13 +678,6 @@ async function fetchInventory(brand: Brand): Promise<InventoryItem[]> {
     }
   }
 
-  // « Commande en cours » = production saisie sur la page Réappro (localStorage/brand)
-  let inProd: Record<string, number> = {}
-  try {
-    const raw = typeof window !== 'undefined' ? localStorage.getItem(`reorder_inprod_${brand}`) : null
-    if (raw) inProd = JSON.parse(raw) as Record<string, number>
-  } catch { /* ignore */ }
-
   return (variantsRes.data ?? []).map((v) => {
     const totalSold = sold30.get(v.shopify_variant_id) ?? 0
     const dailyVelocity = totalSold / 30
@@ -698,7 +701,7 @@ async function fetchInventory(brand: Brand): Promise<InventoryItem[]> {
 // Valorisation du stock : trésorerie immobilisée (coût d'achat) + valeur de revente
 // potentielle, par marque. Stock négatif (survente) clampé à 0. Fallback prix produit
 // quand la variante n'a pas de cost/sell renseigné.
-async function fetchStockValuation(brand: Brand): Promise<StockValuation> {
+async function fetchStockValuation(brand: Brand, inProd: Record<string, number> = {}): Promise<StockValuation> {
   const [variantsRes, productsRes] = await Promise.all([
     supabase.from('product_variants')
       .select('shopify_variant_id, shopify_product_id, product_title, variant_title, stock_quantity, cost_price, sell_price, image_url')
@@ -714,14 +717,6 @@ async function fetchStockValuation(brand: Brand): Promise<StockValuation> {
     prodCost.set(p.shopify_id, p.cost_price ?? null)
     prodSell.set(p.shopify_id, p.sell_price ?? null)
   }
-
-  // « Commande en cours » = production saisie sur la page Réappro (localStorage/brand),
-  // par variante. Même source que fetchInventory.
-  let inProd: Record<string, number> = {}
-  try {
-    const raw = typeof window !== 'undefined' ? localStorage.getItem(`reorder_inprod_${brand}`) : null
-    if (raw) inProd = JSON.parse(raw) as Record<string, number>
-  } catch { /* ignore */ }
 
   let totalCost = 0, totalRetail = 0, units = 0, skusMissingCost = 0
   let prodUnits = 0, prodCostTotal = 0, prodRetail = 0
@@ -962,6 +957,7 @@ function DashboardPage() {
     const { from, to, prevFrom, prevTo, days } = selectedMonth
       ? getMonthRange(selectedMonth)
       : getRange(period)
+    const inProd = await fetchInProduction(brand)
     const [snap, curr, prev, breakdown, roas, sellers, inv, excl, sparks, stock] = await Promise.all([
       fetchSnapshotData(brand, yesterday),
       fetchKpiData(brand, from, to, days),
@@ -969,10 +965,10 @@ function DashboardPage() {
       fetchSpendBreakdown(brand, from, to),
       fetchRoasData(brand, from, to),
       fetchBestSellers(brand, from, to),
-      fetchInventory(brand),
+      fetchInventory(brand, inProd),
       fetchExclusions(brand),
       fetchSparklines(brand, from, to),
-      fetchStockValuation(brand),
+      fetchStockValuation(brand, inProd),
     ])
     setSnapshot(snap)
     setCurrent(curr)

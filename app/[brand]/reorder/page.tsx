@@ -235,7 +235,39 @@ export default function ReapproPage() {
       try { localStorage.setItem(`reorder_inprod_${brand}`, JSON.stringify(next)) } catch { /* ignore */ }
       return next
     })
+    // Persiste côté serveur (partagé entre appareils + intégré à la valo stock)
+    fetch('/api/reorder/production', {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ brand, shopify_variant_id: variantId, qty }),
+    }).catch(() => { /* offline : le localStorage garde la valeur */ })
   }
+
+  // Charge les productions depuis le serveur (source de vérité). Si le serveur est
+  // vide mais qu'on a des saisies locales (ancien localStorage), on les migre une fois.
+  useEffect(() => {
+    let cancelled = false
+    ;(async () => {
+      try {
+        const r = await fetch(`/api/reorder/production?brand=${brand}`, { cache: 'no-store' })
+        if (!r.ok || cancelled) return
+        const { map } = await r.json() as { map: Record<string, number> }
+        let local: Record<string, number> = {}
+        try { local = JSON.parse(localStorage.getItem(`reorder_inprod_${brand}`) || '{}') } catch { /* ignore */ }
+        const serverEmpty = !map || Object.keys(map).length === 0
+        if (serverEmpty && Object.keys(local).length > 0) {
+          await fetch('/api/reorder/production', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ brand, map: local }),
+          }).catch(() => {})
+          // on garde les valeurs locales déjà affichées
+        } else if (!cancelled) {
+          setInProduction(map ?? {})
+          try { localStorage.setItem(`reorder_inprod_${brand}`, JSON.stringify(map ?? {})) } catch { /* ignore */ }
+        }
+      } catch { /* offline : garde localStorage */ }
+    })()
+    return () => { cancelled = true }
+  }, [brand])
 
   // ── Cart / sidebar ─────────────────────────────────────────────────────────
   const [sidebarOpen, setSidebarOpen] = useState(false)
