@@ -12,6 +12,7 @@ import { type SpendByPlatform } from '@/components/dashboard/SpendBreakdown'
 import { type RoasPoint } from '@/components/dashboard/RoasChart'
 import AdPanel from '@/components/dashboard/AdPanel'
 import ProductsView, { type BestSeller, type InventoryItem } from '@/components/dashboard/ProductsView'
+import StockValuationPanel, { type StockValuation, type StockValItem } from '@/components/dashboard/StockValuationPanel'
 import AnnualChart, { type MonthPoint } from '@/components/dashboard/AnnualChart'
 import AiInsights from '@/components/dashboard/AiInsights'
 import { useBrand, type Brand } from '@/context/BrandContext'
@@ -694,6 +695,48 @@ async function fetchInventory(brand: Brand): Promise<InventoryItem[]> {
   })
 }
 
+// Valorisation du stock : trésorerie immobilisée (coût d'achat) + valeur de revente
+// potentielle, par marque. Stock négatif (survente) clampé à 0. Fallback prix produit
+// quand la variante n'a pas de cost/sell renseigné.
+async function fetchStockValuation(brand: Brand): Promise<StockValuation> {
+  const [variantsRes, productsRes] = await Promise.all([
+    supabase.from('product_variants')
+      .select('shopify_product_id, product_title, variant_title, stock_quantity, cost_price, sell_price, image_url')
+      .eq('brand', brand),
+    supabase.from('products')
+      .select('shopify_id, cost_price, sell_price')
+      .eq('brand', brand),
+  ])
+  const prodCost = new Map<string, number | null>()
+  const prodSell = new Map<string, number | null>()
+  for (const p of productsRes.data ?? []) {
+    if (!p.shopify_id) continue
+    prodCost.set(p.shopify_id, p.cost_price ?? null)
+    prodSell.set(p.shopify_id, p.sell_price ?? null)
+  }
+
+  let totalCost = 0, totalRetail = 0, units = 0, skusMissingCost = 0
+  const items: StockValItem[] = []
+  for (const v of variantsRes.data ?? []) {
+    const qty = Math.max(0, v.stock_quantity ?? 0)
+    if (qty === 0) continue
+    const pid    = v.shopify_product_id ?? ''
+    const cost   = v.cost_price ?? (pid ? prodCost.get(pid) ?? null : null)
+    const retail = v.sell_price ?? (pid ? prodSell.get(pid) ?? null : null)
+    const blocked = cost != null ? qty * cost : 0
+    if (cost == null) skusMissingCost++
+    totalCost   += blocked
+    totalRetail += retail != null ? qty * retail : 0
+    units       += qty
+    items.push({
+      title: v.product_title, variant_title: v.variant_title ?? null,
+      qty, cost, retail, blocked, image_url: v.image_url ?? null,
+    })
+  }
+  items.sort((a, b) => b.blocked - a.blocked)
+  return { totalCost, totalRetail, units, skusMissingCost, items }
+}
+
 async function fetchSparklines(brand: Brand, from: string, to: string): Promise<SparklineData> {
   const { data } = await supabase
     .from('daily_snapshots')
@@ -898,6 +941,7 @@ function DashboardPage() {
   const syncAttempted                             = useRef<Set<string>>(new Set())
   const [annualData, setAnnualData]               = useState<MonthPoint[]>([])
   const [annualLoading, setAnnualLoading]         = useState(true)
+  const [stockVal, setStockVal]                   = useState<StockValuation | null>(null)
   const yesterday = getYesterday()
 
   const load = useCallback(async () => {
@@ -905,7 +949,7 @@ function DashboardPage() {
     const { from, to, prevFrom, prevTo, days } = selectedMonth
       ? getMonthRange(selectedMonth)
       : getRange(period)
-    const [snap, curr, prev, breakdown, roas, sellers, inv, excl, sparks] = await Promise.all([
+    const [snap, curr, prev, breakdown, roas, sellers, inv, excl, sparks, stock] = await Promise.all([
       fetchSnapshotData(brand, yesterday),
       fetchKpiData(brand, from, to, days),
       fetchKpiData(brand, prevFrom, prevTo, days),
@@ -915,6 +959,7 @@ function DashboardPage() {
       fetchInventory(brand),
       fetchExclusions(brand),
       fetchSparklines(brand, from, to),
+      fetchStockValuation(brand),
     ])
     setSnapshot(snap)
     setCurrent(curr)
@@ -926,6 +971,7 @@ function DashboardPage() {
     setInventory(inv)
     setExclusions(excl)
     setSparklines(sparks)
+    setStockVal(stock)
     setLoading(false)
   }, [brand, period, selectedMonth, yesterday])
 
@@ -1119,6 +1165,9 @@ Stock faible (<20 unités): ${lowStock || 'Aucun'}`
               periodLabel={chartLabel}
               maturing={!selectedMonth}
             />
+
+            {/* Stock valuation — trésorerie immobilisée par marque */}
+            <StockValuationPanel data={stockVal} loading={loading} />
 
             {/* Products */}
             <section className="space-y-3">
