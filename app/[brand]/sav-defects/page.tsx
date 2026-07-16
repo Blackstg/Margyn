@@ -555,6 +555,8 @@ function NewClaimForm({ brand, activeBatchLabel, onClose, onCreated }: { brand: 
   })
   const [orderInput, setOrderInput] = useState('')
   const [lineItems, setLineItems]   = useState<LineItem[] | null>(null)
+  // Livraison incomplète : sélection multiple d'articles manquants → index → qté manquante
+  const [missingSel, setMissingSel] = useState<Record<number, number>>({})
   const [lookupErr, setLookupErr]   = useState('')
   const [lookingUp, setLookingUp]   = useState(false)
   const [variants, setVariants]     = useState<Variant[]>([])
@@ -576,7 +578,7 @@ function NewClaimForm({ brand, activeBatchLabel, onClose, onCreated }: { brand: 
 
   async function lookupOrder() {
     if (!orderInput.trim()) return
-    setLookingUp(true); setLookupErr(''); setLineItems(null)
+    setLookingUp(true); setLookupErr(''); setLineItems(null); setMissingSel({})
     try {
       const res = await fetch(`/api/sav-defects/order-lookup?brand=${brand}&order=${encodeURIComponent(orderInput.trim())}`)
       const data = await res.json()
@@ -613,8 +615,36 @@ function NewClaimForm({ brand, activeBatchLabel, onClose, onCreated }: { brand: 
     if (type === 'erreur_envoi' && (!form.shopify_order_id || !form.received_sku)) {
       setError('Please fill in the order and the wrongly received item.'); return
     }
-    if (type === 'livraison_incomplete' && (!form.shopify_order_id || (!form.sku.trim() && !form.product_name.trim()))) {
-      setError('Please look up the order and select the missing item.'); return
+    if (type === 'livraison_incomplete') {
+      const chosen = Object.keys(missingSel).map(Number)
+      if (!form.shopify_order_id || chosen.length === 0) {
+        setError('Look up the order and check at least one missing item.'); return
+      }
+      setSaving(true); setError('')
+      try {
+        for (const i of chosen) {
+          const li = (lineItems ?? [])[i]
+          if (!li) continue
+          const res = await fetch('/api/sav-defects', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              brand, claim_type: 'livraison_incomplete',
+              reported_at:        form.reported_at,
+              shopify_order_id:   form.shopify_order_id,
+              shopify_variant_id: li.variant_id ?? '',
+              sku:                li.sku ?? '',
+              product_name:       [li.product_name, li.variant_title].filter(Boolean).join(' · '),
+              quantity:           missingSel[i],
+              defect_description: form.defect_description,
+              reship_tracking_ref: form.reship_tracking_ref,
+              return_tracking_ref: form.return_tracking_ref,
+            }),
+          })
+          if (!res.ok) { const d = await res.json(); setError(d.error ?? 'Erreur'); setSaving(false); return }
+        }
+        onCreated()
+      } catch (e) { setError(String(e)); setSaving(false) }
+      return
     }
     if (type === 'defaut_fournisseur' && !form.sku.trim() && !form.defect_description.trim()) {
       setError('Please provide at least a SKU or a description.'); return
@@ -647,7 +677,7 @@ function NewClaimForm({ brand, activeBatchLabel, onClose, onCreated }: { brand: 
         {/* Type toggle */}
         <div className="inline-flex w-full bg-[#F8F8F7] rounded-xl p-0.5 gap-0.5">
           {([['defaut_fournisseur', 'Supplier defect'], ['erreur_envoi', 'Shipping error'], ['livraison_incomplete', 'Incomplete']] as const).map(([k, lbl]) => (
-            <button key={k} onClick={() => setType(k)}
+            <button key={k} onClick={() => { setType(k); setMissingSel({}) }}
               className={`flex-1 px-2 py-2 rounded-lg text-[11px] font-semibold transition-all ${type === k ? 'bg-white text-[#1a1a18] shadow-sm' : 'text-[#6b6b63]'}`}>
               {lbl}
             </button>
@@ -679,10 +709,41 @@ function NewClaimForm({ brand, activeBatchLabel, onClose, onCreated }: { brand: 
         {lineItems && lineItems.length > 0 && (
           <div className="space-y-1.5">
             <p className="text-[10px] font-semibold uppercase tracking-[0.08em] text-[#9b9b93]">
-              {type === 'erreur_envoi' ? 'Ordered item (correct, to reship)' : type === 'livraison_incomplete' ? 'Select the MISSING item' : 'Select the affected item'}
+              {type === 'erreur_envoi' ? 'Ordered item (correct, to reship)' : type === 'livraison_incomplete' ? 'Check the MISSING item(s) + missing qty' : 'Select the affected item'}
             </p>
-            <div className="space-y-1 max-h-44 overflow-y-auto">
+            <div className="space-y-1 max-h-56 overflow-y-auto">
               {lineItems.map((li, i) => {
+                // Livraison incomplète : cases à cocher multiples + qté manquante
+                if (type === 'livraison_incomplete') {
+                  const checked = missingSel[i] != null
+                  const qty = missingSel[i] ?? li.quantity
+                  return (
+                    <div key={i} className={`w-full flex items-center gap-2.5 p-2 rounded-xl border transition-all ${checked ? 'border-[#6d28d9] bg-[#f5f3ff]' : 'border-[#e8e8e4]'}`}>
+                      <button type="button" title="Missing?"
+                        onClick={() => setMissingSel(s => { const n = { ...s }; if (n[i] != null) delete n[i]; else n[i] = li.quantity; return n })}
+                        className={`w-5 h-5 rounded-md border flex items-center justify-center shrink-0 ${checked ? 'bg-[#6d28d9] border-[#6d28d9] text-white' : 'border-[#cfcfc8] bg-white'}`}>
+                        {checked && <Check size={13} />}
+                      </button>
+                      {li.image_url
+                        ? <img src={li.image_url} alt="" className="w-10 h-10 rounded-lg object-cover border border-[#e8e8e4] shrink-0" />
+                        : <div className="w-10 h-10 rounded-lg bg-[#f0f0ee] shrink-0" />}
+                      <div className="min-w-0 flex-1">
+                        <div className="text-sm font-medium text-[#1a1a18] truncate">{li.product_name}</div>
+                        <div className="text-xs text-[#9b9b93]">{[li.variant_title, li.sku].filter(Boolean).join(' · ') || '—'} · ordered ×{li.quantity}</div>
+                      </div>
+                      {checked && (
+                        <div className="flex items-center gap-1 shrink-0">
+                          <span className="text-[9px] uppercase text-[#9b9b93] mr-0.5">missing</span>
+                          <button type="button" onClick={() => setMissingSel(s => ({ ...s, [i]: Math.max(1, (s[i] ?? li.quantity) - 1) }))}
+                            className="w-6 h-6 rounded-md border border-[#e8e8e4] bg-white text-sm font-bold leading-none flex items-center justify-center">−</button>
+                          <span className="w-6 text-center text-sm font-bold tabular-nums text-[#6d28d9]">{qty}</span>
+                          <button type="button" onClick={() => setMissingSel(s => ({ ...s, [i]: Math.min(li.quantity, (s[i] ?? li.quantity) + 1) }))}
+                            className="w-6 h-6 rounded-md border border-[#e8e8e4] bg-white text-sm font-bold leading-none flex items-center justify-center">+</button>
+                        </div>
+                      )}
+                    </div>
+                  )
+                }
                 const selected = form.shopify_variant_id && form.shopify_variant_id === li.variant_id
                 return (
                   <button key={i} type="button" onClick={() => selectLineItem(li)}
@@ -719,9 +780,11 @@ function NewClaimForm({ brand, activeBatchLabel, onClose, onCreated }: { brand: 
           <Field label="Report date">
             <input type="date" value={form.reported_at} onChange={e => upd('reported_at', e.target.value)} className={input} />
           </Field>
-          <Field label={type === 'livraison_incomplete' ? 'Missing quantity' : 'Quantity'}>
-            <input type="number" min={1} value={form.quantity} onChange={e => upd('quantity', e.target.value)} className={input} />
-          </Field>
+          {type !== 'livraison_incomplete' && (
+            <Field label="Quantity">
+              <input type="number" min={1} value={form.quantity} onChange={e => upd('quantity', e.target.value)} className={input} />
+            </Field>
+          )}
 
           <div className="col-span-2">
             <Field label="Production batch">
@@ -786,7 +849,7 @@ function NewClaimForm({ brand, activeBatchLabel, onClose, onCreated }: { brand: 
         <div className="flex justify-end gap-2 pt-1">
           <button onClick={onClose} className="px-4 py-2 rounded-xl text-sm text-[#6b6b63] hover:bg-[#f8f8f7]">Cancel</button>
           <button onClick={submit} disabled={saving} className="px-4 py-2 rounded-xl bg-[#1a1a2e] text-white text-sm font-semibold hover:bg-[#2a2a3e] disabled:opacity-50">
-            {saving ? 'Saving…' : 'Create case'}
+            {saving ? 'Saving…' : type === 'livraison_incomplete' && Object.keys(missingSel).length > 1 ? `Create ${Object.keys(missingSel).length} cases` : 'Create case'}
           </button>
         </div>
       </div>
