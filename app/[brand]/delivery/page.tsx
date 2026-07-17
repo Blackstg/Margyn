@@ -2365,47 +2365,89 @@ function LivreurView() {
   const [selectedTourId, setSelectedTourId] = useState('')
   const [loading, setLoading] = useState(true)
 
-  // ── GPS tracking silencieux ───────────────────────────────────────────────
+  // ── GPS tracking (auto au chargement + bandeau d'activation si refusé/iOS) ──
+  const driverNameRef  = useRef<string>('')
+  const geoIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const [geoNeedsEnable, setGeoNeedsEnable] = useState(false)
+
+  const sendPos = useCallback(async (): Promise<boolean> => {
+    if (!navigator?.geolocation || !driverNameRef.current) return false
+    try {
+      const pos = await new Promise<GeolocationPosition>((ok, err) =>
+        navigator.geolocation.getCurrentPosition(ok, err, {
+          enableHighAccuracy: true, timeout: 15_000, maximumAge: 60_000,
+        })
+      )
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const battery = await (navigator as any).getBattery?.().then((b: any) => Math.round(b.level * 100)).catch(() => null)
+      await fetch('/api/delivery/location', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          driver_name: driverNameRef.current,
+          lat:      pos.coords.latitude,
+          lng:      pos.coords.longitude,
+          accuracy: pos.coords.accuracy,
+          battery,
+        }),
+      })
+      return true
+    } catch { return false }
+  }, [])
+
+  const startTracking = useCallback(() => {
+    if (geoIntervalRef.current) return
+    sendPos()
+    geoIntervalRef.current = setInterval(() => sendPos(), 5 * 60 * 1000)
+  }, [sendPos])
+
+  // Appelé par le bandeau : le tap fournit le geste utilisateur (popup fiable, iOS inclus)
+  const enableGeo = useCallback(async () => {
+    const ok = await sendPos()
+    if (ok) { setGeoNeedsEnable(false); startTracking() }
+    else setGeoNeedsEnable(true)
+  }, [sendPos, startTracking])
+
   useEffect(() => {
     if (!navigator?.geolocation) return
     const supabase = createBrowserClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL!,
       process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
     )
-    let intervalId: ReturnType<typeof setInterval> | null = null
+    let cancelled = false
+    supabase.auth.getUser().then(async ({ data }) => {
+      if (cancelled) return
+      const meta = data.user?.user_metadata
+      driverNameRef.current = (meta?.full_name ?? meta?.name ?? data.user?.email ?? 'Inconnu') as string
 
-    async function sendPos(driverName: string) {
+      let state: PermissionState | 'unknown' = 'unknown'
       try {
-        const pos = await new Promise<GeolocationPosition>((ok, err) =>
-          navigator.geolocation.getCurrentPosition(ok, err, {
-            enableHighAccuracy: true, timeout: 15_000, maximumAge: 60_000,
-          })
-        )
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const battery = await (navigator as any).getBattery?.().then((b: any) => Math.round(b.level * 100)).catch(() => null)
-        await fetch('/api/delivery/location', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            driver_name: driverName,
-            lat:      pos.coords.latitude,
-            lng:      pos.coords.longitude,
-            accuracy: pos.coords.accuracy,
-            battery,
-          }),
-        })
-      } catch { /* silencieux */ }
-    }
+        const p = await (navigator as any).permissions?.query({ name: 'geolocation' })
+        if (p) {
+          state = p.state
+          p.onchange = () => {
+            if (p.state === 'granted') { setGeoNeedsEnable(false); startTracking() }
+            else setGeoNeedsEnable(true)
+          }
+        }
+      } catch { /* Permissions API absente (ex. iOS) → on tentera directement */ }
 
-    supabase.auth.getUser().then(({ data }) => {
-      const meta       = data.user?.user_metadata
-      const driverName = (meta?.full_name ?? meta?.name ?? data.user?.email ?? 'Inconnu') as string
-      sendPos(driverName)
-      intervalId = setInterval(() => sendPos(driverName), 5 * 60 * 1000)
+      if (state === 'granted') {
+        setGeoNeedsEnable(false)
+        startTracking()
+      } else if (state === 'denied') {
+        setGeoNeedsEnable(true)
+      } else {
+        // 'prompt' ou inconnu → on déclenche automatiquement le popup natif ; s'il
+        // n'est pas encore accordé (refus, ou iOS qui exige un tap), on montre le bandeau.
+        setGeoNeedsEnable(true)
+        const ok = await sendPos()
+        if (ok && !cancelled) { setGeoNeedsEnable(false); startTracking() }
+      }
     })
-
-    return () => { if (intervalId) clearInterval(intervalId) }
-  }, [])
+    return () => { cancelled = true; if (geoIntervalRef.current) { clearInterval(geoIntervalRef.current); geoIntervalRef.current = null } }
+  }, [sendPos, startTracking])
   const [screen, setScreen] = useState<LivreurScreen>('home')
   const [stopIdx, setStopIdx] = useState(0)
   const [marking, setMarking] = useState(false)
@@ -3052,6 +3094,20 @@ function LivreurView() {
     return (
       <div className="w-full space-y-4 px-4 py-4">
 
+        {/* Bandeau d'activation de la position (si non accordée / iOS) */}
+        {geoNeedsEnable && (
+          <button
+            onClick={enableGeo}
+            className="w-full flex items-center gap-3 rounded-[16px] bg-[#6366f1] text-white px-4 py-3.5 text-left active:bg-[#4f46e5] transition-colors shadow-[0_4px_16px_rgba(99,102,241,0.35)]"
+          >
+            <MapPin size={22} className="shrink-0" />
+            <div className="flex-1 min-w-0">
+              <div className="text-sm font-bold">Activer ma position</div>
+              <div className="text-[11px] text-white/80 leading-snug">Touche ici et autorise la localisation pour que l&apos;équipe suive la tournée.</div>
+            </div>
+            <span className="text-xl leading-none">→</span>
+          </button>
+        )}
 
         {tour ? (
           <div className="w-full rounded-[20px] bg-[#1a1a2e] overflow-hidden">
