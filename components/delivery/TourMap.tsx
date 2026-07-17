@@ -186,15 +186,16 @@ export default function TourMap({ stops, onBack, precomputedCoords, onMarkDelive
           if (!coord) return
           routeWaypoints.push(coord)
 
+          // Plusieurs commandes à la même adresse → même position mais décalage en
+          // PIXELS (constant à l'écran, quel que soit le zoom). Un décalage
+          // géographique (~30 m) serait invisible au zoom d'une tournée.
           const key = `${coord[0].toFixed(5)},${coord[1].toFixed(5)}`
           const dup = coordSeen.get(key) ?? 0
           coordSeen.set(key, dup + 1)
-          let markerCoord: [number, number] = coord
-          if (dup > 0) {
-            const angle = (dup - 1) * (Math.PI / 3) // 6 positions autour du point
-            const r = 0.0004                          // ~30–40 m, juste pour dé-chevaucher
-            markerCoord = [coord[0] + Math.cos(angle) * r, coord[1] + Math.sin(angle) * r]
-          }
+          const angle = (dup - 1) * (Math.PI / 3)
+          const pxOffset: [number, number] = dup === 0
+            ? [0, 0]
+            : [Math.round(Math.cos(angle) * 22), Math.round(Math.sin(angle) * 22)]
 
           const el = makeStopMarkerEl(String(i + 1), stopColor(stop.status))
           markerElsRef.current[stop.id] = el
@@ -205,8 +206,8 @@ export default function TourMap({ stops, onBack, precomputedCoords, onMarkDelive
             setSelectedNearby(null)
           })
 
-          new mgl.Marker({ element: el })
-            .setLngLat(markerCoord)
+          new mgl.Marker({ element: el, offset: pxOffset })
+            .setLngLat(coord)
             .addTo(map)
         })
 

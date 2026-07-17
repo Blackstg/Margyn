@@ -155,6 +155,7 @@ export default function ToursMap({ tours, height = 480 }: Props) {
         tour: TourMapTour
         tourIdx: number
         coord: [number, number]
+        pxOffset: [number, number]
       }
 
       const allResults: StopWithMeta[] = []
@@ -165,7 +166,7 @@ export default function ToursMap({ tours, height = 480 }: Props) {
             if (cancelled) return
             const coord = await geocode(stop, token)
             if (!coord || cancelled) return
-            allResults.push({ stop, tour, tourIdx, coord })
+            allResults.push({ stop, tour, tourIdx, coord, pxOffset: [0, 0] })
           })
         )
       )
@@ -183,22 +184,20 @@ export default function ToursMap({ tours, height = 480 }: Props) {
         groups.get(k)!.push(r)
       }
 
-      // 3. Apply radial jitter for overlapping stops (~40m radius)
-      const JITTER_DEG = 0.0004
+      // 3. Plusieurs commandes à la même adresse → on garde la même position mais on
+      // écarte les marqueurs d'un décalage en PIXELS (constant à l'écran, quel que
+      // soit le zoom). Un décalage géographique serait invisible au zoom d'une tournée.
       for (const group of groups.values()) {
         if (group.length === 1) continue
-        const [baseLng, baseLat] = group[0].coord
+        const R = 20 // px
         group.forEach((r, i) => {
           const angle = (2 * Math.PI * i) / group.length
-          r.coord = [
-            baseLng + JITTER_DEG * Math.cos(angle),
-            baseLat + JITTER_DEG * Math.sin(angle),
-          ]
+          r.pxOffset = [Math.round(Math.cos(angle) * R), Math.round(Math.sin(angle) * R)]
         })
       }
 
       // 4. Add markers
-      for (const { stop, tour, tourIdx, coord } of allResults) {
+      for (const { stop, tour, tourIdx, coord, pxOffset } of allResults) {
         hasAny = true
         bounds.extend(coord)
 
@@ -218,7 +217,7 @@ export default function ToursMap({ tours, height = 480 }: Props) {
           </div>
         `)
 
-        const marker = new mgl.Marker({ element: el })
+        const marker = new mgl.Marker({ element: el, offset: pxOffset })
           .setLngLat(coord)
           .setPopup(popup)
           .addTo(map)
