@@ -2,8 +2,8 @@
 
 import { useEffect, useRef, useState } from 'react'
 import { MapPin, Wifi, WifiOff, Battery, Clock } from 'lucide-react'
+import { createBrowserClient } from '@supabase/auth-helpers-nextjs'
 
-const DRIVER_NAME = 'Khalid'
 const INTERVAL_MS = 5 * 60 * 1000  // toutes les 5 minutes
 
 interface Status {
@@ -23,6 +23,9 @@ export default function TrackingPage() {
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const wakeLockRef = useRef<WakeLockSentinel | null>(null)
   const startedRef  = useRef(false)
+  // Nom du livreur = user connecté (chaque livreur broadcast sous son propre nom)
+  const driverNameRef = useRef<string>('')
+  const [driverName, setDriverName] = useState<string>('')
 
   async function getBattery(): Promise<number | null> {
     try {
@@ -47,7 +50,7 @@ export default function TrackingPage() {
         method:  'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          driver_name: DRIVER_NAME,
+          driver_name: driverNameRef.current,
           lat:         pos.coords.latitude,
           lng:         pos.coords.longitude,
           accuracy:    pos.coords.accuracy,
@@ -81,6 +84,19 @@ export default function TrackingPage() {
         setStatus(s => ({ ...s, error: 'GPS non supporté par ce navigateur' }))
         return
       }
+
+      // Identifie le livreur connecté avant d'envoyer (même logique que l'app livreur)
+      try {
+        const supabase = createBrowserClient(
+          process.env.NEXT_PUBLIC_SUPABASE_URL!,
+          process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+        )
+        const { data } = await supabase.auth.getUser()
+        const meta = data.user?.user_metadata
+        driverNameRef.current = (meta?.full_name ?? meta?.name ?? data.user?.email ?? 'Inconnu') as string
+        setDriverName(driverNameRef.current)
+      } catch { driverNameRef.current = 'Inconnu'; setDriverName('Inconnu') }
+
       // Wake lock pour garder l'écran allumé
       try { wakeLockRef.current = await navigator.wakeLock?.request('screen') } catch {}
 
@@ -108,7 +124,7 @@ export default function TrackingPage() {
             <MapPin size={28} className={active ? 'text-green-400' : 'text-[#6366f1]'} />
           </div>
           <h1 className="text-xl font-bold">Suivi GPS</h1>
-          <p className="text-sm text-white/50 mt-1">{DRIVER_NAME} · Margyn</p>
+          <p className="text-sm text-white/50 mt-1">{driverName || '…'} · Margyn</p>
         </div>
 
         {/* Statut */}

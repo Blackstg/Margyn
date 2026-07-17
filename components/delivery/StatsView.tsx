@@ -7,7 +7,7 @@ import type { StatsResponse, DriverStats, TourStat, DayActivity, StopEvent } fro
 
 const DriverLocationMap = dynamic(() => import('./DriverLocationMap'), { ssr: false })
 
-const GPS_DRIVERS = ['Khalid']  // livreurs trackés
+const GPS_DRIVERS = ['Khalid', 'Enzo']  // livreurs trackés
 
 // ── Formatters ────────────────────────────────────────────────────────────────
 
