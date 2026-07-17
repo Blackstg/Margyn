@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react'
 import type mapboxgl from 'mapbox-gl'
-import { geoAddress } from '@/lib/delivery/geo'
+import { geocodeParts } from '@/lib/delivery/geocode'
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -57,50 +57,18 @@ function tourColor(idx: number): string {
 // Module-level cache: survives re-renders, cleared on page reload
 const geocodeCache = new Map<string, [number, number] | null>()
 
-async function geocodeQuery(query: string, token: string): Promise<[number, number] | null> {
-  const cached = geocodeCache.get(query)
-  if (cached !== undefined) return cached
-
-  try {
-    // No `types` filter — let Mapbox find the best match (handles communes, lieux-dits, etc.)
-    const res = await fetch(
-      `https://api.mapbox.com/geocoding/v5/mapbox.places/${encodeURIComponent(query)}.json?access_token=${token}&country=fr&limit=1`
-    )
-    if (!res.ok) {
-      geocodeCache.set(query, null)
-      return null
-    }
-    const d = await res.json()
-    const coord: [number, number] | null = d.features?.[0]?.center ?? null
-    geocodeCache.set(query, coord)
-    return coord
-  } catch {
-    geocodeCache.set(query, null)
-    return null
-  }
-}
-
-// Tries: full address → zip + city → city alone → zip alone
+// Géocodage robuste partagé (rue+ville+CP → rue+CP sans ville → centroïde, avec
+// types=address pour ne pas matcher un POI/village homonyme). Cache module-level.
 async function geocode(
   stop: { address1: string; address2?: string; city: string; zip: string },
   token: string
 ): Promise<[number, number] | null> {
-  const city = stop.city?.trim() || ''
-  const zip  = stop.zip?.trim()  || ''
-  const addr = stop.address1?.trim() || ''
-
-  const attempts = [
-    addr && city && zip ? geoAddress(stop)         : null,
-    city && zip         ? `${zip} ${city}, France` : null,
-    city                ? `${city}, France`        : null,
-    zip                 ? `${zip}, France`         : null,
-  ].filter(Boolean) as string[]
-
-  for (const q of attempts) {
-    const coord = await geocodeQuery(q, token)
-    if (coord) return coord
-  }
-  return null
+  const key = `${stop.address1 ?? ''}|${stop.city ?? ''}|${stop.zip ?? ''}`
+  const cached = geocodeCache.get(key)
+  if (cached !== undefined) return cached
+  const coord = await geocodeParts(stop, token)
+  geocodeCache.set(key, coord)
+  return coord
 }
 
 // ── Marker element ───────────────────────────────────────────────────────────

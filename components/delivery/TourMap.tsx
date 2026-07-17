@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { ChevronLeft, CheckCircle2 } from 'lucide-react'
 import type mapboxgl from 'mapbox-gl'
-import { geoAddress } from '@/lib/delivery/geo'
+import { geocodeParts } from '@/lib/delivery/geocode'
 
 interface PanelItem {
   title: string
@@ -29,19 +29,6 @@ interface MapStop {
 const DEPOT_COORDS: [number, number] = [2.4524, 47.0873]
 const DEPOT_LABEL = 'Dépôt Bourges'
 
-async function geocodeAddress(address: string, token: string): Promise<[number, number] | null> {
-  try {
-    const res = await fetch(
-      `https://api.mapbox.com/geocoding/v5/mapbox.places/${encodeURIComponent(address)}.json?access_token=${token}&country=fr&limit=1&types=address`
-    )
-    if (!res.ok) return null
-    const data = await res.json()
-    const center = data.features?.[0]?.center
-    return center ? (center as [number, number]) : null
-  } catch {
-    return null
-  }
-}
 
 function stopColor(status: string) {
   if (status === 'delivered') return '#22c55e'
@@ -162,7 +149,7 @@ export default function TourMap({ stops, onBack, precomputedCoords, onMarkDelive
       const geocoded: ([number, number] | null)[] = await Promise.all(
         sortedStops.map(async (s) => {
           if (precomputedCoords?.has(s.id)) return precomputedCoords.get(s.id)!
-          return geocodeAddress(geoAddress(s), token)
+          return geocodeParts(s, token)
         })
       )
       if (cancelled) return
@@ -291,7 +278,7 @@ export default function TourMap({ stops, onBack, precomputedCoords, onMarkDelive
 
       await Promise.all(nearbyOrders.map(async (order) => {
         if (nearbyMarkerElsRef.current[order.order_name]) return // already placed
-        const coord = await geocodeAddress(geoAddress(order), token)
+        const coord = await geocodeParts(order, token)
         if (cancelled || !coord || !mapRef.current) return
 
         const el = makeNearbyMarkerEl()

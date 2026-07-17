@@ -16,15 +16,33 @@ export interface GeoAddressParts {
   zip:      string
 }
 
-export function geoAddress({ address1, address2, city, zip }: GeoAddressParts): string {
+function buildStreet(address1?: string | null, address2?: string | null): string {
   const a1 = (address1 ?? '').trim()
   const a2 = (address2 ?? '').trim()
   const numberOnly = /^\d+\s*\w?$/.test(a1)
+  if (a2 && numberOnly) return `${a1} ${a2}`   // "4 Avenue Virginie"
+  if (a2)               return `${a1}, ${a2}`  // keep complement (Bât., apt, hameau…)
+  return a1
+}
 
-  let street: string
-  if (a2 && numberOnly)      street = `${a1} ${a2}`   // "4 Avenue Virginie"
-  else if (a2)               street = `${a1}, ${a2}`  // keep complement (Bât., apt, hameau…)
-  else                       street = a1
-
+export function geoAddress({ address1, address2, city, zip }: GeoAddressParts): string {
+  const street = buildStreet(address1, address2)
   return street ? `${street}, ${city} ${zip}, France` : `${city} ${zip}, France`
+}
+
+// Requêtes de géocodage par ordre de préférence. Le 2e candidat (rue + CP SANS la
+// ville) rattrape les villes mal orthographiées par le client (ex. #10298
+// "Saint mars d outillé" au lieu de "Saint-Mars-d'Outillé" : le géocodage adresse
+// échouait, ou pire matchait un village homonyme "Noyers" à 250 km). Le dernier
+// candidat = centroïde CP/ville (approximatif mais bonne commune) en dernier recours.
+export function geoAddressCandidates({ address1, address2, city, zip }: GeoAddressParts): string[] {
+  const street = buildStreet(address1, address2)
+  const c = (city ?? '').trim()
+  const z = (zip ?? '').trim()
+  const out: string[] = []
+  if (street && c) out.push(`${street}, ${c} ${z}, France`)
+  if (street && z) out.push(`${street}, ${z}, France`)
+  const centroid = [c, z].filter(Boolean).join(' ').trim()
+  if (centroid) out.push(`${centroid}, France`)
+  return out
 }

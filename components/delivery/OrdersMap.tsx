@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react'
 import type mapboxgl from 'mapbox-gl'
-import { geoAddress } from '@/lib/delivery/geo'
+import { geocodeParts } from '@/lib/delivery/geocode'
 
 type Zone = 'nord-est' | 'nord-ouest' | 'sud-est' | 'sud-ouest'
 
@@ -49,18 +49,6 @@ function makeOrderMarker(zone: Zone, selected: boolean): HTMLElement {
   return el
 }
 
-async function geocodeAddress(address: string, token: string): Promise<[number, number] | null> {
-  try {
-    const res = await fetch(
-      `https://api.mapbox.com/geocoding/v5/mapbox.places/${encodeURIComponent(address)}.json?access_token=${token}&country=fr&limit=1&types=address`
-    )
-    if (!res.ok) return null
-    const data = await res.json()
-    const c = data.features?.[0]?.center
-    return c ?? null
-  } catch { return null }
-}
-
 // France center
 const FRANCE_CENTER: [number, number] = [2.3522, 46.8]
 
@@ -105,7 +93,7 @@ export default function OrdersMap({ orders, selectedOrders, onToggle, height = 4
               coordsCache.current.set(o.order_name, [o.lng, o.lat])
               return
             }
-            const coord = await geocodeAddress(geoAddress(o), token)
+            const coord = await geocodeParts(o, token)
             if (coord) coordsCache.current.set(o.order_name, coord)
           })
         )

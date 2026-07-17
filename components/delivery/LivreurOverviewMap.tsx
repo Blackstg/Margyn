@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react'
 import type mapboxgl from 'mapbox-gl'
-import { geoAddress } from '@/lib/delivery/geo'
+import { geocodeParts } from '@/lib/delivery/geocode'
 
 export interface PlannedStop {
   id:            string
@@ -51,18 +51,6 @@ function makeDot(color: string, size: number, border = 'white'): HTMLElement {
   return el
 }
 
-async function geocode(address: string, token: string): Promise<[number, number] | null> {
-  try {
-    const r = await fetch(
-      `https://api.mapbox.com/geocoding/v5/mapbox.places/${encodeURIComponent(address)}.json` +
-      `?access_token=${token}&country=fr&limit=1&types=address`
-    )
-    if (!r.ok) return null
-    const d = await r.json()
-    return d.features?.[0]?.center ?? null
-  } catch { return null }
-}
-
 export default function LivreurOverviewMap({ plannedStops, unplannedOrders, height }: Props) {
   const containerRef = useRef<HTMLDivElement>(null)
   const mapRef       = useRef<mapboxgl.Map | null>(null)
@@ -103,20 +91,14 @@ export default function LivreurOverviewMap({ plannedStops, unplannedOrders, heig
       if (cancelled) return
 
       // Geocode everything in parallel (address2-aware, see geoAddress)
-      const allAddresses: { key: string; address: string }[] = [
-        ...plannedStops.map(s => ({
-          key:     `stop:${s.id}`,
-          address: geoAddress(s),
-        })),
-        ...unplannedOrders.map(o => ({
-          key:     `order:${o.order_name}`,
-          address: geoAddress(o),
-        })),
+      const allAddresses = [
+        ...plannedStops.map(s => ({ key: `stop:${s.id}`, parts: s })),
+        ...unplannedOrders.map(o => ({ key: `order:${o.order_name}`, parts: o })),
       ]
 
-      await Promise.all(allAddresses.map(async ({ key, address }) => {
+      await Promise.all(allAddresses.map(async ({ key, parts }) => {
         if (cacheRef.current.has(key)) return
-        const coord = await geocode(address, token)
+        const coord = await geocodeParts(parts, token)
         if (coord) cacheRef.current.set(key, coord)
       }))
       if (cancelled) return

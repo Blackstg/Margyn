@@ -2,7 +2,7 @@
 
 import { useEffect, useRef } from 'react'
 import type mapboxgl from 'mapbox-gl'
-import { geoAddress } from '@/lib/delivery/geo'
+import { geocodeParts } from '@/lib/delivery/geocode'
 
 export interface SavStop {
   id: string
@@ -19,20 +19,6 @@ export interface SavStop {
 interface Props {
   stops: SavStop[]
   height?: number
-}
-
-async function geocodeAddress(address: string, token: string): Promise<[number, number] | null> {
-  try {
-    const res = await fetch(
-      `https://api.mapbox.com/geocoding/v5/mapbox.places/${encodeURIComponent(address)}.json` +
-      `?access_token=${token}&country=fr&limit=1&types=address`,
-      { cache: 'no-store' }
-    )
-    if (!res.ok) return null
-    const data = await res.json()
-    const c = data.features?.[0]?.center
-    return c ?? null
-  } catch { return null }
 }
 
 /**
@@ -109,7 +95,7 @@ export default function SavPositionMap({ stops, height = 320 }: Props) {
 
       // Geocode all stops in parallel
       const coords = await Promise.all(
-        stops.map(s => geocodeAddress(geoAddress(s), token))
+        stops.map(s => geocodeParts(s, token))
       )
       if (cancelled) return
 

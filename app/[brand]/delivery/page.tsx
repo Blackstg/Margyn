@@ -8,6 +8,7 @@ import { useRouter, useSearchParams } from 'next/navigation'
 import { createBrowserClient } from '@supabase/auth-helpers-nextjs'
 import { useBrand } from '@/context/BrandContext'
 import { geoAddress } from '@/lib/delivery/geo'
+import { geocodeParts } from '@/lib/delivery/geocode'
 import { ChevronDown, ChevronUp, ChevronLeft, ChevronRight, Trash2, Mail, Plus, X, MapPin, Package, Truck, Map as MapIcon, Search, Pencil, Check, MessageSquare, GripVertical, Printer, RefreshCw, Clock } from 'lucide-react'
 import {
   DndContext, DragEndEvent, DragOverlay, DragStartEvent,
@@ -665,7 +666,7 @@ function PlanificateurView() {
 
       // 1. Geocode all stop addresses (address2-aware, see geoAddress)
       const coords: ([number, number] | null)[] = await Promise.all(
-        stops.map((s) => geocodeForMap(geoAddress(s), token))
+        stops.map((s) => geocodeParts(s, token))
       )
 
       // Filter out stops that failed geocoding
@@ -2303,18 +2304,6 @@ function optimizeTSP(
   return twoOptImprove(depot, nearestNeighborTSP(depot, validIndices, coords), coords)
 }
 
-async function geocodeForMap(address: string, token: string): Promise<[number, number] | null> {
-  try {
-    const res = await fetch(
-      `https://api.mapbox.com/geocoding/v5/mapbox.places/${encodeURIComponent(address)}.json?access_token=${token}&country=fr&limit=1&types=address`
-    )
-    if (!res.ok) return null
-    const data = await res.json()
-    const c = data.features?.[0]?.center
-    return c ? (c as [number, number]) : null
-  } catch { return null }
-}
-
 async function buildETAMap(
   sortedStops: TourStop[],
   coordsCache: Map<string, [number, number]>,
@@ -2628,7 +2617,7 @@ function LivreurView() {
       await Promise.all(
         sortedStopsForETA.map(async (stop) => {
           if (coordsCache.current.has(stop.id)) return
-          const coord = await geocodeForMap(geoAddress(stop), token)
+          const coord = await geocodeParts(stop, token)
           if (coord) coordsCache.current.set(stop.id, coord)
         })
       )
@@ -2702,7 +2691,7 @@ function LivreurView() {
         await Promise.all(
           sortedStopsForETA.map(async (stop) => {
             if (coordsCache.current.has(stop.id)) return
-            const coord = await geocodeForMap(geoAddress(stop), token)
+            const coord = await geocodeParts(stop, token)
             if (coord) coordsCache.current.set(stop.id, coord)
           })
         )
