@@ -178,24 +178,32 @@ export default function TourMap({ stops, onBack, precomputedCoords, onMarkDelive
         // Stop markers
         const routeWaypoints: [number, number][] = [DEPOT_COORDS]
         // Plusieurs commandes peuvent être à la MÊME adresse (ex. #10360 et #10358) →
-        // leurs marqueurs se superposent au pixel près et un seul est visible. On
-        // décale légèrement (en éventail) les marqueurs qui partagent une position.
-        const coordSeen = new Map<string, number>()
+        // leurs marqueurs se superposeraient. On les écarte d'un décalage en PIXELS
+        // (constant à l'écran, quel que soit le zoom), réparti symétriquement autour
+        // du point pour qu'ils soient tous clairement visibles et cliquables.
+        const key = (c: [number, number]) => `${c[0].toFixed(5)},${c[1].toFixed(5)}`
+        const coordGroups = new Map<string, number[]>()
+        sortedStops.forEach((_, i) => {
+          const c = geocoded[i]
+          if (!c) return
+          const k = key(c)
+          if (!coordGroups.has(k)) coordGroups.set(k, [])
+          coordGroups.get(k)!.push(i)
+        })
+
         sortedStops.forEach((stop, i) => {
           const coord = geocoded[i]
           if (!coord) return
           routeWaypoints.push(coord)
 
-          // Plusieurs commandes à la même adresse → même position mais décalage en
-          // PIXELS (constant à l'écran, quel que soit le zoom). Un décalage
-          // géographique (~30 m) serait invisible au zoom d'une tournée.
-          const key = `${coord[0].toFixed(5)},${coord[1].toFixed(5)}`
-          const dup = coordSeen.get(key) ?? 0
-          coordSeen.set(key, dup + 1)
-          const angle = (dup - 1) * (Math.PI / 3)
-          const pxOffset: [number, number] = dup === 0
-            ? [0, 0]
-            : [Math.round(Math.cos(angle) * 22), Math.round(Math.sin(angle) * 22)]
+          const grp = coordGroups.get(key(coord)) ?? [i]
+          let pxOffset: [number, number] = [0, 0]
+          if (grp.length > 1) {
+            const gi = grp.indexOf(i)
+            const angle = (2 * Math.PI * gi) / grp.length
+            const R = 20
+            pxOffset = [Math.round(Math.cos(angle) * R), Math.round(Math.sin(angle) * R)]
+          }
 
           const el = makeStopMarkerEl(String(i + 1), stopColor(stop.status))
           markerElsRef.current[stop.id] = el

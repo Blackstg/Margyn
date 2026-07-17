@@ -99,6 +99,31 @@ function makeMarkerEl(color: string, seq: number, status: string): HTMLElement {
   return el
 }
 
+// Marqueur pour PLUSIEURS commandes à la même adresse : pastille allongée « 3·4 ».
+function makeMultiMarkerEl(label: string, color: string): HTMLElement {
+  const el = document.createElement('div')
+  el.style.cssText = `
+    min-width: 28px;
+    height: 28px;
+    padding: 0 8px;
+    border-radius: 14px;
+    background: ${color};
+    border: 2.5px solid white;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 11px;
+    font-weight: 700;
+    color: white;
+    font-family: system-ui, sans-serif;
+    cursor: pointer;
+    white-space: nowrap;
+  `
+  el.textContent = label
+  return el
+}
+
 // ── Component ─────────────────────────────────────────────────────────────────
 
 const FRANCE_CENTER: [number, number] = [2.35, 46.8]
@@ -155,7 +180,6 @@ export default function ToursMap({ tours, height = 480 }: Props) {
         tour: TourMapTour
         tourIdx: number
         coord: [number, number]
-        pxOffset: [number, number]
       }
 
       const allResults: StopWithMeta[] = []
@@ -166,14 +190,15 @@ export default function ToursMap({ tours, height = 480 }: Props) {
             if (cancelled) return
             const coord = await geocode(stop, token)
             if (!coord || cancelled) return
-            allResults.push({ stop, tour, tourIdx, coord, pxOffset: [0, 0] })
+            allResults.push({ stop, tour, tourIdx, coord })
           })
         )
       )
 
       if (cancelled) return
 
-      // 2. Group by coordinate key to detect overlaps (rounded to ~11m precision)
+      // 2. Regroupe par adresse (coord arrondie ~11 m) : plusieurs commandes au même
+      // endroit → UN seul marqueur listant tout (impossible à distinguer sinon).
       const coordKey = ([lng, lat]: [number, number]) =>
         `${lat.toFixed(4)},${lng.toFixed(4)}`
 
@@ -184,48 +209,60 @@ export default function ToursMap({ tours, height = 480 }: Props) {
         groups.get(k)!.push(r)
       }
 
-      // 3. Plusieurs commandes à la même adresse → on garde la même position mais on
-      // écarte les marqueurs d'un décalage en PIXELS (constant à l'écran, quel que
-      // soit le zoom). Un décalage géographique serait invisible au zoom d'une tournée.
+      const esc = (s: string) => s.replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]!))
+
+      // 3. Un marqueur par adresse
       for (const group of groups.values()) {
-        if (group.length === 1) continue
-        const R = 20 // px
-        group.forEach((r, i) => {
-          const angle = (2 * Math.PI * i) / group.length
-          r.pxOffset = [Math.round(Math.cos(angle) * R), Math.round(Math.sin(angle) * R)]
-        })
-      }
-
-      // 4. Add markers
-      for (const { stop, tour, tourIdx, coord, pxOffset } of allResults) {
+        const base = group[0]
         hasAny = true
-        bounds.extend(coord)
+        bounds.extend(base.coord)
 
-        const color = tourColor(tourIdx)
-        const el = makeMarkerEl(color, stop.sequence, stop.status)
-
-        const popup = new mgl.Popup({ offset: 14, closeButton: false, maxWidth: '220px' }).setHTML(`
-          <div style="font-size:12px;line-height:1.6;font-family:system-ui,sans-serif">
-            <div style="font-weight:700;color:#1a1a2e">${stop.customer_name || stop.order_name}</div>
-            <div style="font-family:ui-monospace,monospace;color:#888;font-size:11px">${stop.order_name}</div>
-            <div style="color:#6b6b63">${stop.address1 ? stop.address1 + ', ' : ''}${stop.city} ${stop.zip}</div>
-            <div style="margin-top:4px;display:flex;align-items:center;gap:6px">
-              <span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:${color};flex-shrink:0"></span>
-              <span style="color:#1a1a2e;font-weight:600">${tour.name}</span>
+        if (group.length === 1) {
+          const { stop, tour, tourIdx } = base
+          const color = tourColor(tourIdx)
+          const el = makeMarkerEl(color, stop.sequence, stop.status)
+          const popup = new mgl.Popup({ offset: 14, closeButton: false, maxWidth: '240px' }).setHTML(`
+            <div style="font-size:12px;line-height:1.6;font-family:system-ui,sans-serif">
+              <div style="font-weight:700;color:#1a1a2e">${esc(stop.customer_name || stop.order_name)}</div>
+              <div style="font-family:ui-monospace,monospace;color:#888;font-size:11px">${esc(stop.order_name)}</div>
+              <div style="color:#6b6b63">${stop.address1 ? esc(stop.address1) + ', ' : ''}${esc(stop.city)} ${esc(stop.zip)}</div>
+              <div style="margin-top:4px;display:flex;align-items:center;gap:6px">
+                <span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:${color};flex-shrink:0"></span>
+                <span style="color:#1a1a2e;font-weight:600">${esc(tour.name)}</span>
+              </div>
+              <div style="color:#6b6b63;font-size:11px">${esc(tour.driver_name)} · ${stop.panel_count} panneau${stop.panel_count !== 1 ? 'x' : ''}</div>
             </div>
-            <div style="color:#6b6b63;font-size:11px">${tour.driver_name} · ${stop.panel_count} panneau${stop.panel_count !== 1 ? 'x' : ''}</div>
-          </div>
-        `)
-
-        const marker = new mgl.Marker({ element: el, offset: pxOffset })
-          .setLngLat(coord)
-          .setPopup(popup)
-          .addTo(map)
-
-        el.addEventListener('mouseenter', () => popup.addTo(map))
-        el.addEventListener('mouseleave', () => popup.remove())
-
-        markersRef.current.push(marker)
+          `)
+          const marker = new mgl.Marker({ element: el }).setLngLat(base.coord).setPopup(popup).addTo(map)
+          el.addEventListener('mouseenter', () => popup.addTo(map))
+          el.addEventListener('mouseleave', () => popup.remove())
+          markersRef.current.push(marker)
+        } else {
+          // Plusieurs commandes à la même adresse → pastille « 3·4 » + liste au clic
+          const sorted = [...group].sort((a, b) => a.stop.sequence - b.stop.sequence)
+          const sameTour = sorted.every(r => r.tourIdx === sorted[0].tourIdx)
+          const color = sameTour ? tourColor(sorted[0].tourIdx) : '#1a1a2e'
+          const label = sorted.map(r => r.stop.sequence).join('·')
+          const el = makeMultiMarkerEl(label, color)
+          const rows = sorted.map(r => `
+            <div style="display:flex;align-items:center;gap:7px;padding:5px 0;border-top:1px solid #f0f0ee">
+              <span style="flex-shrink:0;width:18px;height:18px;border-radius:50%;background:${tourColor(r.tourIdx)};color:#fff;font-size:10px;font-weight:700;display:flex;align-items:center;justify-content:center">${r.stop.sequence}</span>
+              <div style="min-width:0">
+                <div style="font-weight:600;color:#1a1a2e">${esc(r.stop.customer_name || r.stop.order_name)} <span style="font-family:ui-monospace,monospace;color:#888;font-weight:400">${esc(r.stop.order_name)}</span></div>
+                <div style="color:#6b6b63;font-size:11px">${esc(r.tour.name)} · ${r.stop.panel_count} panneau${r.stop.panel_count !== 1 ? 'x' : ''}</div>
+              </div>
+            </div>`).join('')
+          const popup = new mgl.Popup({ offset: 14, closeButton: true, maxWidth: '280px' }).setHTML(`
+            <div style="font-size:12px;line-height:1.5;font-family:system-ui,sans-serif">
+              <div style="font-weight:700;color:#1a1a2e">${group.length} commandes — même adresse</div>
+              <div style="color:#6b6b63">${base.stop.address1 ? esc(base.stop.address1) + ', ' : ''}${esc(base.stop.city)} ${esc(base.stop.zip)}</div>
+              ${rows}
+            </div>
+          `)
+          const marker = new mgl.Marker({ element: el }).setLngLat(base.coord).setPopup(popup).addTo(map)
+          el.addEventListener('mouseenter', () => popup.addTo(map))
+          markersRef.current.push(marker)
+        }
       }
 
       if (cancelled) return
