@@ -675,35 +675,35 @@ function PlanificateurView() {
       let optimizedIndices: number[]
 
       if (validIndices.length <= 11) {
-        // 2a. Mapbox Optimization API (TSP, depot + up to 11 waypoints = 12 total)
-        const depotCoord = DEPOT_COORDS
+        // 2a. Mapbox Optimization API (distances routières réelles). Le dépôt est
+        // envoyé UNE seule fois (roundtrip=true revient au départ) → 11 arrêts + dépôt
+        // = 12 = limite Mapbox. (Avant : dépôt envoyé 2× → 13 points > 12 → échec.)
         const waypointCoords = validIndices.map((i) => coords[i] as [number, number])
-        const coordStr = [depotCoord, ...waypointCoords, depotCoord]
+        const coordStr = [DEPOT_COORDS, ...waypointCoords]
           .map(([lng, lat]) => `${lng},${lat}`)
           .join(';')
 
         const optRes = await fetch(
-          `https://api.mapbox.com/optimized-trips/v1/mapbox/driving/${coordStr}?roundtrip=true&source=first&destination=last&access_token=${token}`
+          `https://api.mapbox.com/optimized-trips/v1/mapbox/driving/${coordStr}?roundtrip=true&source=first&access_token=${token}`
         )
+        let mapboxOrder: number[] | null = null
         if (optRes.ok) {
           const optData = await optRes.json()
-          // Mapbox response: waypoints[] is parallel to input coords (depot, stop0, stop1..., depot)
-          // Each entry has waypoint_index = position in the optimized trip (0 = first visit)
+          // waypoints[] est parallèle aux coords d'entrée [dépôt, stop0, …]. Chaque
+          // entrée a waypoint_index = position dans le trajet optimisé (0 = 1er).
           const allWps: { waypoint_index: number }[] = optData.waypoints ?? []
-          // Skip depot (index 0 and last) — take only the stop waypoints
-          const stopWps = allWps.slice(1, validIndices.length + 1)
-          // Sort by waypoint_index to get optimized visit order; inputPos maps to validIndices[inputPos]
+          const stopWps = allWps.slice(1) // enlève le dépôt (position 0)
           const sorted = stopWps
             .map((wp, inputPos) => ({ inputPos, tripPos: wp.waypoint_index }))
             .sort((a, b) => a.tripPos - b.tripPos)
-          optimizedIndices = sorted.map((x) => validIndices[x.inputPos])
-        } else {
-          // Fallback to nearest-neighbor
-          optimizedIndices = nearestNeighborTSP(DEPOT_COORDS, validIndices, coords as ([number, number] | null)[])
+          const order = sorted.map((x) => validIndices[x.inputPos])
+          if (order.length === validIndices.length) mapboxOrder = order
         }
+        // Repli robuste : nearest-neighbor + 2-opt (à vol d'oiseau) si Mapbox échoue.
+        optimizedIndices = mapboxOrder ?? optimizeTSP(DEPOT_COORDS, validIndices, coords as ([number, number] | null)[])
       } else {
-        // 2b. Nearest-neighbor heuristic for >11 stops
-        optimizedIndices = nearestNeighborTSP(DEPOT_COORDS, validIndices, coords as ([number, number] | null)[])
+        // 2b. > 11 arrêts : nearest-neighbor + 2-opt (supprime les retours en arrière).
+        optimizedIndices = optimizeTSP(DEPOT_COORDS, validIndices, coords as ([number, number] | null)[])
       }
 
       // 3. Assign new sequences to all stops (keep non-geocoded stops at end in original order)
@@ -2253,6 +2253,54 @@ function nearestNeighborTSP(
     remaining.delete(best)
   }
   return result
+}
+
+// Amélioration 2-opt : part d'un ordre donné (dépôt → arrêts → dépôt) et inverse
+// des segments tant que ça raccourcit le trajet total. Élimine les croisements et
+// le fameux « aller loin puis revenir » du nearest-neighbor pur. Distances à vol
+// d'oiseau (haversine) — pas besoin d'appels API, marche pour tout nombre d'arrêts.
+function twoOptImprove(
+  depot: [number, number],
+  order: number[],
+  coords: ([number, number] | null)[]
+): number[] {
+  const n = order.length
+  if (n < 3) return order
+  const pt = (idx: number) => coords[idx] as [number, number]
+  const route = order.slice()
+  let improved = true
+  let guard = 0
+  while (improved && guard++ < 200) {
+    improved = false
+    for (let i = 0; i < n - 1; i++) {
+      const A = i === 0 ? depot : pt(route[i - 1])
+      let ci = pt(route[i])
+      for (let j = i + 1; j < n; j++) {
+        const B = j === n - 1 ? depot : pt(route[j + 1])
+        const cj = pt(route[j])
+        // Gain = (arêtes retirées) − (arêtes ajoutées) en inversant le segment i..j
+        const delta =
+          haversineKm(A, cj) + haversineKm(ci, B) -
+          haversineKm(A, ci) - haversineKm(cj, B)
+        if (delta < -1e-6) {
+          let lo = i, hi = j
+          while (lo < hi) { const t = route[lo]; route[lo] = route[hi]; route[hi] = t; lo++; hi-- }
+          improved = true
+          ci = pt(route[i]) // route[i] a changé après l'inversion
+        }
+      }
+    }
+  }
+  return route
+}
+
+// Trajet optimisé (dépôt → … → dépôt) : nearest-neighbor puis 2-opt.
+function optimizeTSP(
+  depot: [number, number],
+  validIndices: number[],
+  coords: ([number, number] | null)[]
+): number[] {
+  return twoOptImprove(depot, nearestNeighborTSP(depot, validIndices, coords), coords)
 }
 
 async function geocodeForMap(address: string, token: string): Promise<[number, number] | null> {
