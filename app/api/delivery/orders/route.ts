@@ -346,13 +346,20 @@ export async function GET() {
       const unfulfilled   = remainingLineItems(order)
       const panelUnfulfilled = unfulfilled.filter((li) => !isNonGoods(li.title))
 
-      // Bug 2 fix (Supabase): subtract quantities already delivered in Steero
+      // Bug 2 fix (Supabase): subtract quantities already delivered in Steero.
+      // Un même SKU peut apparaître sur PLUSIEURS lignes (ex. #10171 : 2 lignes
+      // A03#Grey300 de 90 et 4). On répartit la quantité livrée ligne par ligne
+      // (budget par clé) au lieu de la retirer intégralement de chaque ligne —
+      // sinon livrer 90 supprimerait aussi la ligne des 4.
       const deliveredByKey = deliveredQtyMap.get(order.name)
+      const remainingByKey = new Map<string, number>(deliveredByKey ? [...deliveredByKey.entries()] : [])
       const panelLineItems = panelUnfulfilled
         .map((li) => {
-          const key        = li.sku?.trim() || li.title
-          const alreadyQty = deliveredByKey?.get(key) ?? 0
-          return { ...li, quantity: Math.max(0, li.quantity - alreadyQty) }
+          const key    = li.sku?.trim() || li.title
+          const budget = remainingByKey.get(key) ?? 0
+          const used   = Math.min(budget, li.quantity)
+          if (used > 0) remainingByKey.set(key, budget - used)
+          return { ...li, quantity: li.quantity - used }
         })
         .filter((li) => li.quantity > 0)
 
