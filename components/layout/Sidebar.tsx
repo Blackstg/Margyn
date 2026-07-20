@@ -9,7 +9,7 @@ import {
 import { createBrowserClient } from '@supabase/auth-helpers-nextjs'
 import { useState, useEffect } from 'react'
 import DataFreshness from './DataFreshness'
-import { effectiveFeatures, effectiveBrands, isAdminRole, isOwner } from '@/lib/access'
+import { effectiveFeatures, effectiveBrands, isAdminRole, isOwner, BRAND_LOCK } from '@/lib/access'
 
 // ─── Brand config ─────────────────────────────────────────────────────────────
 
@@ -117,10 +117,21 @@ export default function Sidebar({ isOpen, collapsed, onToggleCollapse }: Sidebar
     return `/${brand}/${item.key}`
   }
 
-  // Switch brand: navigate to same page if available, else dashboard
+  // Switch brand: keep the same section if the user can access it on the target
+  // brand, otherwise the FIRST section they can access there — not 'dashboard',
+  // que les utilisateurs restreints (ex. SAV) n'ont pas, sinon le middleware les
+  // renvoie à leur home (souvent Bowa) → impression de « rester sur Bowa ».
   function selectBrand(b: string) {
-    const available = BRAND_PAGES[b] ?? ['dashboard']
-    const targetPage = available.includes(currentPage) ? currentPage : 'dashboard'
+    const featsNow = effectiveFeatures(role, metaFeatures)
+    const canAccess = (key: string): boolean => {
+      if (!(BRAND_PAGES[b] ?? []).includes(key)) return false
+      if (featsNow === 'all') return true
+      if (!(featsNow as string[]).includes(key)) return false
+      const lock = BRAND_LOCK[key]
+      return lock == null || lock === b
+    }
+    const order = BRAND_PAGES[b] ?? ['dashboard']
+    const targetPage = canAccess(currentPage) ? currentPage : (order.find(canAccess) ?? order[0] ?? 'dashboard')
     router.push(`/${b}/${targetPage}`)
   }
 
