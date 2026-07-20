@@ -2013,7 +2013,7 @@ function PlanificateurView() {
                         <p className="mb-3">Bonne nouvelle ! 🎉 Votre commande sera livrée cette semaine.<br/>
                         Notre livreur commencera sa tournée le <strong>{previewDateStart}</strong> et passera chez vous dans les prochains jours (entre le {previewDateStart}{previewDateEnd ? ` et le ${previewDateEnd}` : ''}).</p>
                         <p className="mb-3">La livraison s&apos;effectuera au pied du camion 🚛. Nous vous demandons donc de faire le nécessaire pour être accompagné(e) d&apos;une autre personne afin de récupérer les panneaux en toute sécurité 🔧.</p>
-                        <p className="mb-3">Pour garantir une livraison en toute fluidité, notre livreur vous appellera très probablement au fil de sa tournée, en fonction de l&apos;ordre des livraisons, afin de vérifier votre disponibilité. Vous serez joint(e) depuis le numéro suivant : <strong>06 02 40 15 86</strong>.</p>
+                        <p className="mb-3">Pour garantir une livraison en toute fluidité, notre livreur vous appellera très probablement au fil de sa tournée, en fonction de l&apos;ordre des livraisons, afin de vérifier votre disponibilité. Vous serez joint(e) depuis le numéro suivant : <strong>06 62 63 32 56</strong>.</p>
                         <p className="mb-3">Si vous êtes indisponible, merci de nous en informer par retour de mail, afin que nous puissions reprogrammer votre livraison.</p>
                         <p className="mb-4">Nous nous réjouissons de finaliser votre livraison très prochainement ☀️.</p>
                         <p className="text-[#6b6b63] text-xs border-t border-[#f0f0f0] pt-3">

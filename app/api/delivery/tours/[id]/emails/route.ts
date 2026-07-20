@@ -74,7 +74,7 @@ function buildEmailHtml(firstName: string, startDateStr: string, stopId: string)
                 La livraison s'effectuera au pied du camion 🚛. Nous vous demandons donc de faire le nécessaire pour être accompagné(e) d'une autre personne afin de récupérer les panneaux en toute sécurité 🔧.
               </p>
               <p style="margin:0 0 28px;font-size:15px;color:#3a3a3a;line-height:1.6;">
-                Notre livreur vous appellera avant de passer, depuis le numéro suivant&nbsp;: <strong>06 02 40 15 86</strong>.
+                Notre livreur vous appellera avant de passer, depuis le numéro suivant&nbsp;: <strong>06 62 63 32 56</strong>.
               </p>
 
               <!-- Availability CTA -->
