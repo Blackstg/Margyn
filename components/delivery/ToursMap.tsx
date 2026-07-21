@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from 'react'
 import type mapboxgl from 'mapbox-gl'
 import { geocodeParts } from '@/lib/delivery/geocode'
+import { streetLine } from '@/lib/delivery/geo'
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -225,7 +226,7 @@ export default function ToursMap({ tours, height = 480 }: Props) {
             <div style="font-size:12px;line-height:1.6;font-family:system-ui,sans-serif">
               <div style="font-weight:700;color:#1a1a2e">${esc(stop.customer_name || stop.order_name)}</div>
               <div style="font-family:ui-monospace,monospace;color:#888;font-size:11px">${esc(stop.order_name)}</div>
-              <div style="color:#6b6b63">${stop.address1 ? esc(stop.address1) + ', ' : ''}${esc(stop.city)} ${esc(stop.zip)}</div>
+              <div style="color:#6b6b63">${streetLine(stop.address1, stop.address2) ? esc(streetLine(stop.address1, stop.address2)) + ', ' : ''}${esc(stop.city)} ${esc(stop.zip)}</div>
               <div style="margin-top:4px;display:flex;align-items:center;gap:6px">
                 <span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:${color};flex-shrink:0"></span>
                 <span style="color:#1a1a2e;font-weight:600">${esc(tour.name)}</span>
@@ -255,7 +256,7 @@ export default function ToursMap({ tours, height = 480 }: Props) {
           const popup = new mgl.Popup({ offset: 14, closeButton: true, maxWidth: '280px' }).setHTML(`
             <div style="font-size:12px;line-height:1.5;font-family:system-ui,sans-serif">
               <div style="font-weight:700;color:#1a1a2e">${group.length} commandes — même adresse</div>
-              <div style="color:#6b6b63">${base.stop.address1 ? esc(base.stop.address1) + ', ' : ''}${esc(base.stop.city)} ${esc(base.stop.zip)}</div>
+              <div style="color:#6b6b63">${streetLine(base.stop.address1, base.stop.address2) ? esc(streetLine(base.stop.address1, base.stop.address2)) + ', ' : ''}${esc(base.stop.city)} ${esc(base.stop.zip)}</div>
               ${rows}
             </div>
           `)

@@ -7,7 +7,7 @@ import nextDynamic from 'next/dynamic'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { createBrowserClient } from '@supabase/auth-helpers-nextjs'
 import { useBrand } from '@/context/BrandContext'
-import { geoAddress } from '@/lib/delivery/geo'
+import { geoAddress, streetLine } from '@/lib/delivery/geo'
 import { geocodeParts } from '@/lib/delivery/geocode'
 import { ChevronDown, ChevronUp, ChevronLeft, ChevronRight, Trash2, Mail, Plus, X, MapPin, Package, Truck, Map as MapIcon, Search, Pencil, Check, MessageSquare, GripVertical, Printer, RefreshCw, Clock } from 'lucide-react'
 import {
@@ -3320,7 +3320,7 @@ function LivreurView() {
                             </span>
                             <div className="flex-1 min-w-0">
                               <p className="text-sm font-semibold text-[#1a1a2e] truncate">{s.customer_name}</p>
-                              <p className="text-xs text-[#9b9b93] truncate">{s.address1}, {s.city}</p>
+                              <p className="text-xs text-[#9b9b93] truncate">{streetLine(s.address1, s.address2)}, {s.city}</p>
                             </div>
                             <div className="text-right shrink-0">
                               <p className="text-sm font-bold text-[#1a1a2e]">{s.panel_count}</p>
@@ -3544,7 +3544,7 @@ function LivreurView() {
                           </span>
                         </div>
                         <p className="text-base font-bold text-[#1a1a2e] leading-tight">{order.customer_name}</p>
-                        <p className="text-sm text-[#6b6b63] mt-0.5">{order.address1}</p>
+                        <p className="text-sm text-[#6b6b63] mt-0.5">{streetLine(order.address1, order.address2)}</p>
                         <p className="text-sm text-[#6b6b63]">{order.city} {order.zip}</p>
                       </div>
                     </div>
@@ -3995,7 +3995,7 @@ function LivreurView() {
           <div className="w-10 h-1 bg-[#e8e8e4] rounded-full mx-auto mb-5" />
           <p className="text-sm font-semibold text-[#1a1a2e] mb-1">Naviguer vers</p>
           <p className="text-sm text-[#6b6b63] mb-5">
-            {currentStop?.address1}, {currentStop?.city}
+            {streetLine(currentStop?.address1, currentStop?.address2)}, {currentStop?.city}
           </p>
           <div className="grid grid-cols-2 gap-3">
             <a
@@ -4121,7 +4121,7 @@ function LivreurView() {
                 {currentStop.phone}
               </a>
             )}
-            <div className="text-lg text-[#1a1a2e] mb-1">{currentStop.address1}</div>
+            <div className="text-lg text-[#1a1a2e] mb-1">{streetLine(currentStop.address1, currentStop.address2)}</div>
             <div className="text-lg text-[#6b6b63]">{currentStop.city} {currentStop.zip}</div>
             {etaMap.get(currentStop.id) && (
               <div className="mt-2 inline-flex items-center gap-1.5 text-sm font-medium text-[#1a7f4b]">
@@ -5746,7 +5746,7 @@ function SavView() {
               <div className="flex items-start gap-2">
                 <MapPin size={13} className="text-[#9b9b93] mt-0.5 flex-shrink-0" />
                 <div>
-                  <p className="text-xs text-[#1a1a2e]">{selected.address1}</p>
+                  <p className="text-xs text-[#1a1a2e]">{streetLine(selected.address1, selected.address2)}</p>
                   <p className="text-xs text-[#6b6b63]">{selected.zip} {selected.city}</p>
                 </div>
               </div>

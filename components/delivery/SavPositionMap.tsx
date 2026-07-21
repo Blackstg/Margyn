@@ -3,6 +3,7 @@
 import { useEffect, useRef } from 'react'
 import type mapboxgl from 'mapbox-gl'
 import { geocodeParts } from '@/lib/delivery/geocode'
+import { streetLine } from '@/lib/delivery/geo'
 
 export interface SavStop {
   id: string
@@ -184,7 +185,7 @@ export default function SavPositionMap({ stops, height = 320 }: Props) {
             .setHTML(
               `<div style="font-size:12px;line-height:1.4;">
                 <strong>${stop.customer_name}</strong><br>
-                <span style="color:#555">${stop.address1}, ${stop.city}</span>
+                <span style="color:#555">${streetLine(stop.address1, stop.address2)}, ${stop.city}</span>
                 ${stop.order_name ? `<br><span style="color:#888;font-size:11px">${stop.order_name}</span>` : ''}
                 ${stop.status === 'delivered' && stop.delivered_at
                   ? `<br><span style="color:#1a7f4b;font-size:11px">✓ Livré ${new Date(stop.delivered_at).toLocaleString('fr-FR', { hour: '2-digit', minute: '2-digit' })}</span>`

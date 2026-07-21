@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from 'react'
 import { ChevronLeft, CheckCircle2 } from 'lucide-react'
 import type mapboxgl from 'mapbox-gl'
 import { geocodeParts } from '@/lib/delivery/geocode'
+import { streetLine } from '@/lib/delivery/geo'
 
 interface PanelItem {
   title: string
@@ -480,7 +481,7 @@ export default function TourMap({ stops, onBack, precomputedCoords, onMarkDelive
                   )}
                 </div>
                 <p className="text-lg font-bold text-[#1a1a2e] mt-1">{selectedStop.customer_name}</p>
-                <p className="text-sm text-[#6b6b63]">{selectedStop.address1}, {selectedStop.city} {selectedStop.zip}</p>
+                <p className="text-sm text-[#6b6b63]">{streetLine(selectedStop.address1, selectedStop.address2)}, {selectedStop.city} {selectedStop.zip}</p>
               </div>
               <button
                 onClick={() => { setSelectedStop(null); setConfirmRemove(false); setCommentMode('none'); setPendingComment(''); setSelectedChip('') }}
@@ -677,7 +678,7 @@ export default function TourMap({ stops, onBack, precomputedCoords, onMarkDelive
                   </span>
                 </div>
                 <p className="text-xl font-bold text-[#1a1a2e] mt-1 leading-tight">{selectedNearby.customer_name}</p>
-                <p className="text-sm text-[#6b6b63] mt-0.5">{selectedNearby.address1}</p>
+                <p className="text-sm text-[#6b6b63] mt-0.5">{streetLine(selectedNearby.address1, selectedNearby.address2)}</p>
                 <p className="text-sm text-[#6b6b63]">{selectedNearby.city} {selectedNearby.zip}</p>
               </div>
               <button

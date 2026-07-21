@@ -30,6 +30,14 @@ export function geoAddress({ address1, address2, city, zip }: GeoAddressParts): 
   return street ? `${street}, ${city} ${zip}, France` : `${city} ${zip}, France`
 }
 
+// Ligne de rue lisible pour l'AFFICHAGE : combine le n° (address1) et la rue
+// (address2) quand le client a réparti sur les deux champs (ex. #10365 :
+// address1="54", address2="Avenue Général De gaulle" → "54 Avenue Général De gaulle").
+// Sans ça, l'affichage ne montrait que "54" → adresse incomplète pour le livreur.
+export function streetLine(address1?: string | null, address2?: string | null): string {
+  return buildStreet(address1, address2)
+}
+
 // Requêtes de géocodage par ordre de préférence. Le 2e candidat (rue + CP SANS la
 // ville) rattrape les villes mal orthographiées par le client (ex. #10298
 // "Saint mars d outillé" au lieu de "Saint-Mars-d'Outillé" : le géocodage adresse
