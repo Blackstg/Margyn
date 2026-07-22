@@ -98,15 +98,71 @@ function fmtTime(iso: string) {
     : d.toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit' })
 }
 
+// ─── Attribution des tickets (qui répond) ──────────────────────────────────────
+
+const ASSIGNEES = ['Satiana', 'Todi'] as const
+const ASSIGNEE_COLORS: Record<string, [string, string]> = {
+  Satiana: ['#ede9fe', '#6d28d9'],
+  Todi:    ['#dcfce7', '#15803d'],
+}
+
+function AssigneePill({ name, selected }: { name: string; selected?: boolean }) {
+  const [bg, fg] = ASSIGNEE_COLORS[name] ?? ['#f0f0ee', '#6b6b63']
+  return (
+    <span
+      className="inline-flex items-center px-1.5 py-0.5 rounded-full text-[9px] font-bold shrink-0"
+      style={selected ? { background: 'rgba(255,255,255,0.18)', color: '#fff' } : { background: bg, color: fg }}
+      title={`Attribué à ${name}`}
+    >
+      {name}
+    </span>
+  )
+}
+
+// Barre « Attribué à » au-dessus du détail d'un ticket
+function AssignBar({ ticketId, assignee, onAssign }: {
+  ticketId: number
+  assignee?: string
+  onAssign: (ticketId: number, assignee: string | null) => void
+}) {
+  return (
+    <div className="shrink-0 flex items-center gap-2 px-6 py-2 border-b border-[#eeede9] bg-[#faf9f7]">
+      <span className="text-[11px] font-semibold text-[#6b6b63]">Attribué à</span>
+      <div className="flex items-center gap-1">
+        {ASSIGNEES.map(name => {
+          const active = assignee === name
+          const [bg, fg] = ASSIGNEE_COLORS[name] ?? ['#f0f0ee', '#6b6b63']
+          return (
+            <button
+              key={name}
+              onClick={() => onAssign(ticketId, active ? null : name)}
+              className="px-2.5 py-1 rounded-full text-[11px] font-semibold transition-colors border"
+              style={active
+                ? { background: fg, color: '#fff', borderColor: fg }
+                : { background: bg, color: fg, borderColor: 'transparent' }}
+            >
+              {name}
+            </button>
+          )
+        })}
+        {assignee
+          ? <button onClick={() => onAssign(ticketId, null)} className="ml-0.5 px-1.5 py-1 rounded-full text-[11px] text-[#9b9b93] hover:text-[#c7293a]" title="Retirer l'attribution">✕</button>
+          : <span className="text-[11px] text-[#9b9b93] ml-1">— non attribué</span>}
+      </div>
+    </div>
+  )
+}
+
 // ─── Left column ──────────────────────────────────────────────────────────────
 
-function TicketRow({ raw, processed, selected, doneAction, isProcessing, onClick }: {
+function TicketRow({ raw, processed, selected, doneAction, isProcessing, onClick, assignee }: {
   raw: RawTicket
   processed?: ProcessedTicket
   selected: boolean
   doneAction?: 'sent' | 'escalated' | 'archived'
   isProcessing?: boolean
   onClick: () => void
+  assignee?: string
 }) {
   const email     = processed?.customer_email ?? `#${raw.requester_id}`
   const isPending = raw.status === 'pending'
@@ -130,6 +186,7 @@ function TicketRow({ raw, processed, selected, doneAction, isProcessing, onClick
         <span className={`text-[10px] truncate flex-1 ${selected ? 'text-white/60' : 'text-[#6b6b63]'}`}>
           {email}
         </span>
+        {assignee && <AssigneePill name={assignee} selected={selected} />}
         {raw.is_reopened && (
           <span className="inline-flex items-center gap-1 text-[10px] font-bold shrink-0 bg-[#fef3c7] text-[#b45309] px-1.5 py-0.5 rounded-full border border-[#fcd34d]">
             💬 Nouveau message
@@ -1665,6 +1722,8 @@ function QualiteDashboard() {
 
 export default function SavPage() {
   const [rawTickets, setRawTickets]         = useState<RawTicket[]>([])
+  const [assignments, setAssignments]       = useState<Record<number, string>>({})
+  const [myEmail, setMyEmail]               = useState('')
   const [processedCache, setProcessedCache] = useState<Record<number, ProcessedTicket>>({})
   const [selectedId, setSelectedId]         = useState<number | null>(null)
   const [processingId, setProcessingId]     = useState<number | null>(null)
@@ -1711,6 +1770,7 @@ export default function SavPage() {
       const r = (data.user?.user_metadata?.role as string | undefined) ?? 'admin'
       setRole(r)
       userEmail = data.user?.email ?? ''
+      setMyEmail(userEmail)
 
       fetch('/api/sav/actions', {
         method: 'POST',
@@ -1825,6 +1885,29 @@ export default function SavPage() {
   }, [])
 
   useEffect(() => { load() }, [load])
+
+  // ── Attributions des tickets (qui répond : Satiana / Todi) ────────────────
+  useEffect(() => {
+    fetch('/api/sav/assign')
+      .then(r => r.json())
+      .then(d => setAssignments(d.assignments ?? {}))
+      .catch(() => {})
+  }, [])
+
+  async function assignTicket(ticketId: number, assignee: string | null) {
+    setAssignments(prev => {
+      const next = { ...prev }
+      if (assignee) next[ticketId] = assignee
+      else delete next[ticketId]
+      return next
+    })
+    try {
+      await fetch('/api/sav/assign', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ticket_id: ticketId, assignee, updated_by: myEmail }),
+      })
+    } catch { /* optimiste — l'UI reste à jour */ }
+  }
 
   // ── Ticket click ──────────────────────────────────────────────────────────
   function handleTicketClick(raw: RawTicket) {
@@ -2118,6 +2201,7 @@ export default function SavPage() {
                 <TicketRow
                   key={t.ticket_id}
                   raw={t}
+                  assignee={assignments[t.ticket_id]}
                   processed={processedCache[t.ticket_id]}
                   selected={t.ticket_id === selectedId}
                   isProcessing={processingId === t.ticket_id}
@@ -2140,6 +2224,7 @@ export default function SavPage() {
                       <TicketRow
                         key={t.ticket_id}
                         raw={t}
+                        assignee={assignments[t.ticket_id]}
                         processed={processedCache[t.ticket_id]}
                         selected={t.ticket_id === selectedId}
                         isProcessing={processingId === t.ticket_id}
@@ -2165,6 +2250,7 @@ export default function SavPage() {
                 <TicketRow
                   key={t.ticket_id}
                   raw={t}
+                  assignee={assignments[t.ticket_id]}
                   processed={processedCache[t.ticket_id]}
                   selected={t.ticket_id === selectedId}
                   doneAction={doneStatuses[t.ticket_id]?.action}
@@ -2212,7 +2298,10 @@ export default function SavPage() {
             : isProcessing && !selectedProcessed
               ? <CenterSkeleton />
               : selectedProcessed
-                ? <TicketDetail ticket={selectedProcessed} refreshKey={commentRefreshKey} />
+                ? <>
+                    <AssignBar ticketId={selectedProcessed.ticket_id} assignee={assignments[selectedProcessed.ticket_id]} onAssign={assignTicket} />
+                    <TicketDetail ticket={selectedProcessed} refreshKey={commentRefreshKey} />
+                  </>
                 : <CenterEmpty />
         }
       </div>
