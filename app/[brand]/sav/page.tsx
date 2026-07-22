@@ -119,35 +119,36 @@ function AssigneePill({ name, selected }: { name: string; selected?: boolean }) 
   )
 }
 
-// Barre « Attribué à » au-dessus du détail d'un ticket
+// Barre d'attribution au-dessus du détail d'un ticket — « Qui répond ? »
 function AssignBar({ ticketId, assignee, onAssign }: {
   ticketId: number
   assignee?: string
   onAssign: (ticketId: number, assignee: string | null) => void
 }) {
+  const options: { val: string | null; label: string; color: string }[] = [
+    { val: null, label: 'Non attribué', color: '#9b9b93' },
+    ...ASSIGNEES.map(a => ({ val: a as string | null, label: a, color: ASSIGNEE_COLORS[a]?.[1] ?? '#6b6b63' })),
+  ]
   return (
-    <div className="shrink-0 flex items-center gap-2 px-6 py-2 border-b border-[#eeede9] bg-[#faf9f7]">
-      <span className="text-[11px] font-semibold text-[#6b6b63]">Attribué à</span>
-      <div className="flex items-center gap-1">
-        {ASSIGNEES.map(name => {
-          const active = assignee === name
-          const [bg, fg] = ASSIGNEE_COLORS[name] ?? ['#f0f0ee', '#6b6b63']
+    <div className="shrink-0 flex items-center gap-3 px-6 py-2.5 border-b border-[#eeede9] bg-[#faf9f7] flex-wrap">
+      <span className="text-[11px] font-bold uppercase tracking-[0.1em] text-[#9b9b93]">Qui répond ?</span>
+      <div className="flex items-center gap-1.5">
+        {options.map(opt => {
+          const active = (assignee ?? null) === opt.val
           return (
             <button
-              key={name}
-              onClick={() => onAssign(ticketId, active ? null : name)}
-              className="px-2.5 py-1 rounded-full text-[11px] font-semibold transition-colors border"
+              key={opt.label}
+              onClick={() => onAssign(ticketId, opt.val)}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold border transition-colors"
               style={active
-                ? { background: fg, color: '#fff', borderColor: fg }
-                : { background: bg, color: fg, borderColor: 'transparent' }}
+                ? { background: opt.color, color: '#fff', borderColor: opt.color }
+                : { background: '#fff', color: '#6b6b63', borderColor: '#e8e8e4' }}
             >
-              {name}
+              <span className="text-[13px] leading-none" style={{ opacity: active ? 1 : 0 }}>✓</span>
+              {opt.label}
             </button>
           )
         })}
-        {assignee
-          ? <button onClick={() => onAssign(ticketId, null)} className="ml-0.5 px-1.5 py-1 rounded-full text-[11px] text-[#9b9b93] hover:text-[#c7293a]" title="Retirer l'attribution">✕</button>
-          : <span className="text-[11px] text-[#9b9b93] ml-1">— non attribué</span>}
       </div>
     </div>
   )
