@@ -166,12 +166,15 @@ function TicketRow({ raw, processed, selected, doneAction, isProcessing, onClick
 }) {
   const email     = processed?.customer_email ?? `#${raw.requester_id}`
   const isPending = raw.status === 'pending'
+  // Barre latérale : couleur de l'agent si attribué, orange sinon (= à attribuer)
+  const accent    = assignee ? (ASSIGNEE_COLORS[assignee]?.[1] ?? '#6b6b63') : '#f59e0b'
 
   return (
     <button
       onClick={onClick}
-      className={`w-full text-left px-4 py-3 border-b border-[#eeede9] transition-colors ${
-        raw.is_reopened ? 'bg-[#fffbeb]' : selected ? 'bg-[#1a1a2e]' : 'hover:bg-[#f0efec]'
+      style={{ borderLeft: `4px solid ${accent}` }}
+      className={`w-full text-left pl-3 pr-4 py-3 border-b border-[#eeede9] transition-colors ${
+        raw.is_reopened ? 'bg-[#fffbeb]' : selected ? 'bg-[#1a1a2e]' : !assignee ? 'bg-[#fffaf3] hover:bg-[#fff4e6]' : 'hover:bg-[#f0efec]'
       }`}
     >
       <div className="flex items-center justify-between gap-2 mb-1">
@@ -186,7 +189,14 @@ function TicketRow({ raw, processed, selected, doneAction, isProcessing, onClick
         <span className={`text-[10px] truncate flex-1 ${selected ? 'text-white/60' : 'text-[#6b6b63]'}`}>
           {email}
         </span>
-        {assignee && <AssigneePill name={assignee} selected={selected} />}
+        {assignee
+          ? <AssigneePill name={assignee} selected={selected} />
+          : <span
+              className="inline-flex items-center px-1.5 py-0.5 rounded-full text-[9px] font-bold shrink-0"
+              style={selected ? { background: 'rgba(255,255,255,0.18)', color: '#fff' } : { background: '#fef3c7', color: '#b45309' }}
+            >
+              À attribuer
+            </span>}
         {raw.is_reopened && (
           <span className="inline-flex items-center gap-1 text-[10px] font-bold shrink-0 bg-[#fef3c7] text-[#b45309] px-1.5 py-0.5 rounded-full border border-[#fcd34d]">
             💬 Nouveau message
