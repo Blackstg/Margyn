@@ -1724,6 +1724,9 @@ export default function SavPage() {
   const [rawTickets, setRawTickets]         = useState<RawTicket[]>([])
   const [assignments, setAssignments]       = useState<Record<number, string>>({})
   const [myEmail, setMyEmail]               = useState('')
+  const [myName, setMyName]                 = useState('')
+  const [assigneeFilter, setAssigneeFilter] = useState<string>('')  // '' = tous · 'unassigned' · nom d'agent
+  const filterInit                          = useRef(false)
   const [processedCache, setProcessedCache] = useState<Record<number, ProcessedTicket>>({})
   const [selectedId, setSelectedId]         = useState<number | null>(null)
   const [processingId, setProcessingId]     = useState<number | null>(null)
@@ -1771,6 +1774,15 @@ export default function SavPage() {
       setRole(r)
       userEmail = data.user?.email ?? ''
       setMyEmail(userEmail)
+      const meta = data.user?.user_metadata ?? {}
+      const name = (meta.full_name ?? meta.name ?? '') as string
+      setMyName(name)
+      // Au 1er chargement, si l'utilisateur EST un agent SAV (Satiana/Todi), on
+      // ouvre par défaut sur « ses » tickets. L'admin voit tout.
+      if (!filterInit.current) {
+        filterInit.current = true
+        if ((ASSIGNEES as readonly string[]).includes(name)) setAssigneeFilter(name)
+      }
 
       fetch('/api/sav/actions', {
         method: 'POST',
@@ -1981,8 +1993,15 @@ export default function SavPage() {
   }
 
   // ── Derived state ─────────────────────────────────────────────────────────
-  const allPending    = rawTickets.filter(t => !doneStatuses[t.ticket_id])
-  const donelist      = rawTickets.filter(t =>  doneStatuses[t.ticket_id])
+  // Filtre par personne assignée (« mes tickets »)
+  const matchesAssignee = (t: RawTicket) => {
+    if (!assigneeFilter) return true
+    if (assigneeFilter === 'unassigned') return !assignments[t.ticket_id]
+    return assignments[t.ticket_id] === assigneeFilter
+  }
+  const filteredTickets = rawTickets.filter(matchesAssignee)
+  const allPending    = filteredTickets.filter(t => !doneStatuses[t.ticket_id])
+  const donelist      = filteredTickets.filter(t =>  doneStatuses[t.ticket_id])
   // Actionable = new or open; waitingClient = pending (awaiting client reply)
   const actionable    = allPending.filter(t => t.status !== 'pending')
   const waitingClient = allPending.filter(t => t.status === 'pending')
@@ -2173,6 +2192,27 @@ export default function SavPage() {
               </button>
             )}
           </div>
+
+          {/* Filtre par personne — « mes tickets » */}
+          {tab !== 'qualite' && (
+            <div className="flex items-center gap-1 pb-2 pt-2 overflow-x-auto">
+              {([['', 'Tous'], ...ASSIGNEES.map(a => [a, a] as [string, string]), ['unassigned', 'Non attribué']] as [string, string][]).map(([val, label]) => {
+                const active = assigneeFilter === val
+                const isMine = !!val && val === myName
+                return (
+                  <button
+                    key={val || 'all'}
+                    onClick={() => setAssigneeFilter(val)}
+                    className={`shrink-0 px-2.5 py-1 rounded-full text-[10px] font-semibold border transition-colors ${
+                      active ? 'bg-[#1a1a2e] text-white border-[#1a1a2e]' : 'bg-white text-[#6b6b63] border-[#e8e8e4] hover:bg-[#f0efec]'
+                    }`}
+                  >
+                    {label}{isMine ? ' (moi)' : ''}
+                  </button>
+                )
+              })}
+            </div>
+          )}
         </div>
 
         {/* Ticket list */}
