@@ -3082,6 +3082,8 @@ function LivreurView() {
               address2:      o.address2,
               city:          o.city,
               zip:           o.zip,
+              lat:           o.lat,
+              lng:           o.lng,
               panel_count:   o.panel_count,
               is_preorder:   o.is_preorder ?? false,
             }))}
@@ -4639,6 +4641,8 @@ interface SavEntry {
   zone: Zone
   address1: string
   address2?: string
+  lat?: number | null
+  lng?: number | null
   panel_count: number
   panel_details: PanelItem[]
   tour_name: string | null
@@ -4770,7 +4774,7 @@ function buildSavEntries(toursRaw: any[], ordersRaw: ShopifyOrder[]): SavEntry[]
       result.push({
         id: stop.id, order_name: stop.order_name, customer_name: stop.customer_name,
         email: stop.email, city: stop.city, zip: stop.zip, zone: stop.zone,
-        address1: stop.address1, address2: stop.address2, panel_count: stop.panel_count,
+        address1: stop.address1, address2: stop.address2, lat: stop.lat, lng: stop.lng, panel_count: stop.panel_count,
         panel_details: stop.panel_details ?? [],
         tour_name: tour.name, tour_status: tour.status,
         tour_planned_date: tour.planned_date, tour_zone: tour.zone ?? null,
@@ -4793,7 +4797,7 @@ function buildSavEntries(toursRaw: any[], ordersRaw: ShopifyOrder[]): SavEntry[]
       id: `order-${order.order_name}`, order_name: order.order_name,
       customer_name: order.customer_name, email: order.email,
       city: order.city, zip: order.zip, zone: order.zone, address1: order.address1,
-      address2: order.address2,
+      address2: order.address2, lat: order.lat, lng: order.lng,
       panel_count: order.panel_count, panel_details: order.panel_details ?? [],
       tour_name: null, tour_status: null, tour_planned_date: null, tour_zone: null,
       tour_total_stops: 0, tour_delivered_stops: 0, stops_before: 0,
@@ -5202,6 +5206,8 @@ function SavView() {
                       address2: e.address2,
                       city: e.city,
                       zip: e.zip,
+                      lat: e.lat,
+                      lng: e.lng,
                       customer_name: e.customer_name,
                       order_name: e.order_name,
                       status: e.stop_status!,
