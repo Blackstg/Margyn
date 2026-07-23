@@ -94,6 +94,8 @@ export interface NearbyOrder {
   address2?: string
   city: string
   zip: string
+  lat?: number | null
+  lng?: number | null
   zone: string
   panel_count: number
   panel_details: PanelItem[]

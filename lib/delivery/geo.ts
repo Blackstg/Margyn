@@ -14,6 +14,10 @@ export interface GeoAddressParts {
   address2?: string | null
   city:     string
   zip:      string
+  // Coordonnées déjà connues (fournies par Shopify à la commande) — si présentes,
+  // le géocodeur les utilise directement (position exacte, aucun risque d'erreur).
+  lat?:     number | null
+  lng?:     number | null
 }
 
 function buildStreet(address1?: string | null, address2?: string | null): string {

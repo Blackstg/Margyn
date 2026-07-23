@@ -81,6 +81,8 @@ interface TourStop {
   address2?: string
   city: string
   zip: string
+  lat?: number | null
+  lng?: number | null
   zone: Zone
   sequence: number
   panel_count: number
@@ -1302,6 +1304,8 @@ function PlanificateurView() {
                       address2:      s.address2,
                       city:          s.city,
                       zip:           s.zip,
+                      lat:           s.lat,
+                      lng:           s.lng,
                       panel_count:   s.panel_count,
                       sequence:      s.sequence,
                       status:        s.status,
@@ -3022,6 +3026,8 @@ function LivreurView() {
       address2:      s.address2,
       city:          s.city,
       zip:           s.zip,
+      lat:           s.lat,
+      lng:           s.lng,
       panel_count:   s.panel_count,
       status:        s.status,
       tour_name:     t.name,
@@ -3403,6 +3409,8 @@ function LivreurView() {
               zone:             order.zone,
               panel_count:      order.panel_count,
               panel_details:    order.panel_details,
+              lat:              order.lat ?? null,
+              lng:              order.lng ?? null,
             }] }),
           })
           await fetchTours()
@@ -3459,6 +3467,8 @@ function LivreurView() {
             zone:             order.zone,
             panel_count:      order.panel_count,
             panel_details:    order.panel_details,
+            lat:              order.lat ?? null,
+            lng:              order.lng ?? null,
           }] }),
         })
         setAddedToTourNames(prev => new Set([...prev, order.order_name]))
