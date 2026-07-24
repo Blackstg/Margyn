@@ -2810,25 +2810,38 @@ function LivreurView() {
     comment?: string
     signature_url?: string
     photo_url?: string
-  } = {}) {
-    if (!currentStop) return
+  } = {}): Promise<boolean> {
+    if (!currentStop) return false
     setMarking(true)
-    await fetch(`/api/delivery/stops/${currentStop.id}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ status: 'delivered', ...opts }),
-    })
-    await fetchTours()
-    setMarking(false)
-    // Auto-advance
-    setTours(latestTours => {
-      const latestTour = latestTours.find(t => t.id === selectedTourId)
-      if (!latestTour) return latestTours
-      const fresh = [...latestTour.stops].sort((a, b) => a.sequence - b.sequence)
-      const nextIdx = fresh.findIndex((s, i) => i > stopIdx && s.status !== 'delivered' && s.status !== 'failed')
-      if (nextIdx !== -1) setStopIdx(nextIdx)
-      return latestTours
-    })
+    try {
+      const res = await fetch(`/api/delivery/stops/${currentStop.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: 'delivered', ...opts }),
+      })
+      // On vérifie explicitement le succès : sinon une validation pouvait échouer
+      // en silence (le livreur pense avoir validé alors que non).
+      if (!res.ok) {
+        alert('La validation a échoué (connexion ?). Ta livraison n’a PAS été enregistrée — réessaie.')
+        return false
+      }
+      await fetchTours()
+      // Auto-advance
+      setTours(latestTours => {
+        const latestTour = latestTours.find(t => t.id === selectedTourId)
+        if (!latestTour) return latestTours
+        const fresh = [...latestTour.stops].sort((a, b) => a.sequence - b.sequence)
+        const nextIdx = fresh.findIndex((s, i) => i > stopIdx && s.status !== 'delivered' && s.status !== 'failed')
+        if (nextIdx !== -1) setStopIdx(nextIdx)
+        return latestTours
+      })
+      return true
+    } catch {
+      alert('Erreur réseau — ta livraison n’a PAS été enregistrée, réessaie.')
+      return false
+    } finally {
+      setMarking(false)
+    }
   }
 
   function clearSignature() {
@@ -2873,40 +2886,53 @@ function LivreurView() {
 
   async function handleConfirmDelivery() {
     if (!currentStop) return
-    setUploadingProof(true)
-    try {
-      const form = new FormData()
-      if (hasSignature && signatureCanvasRef.current) {
-        const blob = await new Promise<Blob | null>(resolve =>
-          signatureCanvasRef.current!.toBlob(resolve, 'image/png')
-        )
-        if (blob) form.append('signature', blob, 'signature.png')
-      }
-      if (proofPhoto) form.append('photo', proofPhoto, proofPhoto.name)
+    const stopId = currentStop.id
 
-      let signatureUrl: string | undefined
-      let photoUrl: string | undefined
-      if (form.has('signature') || form.has('photo')) {
-        const res  = await fetch(`/api/delivery/stops/${currentStop.id}/upload`, { method: 'POST', body: form })
-        const data = await res.json()
-        signatureUrl = data.signature_url
-        photoUrl     = data.photo_url
-      }
+    // Prépare les preuves (signature + photo)
+    const form = new FormData()
+    if (hasSignature && signatureCanvasRef.current) {
+      const blob = await new Promise<Blob | null>(resolve =>
+        signatureCanvasRef.current!.toBlob(resolve, 'image/png')
+      )
+      if (blob) form.append('signature', blob, 'signature.png')
+    }
+    if (proofPhoto) form.append('photo', proofPhoto, proofPhoto.name)
+    const hasProof = form.has('signature') || form.has('photo')
+    const comment  = pendingComment.trim()
 
-      await handleMarkDelivered({
-        ...(pendingComment.trim() ? { comment: pendingComment.trim() } : {}),
-        ...(signatureUrl ? { signature_url: signatureUrl } : {}),
-        ...(photoUrl     ? { photo_url: photoUrl }         : {}),
-      })
+    // 1. On VALIDE la livraison d'abord. L'upload des preuves (photo lourde,
+    //    réseau mobile lent) ne doit JAMAIS empêcher/bloquer la validation —
+    //    c'était la cause de « pas pu valider » (#10326).
+    const ok = await handleMarkDelivered(comment ? { comment } : {})
+    if (!ok) return // erreur déjà affichée, on reste sur l'écran pour réessayer
 
-      // Reset proof state
-      clearSignature()
-      setProofPhoto(null)
-      setProofPhotoPreview(null)
-      setPendingComment('')
-      setCommentMode('none')
-    } finally {
-      setUploadingProof(false)
+    // 2. Quitte l'écran de preuve
+    clearSignature()
+    setProofPhoto(null)
+    setProofPhotoPreview(null)
+    setPendingComment('')
+    setCommentMode('none')
+
+    // 3. Upload des preuves en arrière-plan → attache les URLs (best-effort)
+    if (hasProof) {
+      setUploadingProof(true)
+      fetch(`/api/delivery/stops/${stopId}/upload`, { method: 'POST', body: form })
+        .then(async res => {
+          if (!res.ok) return
+          const data = await res.json() as { signature_url?: string; photo_url?: string }
+          const patch: Record<string, string> = {}
+          if (data.signature_url) patch.signature_url = data.signature_url
+          if (data.photo_url)     patch.photo_url = data.photo_url
+          if (Object.keys(patch).length) {
+            await fetch(`/api/delivery/stops/${stopId}`, {
+              method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(patch),
+            })
+            fetchTours()
+          }
+        })
+        .catch(() => { /* preuve best-effort — la livraison est déjà validée */ })
+        .finally(() => setUploadingProof(false))
     }
   }
 

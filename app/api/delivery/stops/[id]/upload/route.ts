@@ -33,7 +33,11 @@ export async function POST(
     const signatureBlob = form.get('signature') as Blob | null
     const photoBlob     = form.get('photo')     as File | null
 
-    const baseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!
+    // URL publique construite par le client Supabase (jamais à la main) : évite
+    // les URLs corrompues quand NEXT_PUBLIC_SUPABASE_URL contient un espace / retour
+    // à la ligne parasite (ex. "...supabase.co\n/storage/..." vu sur #10326).
+    const publicUrl = (path: string) =>
+      admin.storage.from(BUCKET).getPublicUrl(path).data.publicUrl
     const result: { signature_url?: string; photo_url?: string } = {}
 
     if (signatureBlob && signatureBlob.size > 0) {
@@ -44,7 +48,7 @@ export async function POST(
         upsert: true,
       })
       if (error) throw error
-      result.signature_url = `${baseUrl}/storage/v1/object/public/${BUCKET}/${path}`
+      result.signature_url = publicUrl(path)
     }
 
     if (photoBlob && photoBlob.size > 0) {
@@ -56,7 +60,7 @@ export async function POST(
         upsert: true,
       })
       if (error) throw error
-      result.photo_url = `${baseUrl}/storage/v1/object/public/${BUCKET}/${path}`
+      result.photo_url = publicUrl(path)
     }
 
     return NextResponse.json(result)
