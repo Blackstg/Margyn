@@ -82,10 +82,21 @@ const STATUS_LABELS: Record<string, string> = {
 }
 
 interface ShopifyFulfillment {
-  id:              number
-  created_at:      string
-  tracking_number: string | null
-  shipment_status: string | null
+  id:               number
+  created_at:       string
+  tracking_number:  string | null
+  tracking_numbers?: string[] | null
+  shipment_status:  string | null
+}
+
+// Numéro de suivi effectif : Shopify empile les numéros dans `tracking_numbers`
+// (le 1er = l'ancien). Quand on ajoute un nouveau tracking (réexpédition après un
+// retour), il est ajouté À LA FIN → on prend le DERNIER. Fallback : tracking_number.
+function latestTracking(f: ShopifyFulfillment | null): string | null {
+  if (!f) return null
+  const nums = f.tracking_numbers
+  if (nums && nums.length > 0) return nums[nums.length - 1]
+  return f.tracking_number
 }
 
 interface ShopifyLineItem {
@@ -135,7 +146,7 @@ interface FulfillmentEvent {
 function pickFulfillment(order: ShopifyOrder): ShopifyFulfillment | null {
   const fs = order.fulfillments ?? []
   if (fs.length === 0) return null
-  const tracked = fs.filter(f => f.tracking_number)
+  const tracked = fs.filter(f => latestTracking(f))
   const pool = tracked.length > 0 ? tracked : fs
   return [...pool].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())[0]
 }
@@ -254,9 +265,10 @@ export async function POST(
     let carrierEta: { from: string | null; to: string | null } | null = null
     let carrierName: string | null = null
     let hasCarrierData = false
-    if (fulfillment?.tracking_number && process.env.TRACK17_API_KEY) {
+    const effectiveTracking = latestTracking(fulfillment)
+    if (effectiveTracking && process.env.TRACK17_API_KEY) {
       try {
-        const t17 = await getOrRefresh17(fulfillment.tracking_number, brand, order.name)
+        const t17 = await getOrRefresh17(effectiveTracking, brand, order.name)
         if (t17 && t17.events.length > 0) {
           finalEvents    = t17.events
           finalStep      = t17.step
@@ -291,7 +303,7 @@ export async function POST(
         city:     addr.city     ?? '',
         zip:      addr.zip      ?? '',
       } : null,
-      tracking_number:  fulfillment?.tracking_number ?? null,
+      tracking_number:  effectiveTracking,
       tracking_events:  finalEvents,
       step:             finalStep,
       carrier_eta:      carrierEta,
