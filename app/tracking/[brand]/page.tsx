@@ -213,20 +213,29 @@ function phaseFromEvent(label: string, code: string | null, country: string | nu
   if (c.startsWith('inforeceived'))                                         return PHASE_IDX.prepared
 
   const L = label.toLowerCase()
-  const destSide = !!country && country !== 'CN'          // déjà en Europe
   const isOrigin = /origine|départ|export|origin/.test(L) // event côté départ (Chine)
+  // Étapes qui n'existent QUE côté destination (hub local, cargo terminal, remise
+  // au transporteur) → on les considère « en France » même si la localisation n'a
+  // pas de code pays (ex. "PARIS, VALEDWAZ" sans "FR").
+  const localHub = /cargo terminal|arrived at hub|\bhub\b|remis au transporteur local|ready for outbound|centre de tri \(destination\)/.test(L)
+  const destSide = (!!country && country !== 'CN') || localHub
 
   // Livraison finale (tournée du transporteur local)
   if (/en cours de livraison|out for delivery/.test(L)) return PHASE_IDX.delivery
 
-  // Dédouanement à l'import (surtout pas l'export/déclaration au départ)
-  if (!isOrigin && (/dédouanement|douane|customs clear/.test(L) || c.includes('customs')))
-    return PHASE_IDX.customs
+  // Dédouanement à l'import (surtout pas l'export/déclaration au départ).
+  // Une fois le dédouanement TERMINÉ (import completed/released), le colis a quitté
+  // la douane et est dans le pays → on affiche « Au centre de tri » (dernière étape
+  // réelle), pas « Dédouanement » (qui donnerait l'impression que c'est encore bloqué).
+  if (!isOrigin && (/dédouanement|douane|customs clear/.test(L) || c.includes('customs'))) {
+    const cleared = c.includes('customsrel') || /import terminé|termin[ée]|completed|released|lib[ée]r/.test(L)
+    return cleared ? PHASE_IDX.sorting : PHASE_IDX.customs
+  }
 
   // Tri / arrivée dans la région de destination / remise au transporteur local.
   // NB : « Transmis au transporteur local » (pré-généré « will be delivered to X »)
   // est du bruit et NE compte pas — seul « remis au transporteur local » (réel) compte.
-  if (destSide && /centre de tri|sort facility|arrived at hub|\bhub\b|départ du centre|ready for outbound|outbound|remis au transporteur local|livraison|\btri\b/.test(L))
+  if (destSide && /centre de tri|sort facility|arrived at hub|\bhub\b|départ du centre|ready for outbound|outbound|remis au transporteur local|cargo terminal|livraison|\btri\b/.test(L))
     return PHASE_IDX.sorting
 
   // Départ de l'entrepôt d'origine (Chine)
