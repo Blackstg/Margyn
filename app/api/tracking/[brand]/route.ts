@@ -128,8 +128,20 @@ interface FulfillmentEvent {
   country:      string | null
 }
 
+// Sélectionne la fulfillment à suivre. Si le colis est reparti (retour) et a été
+// RÉEXPÉDIÉ avec un nouveau numéro, on veut le SUIVI LE PLUS RÉCENT : on prend donc
+// la fulfillment la plus récente qui a un numéro de suivi (fallback : la dernière,
+// sinon la première). Avant on prenait toujours la 1re (l'ancien tracking expiré).
+function pickFulfillment(order: ShopifyOrder): ShopifyFulfillment | null {
+  const fs = order.fulfillments ?? []
+  if (fs.length === 0) return null
+  const tracked = fs.filter(f => f.tracking_number)
+  const pool = tracked.length > 0 ? tracked : fs
+  return [...pool].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())[0]
+}
+
 function computeStep(order: ShopifyOrder): number {
-  const fulfillment = order.fulfillments?.[0] ?? null
+  const fulfillment = pickFulfillment(order)
   if (!fulfillment) {
     const daysSince = (Date.now() - new Date(order.created_at).getTime()) / 86_400_000
     if (daysSince >= 2) return 2
@@ -187,7 +199,7 @@ export async function POST(
       )
     }
 
-    const fulfillment = order.fulfillments?.[0] ?? null
+    const fulfillment = pickFulfillment(order)
 
     // Fetch product images + fulfillment events in parallel
     const productIds = [...new Set(order.line_items.map((li) => li.product_id).filter(Boolean))]
