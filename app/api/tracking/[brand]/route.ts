@@ -15,7 +15,12 @@ async function getOrRefresh17(
   const admin = createAdminClient()
   const { data: row } = await admin.from('carrier_tracking').select('*').eq('tracking_number', number).maybeSingle()
 
-  const fresh = row?.updated_at && (Date.now() - new Date(row.updated_at).getTime() < 30 * 60 * 1000)
+  // Cache 30 min normalement, mais SEULEMENT 5 min tant que le suivi est « maigre »
+  // (step ≤ 2 = juste étiquette/infos reçues) : 17Track lie souvent le transporteur
+  // détaillé (ex. YunExpress derrière un n° GOFO) avec un délai → on rattrape vite.
+  const thin = (row?.step ?? 2) <= 2 && !row?.delivered
+  const ttlMs = thin ? 5 * 60 * 1000 : 30 * 60 * 1000
+  const fresh = row?.updated_at && (Date.now() - new Date(row.updated_at).getTime() < ttlMs)
   const rowResult = (): Track17Result | null => row ? {
     status: row.status ?? 'NotFound', step: row.step ?? 2, delivered: !!row.delivered,
     carrier_name: row.carrier ?? null, eta_from: row.eta_from ?? null, eta_to: row.eta_to ?? null,
