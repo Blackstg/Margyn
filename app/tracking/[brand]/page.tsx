@@ -91,8 +91,13 @@ const COUNTRY_FR: Record<string, string> = {
 }
 const titleCase = (s: string) => s.toLowerCase().replace(/(^|[\s'-])([a-zà-ÿ])/g, (_, sep, c) => sep + c.toUpperCase())
 // "PARIS, PARIS, FR" → "Paris, France" ; "HOOFDDORP, NORTH HOLLAND, NL" → "Hoofddorp, Pays-Bas" ; "FR" → "France"
+// Ne pas révéler l'origine (Chine) au client : on masque toute localisation chinoise.
+function isChinaLoc(loc: string | null | undefined): boolean {
+  if (!loc) return false
+  return countryOf(loc) === 'CN' || /china|chine|mainland/i.test(loc)
+}
 function prettyPlace(loc: string | null | undefined): string | null {
-  if (!loc) return null
+  if (!loc || isChinaLoc(loc)) return null
   let parts = loc.split(',').map(s => s.trim()).filter(Boolean)
   parts = parts.filter((p, i) => i === 0 || p.toUpperCase() !== parts[i - 1].toUpperCase()) // dédoublonne
   if (!parts.length) return null
@@ -934,7 +939,7 @@ export default function BrandTrackingPage({ params }: { params: { brand: string 
                           )}
                           <p style={{ fontSize: 11, color: 'rgba(0,0,0,0.35)', marginTop: 2 }}>
                             {new Date(ev.date).toLocaleString('fr-FR', { day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' })}
-                            {ev.location && <span> · {ev.location}</span>}
+                            {prettyPlace(ev.location) && <span> · {prettyPlace(ev.location)}</span>}
                           </p>
                         </div>
                       </div>
