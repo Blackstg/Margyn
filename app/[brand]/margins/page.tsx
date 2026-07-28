@@ -46,6 +46,7 @@ export default function MarginsPage({ params }: { params: { brand: string } }) {
   const [sort, setSort]       = useState<SortKey>('margin')
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
   const [shipPerOrder, setShipPerOrder] = useState(0)
+  const [realCov, setRealCov] = useState<{ matched: number; orders: number } | null>(null)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -126,6 +127,34 @@ export default function MarginsPage({ params }: { params: { brand: string } }) {
         margin: net(p), missing: p.missing,
         variants: [...p.varMap.values()].sort((a, b) => net(b) - net(a)),
       }))
+
+      // Moom : coût de livraison RÉEL par produit (factures logisticien) — remplace
+      // la moyenne. Réel là où la commande est facturée, moyenne en repli sinon.
+      let cov: { matched: number; orders: number } | null = null
+      if (brand === 'moom') {
+        try {
+          const ship = await fetch(`/api/margins/shipping?brand=moom&from=${from}&to=${to}`).then(r => r.json()) as
+            { byVariant?: Record<string, number>; byProduct?: Record<string, number>; matched?: number; orders?: number }
+          if (ship?.byVariant) {
+            for (const p of out) {
+              let pSum = 0
+              for (const v of p.variants) {
+                const vid = v.key.startsWith('v') ? v.key.slice(1) : ''
+                const s = ship.byVariant[vid]
+                if (s != null) v.shipping = s
+                pSum += v.shipping
+              }
+              const pid = p.key.startsWith('p') ? p.key.slice(1) : ''
+              p.shipping = ship.byProduct?.[pid] ?? pSum
+              p.margin = net(p)
+              p.variants.sort((a, b) => net(b) - net(a))
+            }
+            out.sort((a, b) => net(b) - net(a))
+            cov = { matched: ship.matched ?? 0, orders: ship.orders ?? 0 }
+          }
+        } catch { /* garde l'estimation */ }
+      }
+      setRealCov(cov)
       setRows(out)
     } finally { setLoading(false) }
   }, [brand, period])
@@ -189,9 +218,11 @@ export default function MarginsPage({ params }: { params: { brand: string } }) {
         </div>
 
         <p className="text-[11px] text-[#9b9b93]">
-          Marge nette = CA − coût d&apos;achat − livraison. {shipPerOrder > 0
-            ? `Livraison estimée à ${eur(shipPerOrder)} / commande (paramétré), répartie sur les produits de chaque commande au prorata du CA.`
-            : 'Aucun coût de livraison par commande paramétré pour cette marque (ex. Bowa = livraison en propre).'}
+          Marge nette = CA − coût d&apos;achat − livraison. {realCov
+            ? `Livraison au coût RÉEL facturé (factures logisticien) pour ${realCov.matched}/${realCov.orders} commandes${realCov.matched < realCov.orders ? ` — moyenne ${eur(shipPerOrder)} pour les non encore facturées` : ''}, répartie par produit au prorata du CA.`
+            : shipPerOrder > 0
+              ? `Livraison estimée à ${eur(shipPerOrder)} / commande (paramétré), répartie sur les produits de chaque commande au prorata du CA.`
+              : 'Aucun coût de livraison par commande paramétré pour cette marque (ex. Bowa = livraison en propre).'}
         </p>
 
         {totals.missing > 0 && (
