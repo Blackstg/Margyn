@@ -18,15 +18,33 @@ function fmt(d: Date) {
 }
 
 // Fenêtre glissante finissant HIER (aujourd'hui incomplet), comme le dashboard.
-function getRange(period: Period): { from: string; to: string; days: number } {
+function getRange(period: Period): { from: string; to: string } {
   const today = new Date(); today.setHours(0, 0, 0, 0)
   const to = new Date(today); to.setDate(to.getDate() - 1)
   let from: Date
   if (period === '7j')       { from = new Date(to); from.setDate(from.getDate() - 6) }
   else if (period === '30j') { from = new Date(to); from.setDate(from.getDate() - 29) }
   else                       { from = new Date(today.getFullYear(), today.getMonth(), 1) }
-  const days = Math.round((to.getTime() - from.getTime()) / 86_400_000) + 1
-  return { from: fmt(from), to: fmt(to), days }
+  return { from: fmt(from), to: fmt(to) }
+}
+
+// Mois précis (ex. juin clôturé) : du 1er au dernier jour (plafonné à hier).
+function monthRange(ym: string): { from: string; to: string } {
+  const [y, m] = ym.split('-').map(Number)
+  const first = new Date(y, m - 1, 1)
+  const last  = new Date(y, m, 0)
+  const yst   = new Date(); yst.setHours(0, 0, 0, 0); yst.setDate(yst.getDate() - 1)
+  return { from: fmt(first), to: fmt(last < yst ? last : yst) }
+}
+
+function monthOptions(): { value: string; label: string }[] {
+  const opts: { value: string; label: string }[] = []
+  const d = new Date()
+  for (let i = 0; i < 12; i++) {
+    opts.push({ value: `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`, label: d.toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' }) })
+    d.setMonth(d.getMonth() - 1)
+  }
+  return opts
 }
 
 const eur = (n: number) => new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR', maximumFractionDigits: 0 }).format(n)
@@ -41,6 +59,7 @@ type SortKey = 'margin' | 'pct' | 'revenue'
 export default function MarginsPage({ params }: { params: { brand: string } }) {
   const { brand } = params
   const [period, setPeriod]   = useState<Period>('mois')
+  const [month, setMonth]     = useState<string>('')  // '' = période glissante · sinon 'YYYY-MM'
   const [rows, setRows]       = useState<ProductRow[]>([])
   const [loading, setLoading] = useState(true)
   const [sort, setSort]       = useState<SortKey>('margin')
@@ -51,7 +70,7 @@ export default function MarginsPage({ params }: { params: { brand: string } }) {
   const load = useCallback(async () => {
     setLoading(true)
     try {
-      const { from, to } = getRange(period)
+      const { from, to } = month ? monthRange(month) : getRange(period)
       const [salesRes, variantsRes, productsRes, settingsRes] = await Promise.all([
         supabase.from('product_sales')
           .select('product_title, shopify_product_id, variant_id, variant_title, quantity, revenue, order_id')
@@ -157,7 +176,7 @@ export default function MarginsPage({ params }: { params: { brand: string } }) {
       setRealCov(cov)
       setRows(out)
     } finally { setLoading(false) }
-  }, [brand, period])
+  }, [brand, period, month])
 
   useEffect(() => { load() }, [load])
 
@@ -191,13 +210,23 @@ export default function MarginsPage({ params }: { params: { brand: string } }) {
             <Percent size={18} className="text-[#aeb0c9]" />
             <h1 className="text-xl font-bold text-[#1a1a2e]">Marges par produit</h1>
           </div>
-          <div className="inline-flex items-center bg-white rounded-xl p-0.5 gap-0.5 border border-[#e8e8e4]">
-            {(['7j', '30j', 'mois'] as Period[]).map(p => (
-              <button key={p} onClick={() => setPeriod(p)}
-                className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${period === p ? 'bg-[#1a1a2e] text-white' : 'text-[#6b6b63] hover:text-[#1a1a2e]'}`}>
-                {p === '7j' ? '7 jours' : p === '30j' ? '30 jours' : 'Ce mois'}
-              </button>
-            ))}
+          <div className="flex items-center gap-2 flex-wrap">
+            <div className="inline-flex items-center bg-white rounded-xl p-0.5 gap-0.5 border border-[#e8e8e4]">
+              {(['7j', '30j', 'mois'] as Period[]).map(p => (
+                <button key={p} onClick={() => { setMonth(''); setPeriod(p) }}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${!month && period === p ? 'bg-[#1a1a2e] text-white' : 'text-[#6b6b63] hover:text-[#1a1a2e]'}`}>
+                  {p === '7j' ? '7 jours' : p === '30j' ? '30 jours' : 'Ce mois'}
+                </button>
+              ))}
+            </div>
+            <select
+              value={month}
+              onChange={e => setMonth(e.target.value)}
+              className={`px-3 py-2 rounded-xl bg-white border text-xs font-medium capitalize cursor-pointer ${month ? 'border-[#1a1a2e] text-[#1a1a2e]' : 'border-[#e8e8e4] text-[#6b6b63]'}`}
+            >
+              <option value="">Mois précis…</option>
+              {monthOptions().map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+            </select>
           </div>
         </div>
 
