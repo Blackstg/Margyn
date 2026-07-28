@@ -223,12 +223,14 @@ export async function GET() {
       await Promise.all([
         fetchShopifyOrders(shop, token),
 
-        // Stops still "in progress" (not failed, not partial) in non-cancelled tours
-        // → order is already being handled, don't replan.
-        // NB: 'partial' est exclu → le reliquat non livré doit revenir à planifier.
+        // Stops "déjà pris en charge" = uniquement dans une tournée ENCORE ACTIVE
+        // (brouillon / planifiée / en cours) et non failed/partial.
+        // Un arrêt resté 'pending' dans une tournée TERMINÉE (ex. #10346 : cliente
+        // absente, jamais marqué livré/échoué) ne compte PAS → il revient à planifier
+        // au lieu de disparaître dans les limbes.
         admin.from('delivery_stops')
           .select('order_name, delivery_tours!inner(status)')
-          .neq('delivery_tours.status', 'cancelled')
+          .in('delivery_tours.status', ['draft', 'planned', 'in_progress'])
           .neq('status', 'failed')
           .neq('status', 'partial'),
 
