@@ -48,12 +48,20 @@ export async function GET(req: NextRequest) {
   const { data: bs } = await admin.from('brand_settings').select('shipping_cost_per_order').eq('brand', brand).maybeSingle()
   const flat = Number(bs?.shipping_cost_per_order) || 0
 
-  // 2. Ventes par ligne sur la période
-  const { data: sales } = await admin
-    .from('product_sales')
-    .select('shopify_product_id, variant_id, revenue, order_id')
-    .eq('brand', brand).gte('date', from).lte('date', to).limit(50000)
-  const salesRows = (sales ?? []) as Sale[]
+  // 2. Ventes par ligne sur la période — paginé (PostgREST plafonne à 1000 lignes).
+  const salesRows: Sale[] = []
+  for (let offset = 0; ; offset += 1000) {
+    const { data, error } = await admin
+      .from('product_sales')
+      .select('shopify_product_id, variant_id, revenue, order_id')
+      .eq('brand', brand).gte('date', from).lte('date', to)
+      .order('order_id', { ascending: true, nullsFirst: false })
+      .order('variant_id', { ascending: true, nullsFirst: false })
+      .range(offset, offset + 999)
+    if (error || !data || data.length === 0) break
+    salesRows.push(...(data as Sale[]))
+    if (data.length < 1000) break
+  }
 
   // 3. Mapping order_id → order_name via Shopify (commandes de la période)
   const idToName = new Map<string, string>()

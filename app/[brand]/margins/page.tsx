@@ -76,10 +76,30 @@ export default function MarginsPage({ params }: { params: { brand: string } }) {
     setLoading(true)
     try {
       const { from, to } = month ? monthRange(month) : getRange(period)
-      const [salesRes, variantsRes, productsRes, settingsRes, spendRes, fixedCostsRaw] = await Promise.all([
-        supabase.from('product_sales')
-          .select('product_title, shopify_product_id, variant_id, variant_title, quantity, revenue, order_id')
-          .eq('brand', brand).gte('date', from).lte('date', to).limit(50000),
+
+      // IMPORTANT : PostgREST plafonne les réponses à 1000 lignes (max-rows), donc
+      // `.limit(50000)` ne suffit PAS — il faut paginer, sinon le CA est sous-compté
+      // (ex. Moom ~1600 lignes/mois → seules 1000 remontaient). Tri stable obligatoire.
+      const fetchAllSales = async (): Promise<Sale[]> => {
+        const cols = 'product_title, shopify_product_id, variant_id, variant_title, quantity, revenue, order_id'
+        const PAGE = 1000
+        const all: Sale[] = []
+        for (let offset = 0; ; offset += PAGE) {
+          const { data, error } = await supabase.from('product_sales').select(cols)
+            .eq('brand', brand).gte('date', from).lte('date', to)
+            .order('order_id', { ascending: true, nullsFirst: false })
+            .order('variant_id', { ascending: true, nullsFirst: false })
+            .order('product_title', { ascending: true })
+            .range(offset, offset + PAGE - 1)
+          if (error || !data || data.length === 0) break
+          all.push(...(data as Sale[]))
+          if (data.length < PAGE) break
+        }
+        return all
+      }
+
+      const [salesData, variantsRes, productsRes, settingsRes, spendRes, fixedCostsRaw] = await Promise.all([
+        fetchAllSales(),
         supabase.from('product_variants')
           .select('shopify_variant_id, shopify_product_id, cost_price').eq('brand', brand),
         supabase.from('products')
@@ -94,7 +114,7 @@ export default function MarginsPage({ params }: { params: { brand: string } }) {
       // Livraison = coût PAR COMMANDE, réparti sur les produits de la commande au
       // prorata du CA de chaque ligne (une commande de 3 articles = 1 livraison).
       const orderRevenue = new Map<string, number>()
-      for (const s of (salesRes.data ?? []) as Sale[]) {
+      for (const s of salesData) {
         if (!s.order_id) continue
         orderRevenue.set(s.order_id, (orderRevenue.get(s.order_id) ?? 0) + (s.revenue || 0))
       }
@@ -130,7 +150,7 @@ export default function MarginsPage({ params }: { params: { brand: string } }) {
 
       // Agrégation produit → variante
       const prodMap = new Map<string, ProductRow & { varMap: Map<string, VariantRow> }>()
-      for (const s of (salesRes.data ?? []) as Sale[]) {
+      for (const s of salesData) {
         if (!s.product_title) continue
         const pKey = s.shopify_product_id ? `p${s.shopify_product_id}` : `t${s.product_title}`
         let p = prodMap.get(pKey)
