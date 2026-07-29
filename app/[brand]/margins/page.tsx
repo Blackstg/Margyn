@@ -63,6 +63,7 @@ export default function MarginsPage({ params }: { params: { brand: string } }) {
   const [rows, setRows]       = useState<ProductRow[]>([])
   const [loading, setLoading] = useState(true)
   const [sort, setSort]       = useState<SortKey>('margin')
+  const [view, setView]       = useState<'total' | 'unit'>('unit')  // 'unit' = prix par article
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
   const [shipPerOrder, setShipPerOrder] = useState(0)
   const [realCov, setRealCov] = useState<{ matched: number; orders: number } | null>(null)
@@ -196,6 +197,11 @@ export default function MarginsPage({ params }: { params: { brand: string } }) {
     return { revenue, cost, shipping, margin: revenue - cost - shipping, missing }
   }, [rows])
 
+  // En mode « Par unité », on divise les totaux par la quantité vendue (2 décimales
+  // pour la précision prix) ; en « Totaux », montants arrondis.
+  const show  = (total: number, qty: number) => (view === 'unit' && qty > 0 ? total / qty : total)
+  const money = (x: number) => new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR', maximumFractionDigits: view === 'unit' ? 2 : 0 }).format(x)
+
   function toggle(k: string) {
     setExpanded(prev => { const n = new Set(prev); if (n.has(k)) n.delete(k); else n.add(k); return n })
   }
@@ -263,7 +269,15 @@ export default function MarginsPage({ params }: { params: { brand: string } }) {
         {/* Tableau */}
         <div className="bg-white rounded-[20px] shadow-[0_2px_16px_rgba(0,0,0,0.06)] overflow-hidden">
           <div className="flex items-center justify-between px-5 py-3 border-b border-[#f0f0ee]">
-            <p className="text-[10px] font-semibold text-[#6b6b63] uppercase tracking-[0.1em]">Produits ({rows.length})</p>
+            <div className="flex items-center gap-2">
+              <p className="text-[10px] font-semibold text-[#6b6b63] uppercase tracking-[0.1em]">Produits ({rows.length})</p>
+              <div className="inline-flex items-center bg-[#f5f5f3] rounded-lg p-0.5 gap-0.5">
+                {([['unit', 'Par unité'], ['total', 'Totaux']] as ['unit' | 'total', string][]).map(([v, lbl]) => (
+                  <button key={v} onClick={() => setView(v)}
+                    className={`px-2 py-0.5 rounded-md text-[10px] font-semibold ${view === v ? 'bg-white text-[#1a1a2e] shadow-sm' : 'text-[#6b6b63]'}`}>{lbl}</button>
+                ))}
+              </div>
+            </div>
             <div className="inline-flex items-center gap-1 text-[10px]">
               <span className="text-[#9b9b93] mr-1">Trier :</span>
               {([['margin', 'Marge €'], ['pct', 'Marge %'], ['revenue', 'CA']] as [SortKey, string][]).map(([k, lbl]) => (
@@ -283,10 +297,10 @@ export default function MarginsPage({ params }: { params: { brand: string } }) {
                 <tr className="text-[#9b9b93] border-b border-[#f0f0ee]">
                   <th className="text-left font-medium py-2 pl-4">Produit</th>
                   <th className="text-right font-medium py-2">Qté</th>
-                  <th className="text-right font-medium py-2">CA</th>
-                  <th className="text-right font-medium py-2">Coût</th>
-                  <th className="text-right font-medium py-2">Livr.</th>
-                  <th className="text-right font-medium py-2">Marge nette</th>
+                  <th className="text-right font-medium py-2">{view === 'unit' ? 'Prix vente u.' : 'CA'}</th>
+                  <th className="text-right font-medium py-2">{view === 'unit' ? 'Achat u.' : 'Coût'}</th>
+                  <th className="text-right font-medium py-2">{view === 'unit' ? 'Livr. u.' : 'Livr.'}</th>
+                  <th className="text-right font-medium py-2">{view === 'unit' ? 'Marge u.' : 'Marge nette'}</th>
                   <th className="text-right font-medium py-2 pr-4">%</th>
                 </tr>
               </thead>
@@ -308,10 +322,10 @@ export default function MarginsPage({ params }: { params: { brand: string } }) {
                           </div>
                         </td>
                         <td className="text-right tabular-nums text-[#6b6b63]">{p.quantity.toLocaleString('fr-FR')}</td>
-                        <td className="text-right tabular-nums text-[#1a1a2e]">{eur(p.revenue)}</td>
-                        <td className="text-right tabular-nums text-[#9b9b93]">{eur(p.cost)}</td>
-                        <td className="text-right tabular-nums text-[#9b9b93]">{p.shipping > 0 ? eur(p.shipping) : '—'}</td>
-                        <td className="text-right tabular-nums font-semibold text-[#1a7f4b]">{eur(p.margin)}</td>
+                        <td className="text-right tabular-nums text-[#1a1a2e]">{money(show(p.revenue, p.quantity))}</td>
+                        <td className="text-right tabular-nums text-[#9b9b93]">{money(show(p.cost, p.quantity))}</td>
+                        <td className="text-right tabular-nums text-[#9b9b93]">{p.shipping > 0 ? money(show(p.shipping, p.quantity)) : '—'}</td>
+                        <td className="text-right tabular-nums font-semibold text-[#1a7f4b]">{money(show(p.margin, p.quantity))}</td>
                         <td className="text-right tabular-nums font-semibold pr-4" style={{ color: p_pct >= 50 ? '#1a7f4b' : p_pct >= 25 ? '#b45309' : '#c7293a' }}>{p_pct.toFixed(0)}%</td>
                       </tr>
                       {open && p.variants.map(v => {
@@ -321,10 +335,10 @@ export default function MarginsPage({ params }: { params: { brand: string } }) {
                           <tr key={p.key + v.key} className="border-b border-[#f6f6f4] bg-[#fbfbfa]">
                             <td className="py-1.5 pl-11 text-[#6b6b63] truncate max-w-[240px]">{v.variant_title}{v.missing && <AlertTriangle size={10} className="inline ml-1 text-[#b45309]" />}</td>
                             <td className="text-right tabular-nums text-[#9b9b93]">{v.quantity.toLocaleString('fr-FR')}</td>
-                            <td className="text-right tabular-nums text-[#6b6b63]">{eur(v.revenue)}</td>
-                            <td className="text-right tabular-nums text-[#b0b0a8]">{eur(v.cost)}</td>
-                            <td className="text-right tabular-nums text-[#b0b0a8]">{v.shipping > 0 ? eur(v.shipping) : '—'}</td>
-                            <td className="text-right tabular-nums text-[#1a7f4b]">{eur(v_net)}</td>
+                            <td className="text-right tabular-nums text-[#6b6b63]">{money(show(v.revenue, v.quantity))}</td>
+                            <td className="text-right tabular-nums text-[#b0b0a8]">{money(show(v.cost, v.quantity))}</td>
+                            <td className="text-right tabular-nums text-[#b0b0a8]">{v.shipping > 0 ? money(show(v.shipping, v.quantity)) : '—'}</td>
+                            <td className="text-right tabular-nums text-[#1a7f4b]">{money(show(v_net, v.quantity))}</td>
                             <td className="text-right tabular-nums pr-4 text-[#9b9b93]">{v_pct.toFixed(0)}%</td>
                           </tr>
                         )
