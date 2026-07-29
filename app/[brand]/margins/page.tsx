@@ -67,12 +67,15 @@ export default function MarginsPage({ params }: { params: { brand: string } }) {
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
   const [shipPerOrder, setShipPerOrder] = useState(0)
   const [realCov, setRealCov] = useState<{ matched: number; orders: number } | null>(null)
+  const [basis, setBasis] = useState<'contribution' | 'loaded'>('contribution')
+  // Charges hors produit/livraison (pub + frais fixes + frais transaction), au niveau période.
+  const [overhead, setOverhead] = useState<{ marketing: number; fixed: number; fees: number; total: number } | null>(null)
 
   const load = useCallback(async () => {
     setLoading(true)
     try {
       const { from, to } = month ? monthRange(month) : getRange(period)
-      const [salesRes, variantsRes, productsRes, settingsRes] = await Promise.all([
+      const [salesRes, variantsRes, productsRes, settingsRes, spendRes, fixedCostsRaw] = await Promise.all([
         supabase.from('product_sales')
           .select('product_title, shopify_product_id, variant_id, variant_title, quantity, revenue, order_id')
           .eq('brand', brand).gte('date', from).lte('date', to).limit(50000),
@@ -80,7 +83,9 @@ export default function MarginsPage({ params }: { params: { brand: string } }) {
           .select('shopify_variant_id, shopify_product_id, cost_price').eq('brand', brand),
         supabase.from('products')
           .select('shopify_id, cost_price').eq('brand', brand),
-        supabase.from('brand_settings').select('shipping_cost_per_order').eq('brand', brand).maybeSingle(),
+        supabase.from('brand_settings').select('shipping_cost_per_order, transaction_fee_rate').eq('brand', brand).maybeSingle(),
+        supabase.from('ad_spends').select('spend').eq('brand', brand).gte('date', from).lte('date', to),
+        fetch(`/api/fixed-costs?brand=${brand}`).then(r => r.json()).catch(() => []),
       ])
       const shipPerOrder = settingsRes.data?.shipping_cost_per_order ?? 0
       setShipPerOrder(shipPerOrder)
@@ -175,19 +180,42 @@ export default function MarginsPage({ params }: { params: { brand: string } }) {
         } catch { /* garde l'estimation */ }
       }
       setRealCov(cov)
+
+      // ── Charges hors produit/livraison, au niveau période ────────────────────
+      // Publicité (ad_spends) + frais fixes récurrents (salaires, infra, app) prorata
+      // des jours + frais de transaction (% du CA). La livraison est déjà comptée
+      // plus haut → on EXCLUT le fulfillment des frais fixes (pas de double compte).
+      const periodRevenue = out.reduce((s, r) => s + r.revenue, 0)
+      const marketing = (spendRes.data ?? []).reduce((s: number, r: { spend?: number | null }) => s + (r.spend ?? 0), 0)
+
+      type FixedRow = { amount?: number | null; category?: string | null; month?: string | null }
+      const fixedRows: FixedRow[] = Array.isArray(fixedCostsRaw) ? fixedCostsRaw : []
+      let fixedApp = 0, fixedTeam = 0, fixedInfra = 0
+      for (const r of fixedRows) {
+        if (r.month !== '1900-01-01') continue          // seules les lignes récurrentes (sentinelle)
+        const amount = r.amount ?? 0
+        if (r.category === 'app') fixedApp += amount
+        else if (r.category === 'fulfillment') { /* déjà dans la livraison */ }
+        else if (r.category === 'team') fixedTeam += amount
+        else fixedInfra += amount
+      }
+      const [fy, fm, fd] = from.split('-').map(Number)
+      const [ty, tm, td] = to.split('-').map(Number)
+      const days = Math.round((Date.UTC(ty, tm - 1, td) - Date.UTC(fy, fm - 1, fd)) / 86400000) + 1
+      const daysInFromMonth = new Date(fy, fm, 0).getDate()
+      const isFullMonth = fd === 1 && days === daysInFromMonth && fy === ty && fm === tm
+      const ratio = isFullMonth ? 1 : days / 30.44
+      const fixed = Math.round((fixedTeam + fixedInfra + fixedApp) * ratio)
+
+      const feeRate = settingsRes.data?.transaction_fee_rate ?? 0.017
+      const fees = Math.round(periodRevenue * feeRate)
+
+      setOverhead({ marketing: Math.round(marketing), fixed, fees, total: Math.round(marketing) + fixed + fees })
       setRows(out)
     } finally { setLoading(false) }
   }, [brand, period, month])
 
   useEffect(() => { load() }, [load])
-
-  const sorted = useMemo(() => {
-    const arr = [...rows]
-    if (sort === 'margin')  arr.sort((a, b) => b.margin - a.margin)
-    if (sort === 'pct')     arr.sort((a, b) => pct(b.margin, b.revenue) - pct(a.margin, a.revenue))
-    if (sort === 'revenue') arr.sort((a, b) => b.revenue - a.revenue)
-    return arr
-  }, [rows, sort])
 
   const totals = useMemo(() => {
     const revenue  = rows.reduce((s, r) => s + r.revenue, 0)
@@ -196,6 +224,23 @@ export default function MarginsPage({ params }: { params: { brand: string } }) {
     const missing  = rows.filter(r => r.missing).length
     return { revenue, cost, shipping, margin: revenue - cost - shipping, missing }
   }, [rows])
+
+  // Charges (pub + frais fixes + transaction) réparties sur chaque ligne au prorata du CA.
+  const ovhFor = useCallback((rev: number) => (
+    basis === 'loaded' && overhead && totals.revenue > 0 ? overhead.total * (rev / totals.revenue) : 0
+  ), [basis, overhead, totals.revenue])
+  // Marge effective selon la base : contribution, ou « chargée » (nette de pub+frais).
+  const effMargin = useCallback((r: { revenue: number; cost: number; shipping: number }) => (
+    r.revenue - r.cost - r.shipping - ovhFor(r.revenue)
+  ), [ovhFor])
+
+  const sorted = useMemo(() => {
+    const arr = [...rows]
+    if (sort === 'margin')  arr.sort((a, b) => effMargin(b) - effMargin(a))
+    if (sort === 'pct')     arr.sort((a, b) => pct(effMargin(b), b.revenue) - pct(effMargin(a), a.revenue))
+    if (sort === 'revenue') arr.sort((a, b) => b.revenue - a.revenue)
+    return arr
+  }, [rows, sort, effMargin])
 
   // En mode « Par unité », on divise les totaux par la quantité vendue (2 décimales
   // pour la précision prix) ; en « Totaux », montants arrondis.
@@ -260,6 +305,45 @@ export default function MarginsPage({ params }: { params: { brand: string } }) {
               : 'Aucun coût de livraison par commande paramétré pour cette marque (ex. Bowa = livraison en propre).'}
         </p>
 
+        {/* Résultat net de la période (précis — après pub & frais fixes) */}
+        {overhead && (() => {
+          const ca = totals.revenue
+          const net = ca - totals.cost - totals.shipping - overhead.total
+          const lines: { label: string; value: number; sign: '−' | '' }[] = [
+            { label: 'Chiffre d\'affaires', value: ca, sign: '' },
+            { label: 'Coût produits', value: totals.cost, sign: '−' },
+            { label: 'Livraison', value: totals.shipping, sign: '−' },
+            { label: 'Publicité', value: overhead.marketing, sign: '−' },
+            { label: 'Frais fixes (salaires, infra, app)', value: overhead.fixed, sign: '−' },
+            { label: 'Frais de transaction', value: overhead.fees, sign: '−' },
+          ]
+          return (
+            <div className="bg-white rounded-[20px] shadow-[0_2px_16px_rgba(0,0,0,0.06)] p-5">
+              <div className="flex items-baseline justify-between mb-3">
+                <p className="text-[10px] font-semibold text-[#6b6b63] uppercase tracking-[0.1em]">Résultat net de la période</p>
+                <p className="text-[10px] text-[#9b9b93]">après pub &amp; frais fixes</p>
+              </div>
+              <div className="divide-y divide-[#f4f4f2]">
+                {lines.map(l => (
+                  <div key={l.label} className="flex items-center justify-between py-1.5 text-xs">
+                    <span className={l.sign ? 'text-[#6b6b63]' : 'text-[#1a1a2e] font-medium'}>{l.label}</span>
+                    <span className="tabular-nums" style={{ color: l.sign ? '#9b9b93' : '#1a1a2e' }}>{l.sign}{eur(l.value)}</span>
+                  </div>
+                ))}
+                <div className="flex items-center justify-between pt-2.5 mt-1">
+                  <span className="text-sm font-bold text-[#1a1a2e]">Résultat net</span>
+                  <span className="text-lg font-bold tabular-nums" style={{ color: net >= 0 ? '#1a7f4b' : '#c7293a' }}>
+                    {eur(net)} <span className="text-[11px] font-medium text-[#9b9b93]">· {pct(net, ca).toFixed(0)} % du CA</span>
+                  </span>
+                </div>
+              </div>
+              <p className="text-[11px] text-[#9b9b93] mt-3">
+                Précis au niveau de la période. Pub et frais fixes ne sont pas rattachés à un produit ; dans le tableau, la vue «&nbsp;Chargée&nbsp;» les répartit au prorata du CA (estimation).
+              </p>
+            </div>
+          )
+        })()}
+
         {totals.missing > 0 && (
           <div className="flex items-center gap-2 rounded-xl bg-[#fffbeb] border border-[#fcd34d] px-3 py-2 text-[11px] text-[#92400e]">
             <AlertTriangle size={13} /> {totals.missing} produit(s) sans prix d&apos;achat complet — leur marge est surestimée. Complète les coûts dans Réappro/Produits pour fiabiliser.
@@ -277,6 +361,14 @@ export default function MarginsPage({ params }: { params: { brand: string } }) {
                     className={`px-2 py-0.5 rounded-md text-[10px] font-semibold ${view === v ? 'bg-white text-[#1a1a2e] shadow-sm' : 'text-[#6b6b63]'}`}>{lbl}</button>
                 ))}
               </div>
+              {overhead && (
+                <div className="inline-flex items-center bg-[#f5f5f3] rounded-lg p-0.5 gap-0.5" title="Contribution = CA − achat − livraison · Chargée = en plus, pub + frais fixes répartis au prorata du CA">
+                  {([['contribution', 'Contribution'], ['loaded', 'Chargée']] as ['contribution' | 'loaded', string][]).map(([b, lbl]) => (
+                    <button key={b} onClick={() => setBasis(b)}
+                      className={`px-2 py-0.5 rounded-md text-[10px] font-semibold ${basis === b ? 'bg-white text-[#1a1a2e] shadow-sm' : 'text-[#6b6b63]'}`}>{lbl}</button>
+                  ))}
+                </div>
+              )}
             </div>
             <div className="inline-flex items-center gap-1 text-[10px]">
               <span className="text-[#9b9b93] mr-1">Trier :</span>
@@ -300,14 +392,17 @@ export default function MarginsPage({ params }: { params: { brand: string } }) {
                   <th className="text-right font-medium py-2">{view === 'unit' ? 'Prix vente u.' : 'CA'}</th>
                   <th className="text-right font-medium py-2">{view === 'unit' ? 'Achat u.' : 'Coût'}</th>
                   <th className="text-right font-medium py-2">{view === 'unit' ? 'Livr. u.' : 'Livr.'}</th>
-                  <th className="text-right font-medium py-2">{view === 'unit' ? 'Marge u.' : 'Marge nette'}</th>
+                  {basis === 'loaded' && <th className="text-right font-medium py-2">{view === 'unit' ? 'Pub+frais u.' : 'Pub+frais'}</th>}
+                  <th className="text-right font-medium py-2">{view === 'unit' ? 'Marge u.' : basis === 'loaded' ? 'Marge chargée' : 'Marge nette'}</th>
                   <th className="text-right font-medium py-2 pr-4">%</th>
                 </tr>
               </thead>
               <tbody>
                 {sorted.map(p => {
                   const open = expanded.has(p.key)
-                  const p_pct = pct(p.margin, p.revenue)
+                  const p_ovh = ovhFor(p.revenue)
+                  const p_margin = p.margin - p_ovh
+                  const p_pct = pct(p_margin, p.revenue)
                   return (
                     <Fragment key={p.key}>
                       <tr onClick={() => p.variants.length > 1 && toggle(p.key)}
@@ -325,11 +420,13 @@ export default function MarginsPage({ params }: { params: { brand: string } }) {
                         <td className="text-right tabular-nums text-[#1a1a2e]">{money(show(p.revenue, p.quantity))}</td>
                         <td className="text-right tabular-nums text-[#9b9b93]">{money(show(p.cost, p.quantity))}</td>
                         <td className="text-right tabular-nums text-[#9b9b93]">{p.shipping > 0 ? money(show(p.shipping, p.quantity)) : '—'}</td>
-                        <td className="text-right tabular-nums font-semibold text-[#1a7f4b]">{money(show(p.margin, p.quantity))}</td>
+                        {basis === 'loaded' && <td className="text-right tabular-nums text-[#9b9b93]">{p_ovh > 0 ? money(show(p_ovh, p.quantity)) : '—'}</td>}
+                        <td className="text-right tabular-nums font-semibold" style={{ color: p_margin >= 0 ? '#1a7f4b' : '#c7293a' }}>{money(show(p_margin, p.quantity))}</td>
                         <td className="text-right tabular-nums font-semibold pr-4" style={{ color: p_pct >= 50 ? '#1a7f4b' : p_pct >= 25 ? '#b45309' : '#c7293a' }}>{p_pct.toFixed(0)}%</td>
                       </tr>
                       {open && p.variants.map(v => {
-                        const v_net = v.revenue - v.cost - v.shipping
+                        const v_ovh = ovhFor(v.revenue)
+                        const v_net = v.revenue - v.cost - v.shipping - v_ovh
                         const v_pct = pct(v_net, v.revenue)
                         return (
                           <tr key={p.key + v.key} className="border-b border-[#f6f6f4] bg-[#fbfbfa]">
@@ -338,7 +435,8 @@ export default function MarginsPage({ params }: { params: { brand: string } }) {
                             <td className="text-right tabular-nums text-[#6b6b63]">{money(show(v.revenue, v.quantity))}</td>
                             <td className="text-right tabular-nums text-[#b0b0a8]">{money(show(v.cost, v.quantity))}</td>
                             <td className="text-right tabular-nums text-[#b0b0a8]">{v.shipping > 0 ? money(show(v.shipping, v.quantity)) : '—'}</td>
-                            <td className="text-right tabular-nums text-[#1a7f4b]">{money(show(v_net, v.quantity))}</td>
+                            {basis === 'loaded' && <td className="text-right tabular-nums text-[#b0b0a8]">{v_ovh > 0 ? money(show(v_ovh, v.quantity)) : '—'}</td>}
+                            <td className="text-right tabular-nums" style={{ color: v_net >= 0 ? '#1a7f4b' : '#c7293a' }}>{money(show(v_net, v.quantity))}</td>
                             <td className="text-right tabular-nums pr-4 text-[#9b9b93]">{v_pct.toFixed(0)}%</td>
                           </tr>
                         )
