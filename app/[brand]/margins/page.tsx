@@ -71,6 +71,24 @@ export default function MarginsPage({ params }: { params: { brand: string } }) {
   // Charges hors produit/livraison (pub + frais fixes + frais transaction), au niveau période.
   const [overhead, setOverhead] = useState<{ marketing: number; fixed: number; fees: number; total: number } | null>(null)
   const [partial, setPartial] = useState(false)  // période non clôturée (mois courant / fenêtre glissante)
+  const [hydrated, setHydrated] = useState(false) // période/mois restaurés depuis le localStorage
+
+  // Restaure la période + le mois choisis (par marque) pour qu'un refresh les garde.
+  const prefsKey = `margins-period-${brand}`
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(prefsKey)
+      if (raw) {
+        const p = JSON.parse(raw) as { period?: Period; month?: string }
+        if (p.period) setPeriod(p.period)
+        if (typeof p.month === 'string') setMonth(p.month)
+      }
+    } catch { /* pas de prefs */ }
+    setHydrated(true)
+  }, [prefsKey])
+  useEffect(() => {
+    if (hydrated) { try { localStorage.setItem(prefsKey, JSON.stringify({ period, month })) } catch { /* quota */ } }
+  }, [hydrated, prefsKey, period, month])
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -237,7 +255,7 @@ export default function MarginsPage({ params }: { params: { brand: string } }) {
     } finally { setLoading(false) }
   }, [brand, period, month])
 
-  useEffect(() => { load() }, [load])
+  useEffect(() => { if (hydrated) load() }, [load, hydrated])
 
   const totals = useMemo(() => {
     const revenue  = rows.reduce((s, r) => s + r.revenue, 0)
