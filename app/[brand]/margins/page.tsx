@@ -70,6 +70,7 @@ export default function MarginsPage({ params }: { params: { brand: string } }) {
   const [basis, setBasis] = useState<'contribution' | 'loaded'>('contribution')
   // Charges hors produit/livraison (pub + frais fixes + frais transaction), au niveau période.
   const [overhead, setOverhead] = useState<{ marketing: number; fixed: number; fees: number; total: number } | null>(null)
+  const [partial, setPartial] = useState(false)  // période non clôturée (mois courant / fenêtre glissante)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -205,6 +206,7 @@ export default function MarginsPage({ params }: { params: { brand: string } }) {
       const daysInFromMonth = new Date(fy, fm, 0).getDate()
       const isFullMonth = fd === 1 && days === daysInFromMonth && fy === ty && fm === tm
       const ratio = isFullMonth ? 1 : days / 30.44
+      setPartial(!isFullMonth)  // pub non « mûrie » + charges au prorata → net à interpréter avec prudence
       const fixed = Math.round((fixedTeam + fixedInfra + fixedApp) * ratio)
 
       const feeRate = settingsRes.data?.transaction_fee_rate ?? 0.017
@@ -337,6 +339,13 @@ export default function MarginsPage({ params }: { params: { brand: string } }) {
                   </span>
                 </div>
               </div>
+              {partial && (
+                <div className="flex items-start gap-2 rounded-xl bg-[#fffbeb] border border-[#fcd34d] px-3 py-2 text-[11px] text-[#92400e] mt-3">
+                  <AlertTriangle size={13} className="shrink-0 mt-0.5" /> <span>
+                    Période <b>non clôturée</b> : la pub dépensée continue de générer des ventes après (attribution ~30&nbsp;j), donc le CA de la période est incomplet et ce résultat est <b>pessimiste</b>. Pour un vrai net, choisis un <b>mois clôturé</b> dans «&nbsp;Mois précis…&nbsp;».
+                  </span>
+                </div>
+              )}
               <p className="text-[11px] text-[#9b9b93] mt-3">
                 Précis au niveau de la période. Pub et frais fixes ne sont pas rattachés à un produit ; dans le tableau, la vue «&nbsp;Chargée&nbsp;» les répartit au prorata du CA (estimation).
               </p>
