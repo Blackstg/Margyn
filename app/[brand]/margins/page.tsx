@@ -3,6 +3,7 @@
 export const dynamic = 'force-dynamic'
 
 import { useState, useEffect, useCallback, useMemo, Fragment } from 'react'
+import { useSearchParams, useRouter, usePathname } from 'next/navigation'
 import { createBrowserClient } from '@supabase/auth-helpers-nextjs'
 import { ChevronRight, Percent, AlertTriangle } from 'lucide-react'
 
@@ -58,8 +59,16 @@ type SortKey = 'margin' | 'pct' | 'revenue'
 
 export default function MarginsPage({ params }: { params: { brand: string } }) {
   const { brand } = params
-  const [period, setPeriod]   = useState<Period>('mois')
-  const [month, setMonth]     = useState<string>('')  // '' = période glissante · sinon 'YYYY-MM'
+  // La sélection période/mois vit dans l'URL (?period=…|?month=YYYY-MM) : elle
+  // survit au refresh nativement (pas de localStorage) et donne un lien partageable.
+  const searchParams = useSearchParams()
+  const router = useRouter()
+  const pathname = usePathname()
+  const [period, setPeriod]   = useState<Period>(() => {
+    const p = searchParams.get('period')
+    return p === '7j' || p === '30j' || p === 'mois' ? p : 'mois'
+  })
+  const [month, setMonth]     = useState<string>(() => searchParams.get('month') ?? '')  // '' = période glissante · sinon 'YYYY-MM'
   const [rows, setRows]       = useState<ProductRow[]>([])
   const [loading, setLoading] = useState(true)
   const [sort, setSort]       = useState<SortKey>('margin')
@@ -71,24 +80,15 @@ export default function MarginsPage({ params }: { params: { brand: string } }) {
   // Charges hors produit/livraison (pub + frais fixes + frais transaction), au niveau période.
   const [overhead, setOverhead] = useState<{ marketing: number; fixed: number; fees: number; total: number } | null>(null)
   const [partial, setPartial] = useState(false)  // période non clôturée (mois courant / fenêtre glissante)
-  const [hydrated, setHydrated] = useState(false) // période/mois restaurés depuis le localStorage
 
-  // Restaure la période + le mois choisis (par marque) pour qu'un refresh les garde.
-  const prefsKey = `margins-period-${brand}`
+  // Reflète la sélection dans l'URL (un mois précis a priorité sur la période).
   useEffect(() => {
-    try {
-      const raw = localStorage.getItem(prefsKey)
-      if (raw) {
-        const p = JSON.parse(raw) as { period?: Period; month?: string }
-        if (p.period) setPeriod(p.period)
-        if (typeof p.month === 'string') setMonth(p.month)
-      }
-    } catch { /* pas de prefs */ }
-    setHydrated(true)
-  }, [prefsKey])
-  useEffect(() => {
-    if (hydrated) { try { localStorage.setItem(prefsKey, JSON.stringify({ period, month })) } catch { /* quota */ } }
-  }, [hydrated, prefsKey, period, month])
+    const qs = new URLSearchParams()
+    if (month) qs.set('month', month)
+    else qs.set('period', period)
+    const next = qs.toString()
+    if (next !== searchParams.toString()) router.replace(`${pathname}?${next}`, { scroll: false })
+  }, [period, month, pathname, router, searchParams])
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -255,7 +255,7 @@ export default function MarginsPage({ params }: { params: { brand: string } }) {
     } finally { setLoading(false) }
   }, [brand, period, month])
 
-  useEffect(() => { if (hydrated) load() }, [load, hydrated])
+  useEffect(() => { load() }, [load])
 
   const totals = useMemo(() => {
     const revenue  = rows.reduce((s, r) => s + r.revenue, 0)
