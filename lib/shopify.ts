@@ -247,6 +247,23 @@ async function fetchInventoryCosts(
     }
   }
 
+  // Fallback individuel : l'API batch omet parfois silencieusement le cost de
+  // certains items (bug Shopify) → on re-tente à l'unité, rate-limité et borné,
+  // sinon on perd le COGS de ces produits (ex. « Panier rangement couches »).
+  const missing = inventoryItemIds.filter((id) => !costMap.has(id))
+  const MAX_INDIVIDUAL = 80
+  for (const id of missing.slice(0, MAX_INDIVIDUAL)) {
+    await new Promise((r) => setTimeout(r, 350)) // reste sous le bucket ~2 req/s de Shopify
+    try {
+      const { data } = await shopifyFetch<{ inventory_item?: ShopifyInventoryItem }>(
+        config,
+        `inventory_items/${id}.json?fields=id,cost`
+      )
+      const cost = data.inventory_item?.cost
+      if (cost != null) costMap.set(id, parseFloat(cost))
+    } catch { /* laisse manquant : coût réellement absent de Shopify */ }
+  }
+
   return costMap
 }
 
