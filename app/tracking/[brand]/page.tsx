@@ -240,7 +240,8 @@ function phaseFromEvent(label: string, code: string | null, country: string | nu
   // Tri / arrivée dans la région de destination / remise au transporteur local.
   // NB : « Transmis au transporteur local » (pré-généré « will be delivered to X »)
   // est du bruit et NE compte pas — seul « remis au transporteur local » (réel) compte.
-  if (destSide && /centre de tri|sort facility|arrived at hub|\bhub\b|départ du centre|ready for outbound|outbound|remis au transporteur local|cargo terminal|livraison|\btri\b/.test(L))
+  // "acheminement / agence (régionale) de destination" = étapes domestiques GOFO en France.
+  if (destSide && /centre de tri|sort facility|arrived at hub|\bhub\b|départ du centre|ready for outbound|outbound|remis au transporteur local|cargo terminal|livraison|\btri\b|acheminement|agence/.test(L))
     return PHASE_IDX.sorting
 
   // Départ de l'entrepôt d'origine (Chine)
