@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createAdminClient } from '@/lib/supabase'
 import { register, getTrackInfo, normalize, mergeResults, CARRIER, type Track17Result, type TrackItem } from '@/lib/track17'
+import { getGofoResult, isGofoNumber } from '@/lib/gofo'
 
 // Transporteurs à interroger par marque (Moom expédie via YunExpress + Colissimo en fin de course)
 const BRAND_CARRIERS: Record<string, (number | undefined)[]> = {
@@ -271,18 +272,29 @@ export async function POST(
     let carrierName: string | null = null
     let hasCarrierData = false
     const effectiveTracking = latestTracking(fulfillment)
-    if (effectiveTracking && process.env.TRACK17_API_KEY) {
+    if (effectiveTracking) {
       try {
-        const t17 = await getOrRefresh17(effectiveTracking, brand, order.name)
-        if (t17 && t17.events.length > 0) {
-          finalEvents    = t17.events
-          finalStep      = t17.step
-          carrierEta     = { from: t17.eta_from, to: t17.eta_to }
-          carrierName    = t17.carrier_name
+        // 17Track (trajet international détaillé) + GOFO officiel (dernière ligne
+        // France, plus fraîche) pour les numéros GOFO. On fusionne : union des
+        // events, dédup à la seconde, step/statut max → suivi aussi frais que l'officiel.
+        const [t17, gofo] = await Promise.all([
+          process.env.TRACK17_API_KEY
+            ? getOrRefresh17(effectiveTracking, brand, order.name).catch(() => null)
+            : Promise.resolve(null),
+          isGofoNumber(effectiveTracking)
+            ? getGofoResult(effectiveTracking).catch(() => null)
+            : Promise.resolve(null),
+        ])
+        const merged = mergeResults([t17, gofo].filter(Boolean) as Track17Result[])
+        if (merged && merged.events.length > 0) {
+          finalEvents    = merged.events
+          finalStep      = merged.step
+          carrierEta     = { from: merged.eta_from, to: merged.eta_to }
+          carrierName    = merged.carrier_name
           hasCarrierData = true
         }
       } catch (e) {
-        console.error('[tracking 17track]', e)
+        console.error('[tracking carrier]', e)
       }
     }
 

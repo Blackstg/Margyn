@@ -134,7 +134,15 @@ export function mergeResults(results: (Track17Result | null)[]): Track17Result |
   const seen = new Set<string>()
   const events = rs.flatMap(r => r.events)
     .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
-    .filter(e => { const k = `${e.date}|${e.label}`; if (seen.has(k)) return false; seen.add(k); return true })
+    // Dédup à la SECONDE près (indépendant du format de date/du libellé) : un même
+    // scan physique remonté par 2 sources (ex. tri Paris via 17Track ET GOFO) a le
+    // même instant → on le fusionne au lieu de l'afficher en double.
+    .filter(e => {
+      const t = new Date(e.date).getTime()
+      const k = isNaN(t) ? `${e.date}|${e.label}` : String(Math.floor(t / 1000))
+      if (seen.has(k)) return false
+      seen.add(k); return true
+    })
   const withEvents = [...rs].sort((a, b) => b.events.length - a.events.length)
   const delivered = rs.some(r => r.delivered)
   return {
