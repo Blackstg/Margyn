@@ -278,13 +278,15 @@ function buildRealTimeline(result: TrackingResult, settings: TrackingSettings | 
   // au + ancien : en écrasant dateFor, on garde la date d'ENTRÉE (la plus ancienne)
   // dans chaque phase → dates croissantes. placeByIdx garde le lieu le + récent.
   const dateFor: Record<string, string> = {}
+  const latestDateByIdx: Record<number, string> = {}  // date du scan le + RÉCENT de la phase
   const placeByIdx: Record<number, string | null> = {}
   let maxIdx = 0
   for (const e of result.tracking_events) {  // du + récent au + ancien
     const idx = phaseFromEvent(e.label, e.code, countryOf(e.location))
     if (idx == null) continue
     if (idx > maxIdx) maxIdx = idx
-    dateFor[RT_PHASES[idx].key] = e.date
+    dateFor[RT_PHASES[idx].key] = e.date          // écrasé → garde la date d'ENTRÉE (la + ancienne)
+    if (latestDateByIdx[idx] == null) latestDateByIdx[idx] = e.date  // 1re vue = la + récente
     if (placeByIdx[idx] == null) placeByIdx[idx] = prettyPlace(e.location)
   }
   // "Livré" UNIQUEMENT si le transporteur confirme le statut Delivered (step 5),
@@ -318,7 +320,9 @@ function buildRealTimeline(result: TrackingResult, settings: TrackingSettings | 
       ? result.created_at
       : p.key === 'delivered'
         ? (dateFor.delivered ?? (delivered ? result.tracking_events?.[0]?.date : undefined))
-        : dateFor[p.key]
+        // Étape COURANTE : date du dernier scan (cohérente avec le lieu affiché, le + récent).
+        // Étapes passées : date d'entrée (pour un fil de dates croissantes).
+        : (i === lastReached ? (latestDateByIdx[i] ?? dateFor[p.key]) : dateFor[p.key])
     // Étapes à venir : date estimée sur CHACUNE, badge "estimé"
     if (status === 'upcoming') {
       const est = estForIdx[i] ?? null
