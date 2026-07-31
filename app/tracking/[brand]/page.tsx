@@ -254,6 +254,13 @@ function phaseFromEvent(label: string, code: string | null, country: string | nu
 
 // Date de livraison estimée, TOUJOURS dans le futur (rassurant) :
 // ETA transporteur si dispo → sinon commande + délai → si dépassée, glissante depuis le dernier event.
+// Pas de livraison le dimanche (France) → on décale l'estimation au lundi.
+function skipSunday(d: Date): Date {
+  const r = new Date(d)
+  if (r.getDay() === 0) r.setDate(r.getDate() + 1)
+  return r
+}
+
 function estimatedDeliveryDate(result: TrackingResult, settings: TrackingSettings | null): Date | null {
   const now = Date.now()
   const DAY = 24 * 3600 * 1000
@@ -286,7 +293,7 @@ function estimatedDeliveryDate(result: TrackingResult, settings: TrackingSetting
     d.setDate(d.getDate() + 3)
     if (d.getTime() < now) { d = new Date(); d.setDate(d.getDate() + 2) }
   }
-  return d
+  return skipSunday(d)
 }
 
 function buildRealTimeline(result: TrackingResult, settings: TrackingSettings | null): TLEvent[] {
@@ -326,10 +333,12 @@ function buildRealTimeline(result: TrackingResult, settings: TrackingSettings | 
     let prevMs = startMs
     upcoming.forEach((idx, k) => {
       // Réparti entre maintenant et la livraison estimée, mais avec AU MOINS 1 jour
-      // d'écart entre chaque étape (sinon plusieurs étapes tombent le même jour).
+      // d'écart entre chaque étape (sinon plusieurs étapes tombent le même jour),
+      // et jamais un dimanche (pas de livraison).
       const ms = Math.max(startMs + (endMs - startMs) * ((k + 1) / upcoming.length), prevMs + DAY)
-      prevMs = ms
-      estForIdx[idx] = new Date(ms).toLocaleDateString('fr-FR', { day: 'numeric', month: 'long' })
+      const dt = skipSunday(new Date(ms))
+      prevMs = dt.getTime()
+      estForIdx[idx] = dt.toLocaleDateString('fr-FR', { day: 'numeric', month: 'long' })
     })
   }
 
