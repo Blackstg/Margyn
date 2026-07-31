@@ -256,13 +256,33 @@ function phaseFromEvent(label: string, code: string | null, country: string | nu
 // ETA transporteur si dispo → sinon commande + délai → si dépassée, glissante depuis le dernier event.
 function estimatedDeliveryDate(result: TrackingResult, settings: TrackingSettings | null): Date | null {
   const now = Date.now()
+  const DAY = 24 * 3600 * 1000
   let d: Date | null = null
   if (result.carrier_eta?.to) d = new Date(result.carrier_eta.to)
   else if (settings) { d = new Date(result.created_at); d.setDate(d.getDate() + settings.estimated_days_max) }
   if (!d) return null
+
+  // Resserre selon l'AVANCEMENT réel : une fois le colis arrivé au centre de tri de
+  // destination (≈ 2 j du domicile) ou en cours de livraison (≈ 1 j), l'estimation
+  // « commande + délai max » devient trop large → on plafonne au dernier scan + délai court.
+  const delivered = result.step === 5
+  const lastScan = result.tracking_events?.[0]?.date
+  if (!delivered && lastScan) {
+    let phase = 0
+    for (const e of result.tracking_events ?? []) {
+      const idx = phaseFromEvent(e.label, e.code, countryOf(e.location))
+      if (idx != null && idx > phase) phase = idx
+    }
+    const capDays = phase >= PHASE_IDX.delivery ? 1 : phase >= PHASE_IDX.sorting ? 2 : null
+    if (capDays != null) {
+      let cap = new Date(new Date(lastScan).getTime() + capDays * DAY)
+      if (cap.getTime() < now) cap = new Date(now + DAY) // imminent
+      if (cap.getTime() < d.getTime()) d = cap
+    }
+  }
+
   if (d.getTime() < now) {
-    const latest = result.tracking_events?.[0]?.date
-    d = latest ? new Date(latest) : new Date()
+    d = lastScan ? new Date(lastScan) : new Date()
     d.setDate(d.getDate() + 3)
     if (d.getTime() < now) { d = new Date(); d.setDate(d.getDate() + 2) }
   }
