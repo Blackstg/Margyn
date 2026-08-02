@@ -254,10 +254,40 @@ function phaseFromEvent(label: string, code: string | null, country: string | nu
 
 // Date de livraison estimée, TOUJOURS dans le futur (rassurant) :
 // ETA transporteur si dispo → sinon commande + délai → si dépassée, glissante depuis le dernier event.
-// Pas de livraison le dimanche (France) → on décale l'estimation au lundi.
-function skipSunday(d: Date): Date {
-  const r = new Date(d)
-  if (r.getDay() === 0) r.setDate(r.getDate() + 1)
+// Dimanche de Pâques (algorithme de Meeus/Butcher, grégorien) — base des fériés mobiles.
+function easterSunday(year: number): Date {
+  const a = year % 19
+  const b = Math.floor(year / 100), c = year % 100
+  const d = Math.floor(b / 4), e = b % 4
+  const f = Math.floor((b + 8) / 25)
+  const g = Math.floor((b - f + 1) / 3)
+  const h = (19 * a + b - d - g + 15) % 30
+  const i = Math.floor(c / 4), k = c % 4
+  const l = (32 + 2 * e + 2 * i - h - k) % 7
+  const m = Math.floor((a + 11 * h + 22 * l) / 451)
+  const month = Math.floor((h + l - 7 * m + 114) / 31) // 3 = mars, 4 = avril
+  const day = ((h + l - 7 * m + 114) % 31) + 1
+  return new Date(Date.UTC(year, month - 1, day))
+}
+
+// Jour férié français (fixes + mobiles : lundi de Pâques, Ascension, lundi de Pentecôte).
+function isFrenchHoliday(d: Date): boolean {
+  const md = `${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(d.getUTCDate()).padStart(2, '0')}`
+  if (['01-01', '05-01', '05-08', '07-14', '08-15', '11-01', '11-11', '12-25'].includes(md)) return true
+  const e = easterSunday(d.getUTCFullYear())
+  return [1, 39, 50].some(off => {
+    const h = new Date(e.getTime() + off * 86_400_000)
+    return h.getUTCMonth() === d.getUTCMonth() && h.getUTCDate() === d.getUTCDate()
+  })
+}
+
+// Pas de livraison le dimanche ni les jours fériés (France) → prochain jour livrable.
+function nextDeliveryDay(d: Date): Date {
+  let r = new Date(d)
+  let guard = 0
+  while ((r.getUTCDay() === 0 || isFrenchHoliday(r)) && guard++ < 12) {
+    r = new Date(r.getTime() + 86_400_000)
+  }
   return r
 }
 
@@ -293,7 +323,7 @@ function estimatedDeliveryDate(result: TrackingResult, settings: TrackingSetting
     d.setDate(d.getDate() + 3)
     if (d.getTime() < now) { d = new Date(); d.setDate(d.getDate() + 2) }
   }
-  return skipSunday(d)
+  return nextDeliveryDay(d)
 }
 
 function buildRealTimeline(result: TrackingResult, settings: TrackingSettings | null): TLEvent[] {
@@ -336,7 +366,7 @@ function buildRealTimeline(result: TrackingResult, settings: TrackingSettings | 
       // d'écart entre chaque étape (sinon plusieurs étapes tombent le même jour),
       // et jamais un dimanche (pas de livraison).
       const ms = Math.max(startMs + (endMs - startMs) * ((k + 1) / upcoming.length), prevMs + DAY)
-      const dt = skipSunday(new Date(ms))
+      const dt = nextDeliveryDay(new Date(ms))
       prevMs = dt.getTime()
       estForIdx[idx] = dt.toLocaleDateString('fr-FR', { day: 'numeric', month: 'long' })
     })
