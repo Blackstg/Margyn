@@ -709,6 +709,18 @@ function PlanificateurView() {
         optimizedIndices = optimizeTSP(DEPOT_COORDS, validIndices, coords as ([number, number] | null)[])
       }
 
+      // Orientation : une boucle a la MÊME longueur dans les deux sens → on la parcourt
+      // en DÉMARRANT par l'arrêt le plus proche du dépôt (le chauffeur commence près,
+      // ex. Paris/Bourges) et le point le plus lointain (Savoie/Suisse) reste au cœur
+      // de la tournée plutôt qu'en tout début.
+      if (optimizedIndices.length >= 2) {
+        const first = coords[optimizedIndices[0]] as [number, number]
+        const last  = coords[optimizedIndices[optimizedIndices.length - 1]] as [number, number]
+        if (haversineKm(DEPOT_COORDS, last) < haversineKm(DEPOT_COORDS, first)) {
+          optimizedIndices.reverse()
+        }
+      }
+
       // 3. Assign new sequences to all stops (keep non-geocoded stops at end in original order)
       const nonValidIndices = stops.map((_, i) => i).filter((i) => coords[i] === null)
       const finalOrder = [...optimizedIndices, ...nonValidIndices]
