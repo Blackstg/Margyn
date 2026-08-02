@@ -663,78 +663,7 @@ function PlanificateurView() {
     if (!tour || tour.stops.length < 2) return
     setOptimizingTourId(tourId)
     try {
-      const token = process.env.NEXT_PUBLIC_MAPBOX_TOKEN ?? ''
-      const stops = [...tour.stops].sort((a, b) => a.sequence - b.sequence)
-
-      // 1. Geocode all stop addresses (address2-aware, see geoAddress)
-      const coords: ([number, number] | null)[] = await Promise.all(
-        stops.map((s) => geocodeParts(s, token))
-      )
-
-      // Filter out stops that failed geocoding
-      const validIndices = stops.map((_, i) => i).filter((i) => coords[i] !== null)
-      if (validIndices.length < 2) return
-
-      let optimizedIndices: number[]
-
-      if (validIndices.length <= 11) {
-        // 2a. Mapbox Optimization API (distances routières réelles). Le dépôt est
-        // envoyé UNE seule fois (roundtrip=true revient au départ) → 11 arrêts + dépôt
-        // = 12 = limite Mapbox. (Avant : dépôt envoyé 2× → 13 points > 12 → échec.)
-        const waypointCoords = validIndices.map((i) => coords[i] as [number, number])
-        const coordStr = [DEPOT_COORDS, ...waypointCoords]
-          .map(([lng, lat]) => `${lng},${lat}`)
-          .join(';')
-
-        const optRes = await fetch(
-          `https://api.mapbox.com/optimized-trips/v1/mapbox/driving/${coordStr}?roundtrip=true&source=first&access_token=${token}`
-        )
-        let mapboxOrder: number[] | null = null
-        if (optRes.ok) {
-          const optData = await optRes.json()
-          // waypoints[] est parallèle aux coords d'entrée [dépôt, stop0, …]. Chaque
-          // entrée a waypoint_index = position dans le trajet optimisé (0 = 1er).
-          const allWps: { waypoint_index: number }[] = optData.waypoints ?? []
-          const stopWps = allWps.slice(1) // enlève le dépôt (position 0)
-          const sorted = stopWps
-            .map((wp, inputPos) => ({ inputPos, tripPos: wp.waypoint_index }))
-            .sort((a, b) => a.tripPos - b.tripPos)
-          const order = sorted.map((x) => validIndices[x.inputPos])
-          if (order.length === validIndices.length) mapboxOrder = order
-        }
-        // Repli robuste : nearest-neighbor + 2-opt (à vol d'oiseau) si Mapbox échoue.
-        optimizedIndices = mapboxOrder ?? optimizeTSP(DEPOT_COORDS, validIndices, coords as ([number, number] | null)[])
-      } else {
-        // 2b. > 11 arrêts : nearest-neighbor + 2-opt (supprime les retours en arrière).
-        optimizedIndices = optimizeTSP(DEPOT_COORDS, validIndices, coords as ([number, number] | null)[])
-      }
-
-      // Orientation : une boucle a la MÊME longueur dans les deux sens → on la parcourt
-      // en DÉMARRANT par l'arrêt le plus proche du dépôt (le chauffeur commence près,
-      // ex. Paris/Bourges) et le point le plus lointain (Savoie/Suisse) reste au cœur
-      // de la tournée plutôt qu'en tout début.
-      if (optimizedIndices.length >= 2) {
-        const first = coords[optimizedIndices[0]] as [number, number]
-        const last  = coords[optimizedIndices[optimizedIndices.length - 1]] as [number, number]
-        if (haversineKm(DEPOT_COORDS, last) < haversineKm(DEPOT_COORDS, first)) {
-          optimizedIndices.reverse()
-        }
-      }
-
-      // 3. Assign new sequences to all stops (keep non-geocoded stops at end in original order)
-      const nonValidIndices = stops.map((_, i) => i).filter((i) => coords[i] === null)
-      const finalOrder = [...optimizedIndices, ...nonValidIndices]
-
-      await Promise.all(
-        finalOrder.map((stopIdx, newSeq) =>
-          fetch(`/api/delivery/stops/${stops[stopIdx].id}`, {
-            method: 'PATCH',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ sequence: newSeq + 1 }),
-          })
-        )
-      )
-
+      await optimizeTourStops(tour.stops)
       await fetchTours()
     } catch (e) {
       console.error('Route optimization failed', e)
@@ -2398,6 +2327,66 @@ function optimizeTSP(
   return best ?? nearestNeighborTSP(depot, validIndices, coords)
 }
 
+// Optimise l'ordre des arrêts d'une tournée et PERSISTE les nouvelles séquences.
+// Partagé entre la vue admin et la vue livreur → résultat identique. Renvoie true
+// si des séquences ont été réécrites.
+async function optimizeTourStops(stops: TourStop[]): Promise<boolean> {
+  if (stops.length < 2) return false
+  const token = process.env.NEXT_PUBLIC_MAPBOX_TOKEN ?? ''
+  const sorted = [...stops].sort((a, b) => a.sequence - b.sequence)
+
+  // Géocodage (les coords Shopify stockées sont utilisées en priorité, sans appel API).
+  const coords: ([number, number] | null)[] = await Promise.all(sorted.map((s) => geocodeParts(s, token)))
+  const validIndices = sorted.map((_, i) => i).filter((i) => coords[i] !== null)
+  if (validIndices.length < 2) return false
+
+  let optimizedIndices: number[]
+  if (validIndices.length <= 11 && token) {
+    // Mapbox Optimization API (routes réelles), dépôt en source unique (roundtrip).
+    const waypointCoords = validIndices.map((i) => coords[i] as [number, number])
+    const coordStr = [DEPOT_COORDS, ...waypointCoords].map(([lng, lat]) => `${lng},${lat}`).join(';')
+    let mapboxOrder: number[] | null = null
+    try {
+      const optRes = await fetch(
+        `https://api.mapbox.com/optimized-trips/v1/mapbox/driving/${coordStr}?roundtrip=true&source=first&access_token=${token}`
+      )
+      if (optRes.ok) {
+        const optData = await optRes.json()
+        const allWps: { waypoint_index: number }[] = optData.waypoints ?? []
+        const sortedWp = allWps.slice(1)
+          .map((wp, inputPos) => ({ inputPos, tripPos: wp.waypoint_index }))
+          .sort((a, b) => a.tripPos - b.tripPos)
+        const order = sortedWp.map((x) => validIndices[x.inputPos])
+        if (order.length === validIndices.length) mapboxOrder = order
+      }
+    } catch { /* repli TSP */ }
+    optimizedIndices = mapboxOrder ?? optimizeTSP(DEPOT_COORDS, validIndices, coords)
+  } else {
+    optimizedIndices = optimizeTSP(DEPOT_COORDS, validIndices, coords)
+  }
+
+  // Orientation : démarrer par l'arrêt le plus proche du dépôt (même distance dans
+  // les deux sens ; on commence près et on garde le point le plus lointain au cœur).
+  if (optimizedIndices.length >= 2) {
+    const first = coords[optimizedIndices[0]] as [number, number]
+    const last  = coords[optimizedIndices[optimizedIndices.length - 1]] as [number, number]
+    if (haversineKm(DEPOT_COORDS, last) < haversineKm(DEPOT_COORDS, first)) optimizedIndices.reverse()
+  }
+
+  const nonValidIndices = sorted.map((_, i) => i).filter((i) => coords[i] === null)
+  const finalOrder = [...optimizedIndices, ...nonValidIndices]
+  await Promise.all(
+    finalOrder.map((stopIdx, newSeq) =>
+      fetch(`/api/delivery/stops/${sorted[stopIdx].id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sequence: newSeq + 1 }),
+      })
+    )
+  )
+  return true
+}
+
 async function buildETAMap(
   sortedStops: TourStop[],
   coordsCache: Map<string, [number, number]>,
@@ -2566,6 +2555,7 @@ function LivreurView() {
   const [stopListSheet, setStopListSheet] = useState(false)
   const [optimizedOrder, setOptimizedOrder] = useState<string[] | null>(null)
   const [optimizing, setOptimizing] = useState(false)
+  const [optimizingTour, setOptimizingTour] = useState(false) // ré-optimisation persistée de la tournée
   const [optimizeError, setOptimizeError] = useState<string | null>(null)
   const [nearbyOrders, setNearbyOrders]   = useState<ShopifyOrder[]>([])
   const [nearbyLoading, setNearbyLoading] = useState(false)
@@ -2885,6 +2875,25 @@ function LivreurView() {
       }
     } finally {
       setOptimizing(false)
+    }
+  }
+
+  // Ré-optimise TOUTE la tournée et SAUVEGARDE le nouvel ordre (même algo que l'admin) —
+  // pour que le livreur n'ait plus à demander une optimisation le week-end.
+  async function handleOptimizeTour() {
+    if (!tour || tour.stops.length < 2) return
+    setOptimizingTour(true)
+    setOptimizeError(null)
+    try {
+      const ok = await optimizeTourStops(tour.stops)
+      if (ok) {
+        setOptimizedOrder(null) // repart sur l'ordre sauvegardé (annule l'ordre GPS temporaire)
+        await fetchTours()
+      }
+    } catch {
+      setOptimizeError('Optimisation impossible, réessaie')
+    } finally {
+      setOptimizingTour(false)
     }
   }
 
@@ -3339,6 +3348,28 @@ function LivreurView() {
               >
                 <MapIcon size={20} strokeWidth={1.8} />
                 Voir l&apos;itinéraire
+              </button>
+              <button
+                onClick={handleOptimizeTour}
+                disabled={sortedStops.length < 2 || optimizingTour}
+                className="w-full flex items-center justify-center gap-3 py-4 rounded-[16px] border border-white/25 text-white font-semibold text-base disabled:opacity-30 active:bg-white/10 transition-colors"
+              >
+                {optimizingTour ? (
+                  <>
+                    <svg className="animate-spin h-5 w-5" viewBox="0 0 24 24" fill="none">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" />
+                    </svg>
+                    Optimisation…
+                  </>
+                ) : (
+                  <>
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
+                    </svg>
+                    Optimiser la tournée
+                  </>
+                )}
               </button>
               <button
                 onClick={() => { setReorderStops([...sortedStops]); setScreen('reorder') }}
