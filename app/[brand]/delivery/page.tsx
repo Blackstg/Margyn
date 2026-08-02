@@ -2175,6 +2175,42 @@ function haversineKm(a: [number, number], b: [number, number]): number {
   return R * 2 * Math.atan2(Math.sqrt(aVal), Math.sqrt(1 - aVal))
 }
 
+// Cœur de la Suisse (polygone [lng,lat], légèrement en retrait de la frontière pour
+// ne PAS pénaliser les routes françaises qui la longent). On pénalise fortement tout
+// tronçon qui le traverse → l'optimiseur garde la tournée en France (ex. Alsace →
+// Savoie via Besançon, pas via Bâle-Genève). On veut passer le moins possible en Suisse.
+const CH_CORE: [number, number][] = [
+  [6.55, 46.35], [6.9, 47.05], [7.5, 47.45], [8.8, 47.55], [9.6, 47.35],
+  [9.9, 46.8], [9.2, 46.05], [7.6, 45.92], [6.8, 46.0], [6.55, 46.35],
+]
+const CH_PENALTY_KM = 500
+
+function pointInPoly(p: [number, number], poly: [number, number][]): boolean {
+  const [x, y] = p
+  let inside = false
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    const [xi, yi] = poly[i]
+    const [xj, yj] = poly[j]
+    if ((yi > y) !== (yj > y) && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi) inside = !inside
+  }
+  return inside
+}
+function segIntersect(p1: [number, number], p2: [number, number], p3: [number, number], p4: [number, number]): boolean {
+  const ccw = (a: [number, number], b: [number, number], c: [number, number]) =>
+    (c[1] - a[1]) * (b[0] - a[0]) > (b[1] - a[1]) * (c[0] - a[0])
+  return ccw(p1, p3, p4) !== ccw(p2, p3, p4) && ccw(p1, p2, p3) !== ccw(p1, p2, p4)
+}
+function crossesSwitzerland(a: [number, number], b: [number, number]): boolean {
+  if (pointInPoly(a, CH_CORE) || pointInPoly(b, CH_CORE)) return true
+  for (let i = 0; i < CH_CORE.length - 1; i++) if (segIntersect(a, b, CH_CORE[i], CH_CORE[i + 1])) return true
+  return false
+}
+// Coût d'un tronçon pour l'optimisation : distance à vol d'oiseau + grosse pénalité
+// si le tronçon traverse la Suisse.
+function legCostKm(a: [number, number], b: [number, number]): number {
+  return haversineKm(a, b) + (crossesSwitzerland(a, b) ? CH_PENALTY_KM : 0)
+}
+
 // Returns indices into the `validIndices` slice, sorted by nearest-neighbor from depot
 function nearestNeighborTSP(
   depot: [number, number],
@@ -2190,7 +2226,7 @@ function nearestNeighborTSP(
     for (const idx of remaining) {
       const c = coords[idx]
       if (!c) continue
-      const d = haversineKm(current, c)
+      const d = legCostKm(current, c)
       if (d < bestDist) { bestDist = d; best = idx }
     }
     if (best === null) break
@@ -2226,8 +2262,8 @@ function twoOptImprove(
         const cj = pt(route[j])
         // Gain = (arêtes retirées) − (arêtes ajoutées) en inversant le segment i..j
         const delta =
-          haversineKm(A, cj) + haversineKm(ci, B) -
-          haversineKm(A, ci) - haversineKm(cj, B)
+          legCostKm(A, cj) + legCostKm(ci, B) -
+          legCostKm(A, ci) - legCostKm(cj, B)
         if (delta < -1e-6) {
           let lo = i, hi = j
           while (lo < hi) { const t = route[lo]; route[lo] = route[hi]; route[hi] = t; lo++; hi-- }
@@ -2248,9 +2284,9 @@ function routeLenKm(
 ): number {
   if (order.length === 0) return 0
   const pt = (i: number) => coords[i] as [number, number]
-  let tot = haversineKm(depot, pt(order[0]))
-  for (let i = 0; i < order.length - 1; i++) tot += haversineKm(pt(order[i]), pt(order[i + 1]))
-  return tot + haversineKm(pt(order[order.length - 1]), depot)
+  let tot = legCostKm(depot, pt(order[0]))
+  for (let i = 0; i < order.length - 1; i++) tot += legCostKm(pt(order[i]), pt(order[i + 1]))
+  return tot + legCostKm(pt(order[order.length - 1]), depot)
 }
 
 // Amélioration Or-opt : déplace des segments de 1 à 3 arrêts consécutifs à une
@@ -2275,12 +2311,12 @@ function orOptImprove(
         const prevA = i === 0 ? depot : pt(route[i - 1])
         const nextA = i + seg >= n ? depot : pt(route[i + seg])
         const removed =
-          haversineKm(prevA, pt(block[0])) + haversineKm(pt(block[seg - 1]), nextA) - haversineKm(prevA, nextA)
+          legCostKm(prevA, pt(block[0])) + legCostKm(pt(block[seg - 1]), nextA) - legCostKm(prevA, nextA)
         const rest = route.slice(0, i).concat(route.slice(i + seg))
         for (let k = 0; k <= rest.length; k++) {
           const P = k === 0 ? depot : pt(rest[k - 1])
           const Q = k >= rest.length ? depot : pt(rest[k])
-          const added = haversineKm(P, pt(block[0])) + haversineKm(pt(block[seg - 1]), Q) - haversineKm(P, Q)
+          const added = legCostKm(P, pt(block[0])) + legCostKm(pt(block[seg - 1]), Q) - legCostKm(P, Q)
           if (added - removed < -1e-6) {
             route = rest.slice(0, k).concat(block, rest.slice(k))
             improved = true
