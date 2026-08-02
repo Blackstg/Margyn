@@ -2299,13 +2299,91 @@ function twoOptImprove(
   return route
 }
 
-// Trajet optimisé (dépôt → … → dépôt) : nearest-neighbor puis 2-opt.
+// Longueur totale d'un trajet dépôt → arrêts → dépôt (à vol d'oiseau).
+function routeLenKm(
+  depot: [number, number],
+  order: number[],
+  coords: ([number, number] | null)[]
+): number {
+  if (order.length === 0) return 0
+  const pt = (i: number) => coords[i] as [number, number]
+  let tot = haversineKm(depot, pt(order[0]))
+  for (let i = 0; i < order.length - 1; i++) tot += haversineKm(pt(order[i]), pt(order[i + 1]))
+  return tot + haversineKm(pt(order[order.length - 1]), depot)
+}
+
+// Amélioration Or-opt : déplace des segments de 1 à 3 arrêts consécutifs à une
+// MEILLEURE position dans le trajet. Le 2-opt (simple inversion de segment) ne sait
+// pas réinsérer un arrêt « orphelin » laissé en fin de parcours par le nearest-neighbor
+// (ex. descendre en Savoie puis remonter en Champagne) — l'Or-opt, si.
+function orOptImprove(
+  depot: [number, number],
+  order: number[],
+  coords: ([number, number] | null)[]
+): number[] {
+  const pt = (idx: number) => coords[idx] as [number, number]
+  let route = order.slice()
+  let improved = true
+  let guard = 0
+  while (improved && guard++ < 200) {
+    improved = false
+    const n = route.length
+    for (const seg of [1, 2, 3]) {
+      for (let i = 0; i + seg <= n; i++) {
+        const block = route.slice(i, i + seg)
+        const prevA = i === 0 ? depot : pt(route[i - 1])
+        const nextA = i + seg >= n ? depot : pt(route[i + seg])
+        const removed =
+          haversineKm(prevA, pt(block[0])) + haversineKm(pt(block[seg - 1]), nextA) - haversineKm(prevA, nextA)
+        const rest = route.slice(0, i).concat(route.slice(i + seg))
+        for (let k = 0; k <= rest.length; k++) {
+          const P = k === 0 ? depot : pt(rest[k - 1])
+          const Q = k >= rest.length ? depot : pt(rest[k])
+          const added = haversineKm(P, pt(block[0])) + haversineKm(pt(block[seg - 1]), Q) - haversineKm(P, Q)
+          if (added - removed < -1e-6) {
+            route = rest.slice(0, k).concat(block, rest.slice(k))
+            improved = true
+            break
+          }
+        }
+        if (improved) break
+      }
+      if (improved) break
+    }
+  }
+  return route
+}
+
+// Trajet optimisé (dépôt → … → dépôt). Multi-départ nearest-neighbor puis
+// 2-opt + Or-opt en boucle jusqu'à convergence ; on garde le meilleur trajet.
 function optimizeTSP(
   depot: [number, number],
   validIndices: number[],
   coords: ([number, number] | null)[]
 ): number[] {
-  return twoOptImprove(depot, nearestNeighborTSP(depot, validIndices, coords), coords)
+  const localSearch = (start: number[]): number[] => {
+    let r = start
+    for (let it = 0; it < 8; it++) {
+      const before = routeLenKm(depot, r, coords)
+      r = orOptImprove(depot, twoOptImprove(depot, r, coords), coords)
+      if (routeLenKm(depot, r, coords) >= before - 1e-6) break
+    }
+    return r
+  }
+  // Départs multiples : depuis le dépôt + quelques arrêts échantillonnés (le
+  // nearest-neighbor est sensible au point de départ → on essaie plusieurs graines).
+  const seeds: [number, number][] = [depot]
+  for (let i = 0; i < validIndices.length && seeds.length < 10; i += 5) {
+    seeds.push(coords[validIndices[i]] as [number, number])
+  }
+  let best: number[] | null = null
+  let bestLen = Infinity
+  for (const seed of seeds) {
+    const r = localSearch(nearestNeighborTSP(seed, validIndices, coords))
+    const L = routeLenKm(depot, r, coords)
+    if (L < bestLen) { bestLen = L; best = r }
+  }
+  return best ?? nearestNeighborTSP(depot, validIndices, coords)
 }
 
 async function buildETAMap(
