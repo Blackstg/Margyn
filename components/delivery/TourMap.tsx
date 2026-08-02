@@ -222,18 +222,32 @@ export default function TourMap({ stops, onBack, precomputedCoords, onMarkDelive
             .addTo(map)
         })
 
-        // Route line via Directions API
-        const capped = routeWaypoints.slice(0, 25)
-        if (capped.length >= 2) {
+        // Route line via Directions API. L'API est limitée à 25 points/requête →
+        // on DÉCOUPE en tronçons de 25 (chevauchement d'1 point pour raccorder) et
+        // on concatène les géométries, pour tracer TOUTE la tournée (pas juste les 25
+        // premiers arrêts — avant, les arrêts au-delà du 25e n'avaient pas de ligne).
+        if (routeWaypoints.length >= 2) {
           try {
-            const coordStr = capped.map((c) => c.join(',')).join(';')
-            const dirRes = await fetch(
-              `https://api.mapbox.com/directions/v5/mapbox/driving/${coordStr}?geometries=geojson&overview=full&access_token=${token}`
-            )
-            if (dirRes.ok && !cancelled) {
+            const MAX = 25
+            const merged: [number, number][] = []
+            let ok = true
+            for (let start = 0; start < routeWaypoints.length - 1; start += MAX - 1) {
+              const chunk = routeWaypoints.slice(start, start + MAX)
+              if (chunk.length < 2) break
+              const coordStr = chunk.map((c) => c.join(',')).join(';')
+              const dirRes = await fetch(
+                `https://api.mapbox.com/directions/v5/mapbox/driving/${coordStr}?geometries=geojson&overview=full&access_token=${token}`
+              )
+              if (!dirRes.ok) { ok = false; break }
               const dirData = await dirRes.json()
-              const geometry = dirData.routes?.[0]?.geometry
-              if (geometry) {
+              const coords = dirData.routes?.[0]?.geometry?.coordinates as [number, number][] | undefined
+              if (!coords?.length) { ok = false; break }
+              if (merged.length) coords.shift() // évite de dupliquer le point de raccord
+              merged.push(...coords)
+            }
+            if (ok && merged.length && !cancelled) {
+              const geometry = { type: 'LineString' as const, coordinates: merged }
+              {
                 map.addSource('route', {
                   type: 'geojson',
                   data: { type: 'Feature', properties: {}, geometry },
