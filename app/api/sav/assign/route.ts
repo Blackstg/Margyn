@@ -16,12 +16,25 @@ export async function GET() {
 }
 
 export async function POST(req: NextRequest) {
-  const body = await req.json().catch(() => ({})) as { ticket_id?: number; assignee?: string | null; updated_by?: string }
+  const body = await req.json().catch(() => ({})) as { ticket_id?: number; assignee?: string | null; updated_by?: string; claim?: boolean }
   const ticket_id = Number(body.ticket_id)
   if (!ticket_id) return NextResponse.json({ error: 'ticket_id requis' }, { status: 400 })
 
   const sb = createAdminClient()
   const assignee = (body.assignee ?? '').toString().trim()
+
+  // Mode « claim » : revendication à l'ouverture — n'attribue QUE si le ticket n'est
+  // pas déjà pris (insert-si-absent), sans écraser un agent existant. Renvoie le
+  // détenteur réel pour que l'UI se cale dessus.
+  if (body.claim && assignee) {
+    await sb.from('sav_assignments').upsert(
+      { ticket_id, assignee, updated_by: body.updated_by ?? null, updated_at: new Date().toISOString() },
+      { onConflict: 'ticket_id', ignoreDuplicates: true },
+    )
+    const { data: row } = await sb.from('sav_assignments').select('assignee').eq('ticket_id', ticket_id).maybeSingle()
+    return NextResponse.json({ ok: true, assignee: (row?.assignee ?? assignee) })
+  }
+
   if (assignee) {
     const { error } = await sb.from('sav_assignments').upsert(
       { ticket_id, assignee, updated_by: body.updated_by ?? null, updated_at: new Date().toISOString() },

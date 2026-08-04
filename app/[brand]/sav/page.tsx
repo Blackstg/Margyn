@@ -100,10 +100,11 @@ function fmtTime(iso: string) {
 
 // ─── Attribution des tickets (qui répond) ──────────────────────────────────────
 
-const ASSIGNEES = ['Satiana', 'Todi'] as const
+const ASSIGNEES = ['Satiana', 'Todi', 'Lary'] as const
 const ASSIGNEE_COLORS: Record<string, [string, string]> = {
   Satiana: ['#ede9fe', '#6d28d9'],
   Todi:    ['#dcfce7', '#15803d'],
+  Lary:    ['#dbeafe', '#1d4ed8'],
 }
 
 function AssigneePill({ name, selected }: { name: string; selected?: boolean }) {
@@ -120,36 +121,48 @@ function AssigneePill({ name, selected }: { name: string; selected?: boolean }) 
 }
 
 // Barre d'attribution au-dessus du détail d'un ticket — « Qui répond ? »
-function AssignBar({ ticketId, assignee, onAssign }: {
+function AssignBar({ ticketId, assignee, onAssign, myName }: {
   ticketId: number
   assignee?: string
   onAssign: (ticketId: number, assignee: string | null) => void
+  myName?: string
 }) {
   const options: { val: string | null; label: string; color: string }[] = [
     { val: null, label: 'Non attribué', color: '#9b9b93' },
     ...ASSIGNEES.map(a => ({ val: a as string | null, label: a, color: ASSIGNEE_COLORS[a]?.[1] ?? '#6b6b63' })),
   ]
+  // Ticket pris par un AUTRE agent → avertissement (le blocage réel est à l'envoi).
+  const takenByOther = !!assignee && !!myName && assignee !== myName
   return (
-    <div className="shrink-0 flex items-center gap-3 px-6 py-2.5 border-b border-[#eeede9] bg-[#faf9f7] flex-wrap">
-      <span className="text-[11px] font-bold uppercase tracking-[0.1em] text-[#9b9b93]">Qui répond ?</span>
-      <div className="flex items-center gap-1.5">
-        {options.map(opt => {
-          const active = (assignee ?? null) === opt.val
-          return (
-            <button
-              key={opt.label}
-              onClick={() => onAssign(ticketId, opt.val)}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold border transition-colors"
-              style={active
-                ? { background: opt.color, color: '#fff', borderColor: opt.color }
-                : { background: '#fff', color: '#6b6b63', borderColor: '#e8e8e4' }}
-            >
-              <span className="text-[13px] leading-none" style={{ opacity: active ? 1 : 0 }}>✓</span>
-              {opt.label}
-            </button>
-          )
-        })}
+    <div className="shrink-0 border-b border-[#eeede9] bg-[#faf9f7]">
+      <div className="flex items-center gap-3 px-6 py-2.5 flex-wrap">
+        <span className="text-[11px] font-bold uppercase tracking-[0.1em] text-[#9b9b93]">Qui répond ?</span>
+        <div className="flex items-center gap-1.5">
+          {options.map(opt => {
+            const active = (assignee ?? null) === opt.val
+            return (
+              <button
+                key={opt.label}
+                onClick={() => onAssign(ticketId, opt.val)}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold border transition-colors"
+                style={active
+                  ? { background: opt.color, color: '#fff', borderColor: opt.color }
+                  : { background: '#fff', color: '#6b6b63', borderColor: '#e8e8e4' }}
+              >
+                <span className="text-[13px] leading-none" style={{ opacity: active ? 1 : 0 }}>✓</span>
+                {opt.label}
+              </button>
+            )
+          })}
+        </div>
       </div>
+      {takenByOther && (
+        <div className="px-6 pb-2.5 -mt-1">
+          <p className="text-[12px] font-semibold text-[#b45309] bg-[#fffbeb] border border-[#fcd34d] rounded-lg px-3 py-2">
+            ⚠️ Ticket déjà pris en charge par <b>{assignee}</b>. Ne réponds pas en double — l&apos;envoi sera bloqué. Reprends-le seulement si nécessaire (bouton {myName}).
+          </p>
+        </div>
+      )}
     </div>
   )
 }
@@ -1932,6 +1945,23 @@ export default function SavPage() {
     } catch { /* optimiste — l'UI reste à jour */ }
   }
 
+  // Revendication à l'OUVERTURE : dès qu'un agent ouvre un ticket non attribué, il
+  // se le réserve (insert-si-absent, ne vole pas un ticket déjà pris) → les autres
+  // agents voient tout de suite qu'il est pris. Le vrai blocage est côté serveur à l'envoi.
+  async function claimOnOpen(ticketId: number) {
+    if (!(ASSIGNEES as readonly string[]).includes(myName)) return // admin/non-agent : pas d'auto-claim
+    if (assignments[ticketId]) return                              // déjà attribué
+    setAssignments(prev => ({ ...prev, [ticketId]: myName }))      // optimiste
+    try {
+      const r = await fetch('/api/sav/assign', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ticket_id: ticketId, assignee: myName, updated_by: myEmail, claim: true }),
+      })
+      const d = await r.json() as { assignee?: string }
+      if (d.assignee) setAssignments(prev => ({ ...prev, [ticketId]: d.assignee! })) // se cale sur le détenteur réel
+    } catch { /* optimiste */ }
+  }
+
   // ── Ticket click ──────────────────────────────────────────────────────────
   function handleTicketClick(raw: RawTicket) {
     setSelectedId(raw.ticket_id)
@@ -1940,6 +1970,7 @@ export default function SavPage() {
     if (!ticketStartTimes.current[raw.ticket_id]) {
       ticketStartTimes.current[raw.ticket_id] = Date.now()
     }
+    claimOnOpen(raw.ticket_id)
     if (!processedCache[raw.ticket_id]) processTicket(raw)
   }
 
@@ -2350,7 +2381,7 @@ export default function SavPage() {
               ? <CenterSkeleton />
               : selectedProcessed
                 ? <>
-                    <AssignBar ticketId={selectedProcessed.ticket_id} assignee={assignments[selectedProcessed.ticket_id]} onAssign={assignTicket} />
+                    <AssignBar ticketId={selectedProcessed.ticket_id} assignee={assignments[selectedProcessed.ticket_id]} onAssign={assignTicket} myName={myName} />
                     <TicketDetail ticket={selectedProcessed} refreshKey={commentRefreshKey} />
                   </>
                 : <CenterEmpty />
