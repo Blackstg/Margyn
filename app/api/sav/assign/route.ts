@@ -1,4 +1,4 @@
-// Attribution des tickets SAV Mōom (qui répond : Satiana / Todi).
+// Attribution des tickets SAV Mōom (qui répond : agents SAV).
 //   GET  → { assignments: { [ticket_id]: assignee } }
 //   POST { ticket_id, assignee, updated_by }  → upsert (assignee null → désattribue)
 import { NextRequest, NextResponse } from 'next/server'

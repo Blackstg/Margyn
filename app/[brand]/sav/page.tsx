@@ -100,10 +100,9 @@ function fmtTime(iso: string) {
 
 // ─── Attribution des tickets (qui répond) ──────────────────────────────────────
 
-const ASSIGNEES = ['Satiana', 'Todi', 'Lary'] as const
+const ASSIGNEES = ['Satiana', 'Lary'] as const
 const ASSIGNEE_COLORS: Record<string, [string, string]> = {
   Satiana: ['#ede9fe', '#6d28d9'],
-  Todi:    ['#dcfce7', '#15803d'],
   Lary:    ['#dbeafe', '#1d4ed8'],
 }
 
@@ -1801,7 +1800,7 @@ export default function SavPage() {
       const meta = data.user?.user_metadata ?? {}
       const name = (meta.full_name ?? meta.name ?? '') as string
       setMyName(name)
-      // Au 1er chargement, si l'utilisateur EST un agent SAV (Satiana/Todi), on
+      // Au 1er chargement, si l'utilisateur EST un agent SAV (Satiana/Lary), on
       // ouvre par défaut sur « ses » tickets. L'admin voit tout.
       if (!filterInit.current) {
         filterInit.current = true
@@ -1922,7 +1921,7 @@ export default function SavPage() {
 
   useEffect(() => { load() }, [load])
 
-  // ── Attributions des tickets (qui répond : Satiana / Todi) ────────────────
+  // ── Attributions des tickets (qui répond : agents SAV) ────────────────
   useEffect(() => {
     fetch('/api/sav/assign')
       .then(r => r.json())
