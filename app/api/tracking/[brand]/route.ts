@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createAdminClient } from '@/lib/supabase'
-import { register, getTrackInfo, normalize, mergeResults, CARRIER, type Track17Result, type TrackItem } from '@/lib/track17'
+import { register, getTrackInfo, normalize, mergeResults, CARRIER, type Track17Result, type Track17Event, type TrackItem } from '@/lib/track17'
 import { getGofoResult, isGofoNumber } from '@/lib/gofo'
 
 // Transporteurs à interroger par marque (Moom expédie via YunExpress + Colissimo en fin de course)
@@ -73,6 +73,10 @@ const SHOPIFY: Record<string, { shop: string; token: string }> = {
   moom: { shop: process.env.SHOPIFY_MOOM_SHOP!, token: process.env.SHOPIFY_MOOM_ACCESS_TOKEN! },
   krom: { shop: process.env.SHOPIFY_KROM_SHOP!, token: process.env.SHOPIFY_KROM_ACCESS_TOKEN! },
 }
+
+// Pays plausibles sur les lignes Chine → Europe/France (pour filtrer les codes pays
+// aberrants renvoyés par certains transporteurs, ex. "US" à la place de "FR").
+const PLAUSIBLE_COUNTRIES = new Set(['CN', 'HK', 'TW', 'FR', 'BE', 'DE', 'NL', 'LU', 'GB', 'ES', 'IT', 'CH', 'PT', 'AT', 'PL'])
 
 const STATUS_LABELS: Record<string, string> = {
   label_printed:      'Étiquette créée',
@@ -252,12 +256,26 @@ export async function POST(
             .then(({ fulfillment_events }) =>
               [...fulfillment_events]
                 .sort((a, b) => new Date(b.happened_at).getTime() - new Date(a.happened_at).getTime())
-                .map((e) => ({
-                  label:   STATUS_LABELS[e.status] ?? e.status,
-                  message: e.message ?? null,
-                  date:    e.happened_at,
-                  location: [e.city, e.country].filter(Boolean).join(', ') || null,
-                }))
+                .map((e): Track17Event => {
+                  // Assainit le pays : ces colis vont Chine → Europe/France, jamais les
+                  // US. Les transporteurs renvoient parfois un code pays aberrant (ex.
+                  // "Paris, US" pour Paris FR) → on l'ignore plutôt que d'afficher un faux pays.
+                  const cc = (e.country ?? '').toUpperCase()
+                  const country = PLAUSIBLE_COUNTRIES.has(cc) ? cc : null
+                  const inFrance = country === 'FR'
+                  return {
+                    // Un scan "in_transit" en France = colis arrivé → « Au centre de tri »
+                    // côté affichage (et non « transit international »).
+                    label:    inFrance && e.status === 'in_transit' ? 'Arrivé en France' : (STATUS_LABELS[e.status] ?? e.status),
+                    message:  e.message ?? null,
+                    date:     e.happened_at,
+                    location: [e.city, country].filter(Boolean).join(', ') || null,
+                    code:     e.status === 'delivered' ? 'Delivered'
+                            : e.status === 'out_for_delivery' ? 'OutForDelivery'
+                            : e.status === 'confirmed' ? 'InfoReceived'
+                            : 'InTransit_Other',
+                  }
+                })
             )
             .catch(() => [])
         : Promise.resolve([]),
