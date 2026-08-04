@@ -1449,6 +1449,9 @@ export default function SettingsPage() {
                   </div>
                 </div>
 
+                {/* Ventes privées (Choose, Veepee…) */}
+                <PrivateSalesSection brand={b} />
+
                 {/* Shipping */}
                 <div className="bg-white rounded-[20px] shadow-[0_2px_16px_rgba(0,0,0,0.06)] overflow-hidden">
                   <div className="px-6 py-4 border-b border-[#f0f0ee]">
@@ -1526,6 +1529,114 @@ export default function SettingsPage() {
         <ExclusionSection brand={activeBrand} />
 
       </main>
+    </div>
+  )
+}
+
+// ─── Ventes privées (Choose, Veepee…) ────────────────────────────────────────
+// Ventes sur sites de vente privés : à 0 sur Shopify → on saisit le CA réel + les
+// fees de la plateforme. Le CA s'ajoute au dashboard, les fees sont déduites du net.
+interface PrivateSaleRow { id: string; source: string; amount: string; fees: string }
+function PrivateSalesSection({ brand }: { brand: string }) {
+  const [month, setMonth] = useState<string>(() => {
+    const d = new Date(); d.setMonth(d.getMonth() - 1)
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-01`
+  })
+  const [rows, setRows] = useState<PrivateSaleRow[]>([])
+  const [loading, setLoading] = useState(true)
+  const [save, setSave] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle')
+
+  const load = useCallback(async (m: string) => {
+    setLoading(true)
+    const { data } = await supabase.from('supplementary_revenue')
+      .select('id, source, amount, fees').eq('brand', brand).eq('month', m)
+    const list = (data ?? []) as { id: string | number; source: string | null; amount: number | null; fees: number | null }[]
+    setRows(list.map((r) => ({ id: uid(), source: r.source ?? '', amount: String(r.amount ?? ''), fees: String(r.fees ?? '') })))
+    setLoading(false)
+  }, [brand])
+
+  useEffect(() => { load(month) }, [month, load])
+
+  const change = (id: string, field: 'source' | 'amount' | 'fees', v: string) =>
+    setRows((prev) => prev.map((r) => (r.id === id ? { ...r, [field]: v } : r)))
+  const add = () => setRows((prev) => [...prev, { id: uid(), source: '', amount: '', fees: '' }])
+  const del = (id: string) => setRows((prev) => prev.filter((r) => r.id !== id))
+
+  const totalCa   = rows.reduce((s, r) => s + (parseFloat(r.amount) || 0), 0)
+  const totalFees = rows.reduce((s, r) => s + (parseFloat(r.fees) || 0), 0)
+
+  async function onSave() {
+    setSave('saving')
+    const valid = rows.filter((r) => r.source.trim() && parseFloat(r.amount) > 0)
+    try {
+      await supabase.from('supplementary_revenue').delete().eq('brand', brand).eq('month', month)
+      if (valid.length > 0) {
+        const { error } = await supabase.from('supplementary_revenue').insert(
+          valid.map((r) => ({ brand, month, source: r.source.trim(), amount: parseFloat(r.amount), fees: parseFloat(r.fees) || 0 }))
+        )
+        if (error) throw error
+      }
+      setSave('saved'); setTimeout(() => setSave('idle'), 2500)
+      load(month)
+    } catch { setSave('error'); setTimeout(() => setSave('idle'), 3000) }
+  }
+
+  return (
+    <div>
+      <p className="text-xs font-semibold text-[#6b6b63] uppercase tracking-wider mb-3">Ventes privées (Choose, Veepee…)</p>
+      <div className="bg-white rounded-[20px] shadow-[0_2px_16px_rgba(0,0,0,0.06)] overflow-hidden">
+        <div className="px-6 py-4 border-b border-[#f0f0ee] flex items-center justify-between gap-3 flex-wrap">
+          <div>
+            <h3 className="text-sm font-semibold text-[#1a1a2e]">Ventes sur sites de vente privés</h3>
+            <p className="text-xs text-[#6b6b63] mt-0.5">CA réel encaissé (Shopify à 0) + fees plateforme · +CA sur le dashboard, fees déduites du net (hors ROAS)</p>
+          </div>
+          <MonthNav month={month} onChange={setMonth} />
+        </div>
+        {loading ? (
+          <div className="px-6 py-6 text-sm text-[#9b9b93]">Chargement…</div>
+        ) : (
+          <div className="px-6 py-4 space-y-2">
+            <div className="flex items-center gap-2 text-[10px] font-semibold text-[#9b9b93] uppercase tracking-wide px-1">
+              <span className="flex-1">Plateforme / campagne</span>
+              <span className="w-24 text-right">CA €</span>
+              <span className="w-24 text-right">Fees €</span>
+              <span className="w-6" />
+            </div>
+            {rows.length === 0 && <p className="text-sm text-[#9b9b93] px-1 py-2">Aucune vente privée ce mois-ci.</p>}
+            {rows.map((r) => (
+              <div key={r.id} className="flex items-center gap-2">
+                <input value={r.source} onChange={(e) => change(r.id, 'source', e.target.value)} placeholder="Choose"
+                  className="flex-1 px-3 py-2 rounded-lg border border-[#e8e8e4] text-sm focus:outline-none focus:border-[#1a1a2e]" />
+                <input type="number" value={r.amount} onChange={(e) => change(r.id, 'amount', e.target.value)} placeholder="0"
+                  className="w-24 px-3 py-2 rounded-lg border border-[#e8e8e4] text-sm text-right tabular-nums focus:outline-none focus:border-[#1a1a2e]" />
+                <input type="number" value={r.fees} onChange={(e) => change(r.id, 'fees', e.target.value)} placeholder="0"
+                  className="w-24 px-3 py-2 rounded-lg border border-[#e8e8e4] text-sm text-right tabular-nums focus:outline-none focus:border-[#1a1a2e]" />
+                <button onClick={() => del(r.id)} className="w-6 h-6 flex items-center justify-center text-[#c7293a] hover:bg-[#fdecec] rounded shrink-0">
+                  <Trash2 size={14} />
+                </button>
+              </div>
+            ))}
+            {rows.length > 0 && (
+              <div className="flex items-center gap-2 px-1 pt-1 text-xs font-semibold text-[#1a1a2e]">
+                <span className="flex-1">Total</span>
+                <span className="w-24 text-right tabular-nums">{Math.round(totalCa).toLocaleString('fr-FR')} €</span>
+                <span className="w-24 text-right tabular-nums">{Math.round(totalFees).toLocaleString('fr-FR')} €</span>
+                <span className="w-6" />
+              </div>
+            )}
+            <div className="flex items-center justify-between pt-2">
+              <button onClick={add} className="inline-flex items-center gap-1 text-sm font-medium text-[#1a1a2e] hover:underline">
+                <Plus size={15} /> Ajouter une vente
+              </button>
+              <button onClick={onSave} disabled={save === 'saving'}
+                className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-[#1a1a2e] text-white text-sm font-semibold disabled:opacity-50">
+                {save === 'saving' ? <Loader2 size={15} className="animate-spin" /> : save === 'saved' ? <Check size={15} /> : null}
+                {save === 'saving' ? 'Enregistrement…' : save === 'saved' ? 'Enregistré' : save === 'error' ? 'Erreur' : 'Enregistrer'}
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
     </div>
   )
 }

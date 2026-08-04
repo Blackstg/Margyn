@@ -6,6 +6,7 @@ import { useState } from 'react'
 export interface SupplementaryItem {
   source: string
   amount: number
+  fees?: number
 }
 
 export interface KpiData {
@@ -21,6 +22,7 @@ export interface KpiData {
   transaction_fees: number
   app_charges: number
   supplementary_ca?: number
+  supplementary_fees?: number
   supplementary_breakdown?: SupplementaryItem[]
   gifting_count?: number
   gifting_cogs?: number
@@ -257,11 +259,15 @@ export default function KpiGrid({ current, previous, loading, brand, sparklines 
   const prevTotalSales  = p.total_sales + (p.supplementary_ca ?? 0)
   const grossProfit     = c.gross_profit
   const prevGrossProfit = p.gross_profit
-  const netProfit       = grossProfit - c.marketing - c.fulfillment - c.transaction_fees - c.app_charges - c.op_expenses
-  const prevNetProfit   = prevGrossProfit - p.marketing - p.fulfillment - p.transaction_fees - p.app_charges - p.op_expenses
+  const suppFees        = c.supplementary_fees ?? 0
+  const prevSuppFees    = p.supplementary_fees ?? 0
+  // Fees des ventes privées (Choose…) = coût déduit du net, à la place du marketing.
+  const netProfit       = grossProfit - c.marketing - c.fulfillment - c.transaction_fees - c.app_charges - c.op_expenses - suppFees
+  const prevNetProfit   = prevGrossProfit - p.marketing - p.fulfillment - p.transaction_fees - p.app_charges - p.op_expenses - prevSuppFees
 
-  const roasReel     = c.marketing > 0 ? totalSales / c.marketing : 0
-  const prevRoasReel = p.marketing > 0 ? prevTotalSales / p.marketing : 0
+  // ROAS / CPO basés sur le CA Shopify SEUL (les ventes privées ne viennent pas de la pub → ne doivent pas gonfler le ROAS).
+  const roasReel     = c.marketing > 0 ? c.total_sales / c.marketing : 0
+  const prevRoasReel = p.marketing > 0 ? p.total_sales / p.marketing : 0
 
   const cpo     = c.order_count > 0 ? c.marketing / c.order_count : 0
   const prevCpo = p.order_count > 0 ? p.marketing / p.order_count : 0
@@ -304,10 +310,15 @@ export default function KpiGrid({ current, previous, loading, brand, sparklines 
     lines.push(`= ${fmtEur(netProfit)}`)
     return lines.join('\n')
   })() : [
-    `CA               ${fmtEur(totalSales)}`,
+    `CA Shopify       ${fmtEur(c.total_sales)}`,
+    ...(suppCa > 0 ? [
+      `+ Ventes privées ${fmtEur(suppCa)}`,
+      `= CA total       ${fmtEur(totalSales)}`,
+    ] : []),
     `− COGS           ${fmtEur(c.cogs)}`,
     `= Marge brute    ${fmtEur(grossProfit)}`,
     `− Marketing      ${fmtEur(c.marketing)}`,
+    ...(suppFees > 0 ? [`− Fees ventes priv. ${fmtEur(suppFees)}`] : []),
     `− Fulfillment    ${fmtEur(c.fulfillment)}`,
     `− Frais paiement ${fmtEur(c.transaction_fees)}`,
     `− Apps           ${fmtEur(c.app_charges)}`,

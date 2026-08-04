@@ -301,12 +301,10 @@ async function fetchMoomFulfillment(
 
 async function fetchKpiData(brand: Brand, from: string, to: string, days: number): Promise<KpiData> {
   const brands = brandFilter(brand)
-  const suppQuery = brand === 'bowa'
-    ? supabase.from('supplementary_revenue').select('source, amount, month')
-        .gte('month', from.slice(0, 7) + '-01')
-        .lte('month', to.slice(0, 7) + '-01')
-        .eq('brand', 'bowa')
-    : Promise.resolve({ data: [] })
+  const suppQuery = supabase.from('supplementary_revenue').select('source, amount, fees, month')
+    .gte('month', from.slice(0, 7) + '-01')
+    .lte('month', to.slice(0, 7) + '-01')
+    .eq('brand', brand)
 
   const [snapshotsRes, marketingRes, fixedCostsRaw, settingsRes, suppRes] = await Promise.all([
     supabase.from('daily_snapshots').select('total_sales, gross_profit, order_count, cogs, fulfillment_cost, returns')
@@ -448,23 +446,29 @@ async function fetchKpiData(brand: Brand, from: string, to: string, days: number
     }
   }
 
-  // Supplementary revenue (Bowa only) — sum actual amounts for the period
-  type SuppRow = { source: string; amount?: number | null; month: string }
-  const bySource = new Map<string, number>()
+  // Revenus hors Shopify (Bowa : B2B/Leroy… · Moom/Krom : ventes privées type Choose,
+  // à 0 sur Shopify → on saisit le CA réel + les fees de la plateforme). Le CA s'ajoute
+  // au total ; les fees sont un coût déduit du net (à la place du marketing).
+  type SuppRow = { source: string; amount?: number | null; fees?: number | null; month: string }
+  const bySource = new Map<string, { amount: number; fees: number }>()
   for (const r of ((suppRes as { data: SuppRow[] | null }).data ?? []) as SuppRow[]) {
-    const src = r.source
-    bySource.set(src, (bySource.get(src) ?? 0) + (r.amount ?? 0))
+    const cur = bySource.get(r.source) ?? { amount: 0, fees: 0 }
+    cur.amount += r.amount ?? 0
+    cur.fees   += r.fees ?? 0
+    bySource.set(r.source, cur)
   }
   const supplementary_breakdown = Array.from(bySource.entries())
-    .map(([source, amount]) => ({ source, amount: Math.round(amount) }))
-    .filter(i => i.amount > 0)
-  const supplementary_ca = supplementary_breakdown.reduce((s, i) => s + i.amount, 0)
+    .map(([source, v]) => ({ source, amount: Math.round(v.amount), fees: Math.round(v.fees) }))
+    .filter(i => i.amount > 0 || i.fees > 0)
+  const supplementary_ca   = supplementary_breakdown.reduce((s, i) => s + i.amount, 0)
+  const supplementary_fees = supplementary_breakdown.reduce((s, i) => s + i.fees, 0)
 
   // TVA correction for Bowa: Shopify revenue is TTC, COGS are HT.
-  // Gross profit must be computed on HT basis: (CA TTC + Supp CA) × 5/6 − COGS
+  // Gross profit must be computed on HT basis: (CA TTC + Supp CA) × 5/6 − COGS.
+  // Autres marques : on ajoute le CA des ventes privées à la marge brute.
   const gross_profit = brand === 'bowa'
     ? Math.round((snaps.total_sales + supplementary_ca) * (5 / 6)) - snaps.cogs
-    : snaps.gross_profit
+    : snaps.gross_profit + supplementary_ca
 
   // Gifting columns — fetched separately, gracefully degrade if columns don't exist yet
   let gifting_count = 0
@@ -487,7 +491,7 @@ async function fetchKpiData(brand: Brand, from: string, to: string, days: number
     salaires, charges_infra,
     gifting_count, gifting_cogs, fulfillment_note, fulfillment_configured,
     ...(fulfillment_breakdown_final.length > 0 ? { fulfillment_breakdown: fulfillment_breakdown_final } : {}),
-    ...(brand === 'bowa' && supplementary_ca > 0 ? { supplementary_ca, supplementary_breakdown } : {}),
+    ...((supplementary_ca > 0 || supplementary_fees > 0) ? { supplementary_ca, supplementary_fees, supplementary_breakdown } : {}),
   }
 }
 
