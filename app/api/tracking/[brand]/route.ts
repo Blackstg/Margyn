@@ -288,7 +288,10 @@ export async function POST(
     let finalStep   = computeStep(order)
     let carrierEta: { from: string | null; to: string | null } | null = null
     let carrierName: string | null = null
-    let hasCarrierData = false
+    // De vrais événements transporteur (même via Shopify) → on affiche la timeline
+    // basée sur les événements (buildRealTimeline) plutôt qu'une estimation temporelle
+    // qui invente « le livreur passera dans la journée » alors que le colis est au tri.
+    let hasCarrierData = trackingEvents.length > 0
     const effectiveTracking = latestTracking(fulfillment)
     if (effectiveTracking) {
       try {
