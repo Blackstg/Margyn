@@ -1,11 +1,12 @@
 // POST /api/sav/process — classify + draft one ticket (AI, on-demand)
 
-import { NextResponse } from 'next/server'
+import { NextRequest, NextResponse } from 'next/server'
 import { processOneTicket } from '@/lib/sav/orchestrator'
+import { savBrandFromRequest } from '@/lib/sav/brand'
 
 export const dynamic = 'force-dynamic'
 
-export async function POST(req: Request) {
+export async function POST(req: NextRequest) {
   try {
     const { ticket_id, subject, description, created_at, requester_id, status } =
       await req.json() as {
@@ -24,6 +25,7 @@ export async function POST(req: Request) {
       created_at,
       requester_id,
       status ?? 'open',
+      savBrandFromRequest(req),
     )
     return NextResponse.json(ticket)
   } catch (err) {

@@ -3,6 +3,7 @@
 
 import { NextRequest, NextResponse } from 'next/server'
 import { getCustomerTickets, getTicketComments } from '@/lib/sav/zendesk'
+import { savBrandFromRequest } from '@/lib/sav/brand'
 
 export const dynamic = 'force-dynamic'
 
@@ -14,7 +15,7 @@ export async function GET(req: NextRequest) {
   if (!email) return NextResponse.json({ error: 'email requis' }, { status: 400 })
 
   try {
-    const tickets = await getCustomerTickets(email, exclude)
+    const tickets = await getCustomerTickets(email, exclude, savBrandFromRequest(req))
 
     if (!withComments) return NextResponse.json({ tickets })
 
@@ -23,7 +24,7 @@ export async function GET(req: NextRequest) {
     const ticketId = parseInt(req.nextUrl.searchParams.get('ticket_id') ?? '0', 10)
     if (!ticketId) return NextResponse.json({ tickets })
 
-    const comments = await getTicketComments(ticketId, 0)
+    const comments = await getTicketComments(ticketId, 0, savBrandFromRequest(req))
     return NextResponse.json({ tickets, comments })
   } catch (err) {
     console.error('[SAV] customer-history error:', err)

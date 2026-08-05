@@ -31,9 +31,11 @@ export async function POST(req: NextRequest) {
   }
 
   const filename = encodeURIComponent(file.name)
-  const subdomain = process.env.ZENDESK_SUBDOMAIN
-  const email     = process.env.ZENDESK_EMAIL
-  const token     = process.env.ZENDESK_API_TOKEN
+  // Upload vers le Zendesk de la bonne marque.
+  const brand = req.nextUrl.searchParams.get('brand') === 'bowa' ? 'bowa' : 'moom'
+  const subdomain = brand === 'bowa' ? process.env.ZENDESK_BOWA_SUBDOMAIN : process.env.ZENDESK_SUBDOMAIN
+  const email     = brand === 'bowa' ? process.env.ZENDESK_BOWA_EMAIL     : process.env.ZENDESK_EMAIL
+  const token     = brand === 'bowa' ? process.env.ZENDESK_BOWA_API_TOKEN : process.env.ZENDESK_API_TOKEN
 
   if (!subdomain || !email || !token) {
     return NextResponse.json({ error: 'Variables Zendesk non configurées' }, { status: 500 })

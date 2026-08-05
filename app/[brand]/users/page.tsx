@@ -173,18 +173,20 @@ function UserCard({ user }: { user: ApiUser }) {
                   <div className="flex flex-wrap gap-1.5">
                     {FEATURES.filter(f => f.section === section).map(f => {
                       const on = features.includes(f.key)
-                      // A brand-locked feature is unusable unless its brand is selected
-                      const lockedOut = !!f.brandLock && !brands.includes(f.brandLock)
+                      // Feature verrouillée sur une/des marque(s) : utilisable si AU MOINS
+                      // une de ses marques est sélectionnée pour l'utilisateur.
+                      const lockBrands: Brand[] = f.brandLock == null ? [] : Array.isArray(f.brandLock) ? f.brandLock : [f.brandLock]
+                      const lockedOut = lockBrands.length > 0 && !lockBrands.some(b => brands.includes(b))
                       return (
                         <button key={f.key} onClick={() => toggleFeature(f.key)} disabled={lockedOut}
-                          title={lockedOut ? `Nécessite la marque ${BRAND_LABELS[f.brandLock as Brand]}` : ''}
+                          title={lockedOut ? `Nécessite la marque ${lockBrands.map(b => BRAND_LABELS[b]).join(' ou ')}` : ''}
                           className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border transition-all ${
                             lockedOut ? 'bg-[#f8f8f7] text-[#cfcfc8] border-[#f0f0ee] cursor-not-allowed'
                             : on ? 'bg-[#1a7f4b] text-white border-[#1a7f4b]'
                             : 'bg-white text-[#6b6b63] border-[#e8e8e4] hover:border-[#aeb0c9]'
                           }`}>
                           {on && !lockedOut && <Check size={12} />} {f.label}
-                          {f.brandLock && <span className="opacity-60">· {BRAND_LABELS[f.brandLock]}</span>}
+                          {lockBrands.length > 0 && <span className="opacity-60">· {lockBrands.map(b => BRAND_LABELS[b]).join('/')}</span>}
                         </button>
                       )
                     })}

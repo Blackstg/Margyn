@@ -8,6 +8,18 @@ import {
   Settings, Trash2, Plus, X, Download, RotateCcw, Paperclip, ArrowRight,
 } from 'lucide-react'
 
+// ─── Marque courante (Moom ou Bowa) ─────────────────────────────────────────
+// Le SAV est partagé entre Moom et Bowa (chacun son Zendesk). La marque est
+// déduite de l'URL, et TOUS les appels /api/sav/* la passent en ?brand=.
+function savBrand(): 'moom' | 'bowa' {
+  if (typeof window === 'undefined') return 'moom'
+  return window.location.pathname.split('/').filter(Boolean)[0] === 'bowa' ? 'bowa' : 'moom'
+}
+function savFetch(input: string, init?: RequestInit): Promise<Response> {
+  const url = input + (input.includes('?') ? '&' : '?') + 'brand=' + savBrand()
+  return fetch(url, init)
+}
+
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 type TicketCategory =
@@ -334,7 +346,7 @@ function CustomerHistory({ email, currentTicketId }: { email: string; currentTic
   useEffect(() => {
     if (!open || tickets.length > 0) return
     setLoading(true)
-    fetch(`/api/sav/customer-history?email=${encodeURIComponent(email)}&exclude=${currentTicketId}`)
+    savFetch(`/api/sav/customer-history?email=${encodeURIComponent(email)}&exclude=${currentTicketId}`)
       .then(r => r.json())
       .then((d: { tickets?: PastTicket[] }) => setTickets(d.tickets ?? []))
       .catch(() => {})
@@ -347,7 +359,7 @@ function CustomerHistory({ email, currentTicketId }: { email: string; currentTic
     if (comments[id]) return
     setLoadingCom(id)
     try {
-      const r = await fetch(`/api/sav/customer-history?email=${encodeURIComponent(email)}&comments=1&ticket_id=${id}`)
+      const r = await savFetch(`/api/sav/customer-history?email=${encodeURIComponent(email)}&comments=1&ticket_id=${id}`)
       const d = await r.json() as { comments?: PastComment[] }
       setComments(prev => ({ ...prev, [id]: d.comments ?? [] }))
     } catch { /* ignore */ }
@@ -768,7 +780,7 @@ function ReplyPanel({ ticket, draft, solved, onDraftChange, onSolvedChange, onSe
       const uploaded = await Promise.all(files.map(async file => {
         const form = new FormData()
         form.append('file', file)
-        const res = await fetch('/api/sav/upload', { method: 'POST', body: form })
+        const res = await savFetch('/api/sav/upload', { method: 'POST', body: form })
         const d   = await res.json() as { token?: string; filename?: string; error?: string }
         if (!res.ok) throw new Error(d.error ?? `HTTP ${res.status}`)
         return { filename: d.filename ?? file.name, token: d.token! }
@@ -786,7 +798,7 @@ function ReplyPanel({ ticket, draft, solved, onDraftChange, onSolvedChange, onSe
   async function regenerate() {
     setRegenerating(true); setError(null)
     try {
-      const res = await fetch('/api/sav/regenerate', {
+      const res = await savFetch('/api/sav/regenerate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -812,7 +824,7 @@ function ReplyPanel({ ticket, draft, solved, onDraftChange, onSolvedChange, onSe
     setSending(true); setError(null)
     try {
       const uploads = attachments.map(a => a.token)
-      const res = await fetch('/api/sav/send', {
+      const res = await savFetch('/api/sav/send', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ ticket_id: ticket.ticket_id, reply_body: draft, solved, action, category: ticket.category, uploads }),
@@ -829,7 +841,7 @@ function ReplyPanel({ ticket, draft, solved, onDraftChange, onSolvedChange, onSe
   async function archive() {
     setArchiving(true); setError(null)
     try {
-      const res = await fetch('/api/sav/archive', {
+      const res = await savFetch('/api/sav/archive', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ ticket_id: ticket.ticket_id }),
@@ -844,7 +856,7 @@ function ReplyPanel({ ticket, draft, solved, onDraftChange, onSolvedChange, onSe
   async function decide(option: DecisionOption) {
     setDeciding(true); setError(null)
     try {
-      const res = await fetch('/api/sav/decide', {
+      const res = await savFetch('/api/sav/decide', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -873,7 +885,7 @@ function ReplyPanel({ ticket, draft, solved, onDraftChange, onSolvedChange, onSe
     setImproving(true); setError(null)
     setPreviousDraft(draft)
     try {
-      const res = await fetch('/api/sav/improve', {
+      const res = await savFetch('/api/sav/improve', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ current_draft: draft }),
@@ -1151,7 +1163,7 @@ function FollowUpPanel({ ticket, onSent }: {
     if (!body.trim()) return
     setSending(true); setError(null)
     try {
-      const res = await fetch('/api/sav/send', {
+      const res = await savFetch('/api/sav/send', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ ticket_id: ticket.ticket_id, reply_body: body, solved: false, action: 'auto_reply' }),
@@ -1166,7 +1178,7 @@ function FollowUpPanel({ ticket, onSent }: {
   async function archive() {
     setArchiving(true); setError(null)
     try {
-      const res = await fetch('/api/sav/archive', {
+      const res = await savFetch('/api/sav/archive', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ ticket_id: ticket.ticket_id }),
@@ -1236,7 +1248,7 @@ function RulesPanel({ onClose }: { onClose: () => void }) {
   const [error, setError]     = useState<string | null>(null)
 
   useEffect(() => {
-    fetch('/api/sav/rules')
+    savFetch('/api/sav/rules')
       .then(r => r.json()).then((d: { rules?: string[] }) => setRules(d.rules ?? []))
       .catch(() => setError('Erreur de chargement'))
       .finally(() => setLoading(false))
@@ -1246,7 +1258,7 @@ function RulesPanel({ onClose }: { onClose: () => void }) {
     const rule = newRule.trim(); if (!rule) return
     setSaving(true); setError(null)
     try {
-      const res = await fetch('/api/sav/rules', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ rule }) })
+      const res = await savFetch('/api/sav/rules', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ rule }) })
       const d = await res.json() as { rules?: string[]; error?: string }
       if (!res.ok) throw new Error(d.error ?? `HTTP ${res.status}`)
       setRules(d.rules ?? []); setNewRule('')
@@ -1257,7 +1269,7 @@ function RulesPanel({ onClose }: { onClose: () => void }) {
   async function deleteRule(index: number) {
     setError(null)
     try {
-      const res = await fetch('/api/sav/rules', { method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ index }) })
+      const res = await savFetch('/api/sav/rules', { method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ index }) })
       const d = await res.json() as { rules?: string[]; error?: string }
       if (!res.ok) throw new Error(d.error ?? `HTTP ${res.status}`)
       setRules(d.rules ?? [])
@@ -1388,7 +1400,7 @@ function QualiteDashboard() {
     setLoading(true); setError(null)
     const params = new URLSearchParams({ days: String(days) })
     if (selectedUser) params.set('user_email', selectedUser)
-    fetch(`/api/sav/actions?${params}`)
+    savFetch(`/api/sav/actions?${params}`)
       .then(r => r.json())
       .then(d => {
         if (d.error) throw new Error(d.error)
@@ -1826,7 +1838,7 @@ export default function SavPage() {
         if ((ASSIGNEES as readonly string[]).includes(name)) setAssigneeFilter(name)
       }
 
-      fetch('/api/sav/actions', {
+      savFetch('/api/sav/actions', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ action: 'session_start', ticket_id: 0, category: userEmail }),
@@ -1868,7 +1880,7 @@ export default function SavPage() {
     fetchingRef.current.add(raw.ticket_id)
     setProcessingId(raw.ticket_id)
     try {
-      const res = await fetch('/api/sav/process', {
+      const res = await savFetch('/api/sav/process', {
         method:  'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -1897,7 +1909,7 @@ export default function SavPage() {
   const load = useCallback(async () => {
     setListLoading(true)
     try {
-      const res  = await fetch('/api/sav/tickets')
+      const res  = await savFetch('/api/sav/tickets')
       const data = await res.json() as { tickets?: RawTicket[]; error?: string }
 
       if (!res.ok || !Array.isArray(data.tickets)) {
@@ -1942,7 +1954,7 @@ export default function SavPage() {
 
   // ── Attributions des tickets (qui répond : agents SAV) ────────────────
   useEffect(() => {
-    fetch('/api/sav/assign')
+    savFetch('/api/sav/assign')
       .then(r => r.json())
       .then(d => setAssignments(d.assignments ?? {}))
       .catch(() => {})
@@ -1956,7 +1968,7 @@ export default function SavPage() {
       return next
     })
     try {
-      await fetch('/api/sav/assign', {
+      await savFetch('/api/sav/assign', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ ticket_id: ticketId, assignee, updated_by: myEmail }),
       })
@@ -1971,7 +1983,7 @@ export default function SavPage() {
     if (assignments[ticketId]) return                              // déjà attribué
     setAssignments(prev => ({ ...prev, [ticketId]: myName }))      // optimiste
     try {
-      const r = await fetch('/api/sav/assign', {
+      const r = await savFetch('/api/sav/assign', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ ticket_id: ticketId, assignee: myName, updated_by: myEmail, claim: true }),
       })
@@ -1987,7 +1999,7 @@ export default function SavPage() {
     if (q.length < 2) { setZdResults(null); return }
     setZdSearching(true); setZdError(null)
     try {
-      const r = await fetch(`/api/sav/search?q=${encodeURIComponent(q)}`)
+      const r = await savFetch(`/api/sav/search?q=${encodeURIComponent(q)}`)
       const d = await r.json() as { tickets?: SearchResult[]; error?: string }
       if (d.error) setZdError(d.error)
       setZdResults(d.tickets ?? [])
@@ -2035,7 +2047,7 @@ export default function SavPage() {
     const processed = processedCache[ticketId]
     const startTime = ticketStartTimes.current[ticketId]
     const time_to_action_ms = startTime ? Date.now() - startTime : null
-    fetch('/api/sav/actions', {
+    savFetch('/api/sav/actions', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -2069,7 +2081,7 @@ export default function SavPage() {
   async function handleImport() {
     setImporting(true); setImportMsg(null)
     try {
-      const res = await fetch('/api/sav/import-history', { method: 'POST' })
+      const res = await savFetch('/api/sav/import-history', { method: 'POST' })
       const d   = await res.json() as { count?: number; error?: string }
       if (!res.ok) throw new Error(d.error ?? `HTTP ${res.status}`)
       setImportMsg(`✓ ${d.count} exemples importés`)
@@ -2183,7 +2195,7 @@ export default function SavPage() {
                       setNewMsgSending(true)
                       setNewMsgError(null)
                       try {
-                        const res = await fetch('/api/sav/new-message', {
+                        const res = await savFetch('/api/sav/new-message', {
                           method: 'POST',
                           headers: { 'Content-Type': 'application/json' },
                           body: JSON.stringify({ to_email: newMsgTo, subject: newMsgSubject, body: newMsgBody }),

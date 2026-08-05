@@ -4,6 +4,7 @@
 
 import { NextRequest, NextResponse } from 'next/server'
 import { generateReply } from '@/lib/sav/classifier'
+import { savBrandFromRequest } from '@/lib/sav/brand'
 import type { TicketCategory } from '@/lib/sav/classifier'
 import type { MoomOrder } from '@/lib/sav/shopify'
 import { getTicketComments } from '@/lib/sav/zendesk'
@@ -35,7 +36,7 @@ export async function POST(req: NextRequest) {
   let comments = undefined
   if (ticket_id) {
     try {
-      comments = await getTicketComments(ticket_id, requester_id ?? 0)
+      comments = await getTicketComments(ticket_id, requester_id ?? 0, savBrandFromRequest(req))
       console.log(`[SAV] decide — #${ticket_id}: ${comments.length} commentaire(s) récupéré(s)`)
     } catch (err) {
       console.warn(`[SAV] decide — could not fetch comments for #${ticket_id}:`, err)
@@ -44,7 +45,7 @@ export async function POST(req: NextRequest) {
 
   try {
     const result = await generateReply(
-      subject, description, category, order ?? null, customer_email, comments, decision_label
+      subject, description, category, order ?? null, customer_email, comments, decision_label, savBrandFromRequest(req)
     )
     return NextResponse.json({ body: result.body, solved: result.solved, situation_detectee: result.situation_detectee })
   } catch (err) {

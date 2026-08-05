@@ -1,15 +1,31 @@
-// Attribution des tickets SAV Mōom (qui répond : agents SAV).
-//   GET  → { assignments: { [ticket_id]: assignee } }
-//   POST { ticket_id, assignee, updated_by }  → upsert (assignee null → désattribue)
+// Attribution des tickets SAV (qui répond), scopée par marque.
+//   GET  ?brand= → { assignments: { [ticket_id]: assignee } }
+//   POST { ticket_id, assignee, updated_by, claim } ?brand=  → upsert / claim / désattribue
 import { NextRequest, NextResponse } from 'next/server'
 import { createAdminClient } from '@/lib/supabase'
+import { savBrandFromRequest } from '@/lib/sav/brand'
 
 export const dynamic = 'force-dynamic'
 
-export async function GET() {
+// Upsert résilient : tente la clé composite (brand,ticket_id) ; si elle n'est pas
+// encore migrée, repli sur l'ancienne clé ticket_id (Moom garde son attribution).
+async function upsertAssign(
+  sb: ReturnType<typeof createAdminClient>,
+  row: Record<string, unknown>,
+  ignoreDuplicates: boolean,
+): Promise<{ error: { message: string } | null }> {
+  const { error } = await sb.from('sav_assignments').upsert(row, { onConflict: 'brand,ticket_id', ignoreDuplicates })
+  if (error && /no unique|exclusion|constraint|conflict/i.test(error.message)) {
+    return await sb.from('sav_assignments').upsert(row, { onConflict: 'ticket_id', ignoreDuplicates })
+  }
+  return { error }
+}
+
+export async function GET(req: NextRequest) {
   const sb = createAdminClient()
-  const { data, error } = await sb.from('sav_assignments').select('ticket_id, assignee')
-  if (error) return NextResponse.json({ assignments: {} }) // table peut ne pas exister encore
+  const brand = savBrandFromRequest(req)
+  const { data, error } = await sb.from('sav_assignments').select('ticket_id, assignee').eq('brand', brand)
+  if (error) return NextResponse.json({ assignments: {} }) // table/colonne peut ne pas exister encore
   const map: Record<number, string> = {}
   for (const r of data ?? []) if (r.assignee) map[r.ticket_id] = r.assignee
   return NextResponse.json({ assignments: map })
@@ -21,28 +37,21 @@ export async function POST(req: NextRequest) {
   if (!ticket_id) return NextResponse.json({ error: 'ticket_id requis' }, { status: 400 })
 
   const sb = createAdminClient()
+  const brand = savBrandFromRequest(req)
   const assignee = (body.assignee ?? '').toString().trim()
 
-  // Mode « claim » : revendication à l'ouverture — n'attribue QUE si le ticket n'est
-  // pas déjà pris (insert-si-absent), sans écraser un agent existant. Renvoie le
-  // détenteur réel pour que l'UI se cale dessus.
+  // Mode « claim » : revendication à l'ouverture — n'attribue QUE si non déjà pris.
   if (body.claim && assignee) {
-    await sb.from('sav_assignments').upsert(
-      { ticket_id, assignee, updated_by: body.updated_by ?? null, updated_at: new Date().toISOString() },
-      { onConflict: 'ticket_id', ignoreDuplicates: true },
-    )
-    const { data: row } = await sb.from('sav_assignments').select('assignee').eq('ticket_id', ticket_id).maybeSingle()
+    await upsertAssign(sb, { ticket_id, brand, assignee, updated_by: body.updated_by ?? null, updated_at: new Date().toISOString() }, true)
+    const { data: row } = await sb.from('sav_assignments').select('assignee').eq('ticket_id', ticket_id).eq('brand', brand).maybeSingle()
     return NextResponse.json({ ok: true, assignee: (row?.assignee ?? assignee) })
   }
 
   if (assignee) {
-    const { error } = await sb.from('sav_assignments').upsert(
-      { ticket_id, assignee, updated_by: body.updated_by ?? null, updated_at: new Date().toISOString() },
-      { onConflict: 'ticket_id' },
-    )
+    const { error } = await upsertAssign(sb, { ticket_id, brand, assignee, updated_by: body.updated_by ?? null, updated_at: new Date().toISOString() }, false)
     if (error) return NextResponse.json({ error: error.message }, { status: 500 })
   } else {
-    const { error } = await sb.from('sav_assignments').delete().eq('ticket_id', ticket_id)
+    const { error } = await sb.from('sav_assignments').delete().eq('ticket_id', ticket_id).eq('brand', brand)
     if (error) return NextResponse.json({ error: error.message }, { status: 500 })
   }
   return NextResponse.json({ ok: true })

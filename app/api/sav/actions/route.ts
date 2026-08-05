@@ -5,6 +5,7 @@
 
 import { NextRequest, NextResponse } from 'next/server'
 import { createAdminClient } from '@/lib/supabase'
+import { savBrandFromRequest } from '@/lib/sav/brand'
 
 // ── POST — log one action ─────────────────────────────────────────────────────
 
@@ -20,6 +21,7 @@ export async function POST(req: NextRequest) {
 
   const sb = createAdminClient()
   const { error } = await sb.from('sav_actions').insert({
+    brand:              savBrandFromRequest(req),
     ticket_id:          body.ticket_id,
     action:             body.action,
     was_modified:       body.was_modified ?? null,
@@ -56,6 +58,7 @@ export async function GET(req: NextRequest) {
   const { data, error } = await sb
     .from('sav_actions')
     .select('*')
+    .eq('brand', savBrandFromRequest(req))
     .gte('created_at', since.toISOString())
 
   if (error) {

@@ -34,7 +34,7 @@ type NavItem = {
   key:       string
   icon:      React.ForwardRefExoticComponent<Omit<LucideProps, 'ref'> & React.RefAttributes<SVGSVGElement>>
   label:     string
-  brandLock: string | null
+  brandLock: string | string[] | null
 }
 
 const NAV_SECTIONS: { label: string; items: NavItem[] }[] = [
@@ -61,7 +61,7 @@ const NAV_SECTIONS: { label: string; items: NavItem[] }[] = [
   {
     label: 'Support',
     items: [
-      { key: 'sav',         icon: Headphones, label: 'SAV Mōom', brandLock: 'moom' },
+      { key: 'sav',         icon: Headphones, label: 'SAV',      brandLock: ['moom', 'bowa'] },
       { key: 'sav-defects', icon: PackageX,   label: 'Défauts',  brandLock: 'moom' },
       { key: 'sav-krom',    icon: Headphones, label: 'SAV Krom', brandLock: 'krom' },
     ],
@@ -76,7 +76,7 @@ const NAV_SECTIONS: { label: string; items: NavItem[] }[] = [
 
 // Pages the brand-selector can jump to when switching brands
 const BRAND_PAGES: Record<string, string[]> = {
-  bowa: ['dashboard', 'campaigns', 'creatives', 'margins', 'settings', 'reorder', 'billing', 'delivery'],
+  bowa: ['dashboard', 'campaigns', 'creatives', 'margins', 'settings', 'reorder', 'billing', 'delivery', 'sav'],
   moom: ['dashboard', 'campaigns', 'creatives', 'margins', 'settings', 'reorder', 'billing', 'invoices', 'stock', 'products', 'sav', 'sav-defects'],
   krom: ['dashboard', 'campaigns', 'creatives', 'margins', 'settings', 'reorder', 'billing', 'sav-krom'],
 }
@@ -114,7 +114,8 @@ export default function Sidebar({ isOpen, collapsed, onToggleCollapse }: Sidebar
 
   // Build href for a nav item
   function itemHref(item: NavItem): string {
-    const brand = item.brandLock ?? currentBrand ?? 'bowa'
+    // Mono-marque → cette marque ; multi/partagée → la marque courante.
+    const brand = (typeof item.brandLock === 'string' ? item.brandLock : currentBrand) ?? currentBrand ?? 'bowa'
     return `/${brand}/${item.key}`
   }
 
@@ -274,8 +275,8 @@ export default function Sidebar({ isOpen, collapsed, onToggleCollapse }: Sidebar
             if (feats !== 'all' && !(feats as string[]).includes(key)) return false
             // Shared pages: always visible
             if (brandLock === null) return true
-            // Brand-locked: only visible when currently ON that brand
-            return brandLock === currentBrand
+            // Brand-locked (mono ou multi) : visible seulement sur une marque autorisée
+            return Array.isArray(brandLock) ? brandLock.includes(currentBrand ?? '') : brandLock === currentBrand
           })
           if (items.length === 0) return null
 

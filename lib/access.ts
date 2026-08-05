@@ -26,7 +26,7 @@ export interface Feature {
   key:       FeatureKey
   label:     string
   section:   string
-  brandLock: Brand | null  // null = available on every brand
+  brandLock: Brand | Brand[] | null  // null = toutes marques · Brand[] = plusieurs marques
 }
 
 export const FEATURES: Feature[] = [
@@ -40,14 +40,22 @@ export const FEATURES: Feature[] = [
   { key: 'stock',       label: 'Stock',      section: 'Opérations', brandLock: 'moom' },
   { key: 'invoices',    label: 'Factures',   section: 'Opérations', brandLock: 'moom' },
   { key: 'products',    label: 'Produits',   section: 'Opérations', brandLock: 'moom' },
-  { key: 'sav',         label: 'SAV Mōom',   section: 'Support',    brandLock: 'moom' },
+  { key: 'sav',         label: 'SAV',        section: 'Support',    brandLock: ['moom', 'bowa'] },
   { key: 'sav-defects', label: 'Défauts',    section: 'Support',    brandLock: 'moom' },
   { key: 'sav-krom',    label: 'SAV Krom',   section: 'Support',    brandLock: 'krom' },
 ]
 
+// Verrou MONO-marque uniquement (pour la redirection middleware). Les features
+// multi-marques (brandLock: Brand[]) n'y figurent pas → pas de redirection forcée.
 export const BRAND_LOCK: Record<string, Brand> = Object.fromEntries(
-  FEATURES.filter(f => f.brandLock).map(f => [f.key, f.brandLock as Brand])
+  FEATURES.filter(f => typeof f.brandLock === 'string').map(f => [f.key, f.brandLock as Brand])
 )
+
+// Une feature est-elle disponible sur cette marque ? (gère null / Brand / Brand[])
+export function featureOnBrand(brandLock: Brand | Brand[] | null, brand: Brand): boolean {
+  if (brandLock == null) return true
+  return Array.isArray(brandLock) ? brandLock.includes(brand) : brandLock === brand
+}
 
 export function isAdminRole(role?: string | null): boolean {
   return !role || role === 'admin'

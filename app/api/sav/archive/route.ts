@@ -5,6 +5,7 @@
 
 import { NextRequest, NextResponse } from 'next/server'
 import { archiveTicket } from '@/lib/sav/zendesk'
+import { savBrandFromRequest } from '@/lib/sav/brand'
 import { markTicketProcessed } from '@/lib/sav/orchestrator'
 
 export const dynamic = 'force-dynamic'
@@ -20,8 +21,8 @@ export async function POST(req: NextRequest) {
   }
 
   try {
-    await archiveTicket(ticket_id)
-    await markTicketProcessed(ticket_id, 'archived')
+    await archiveTicket(ticket_id, savBrandFromRequest(req))
+    await markTicketProcessed(ticket_id, 'archived', savBrandFromRequest(req))
     return NextResponse.json({ ok: true })
   } catch (err) {
     console.error('[SAV] archiveTicket error:', err)

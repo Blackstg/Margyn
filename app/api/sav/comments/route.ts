@@ -3,6 +3,7 @@
 
 import { NextRequest, NextResponse } from 'next/server'
 import { getTicketComments } from '@/lib/sav/zendesk'
+import { savBrandFromRequest } from '@/lib/sav/brand'
 
 export const dynamic = 'force-dynamic'
 
@@ -21,7 +22,7 @@ export async function GET(req: NextRequest) {
   console.log(`[SAV] GET /api/sav/comments — ticket_id=${ticketId} requester_id=${requesterId}`)
 
   try {
-    const comments = await getTicketComments(ticketId, requesterId)
+    const comments = await getTicketComments(ticketId, requesterId, savBrandFromRequest(req))
     console.log(`[SAV] GET /api/sav/comments — #${ticketId}: returning ${comments.length} comment(s)`)
     if (comments.length === 0) {
       console.warn(`[SAV] GET /api/sav/comments — #${ticketId}: 0 comments returned — requester_id=${requesterId}`)

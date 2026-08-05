@@ -2,6 +2,7 @@
 // retrouver un ticket sans aller sur Zendesk (par n° commande, email, sujet, n° ticket).
 import { NextRequest, NextResponse } from 'next/server'
 import { searchTickets, getRequesterEmail } from '@/lib/sav/zendesk'
+import { savBrandFromRequest } from '@/lib/sav/brand'
 
 export const dynamic = 'force-dynamic'
 
@@ -10,11 +11,11 @@ export async function GET(req: NextRequest) {
   if (q.length < 2) return NextResponse.json({ tickets: [] })
 
   try {
-    const found = await searchTickets(q)
+    const found = await searchTickets(q, savBrandFromRequest(req))
     // Email du demandeur (best-effort, en parallèle borné) pour l'affichage.
     const top = found.slice(0, 20)
     const emails = await Promise.all(
-      top.map(t => getRequesterEmail(t.requester_id).catch(() => '')),
+      top.map(t => getRequesterEmail(t.requester_id, savBrandFromRequest(req)).catch(() => '')),
     )
     const tickets = top.map((t, i) => ({
       ticket_id:      t.id,

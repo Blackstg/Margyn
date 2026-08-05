@@ -4,6 +4,7 @@
 
 import { NextRequest, NextResponse } from 'next/server'
 import { createOutboundTicket } from '@/lib/sav/zendesk'
+import { savBrandFromRequest } from '@/lib/sav/brand'
 
 export const dynamic = 'force-dynamic'
 
@@ -20,7 +21,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'to_email, subject et body sont requis' }, { status: 400 })
     }
 
-    const ticketId = await createOutboundTicket(to_email.trim(), subject.trim(), body.trim(), customer_name?.trim())
+    const ticketId = await createOutboundTicket(to_email.trim(), subject.trim(), body.trim(), customer_name?.trim(), savBrandFromRequest(req))
     return NextResponse.json({ ticket_id: ticketId })
   } catch (err) {
     console.error('[SAV] new-message error:', err)
