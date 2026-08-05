@@ -62,6 +62,34 @@ export async function getNewTickets(): Promise<ZendeskTicket[]> {
   )
 }
 
+// Recherche libre de tickets (n'importe quel statut, y compris résolus) — pour
+// retrouver un ticket par n° de commande, email, sujet ou n° de ticket.
+export async function searchTickets(q: string): Promise<ZendeskTicket[]> {
+  const raw = q.trim()
+  if (!raw) return []
+  // N° de ticket exact (#12345 ou 12345) → lecture directe.
+  const idMatch = raw.match(/^#?(\d{3,})$/)
+  if (idMatch) {
+    const res = await fetchWithRetry(
+      `${base()}/tickets/${idMatch[1]}.json`,
+      { headers: authHeaders(), cache: 'no-store' }, 2, 1000,
+    ).catch(() => null)
+    if (res && res.ok) {
+      const { ticket } = await res.json() as { ticket?: ZendeskTicket }
+      if (ticket) return [ticket]
+    }
+    // sinon on retombe sur la recherche plein texte
+  }
+  const query = encodeURIComponent(`type:ticket ${raw}`)
+  const res = await fetchWithRetry(
+    `${base()}/search.json?query=${query}&sort_by=updated_at&sort_order=desc&per_page=25`,
+    { headers: authHeaders(), cache: 'no-store' }, 3, 1000,
+  )
+  if (!res.ok) throw new Error(`[Zendesk] searchTickets ${res.status}: ${await res.text()}`)
+  const data = await res.json() as { results?: ZendeskTicket[] }
+  return (data.results ?? []).filter(t => t.id)
+}
+
 export interface CustomerTicketSummary {
   id:          number
   subject:     string

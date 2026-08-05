@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { createBrowserClient } from '@supabase/auth-helpers-nextjs'
 import {
   RefreshCw, Send, ArrowUpRight, Archive, Package, ExternalLink,
-  Inbox, CheckCheck, ChevronDown, ChevronUp,
+  Inbox, CheckCheck, ChevronDown, ChevronUp, Search,
   Settings, Trash2, Plus, X, Download, RotateCcw, Paperclip, ArrowRight,
 } from 'lucide-react'
 
@@ -49,6 +49,21 @@ interface RawTicket {
   status:       'new' | 'open' | 'pending'
   requester_id: number
   is_reopened?: boolean
+}
+
+// Résultat de recherche Zendesk (tous statuts, y compris résolus)
+interface SearchResult {
+  ticket_id:       number
+  subject:         string
+  description:     string
+  status:          string
+  requester_id:    number
+  requester_email?: string
+  created_at:      string
+  updated_at:      string
+}
+const STATUS_FR: Record<string, string> = {
+  new: 'Nouveau', open: 'Ouvert', pending: 'En attente', hold: 'En pause', solved: 'Résolu', closed: 'Fermé',
 }
 
 // Full ticket after AI processing
@@ -1749,6 +1764,10 @@ export default function SavPage() {
   const [myEmail, setMyEmail]               = useState('')
   const [myName, setMyName]                 = useState('')
   const [assigneeFilter, setAssigneeFilter] = useState<string>('')  // '' = tous · 'unassigned' · nom d'agent
+  const [search, setSearch]         = useState('')
+  const [zdResults, setZdResults]   = useState<SearchResult[] | null>(null)
+  const [zdSearching, setZdSearching] = useState(false)
+  const [zdError, setZdError]       = useState<string | null>(null)
   const filterInit                          = useRef(false)
   const [processedCache, setProcessedCache] = useState<Record<number, ProcessedTicket>>({})
   const [selectedId, setSelectedId]         = useState<number | null>(null)
@@ -1961,6 +1980,32 @@ export default function SavPage() {
     } catch { /* optimiste */ }
   }
 
+  // Recherche dans TOUT Zendesk (y compris tickets résolus) pour retrouver un ticket
+  // absent de la file — évite d'aller sur Zendesk.
+  async function runZendeskSearch() {
+    const q = search.trim()
+    if (q.length < 2) { setZdResults(null); return }
+    setZdSearching(true); setZdError(null)
+    try {
+      const r = await fetch(`/api/sav/search?q=${encodeURIComponent(q)}`)
+      const d = await r.json() as { tickets?: SearchResult[]; error?: string }
+      if (d.error) setZdError(d.error)
+      setZdResults(d.tickets ?? [])
+    } catch { setZdError('Recherche impossible') } finally { setZdSearching(false) }
+  }
+
+  // Ouvre un ticket trouvé par recherche : on l'injecte dans la liste puis on le traite.
+  function openSearchedTicket(r: SearchResult) {
+    const raw: RawTicket = {
+      ticket_id: r.ticket_id, subject: r.subject, description: r.description,
+      created_at: r.created_at, updated_at: r.updated_at, requester_id: r.requester_id,
+      status: (r.status === 'new' || r.status === 'pending') ? r.status : 'open',
+    }
+    setRawTickets(prev => prev.some(t => t.ticket_id === raw.ticket_id) ? prev : [raw, ...prev])
+    setZdResults(null); setSearch('')
+    handleTicketClick(raw)
+  }
+
   // ── Ticket click ──────────────────────────────────────────────────────────
   function handleTicketClick(raw: RawTicket) {
     setSelectedId(raw.ticket_id)
@@ -2040,7 +2085,17 @@ export default function SavPage() {
     if (assigneeFilter === 'unassigned') return !assignments[t.ticket_id]
     return assignments[t.ticket_id] === assigneeFilter
   }
-  const filteredTickets = rawTickets.filter(matchesAssignee)
+  // Recherche instantanée dans la file affichée (n° ticket, sujet, description,
+  // + email/n° commande une fois le ticket traité).
+  const matchesSearch = (t: RawTicket) => {
+    const q = search.trim().toLowerCase()
+    if (!q) return true
+    const p = processedCache[t.ticket_id]
+    const hay = [String(t.ticket_id), t.subject, t.description, p?.customer_email, p?.order?.order_number]
+      .filter(Boolean).join(' ').toLowerCase()
+    return hay.includes(q)
+  }
+  const filteredTickets = rawTickets.filter(matchesAssignee).filter(matchesSearch)
   const allPending    = filteredTickets.filter(t => !doneStatuses[t.ticket_id])
   const donelist      = filteredTickets.filter(t =>  doneStatuses[t.ticket_id])
   // Actionable = new or open; waitingClient = pending (awaiting client reply)
@@ -2233,6 +2288,55 @@ export default function SavPage() {
               </button>
             )}
           </div>
+
+          {/* Barre de recherche — file en cours (instantané) + tout Zendesk (bouton) */}
+          {tab !== 'qualite' && (
+            <div className="pt-2">
+              <div className="relative">
+                <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-[#9b9b93]" />
+                <input
+                  value={search}
+                  onChange={e => { setSearch(e.target.value); if (!e.target.value.trim()) { setZdResults(null); setZdError(null) } }}
+                  onKeyDown={e => { if (e.key === 'Enter') runZendeskSearch() }}
+                  placeholder="Rechercher : n° commande, email, sujet, #ticket…"
+                  className="w-full pl-8 pr-24 py-1.5 rounded-lg border border-[#e8e8e4] text-xs focus:outline-none focus:border-[#1a1a2e]"
+                />
+                {search && (
+                  <button onClick={() => { setSearch(''); setZdResults(null); setZdError(null) }}
+                    className="absolute right-[68px] top-1/2 -translate-y-1/2 text-[#9b9b93] hover:text-[#1a1a2e]"><X size={13} /></button>
+                )}
+                <button onClick={runZendeskSearch} disabled={zdSearching || search.trim().length < 2}
+                  className="absolute right-1 top-1/2 -translate-y-1/2 px-2.5 py-1 rounded-md bg-[#1a1a2e] text-white text-[10px] font-semibold disabled:opacity-40">
+                  {zdSearching ? '…' : 'Zendesk'}
+                </button>
+              </div>
+              {zdResults && (
+                <div className="mt-2 border border-[#e8e8e4] rounded-lg overflow-hidden bg-white">
+                  <div className="px-3 py-1.5 bg-[#f5f4f2] text-[10px] font-semibold text-[#6b6b63] flex items-center justify-between">
+                    <span>Résultats Zendesk{zdResults.length ? ` (${zdResults.length})` : ''}</span>
+                    <button onClick={() => setZdResults(null)} className="text-[#9b9b93] hover:text-[#1a1a2e]"><X size={12} /></button>
+                  </div>
+                  {zdError && <p className="px-3 py-2 text-[11px] text-[#c7293a]">{zdError}</p>}
+                  {!zdError && zdResults.length === 0 && <p className="px-3 py-2 text-[11px] text-[#9b9b93]">Aucun ticket trouvé.</p>}
+                  <div className="max-h-64 overflow-y-auto">
+                    {zdResults.map(r => (
+                      <button key={r.ticket_id} onClick={() => openSearchedTicket(r)}
+                        className="w-full text-left px-3 py-2 border-t border-[#f0efec] hover:bg-[#faf9f7]">
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="text-[11px] font-semibold text-[#1a1a2e] truncate">{r.subject || '(sans objet)'}</span>
+                          <span className="text-[9px] font-bold text-[#6b6b63] shrink-0">#{r.ticket_id}</span>
+                        </div>
+                        <div className="flex items-center gap-2 text-[10px] text-[#9b9b93] mt-0.5">
+                          <span className="truncate flex-1">{r.requester_email || '—'}</span>
+                          <span className="shrink-0 uppercase tracking-wide">{STATUS_FR[r.status] ?? r.status}</span>
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
 
           {/* Filtre par personne — « mes tickets » */}
           {tab !== 'qualite' && (
