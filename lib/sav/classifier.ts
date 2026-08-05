@@ -6,36 +6,50 @@ import fs from 'fs'
 import path from 'path'
 import { searchCatalog } from './shopify'
 import type { MoomOrder, CatalogProduct } from './shopify'
-import type { CommentItem } from './zendesk'
+import type { CommentItem, SavBrand } from './zendesk'
 import { fetchTicketContext } from './zendesk'
 import { findSimilarExamples } from './history'
 import { createAdminClient } from '@/lib/supabase'
 
 const client = new Anthropic()
 
-// ─── Rules loader ─────────────────────────────────────────────────────────────
-// Reads from Supabase (persistent). Falls back to the committed rules.json
-// if the DB is unreachable (e.g. during local dev without Supabase vars).
+// Persona par marque (nom + description) injectée dans les prompts.
+export const BRAND_PROFILE: Record<SavBrand, { name: string; description: string }> = {
+  moom: { name: 'Mōom', description: 'cosmétiques naturels français haut de gamme' },
+  bowa: { name: 'Bowa', description: 'Bowa Concept (marque française)' },
+}
 
-async function loadRules(): Promise<string[]> {
+// ─── Rules loader ─────────────────────────────────────────────────────────────
+// Règles PROPRES À CHAQUE MARQUE (les règles Moom et Bowa sont différentes).
+// Lues depuis Supabase (`sav_rules` scopé par marque) ; repli sur le fichier
+// committé rules-<brand>.json (rules.json = Moom historique).
+
+async function loadRules(brand: SavBrand = 'moom'): Promise<string[]> {
   try {
     const supabase = createAdminClient()
-    const { data, error } = await supabase
+    const brandFilter = brand === 'moom' ? 'brand.eq.moom,brand.is.null' : `brand.eq.${brand}`
+    let { data, error } = await supabase
       .from('sav_rules')
       .select('content')
       .eq('active', true)
+      .or(brandFilter)
       .order('created_at', { ascending: true })
+    // Colonne `brand` pas encore migrée → repli non scopé UNIQUEMENT pour Moom
+    // (Bowa ne doit JAMAIS hériter des règles Moom → il tombera sur son fichier).
+    if (error && brand === 'moom' && error.message.toLowerCase().includes('brand')) {
+      ({ data, error } = await supabase
+        .from('sav_rules').select('content').eq('active', true).order('created_at', { ascending: true }))
+    }
     if (!error && data) return (data as { content: string }[]).map((r) => r.content)
   } catch { /* fall through to file fallback */ }
 
-  // Fallback: committed rules.json (works offline / before table is created)
-  try {
-    const raw = JSON.parse(
-      fs.readFileSync(path.join(process.cwd(), 'lib/sav/rules.json'), 'utf-8')
-    ) as { rules: string[] }
-    if (Array.isArray(raw.rules)) return raw.rules
-  } catch { /* no file */ }
-
+  // Repli fichier : rules-<brand>.json, sinon rules.json (Moom) uniquement pour Moom.
+  for (const file of [`rules-${brand}.json`, ...(brand === 'moom' ? ['rules.json'] : [])]) {
+    try {
+      const raw = JSON.parse(fs.readFileSync(path.join(process.cwd(), 'lib/sav', file), 'utf-8')) as { rules: string[] }
+      if (Array.isArray(raw.rules)) return raw.rules
+    } catch { /* try next */ }
+  }
   return []
 }
 
@@ -163,12 +177,14 @@ const CATEGORY_DESCRIPTIONS: Record<TicketCategory, string> = {
 export async function classifyTicket(
   subject: string,
   description: string,
+  brand: SavBrand = 'moom',
 ): Promise<ClassificationResult> {
   const categoriesList = Object.entries(CATEGORY_DESCRIPTIONS)
     .map(([k, v]) => `- ${k}: ${v}`)
     .join('\n')
 
-  const prompt = `Tu es un assistant de classification SAV pour la marque Mōom (cosmétiques français).
+  const bp = BRAND_PROFILE[brand]
+  const prompt = `Tu es un assistant de classification SAV pour la marque ${bp.name} (${bp.description}).
 
 Voici les catégories disponibles :
 ${categoriesList}
@@ -228,14 +244,18 @@ export async function generateReply(
   customerEmail:  string,
   comments?:      CommentItem[],
   decision?:      string,  // e.g. "On rembourse" — human decision to base the reply on
+  brand:          SavBrand = 'moom',
 ): Promise<ReplyResult> {
-  const rules = await loadRules()
+  const bp = BRAND_PROFILE[brand]
+  const rules = await loadRules(brand)
   console.log(`[SAV] generateReply — ${rules.length} règle(s) chargée(s) :`, rules)
   const rulesBlock = rules.length > 0
     ? `\nRègles obligatoires à respecter impérativement :\n${rules.map((r, i) => `IMPORTANT: ${i + 1}. ${r}`).join('\n')}\n`
     : ''
 
-  const similarExamples = await findSimilarExamples(subject, description, 5)
+  // Exemples de ton = historique Moom uniquement → on ne les injecte PAS pour Bowa
+  // (règles/ton différents ; Bowa démarre sur ses propres règles).
+  const similarExamples = brand === 'moom' ? await findSimilarExamples(subject, description, 5) : []
   if (similarExamples.length > 0) {
     console.log(
       `[SAV] findSimilarExamples — ${similarExamples.length} exemple(s) trouvé(s) pour "${subject.slice(0, 60)}" :`,
@@ -284,10 +304,10 @@ export async function generateReply(
 
     let catalogProducts: CatalogProduct[] = []
     try {
-      catalogProducts = await searchCatalog(subject)
+      catalogProducts = await searchCatalog(subject, brand)
       if (catalogProducts.length === 0) {
         // Retry with the client message (first 80 chars) as search query
-        catalogProducts = await searchCatalog(lastMsg.slice(0, 80))
+        catalogProducts = await searchCatalog(lastMsg.slice(0, 80), brand)
       }
       console.log(`[SAV] modification_commande — catalogue Shopify: ${catalogProducts.length} produit(s) trouvé(s) pour "${subject}"`)
     } catch (err) {
@@ -302,9 +322,9 @@ export async function generateReply(
         }
         return `- "${p.title}" — variantes : ${variants.map(v => `${v.title} → ${v.price}€`).join(', ')}`
       })
-      catalogBlock = `\nProduits trouvés dans le catalogue Mōom pouvant correspondre à la demande du client :\n${lines.join('\n')}\n`
+      catalogBlock = `\nProduits trouvés dans le catalogue ${bp.name} pouvant correspondre à la demande du client :\n${lines.join('\n')}\n`
     } else {
-      catalogBlock = '\nAucun produit trouvé dans le catalogue Mōom pour cette demande — ne pas inventer de prix.\n'
+      catalogBlock = '\nAucun produit trouvé dans le catalogue ${bp.name} pour cette demande — ne pas inventer de prix.\n'
     }
   }
 
@@ -327,7 +347,7 @@ export async function generateReply(
   if (referencedIds.length > 0) {
     console.log(`[SAV] generateReply — références tickets détectées : ${referencedIds.map(id => '#' + id).join(', ')}`)
     const contexts = await Promise.allSettled(
-      referencedIds.map(id => fetchTicketContext(id))
+      referencedIds.map(id => fetchTicketContext(id, brand))
     )
     const blocks: string[] = []
     for (let i = 0; i < referencedIds.length; i++) {
@@ -368,7 +388,7 @@ export async function generateReply(
     priorHistory  = '(pas d\'historique disponible)'
   }
 
-  const prompt = `Tu es un agent SAV pour la marque Mōom (cosmétiques naturels français haut de gamme).
+  const prompt = `Tu es un agent SAV pour la marque ${bp.name} (${bp.description}).
 Ton objectif : rédiger la meilleure réponse possible au dernier message du client.
 Langue : français. Ton : professionnel, chaleureux, humain.
 

@@ -1,13 +1,20 @@
-// ─── Shopify client — Mōom SAV ───────────────────────────────────────────────
-// Env vars: SHOPIFY_MOOM_STORE, SHOPIFY_MOOM_TOKEN
+// ─── Shopify client — SAV multi-marque ───────────────────────────────────────
+// Moom : SHOPIFY_MOOM_SHOP / SHOPIFY_MOOM_ACCESS_TOKEN
+// Bowa : SHOPIFY_BOWA_SHOP / SHOPIFY_BOWA_ACCESS_TOKEN
+import type { SavBrand } from './zendesk'
 
-function base() {
-  return `https://${process.env.SHOPIFY_MOOM_SHOP}/admin/api/2024-01`
+function shopCreds(brand: SavBrand) {
+  if (brand === 'bowa') return { shop: process.env.SHOPIFY_BOWA_SHOP, token: process.env.SHOPIFY_BOWA_ACCESS_TOKEN }
+  return { shop: process.env.SHOPIFY_MOOM_SHOP, token: process.env.SHOPIFY_MOOM_ACCESS_TOKEN }
 }
 
-function authHeaders(): Record<string, string> {
+function base(brand: SavBrand) {
+  return `https://${shopCreds(brand).shop}/admin/api/2024-01`
+}
+
+function authHeaders(brand: SavBrand): Record<string, string> {
   return {
-    'X-Shopify-Access-Token': process.env.SHOPIFY_MOOM_ACCESS_TOKEN!,
+    'X-Shopify-Access-Token': shopCreds(brand).token!,
     'Content-Type': 'application/json',
   }
 }
@@ -55,12 +62,12 @@ export interface CatalogProduct {
   variants: Array<{ title: string; price: string }>
 }
 
-export async function searchCatalog(query: string): Promise<CatalogProduct[]> {
+export async function searchCatalog(query: string, brand: SavBrand = 'moom'): Promise<CatalogProduct[]> {
   if (!query.trim()) return []
   // Shopify title search does partial matching — send the first 100 chars
-  const url = `${base()}/products.json?title=${encodeURIComponent(query.slice(0, 100))}&limit=5&fields=id,title,variants`
+  const url = `${base(brand)}/products.json?title=${encodeURIComponent(query.slice(0, 100))}&limit=5&fields=id,title,variants`
   try {
-    const res = await fetch(url, { headers: authHeaders(), cache: 'no-store' })
+    const res = await fetch(url, { headers: authHeaders(brand), cache: 'no-store' })
     if (!res.ok) {
       console.warn(`[Shopify/SAV] searchCatalog "${query}" — ${res.status}`)
       return []
@@ -120,10 +127,11 @@ const ORDER_FIELDS = 'order_number,fulfillment_status,financial_status,fulfillme
 export async function getMostRecentOrder(
   email: string,
   messageBody?: string,
+  brand: SavBrand = 'moom',
 ): Promise<MoomOrder | null> {
   // ── Tentative 1 : recherche par email ──────────────────────────────────────
-  const url1 = `${base()}/orders.json?email=${encodeURIComponent(email)}&status=any&limit=1&fields=${ORDER_FIELDS}`
-  const res1 = await fetch(url1, { headers: authHeaders(), cache: 'no-store' })
+  const url1 = `${base(brand)}/orders.json?email=${encodeURIComponent(email)}&status=any&limit=1&fields=${ORDER_FIELDS}`
+  const res1 = await fetch(url1, { headers: authHeaders(brand), cache: 'no-store' })
   if (!res1.ok) throw new Error(`[Shopify/SAV] getMostRecentOrder ${res1.status}: ${await res1.text()}`)
 
   const data1 = await res1.json() as { orders: ShopifyOrder[] }
@@ -142,8 +150,8 @@ export async function getMostRecentOrder(
 
   console.log(`[Shopify/SAV] Email introuvable — tentative par numéro de commande #${orderNum}`)
 
-  const url2 = `${base()}/orders.json?name=${encodeURIComponent(`#${orderNum}`)}&status=any&limit=1&fields=${ORDER_FIELDS}`
-  const res2 = await fetch(url2, { headers: authHeaders(), cache: 'no-store' })
+  const url2 = `${base(brand)}/orders.json?name=${encodeURIComponent(`#${orderNum}`)}&status=any&limit=1&fields=${ORDER_FIELDS}`
+  const res2 = await fetch(url2, { headers: authHeaders(brand), cache: 'no-store' })
   if (!res2.ok) {
     console.warn(`[Shopify/SAV] Recherche par numéro — ${res2.status}`)
     return null

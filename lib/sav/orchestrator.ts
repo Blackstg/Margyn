@@ -5,6 +5,7 @@
 //   - Auto: classify + draft + post reply immediately (for high-confidence auto_reply)
 
 import { getNewTickets, getRequesterEmail, postReply, escalateTicket, tagTicket, getTicketComments } from './zendesk'
+import type { SavBrand } from './zendesk'
 import { getMostRecentOrder } from './shopify'
 import { classifyTicket, generateReply, detectPhishing } from './classifier'
 import type { TicketCategory, ReplyAction, DecisionOption } from './classifier'
@@ -24,8 +25,8 @@ export interface RawTicketItem {
   is_reopened?: boolean  // true if client replied after our last action
 }
 
-export async function getRawTicketList(): Promise<RawTicketItem[]> {
-  const [tickets, processedMap] = await Promise.all([getNewTickets(), getProcessedMap()])
+export async function getRawTicketList(brand: SavBrand = 'moom'): Promise<RawTicketItem[]> {
+  const [tickets, processedMap] = await Promise.all([getNewTickets(brand), getProcessedMap(brand)])
 
   const fresh = tickets.filter(t => {
     const processedAt = processedMap.get(t.id)
@@ -58,12 +59,20 @@ export async function getRawTicketList(): Promise<RawTicketItem[]> {
 // The comparison logic: a ticket re-appears if its updated_at > processed_at,
 // meaning the client replied after our last action — it needs attention again.
 
-async function getProcessedMap(): Promise<Map<number, string>> {
+async function getProcessedMap(brand: SavBrand = 'moom'): Promise<Map<number, string>> {
   try {
     const sb = createAdminClient()
-    const { data, error } = await sb
+    // Scope par marque (les IDs de tickets des 2 Zendesk se chevauchent) ; lignes
+    // historiques sans `brand` = Moom.
+    const brandFilter = brand === 'moom' ? 'brand.eq.moom,brand.is.null' : `brand.eq.${brand}`
+    let { data, error } = await sb
       .from('sav_processed_tickets')
       .select('ticket_id, processed_at')
+      .or(brandFilter)
+    // Colonne `brand` pas encore migrée → repli sur une lecture non scopée (Moom).
+    if (error && error.message.toLowerCase().includes('brand')) {
+      ({ data, error } = await sb.from('sav_processed_tickets').select('ticket_id, processed_at'))
+    }
     if (error) {
       // Fallback: if processed_at column doesn't exist yet (migration pending),
       // select only ticket_id and never re-show processed tickets (old behavior).
@@ -72,6 +81,7 @@ async function getProcessedMap(): Promise<Map<number, string>> {
         const { data: legacyData } = await sb
           .from('sav_processed_tickets')
           .select('ticket_id')
+          .or(brandFilter)
         const map = new Map<number, string>()
         for (const r of (legacyData ?? []) as { ticket_id: number }[]) {
           map.set(r.ticket_id, new Date().toISOString()) // treat as "just processed"
@@ -95,13 +105,22 @@ async function getProcessedMap(): Promise<Map<number, string>> {
 export async function markTicketProcessed(
   ticketId: number,
   action:   'sent' | 'escalated' | 'archived',
+  brand: SavBrand = 'moom',
 ): Promise<void> {
   try {
     const sb = createAdminClient()
-    await sb.from('sav_processed_tickets').upsert(
-      { ticket_id: ticketId, action, processed_at: new Date().toISOString() },
-      { onConflict: 'ticket_id' }
+    const now = new Date().toISOString()
+    const { error } = await sb.from('sav_processed_tickets').upsert(
+      { ticket_id: ticketId, action, processed_at: now, brand },
+      { onConflict: 'brand,ticket_id' }
     )
+    // Colonne/contrainte `brand` pas encore migrée → repli ancien comportement.
+    if (error) {
+      await sb.from('sav_processed_tickets').upsert(
+        { ticket_id: ticketId, action, processed_at: now },
+        { onConflict: 'ticket_id' }
+      )
+    }
   } catch (err) {
     console.error('[SAV] markTicketProcessed error:', err)
   }
@@ -201,8 +220,8 @@ async function sendPartnershipEmail(
 // Fetches new Zendesk tickets, classifies each, fetches Shopify order,
 // generates a draft reply. Returns all processed tickets for review.
 
-export async function processPendingTickets(): Promise<ProcessedTicket[]> {
-  const [tickets, processedMap] = await Promise.all([getNewTickets(), getProcessedMap()])
+export async function processPendingTickets(brand: SavBrand = 'moom'): Promise<ProcessedTicket[]> {
+  const [tickets, processedMap] = await Promise.all([getNewTickets(brand), getProcessedMap(brand)])
 
   const fresh = tickets.filter(t => {
     const processedAt = processedMap.get(t.id)
@@ -220,7 +239,7 @@ export async function processPendingTickets(): Promise<ProcessedTicket[]> {
   for (let i = 0; i < fresh.length; i += CONCURRENCY) {
     const batch = fresh.slice(i, i + CONCURRENCY)
     const batchResults = await Promise.allSettled(
-      batch.map(ticket => processOneTicket(ticket.id, ticket.subject, ticket.description, ticket.created_at, ticket.requester_id, ticket.status as 'new' | 'open' | 'pending'))
+      batch.map(ticket => processOneTicket(ticket.id, ticket.subject, ticket.description, ticket.created_at, ticket.requester_id, ticket.status as 'new' | 'open' | 'pending', brand))
     )
     results.push(...batchResults)
     if (i + CONCURRENCY < fresh.length) {
@@ -245,12 +264,13 @@ export async function processOneTicket(
   createdAt:   string,
   requesterId: number,
   ticketStatus: 'new' | 'open' | 'pending' = 'open',
+  brand: SavBrand = 'moom',
 ): Promise<ProcessedTicket> {
   // Run email fetch + classification in parallel (email is needed for phishing
   // check and Shopify lookup, but classification doesn't need it)
   const [emailResult, classification] = await Promise.allSettled([
-    getRequesterEmail(requesterId),
-    classifyTicket(subject, description),
+    getRequesterEmail(requesterId, brand),
+    classifyTicket(subject, description, brand),
   ])
 
   if (emailResult.status === 'rejected') throw new Error(`[SAV] getRequesterEmail failed: ${emailResult.reason}`)
@@ -263,7 +283,7 @@ export async function processOneTicket(
   const phishing = detectPhishing(email, subject, description)
   if (phishing) {
     console.warn(`[SAV] Phishing détecté ticket #${ticketId} — signaux:`, phishing.signals)
-    tagTicket(ticketId, ['phishing']).catch((err) =>
+    tagTicket(ticketId, ['phishing'], brand).catch((err) =>
       console.error('[SAV] tagTicket phishing failed:', err)
     )
     return {
@@ -288,7 +308,7 @@ export async function processOneTicket(
 
   // Shopify order fetch (needs email, which is now resolved)
   const [shopifyOrder] = await Promise.allSettled([
-    getMostRecentOrder(email, `${subject}\n${description}`),
+    getMostRecentOrder(email, `${subject}\n${description}`, brand),
   ])
 
   const order: MoomOrder | null =
@@ -363,14 +383,14 @@ export async function processOneTicket(
   // b) detect references to previous tickets (#XXXXX) anywhere in the thread
   let comments
   try {
-    comments = await getTicketComments(ticketId, requesterId)
+    comments = await getTicketComments(ticketId, requesterId, brand)
     console.log(`[SAV] processOneTicket #${ticketId} — ${comments.length} commentaire(s) récupéré(s)`)
   } catch (err) {
     console.warn(`[SAV] processOneTicket #${ticketId} — getTicketComments échoué:`, err)
   }
 
   // Generate reply draft
-  const reply = await generateReply(subject, description, cls.category, order, email, comments)
+  const reply = await generateReply(subject, description, cls.category, order, email, comments, undefined, brand)
 
   return {
     ticket_id:      ticketId,
@@ -403,10 +423,11 @@ export async function sendValidatedReply(
   solved:     boolean,
   action:     ReplyAction,
   uploads:    string[] = [],
+  brand: SavBrand = 'moom',
 ): Promise<void> {
   if (action === 'escalate') {
-    await escalateTicket(ticketId)
+    await escalateTicket(ticketId, brand)
   } else {
-    await postReply(ticketId, replyBody, solved, uploads)
+    await postReply(ticketId, replyBody, solved, uploads, brand)
   }
 }

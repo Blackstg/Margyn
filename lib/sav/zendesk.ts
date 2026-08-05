@@ -1,14 +1,41 @@
-// ─── Zendesk client — Mōom SAV ───────────────────────────────────────────────
-// Env vars: ZENDESK_SUBDOMAIN, ZENDESK_EMAIL, ZENDESK_API_TOKEN
+// ─── Zendesk client — multi-marque ───────────────────────────────────────────
+// Moom : ZENDESK_SUBDOMAIN / ZENDESK_EMAIL / ZENDESK_API_TOKEN
+// Bowa : ZENDESK_BOWA_SUBDOMAIN / ZENDESK_BOWA_EMAIL / ZENDESK_BOWA_API_TOKEN
+// `brand` = dernier paramètre optionnel (défaut 'moom') → Moom inchangé, Bowa
+// passe la marque. Chaque marque tape SON compte Zendesk (confidentialité).
+export type SavBrand = 'moom' | 'bowa'
 
-function base() {
-  return `https://${process.env.ZENDESK_SUBDOMAIN}.zendesk.com/api/v2`
+interface ZdConfig {
+  subdomain: string
+  email:     string
+  token:     string
+  resolutionField: { id: number; value: string } | null // champ obligatoire au solve (null = aucun)
 }
 
-function authHeaders(): Record<string, string> {
-  const creds = Buffer.from(
-    `${process.env.ZENDESK_EMAIL}/token:${process.env.ZENDESK_API_TOKEN}`
-  ).toString('base64')
+function zdConfig(brand: SavBrand): ZdConfig {
+  if (brand === 'bowa') {
+    return {
+      subdomain: process.env.ZENDESK_BOWA_SUBDOMAIN ?? '',
+      email:     process.env.ZENDESK_BOWA_EMAIL ?? '',
+      token:     process.env.ZENDESK_BOWA_API_TOKEN ?? '',
+      resolutionField: null, // le Zendesk Bowa n'a aucun champ obligatoire au solve
+    }
+  }
+  return {
+    subdomain: process.env.ZENDESK_SUBDOMAIN ?? '',
+    email:     process.env.ZENDESK_EMAIL ?? '',
+    token:     process.env.ZENDESK_API_TOKEN ?? '',
+    resolutionField: { id: 20652537824913, value: 'autres' }, // « Motif de contact » Moom
+  }
+}
+
+function base(brand: SavBrand) {
+  return `https://${zdConfig(brand).subdomain}.zendesk.com/api/v2`
+}
+
+function authHeaders(brand: SavBrand): Record<string, string> {
+  const c = zdConfig(brand)
+  const creds = Buffer.from(`${c.email}/token:${c.token}`).toString('base64')
   return {
     Authorization:  `Basic ${creds}`,
     'Content-Type': 'application/json',
@@ -44,13 +71,13 @@ interface ZendeskComment {
 }
 
 // Returns all new/open/pending tickets, excluding vip and litige
-export async function getNewTickets(): Promise<ZendeskTicket[]> {
+export async function getNewTickets(brand: SavBrand = 'moom'): Promise<ZendeskTicket[]> {
   // Zendesk: listing the same field twice = OR; tags filter done in code
   // "pending" is included — agents sometimes set tickets to pending while awaiting info
   const query = encodeURIComponent('type:ticket status:new status:open status:pending')
   const res = await fetchWithRetry(
-    `${base()}/search.json?query=${query}&sort_by=created_at&sort_order=asc`,
-    { headers: authHeaders(), cache: 'no-store' },
+    `${base(brand)}/search.json?query=${query}&sort_by=created_at&sort_order=asc`,
+    { headers: authHeaders(brand), cache: 'no-store' },
     3,
     1000,
   )
@@ -64,15 +91,15 @@ export async function getNewTickets(): Promise<ZendeskTicket[]> {
 
 // Recherche libre de tickets (n'importe quel statut, y compris résolus) — pour
 // retrouver un ticket par n° de commande, email, sujet ou n° de ticket.
-export async function searchTickets(q: string): Promise<ZendeskTicket[]> {
+export async function searchTickets(q: string, brand: SavBrand = 'moom'): Promise<ZendeskTicket[]> {
   const raw = q.trim()
   if (!raw) return []
   // N° de ticket exact (#12345 ou 12345) → lecture directe.
   const idMatch = raw.match(/^#?(\d{3,})$/)
   if (idMatch) {
     const res = await fetchWithRetry(
-      `${base()}/tickets/${idMatch[1]}.json`,
-      { headers: authHeaders(), cache: 'no-store' }, 2, 1000,
+      `${base(brand)}/tickets/${idMatch[1]}.json`,
+      { headers: authHeaders(brand), cache: 'no-store' }, 2, 1000,
     ).catch(() => null)
     if (res && res.ok) {
       const { ticket } = await res.json() as { ticket?: ZendeskTicket }
@@ -82,8 +109,8 @@ export async function searchTickets(q: string): Promise<ZendeskTicket[]> {
   }
   const query = encodeURIComponent(`type:ticket ${raw}`)
   const res = await fetchWithRetry(
-    `${base()}/search.json?query=${query}&sort_by=updated_at&sort_order=desc&per_page=25`,
-    { headers: authHeaders(), cache: 'no-store' }, 3, 1000,
+    `${base(brand)}/search.json?query=${query}&sort_by=updated_at&sort_order=desc&per_page=25`,
+    { headers: authHeaders(brand), cache: 'no-store' }, 3, 1000,
   )
   if (!res.ok) throw new Error(`[Zendesk] searchTickets ${res.status}: ${await res.text()}`)
   const data = await res.json() as { results?: ZendeskTicket[] }
@@ -103,11 +130,12 @@ export interface CustomerTicketSummary {
 export async function getCustomerTickets(
   email:          string,
   excludeTicketId?: number,
+  brand: SavBrand = 'moom',
 ): Promise<CustomerTicketSummary[]> {
   const query = encodeURIComponent(`type:ticket requester:${email}`)
   const res = await fetchWithRetry(
-    `${base()}/search.json?query=${query}&sort_by=created_at&sort_order=desc&per_page=20`,
-    { headers: authHeaders(), cache: 'no-store' },
+    `${base(brand)}/search.json?query=${query}&sort_by=created_at&sort_order=desc&per_page=20`,
+    { headers: authHeaders(brand), cache: 'no-store' },
     3, 1000,
   )
   if (!res.ok) throw new Error(`[Zendesk] getCustomerTickets ${res.status}: ${await res.text()}`)
@@ -124,10 +152,10 @@ export async function getCustomerTickets(
 }
 
 // Fetches the requester's email from their user ID
-export async function getRequesterEmail(requesterId: number): Promise<string> {
+export async function getRequesterEmail(requesterId: number, brand: SavBrand = 'moom'): Promise<string> {
   const res = await fetchWithRetry(
-    `${base()}/users/${requesterId}.json`,
-    { headers: authHeaders(), cache: 'no-store' },
+    `${base(brand)}/users/${requesterId}.json`,
+    { headers: authHeaders(brand), cache: 'no-store' },
     3,
     1000,
   )
@@ -147,22 +175,24 @@ export async function createOutboundTicket(
   subject:      string,
   body:         string,
   customerName?: string,
+  brand: SavBrand = 'moom',
 ): Promise<number> {
   // Zendesk requires requester.name (min 1 char) — fall back to the email prefix
   const requesterName = customerName?.trim() || toEmail.split('@')[0]
+  const rf = zdConfig(brand).resolutionField
 
   const res = await fetchWithRetry(
-    `${base()}/tickets.json`,
+    `${base(brand)}/tickets.json`,
     {
       method:  'POST',
-      headers: authHeaders(),
+      headers: authHeaders(brand),
       body: JSON.stringify({
         ticket: {
           subject,
           requester: { email: toEmail, name: requesterName },
           comment:   { body, public: true },
           status:    'open',
-          custom_fields: [{ id: 20652537824913, value: 'autres' }],
+          ...(rf ? { custom_fields: [{ id: rf.id, value: rf.value }] } : {}),
         },
       }),
     },
@@ -178,6 +208,7 @@ export async function postReply(
   body:     string,
   solved:   boolean,
   uploads:  string[] = [],
+  brand: SavBrand = 'moom',
 ): Promise<void> {
   const comment: Record<string, unknown> = { body, public: true }
   if (uploads.length > 0) comment.uploads = uploads
@@ -186,12 +217,13 @@ export async function postReply(
     status:  solved ? 'solved' : 'open',
     comment,
   }
-  if (solved) {
-    ticket.custom_fields = [{ id: 20652537824913, value: 'autres' }]
+  const rf = zdConfig(brand).resolutionField
+  if (solved && rf) {
+    ticket.custom_fields = [{ id: rf.id, value: rf.value }]
   }
   const res = await fetchWithRetry(
-    `${base()}/tickets/${ticketId}.json`,
-    { method: 'PUT', headers: authHeaders(), body: JSON.stringify({ ticket }) },
+    `${base(brand)}/tickets/${ticketId}.json`,
+    { method: 'PUT', headers: authHeaders(brand), body: JSON.stringify({ ticket }) },
     4,
     1000,
   )
@@ -199,36 +231,36 @@ export async function postReply(
 }
 
 // Adds one or more tags to a ticket (fire-and-forget safe)
-export async function tagTicket(ticketId: number, tags: string[]): Promise<void> {
+export async function tagTicket(ticketId: number, tags: string[], brand: SavBrand = 'moom'): Promise<void> {
   const getRes = await fetchWithRetry(
-    `${base()}/tickets/${ticketId}.json`,
-    { headers: authHeaders(), cache: 'no-store' },
+    `${base(brand)}/tickets/${ticketId}.json`,
+    { headers: authHeaders(brand), cache: 'no-store' },
     3, 1000,
   )
   if (!getRes.ok) throw new Error(`[Zendesk] tagTicket read ${getRes.status}`)
   const { ticket } = await getRes.json() as { ticket: ZendeskTicket }
 
   const res = await fetchWithRetry(
-    `${base()}/tickets/${ticketId}.json`,
-    { method: 'PUT', headers: authHeaders(), body: JSON.stringify({ ticket: { tags: [...new Set([...ticket.tags, ...tags])] } }) },
+    `${base(brand)}/tickets/${ticketId}.json`,
+    { method: 'PUT', headers: authHeaders(brand), body: JSON.stringify({ ticket: { tags: [...new Set([...ticket.tags, ...tags])] } }) },
     3, 1000,
   )
   if (!res.ok) throw new Error(`[Zendesk] tagTicket write ${res.status}: ${await res.text()}`)
 }
 
 // Adds the "escalade-humain" tag silently — no public reply
-export async function escalateTicket(ticketId: number): Promise<void> {
+export async function escalateTicket(ticketId: number, brand: SavBrand = 'moom'): Promise<void> {
   const getRes = await fetchWithRetry(
-    `${base()}/tickets/${ticketId}.json`,
-    { headers: authHeaders(), cache: 'no-store' },
+    `${base(brand)}/tickets/${ticketId}.json`,
+    { headers: authHeaders(brand), cache: 'no-store' },
     3, 1000,
   )
   if (!getRes.ok) throw new Error(`[Zendesk] escalate read ${getRes.status}`)
   const { ticket } = await getRes.json() as { ticket: ZendeskTicket }
 
   const res = await fetchWithRetry(
-    `${base()}/tickets/${ticketId}.json`,
-    { method: 'PUT', headers: authHeaders(), body: JSON.stringify({ ticket: { tags: [...new Set([...ticket.tags, 'escalade-humain'])] } }) },
+    `${base(brand)}/tickets/${ticketId}.json`,
+    { method: 'PUT', headers: authHeaders(brand), body: JSON.stringify({ ticket: { tags: [...new Set([...ticket.tags, 'escalade-humain'])] } }) },
     3, 1000,
   )
   if (!res.ok) throw new Error(`[Zendesk] escalate write ${res.status}: ${await res.text()}`)
@@ -237,16 +269,17 @@ export async function escalateTicket(ticketId: number): Promise<void> {
 // Closes a ticket as solved without posting any public comment.
 // Sets the required "Motif de contact" field to "autres" (field 20652537824913)
 // to satisfy Zendesk's validation, and adds the "steero-archive" tag.
-export async function archiveTicket(ticketId: number): Promise<void> {
+export async function archiveTicket(ticketId: number, brand: SavBrand = 'moom'): Promise<void> {
+  const rf = zdConfig(brand).resolutionField
   const res = await fetchWithRetry(
-    `${base()}/tickets/${ticketId}.json`,
+    `${base(brand)}/tickets/${ticketId}.json`,
     {
       method: 'PUT',
-      headers: authHeaders(),
+      headers: authHeaders(brand),
       body: JSON.stringify({
         ticket: {
           status: 'solved',
-          custom_fields: [{ id: 20652537824913, value: 'autres' }],
+          ...(rf ? { custom_fields: [{ id: rf.id, value: rf.value }] } : {}),
           tags_to_add: ['steero-archive'],
         },
       }),
@@ -278,12 +311,13 @@ export interface CommentItem {
 export async function getTicketComments(
   ticketId:    number,
   requesterId: number,
+  brand: SavBrand = 'moom',
 ): Promise<CommentItem[]> {
-  const url = `${base()}/tickets/${ticketId}/comments.json`
+  const url = `${base(brand)}/tickets/${ticketId}/comments.json`
   console.log(`[Zendesk] getTicketComments — fetching #${ticketId} (requesterId=${requesterId})`)
 
   // Use fetchWithRetry so 429s are handled with a minimum 1s delay
-  const res = await fetchWithRetry(url, { headers: authHeaders(), cache: 'no-store' }, 3, 1000)
+  const res = await fetchWithRetry(url, { headers: authHeaders(brand), cache: 'no-store' }, 3, 1000)
 
   if (!res.ok) {
     const body = await res.text().catch(() => '(unreadable)')
@@ -339,11 +373,11 @@ export async function getTicketComments(
 // When a client references a previous ticket (#XXXXX), fetch its subject and
 // public comments so Claude can understand the full history before replying.
 
-export async function fetchTicketContext(ticketId: number): Promise<string | null> {
+export async function fetchTicketContext(ticketId: number, brand: SavBrand = 'moom'): Promise<string | null> {
   // 1. Fetch ticket metadata
   const ticketRes = await fetch(
-    `${base()}/tickets/${ticketId}.json`,
-    { headers: authHeaders(), cache: 'no-store' }
+    `${base(brand)}/tickets/${ticketId}.json`,
+    { headers: authHeaders(brand), cache: 'no-store' }
   ).catch(() => null)
 
   if (!ticketRes || !ticketRes.ok) {
@@ -355,8 +389,8 @@ export async function fetchTicketContext(ticketId: number): Promise<string | nul
 
   // 2. Fetch public comments
   const commentsRes = await fetchWithRetry(
-    `${base()}/tickets/${ticketId}/comments.json`,
-    { headers: authHeaders(), cache: 'no-store' },
+    `${base(brand)}/tickets/${ticketId}/comments.json`,
+    { headers: authHeaders(brand), cache: 'no-store' },
     2,
     1000,
   ).catch(() => null)
@@ -462,10 +496,10 @@ async function fetchNoWait429(url: string, opts: RequestInit): Promise<Response>
   return res
 }
 
-async function fetchComments(ticketId: number): Promise<ZendeskComment[]> {
+async function fetchComments(ticketId: number, brand: SavBrand = 'moom'): Promise<ZendeskComment[]> {
   const res = await fetchNoWait429(
-    `${base()}/tickets/${ticketId}/comments.json`,
-    { headers: authHeaders(), cache: 'no-store' }
+    `${base(brand)}/tickets/${ticketId}/comments.json`,
+    { headers: authHeaders(brand), cache: 'no-store' }
   )
   if (!res.ok) return []
   const data = await res.json() as { comments: ZendeskComment[] }
@@ -480,19 +514,20 @@ async function fetchComments(ticketId: number): Promise<ZendeskComment[]> {
 export async function exportSolvedTickets(
   maxTickets = 25,
   resumeUrl?: string | null,
+  brand: SavBrand = 'moom',
 ): Promise<{ examples: SolvedTicketData[]; nextCursor: string | null }> {
   // maxPages = how many Zendesk pages to fetch per call (each page ~100 tickets)
   // We take ALL solved tickets from each page — never skip any.
   const maxPages = maxTickets  // parameter is reused as page count
   let url: string | null = resumeUrl ??
-    `${base()}/incremental/tickets/cursor.json?start_time=1735689600&per_page=100`
+    `${base(brand)}/incremental/tickets/cursor.json?start_time=1735689600&per_page=100`
   let nextCursor: string | null = null
   const allTickets: ZendeskTicket[] = []
   let pagesRead = 0
 
   // 1. Fetch up to maxPages pages, collect ALL solved/closed tickets from each
   while (url && pagesRead < maxPages) {
-    const res = await fetchNoWait429(url, { headers: authHeaders(), cache: 'no-store' })
+    const res = await fetchNoWait429(url, { headers: authHeaders(brand), cache: 'no-store' })
     if (!res.ok) throw new Error(`[Zendesk] exportSolvedTickets ${res.status}: ${await res.text()}`)
     const data = await res.json() as {
       tickets: ZendeskTicket[]
@@ -516,7 +551,7 @@ export async function exportSolvedTickets(
     allTickets,
     async (ticket): Promise<SolvedTicketData | null> => {
       console.log(`  → #${ticket.id} ${ticket.subject.slice(0, 50)}`)
-      const comments = await fetchComments(ticket.id)
+      const comments = await fetchComments(ticket.id, brand)
 
       const agentReply = comments.find(
         c => c.public && c.author_id !== ticket.requester_id && c.body?.trim().length > 20
