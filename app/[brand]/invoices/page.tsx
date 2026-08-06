@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef } from 'react'
 import { read, utils } from 'xlsx'
-import { Upload, TrendingUp, Sparkles, AlertTriangle, RotateCcw, CheckCircle, GitFork, Clock } from 'lucide-react'
+import { Upload, TrendingUp, Sparkles, AlertTriangle, CheckCircle, Clock } from 'lucide-react'
 
 interface InvoiceRow {
   order_name: string
@@ -473,13 +473,20 @@ Historique FW : ${history.map(h => `${h.month}: ${h.fw_count} FW ($${h.fw_total?
   }
 
   const normal    = rows.filter(r => !r.isFW)
-  const fw        = rows.filter(r => r.isFW)
   const total     = rows.reduce((s, r) => s + r.total_price, 0)
-  const fwTotal   = fw.reduce((s, r) => s + r.total_price, 0)
   const atRisk    = anomalies.reduce((s, a) => s + a.amount, 0)
 
+  // KPI de coût (aide à voir CE qui coûte et POURQUOI)
+  const shippingTotal = normal.reduce((s, r) => s + r.shipping_price, 0)
+  const serviceTotal  = normal.reduce((s, r) => s + r.service_price, 0)
+  const avgPerOrder   = normal.length ? total / normal.length : 0
+  const shipAvg       = normal.length ? shippingTotal / normal.length : 0
+  const servAvg       = normal.length ? serviceTotal / normal.length : 0
+  const serviceAnoms  = anomalies.filter(a => a.type === 'high_service').length
+  const shippingAnoms = anomalies.filter(a => a.type === 'high_shipping').length
+
   const chartData = [...history].sort((a, b) => a.month.localeCompare(b.month)).slice(-6)
-  const maxFW     = Math.max(...chartData.map(d => d.fw_count), 1)
+  const maxTotal  = Math.max(...chartData.map(d => d.normal_total || 0), 1)
 
   const sortedHistory = [...history].sort((a, b) => b.month.localeCompare(a.month))
 
@@ -622,34 +629,43 @@ Historique FW : ${history.map(h => `${h.month}: ${h.fw_count} FW ($${h.fw_total?
 
         {rows.length > 0 && (
           <>
-            {/* Summary cards — full width */}
-            <div className="grid grid-cols-3 gap-3">
+            {/* KPI — voir facilement CE qui coûte et POURQUOI */}
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+              {/* Total facturé + moyenne / commande */}
               <div className="bg-white rounded-[14px] shadow-[0_2px_10px_rgba(0,0,0,0.05)] p-4">
                 <p className="text-[10px] font-semibold uppercase tracking-wide text-[#6b6b63] mb-2">Total facturé</p>
-                <p className="text-2xl font-bold text-[#1a1a2e]">${total.toFixed(2)}</p>
-                <p className="text-xs text-[#9b9b93] mt-0.5">{rows.length} lignes · {normal.length} normales</p>
+                <p className="text-2xl font-bold text-[#1a1a2e]">${total.toFixed(0)}</p>
+                <p className="text-xs text-[#9b9b93] mt-0.5">{normal.length} commandes · ${avgPerOrder.toFixed(2)}/cmd</p>
               </div>
+              {/* Livraison */}
               <div className="bg-white rounded-[14px] shadow-[0_2px_10px_rgba(0,0,0,0.05)] p-4">
-                <div className="flex items-center gap-1.5 mb-2">
-                  <RotateCcw size={12} className="text-[#aeb0c9]" />
-                  <p className="text-[10px] font-semibold uppercase tracking-wide text-[#6b6b63]">Renvois FW</p>
-                </div>
-                <p className="text-2xl font-bold text-[#1a1a2e]">{fw.length}</p>
-                <p className="text-xs text-[#9b9b93] mt-0.5">${fwTotal.toFixed(2)} au total</p>
+                <p className="text-[10px] font-semibold uppercase tracking-wide text-[#6b6b63] mb-2">Livraison</p>
+                <p className="text-2xl font-bold text-[#1a1a2e]">${shippingTotal.toFixed(0)}</p>
+                <p className={`text-xs mt-0.5 ${shippingAnoms > 0 ? 'text-[#c7293a] font-semibold' : 'text-[#9b9b93]'}`}>
+                  ${shipAvg.toFixed(2)}/cmd{shippingAnoms > 0 ? ` · ${shippingAnoms} anormale${shippingAnoms > 1 ? 's' : ''}` : ''}
+                </p>
               </div>
+              {/* Frais de prépa (service fee) — là où le bug logisticien gonfle */}
+              <div className={`rounded-[14px] shadow-[0_2px_10px_rgba(0,0,0,0.05)] p-4 ${serviceAnoms > 0 ? 'bg-[#fff8ed]' : 'bg-white'}`}>
+                <p className="text-[10px] font-semibold uppercase tracking-wide text-[#6b6b63] mb-2">Frais de prépa</p>
+                <p className="text-2xl font-bold text-[#1a1a2e]">${serviceTotal.toFixed(0)}</p>
+                <p className={`text-xs mt-0.5 ${serviceAnoms > 0 ? 'text-[#b45309] font-semibold' : 'text-[#9b9b93]'}`}>
+                  ${servAvg.toFixed(2)}/cmd{serviceAnoms > 0 ? ` · ${serviceAnoms} anormal${serviceAnoms > 1 ? 'es' : ''}` : ''}
+                </p>
+              </div>
+              {/* À contester */}
               <div className={`rounded-[14px] shadow-[0_2px_10px_rgba(0,0,0,0.05)] p-4 ${anomalies.length > 0 ? 'bg-[#fef2f2]' : 'bg-white'}`}>
                 <div className="flex items-center gap-1.5 mb-2">
                   {anomalies.length > 0
                     ? <AlertTriangle size={12} className="text-[#c7293a]" />
-                    : <CheckCircle size={12} className="text-[#1a7f4b]" />
-                  }
-                  <p className="text-[10px] font-semibold uppercase tracking-wide text-[#6b6b63]">Anomalies</p>
+                    : <CheckCircle size={12} className="text-[#1a7f4b]" />}
+                  <p className="text-[10px] font-semibold uppercase tracking-wide text-[#6b6b63]">À contester</p>
                 </div>
                 <p className={`text-2xl font-bold ${anomalies.length > 0 ? 'text-[#c7293a]' : 'text-[#1a7f4b]'}`}>
-                  {anomalies.length}
+                  {anomalies.length > 0 ? `$${atRisk.toFixed(0)}` : '0'}
                 </p>
                 <p className="text-xs text-[#9b9b93] mt-0.5">
-                  {anomalies.length > 0 ? `$${atRisk.toFixed(2)} à risque` : 'Aucune détectée'}
+                  {anomalies.length > 0 ? `${anomalies.length} anomalie${anomalies.length > 1 ? 's' : ''} à récupérer` : 'Aucune anomalie'}
                 </p>
               </div>
             </div>
@@ -771,30 +787,6 @@ Historique FW : ${history.map(h => `${h.month}: ${h.fw_count} FW ($${h.fw_total?
                   </div>
                 )}
 
-                {/* Split shipments légitimes */}
-                {splitShipments.length > 0 && (
-                  <>
-                    <div className="px-5 py-3 border-t border-[#f0f0ee] flex items-center gap-2 bg-[#f6faf8]">
-                      <GitFork size={12} className="text-[#1a7f4b]" />
-                      <p className="text-[10px] font-semibold uppercase tracking-[0.1em] text-[#1a7f4b]">
-                        Split shipments légitimes ({splitShipments.length})
-                      </p>
-                    </div>
-                    <div className="divide-y divide-[#f0f8f4]">
-                      {splitShipments.map((s, i) => (
-                        <div key={i} className="flex items-center justify-between px-5 py-3 gap-4 bg-[#f6faf8]/60">
-                          <div className="flex items-center gap-2">
-                            <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-md bg-[#e6f4ec] text-[#1a7f4b]">
-                              Les deux entrepôts
-                            </span>
-                            <span className="font-mono text-xs text-[#1a1a2e]">{s.order_name}</span>
-                          </div>
-                          <p className="text-sm font-medium text-[#1a7f4b] tabular-nums shrink-0">${s.amount.toFixed(2)}</p>
-                        </div>
-                      ))}
-                    </div>
-                  </>
-                )}
               </div>
 
               {/* Right — AI Analysis + FW chart */}
@@ -831,15 +823,15 @@ Historique FW : ${history.map(h => `${h.month}: ${h.fw_count} FW ($${h.fw_total?
                   <div className="bg-white rounded-[16px] shadow-[0_2px_12px_rgba(0,0,0,0.06)] p-5">
                     <div className="flex items-center gap-2 mb-5">
                       <TrendingUp size={14} className="text-[#aeb0c9]" />
-                      <p className="text-[10px] font-semibold uppercase tracking-[0.1em] text-[#6b6b63]">Évolution mensuelle des FW</p>
+                      <p className="text-[10px] font-semibold uppercase tracking-[0.1em] text-[#6b6b63]">Total facturé / mois</p>
                     </div>
                     <div className="flex items-end gap-3 h-28">
                       {chartData.map((d) => {
-                        const h   = Math.max(4, Math.round((d.fw_count / maxFW) * 96))
+                        const h   = Math.max(4, Math.round(((d.normal_total||0) / maxTotal) * 96))
                         const lbl = new Date(d.month + '-02').toLocaleDateString('fr-FR', { month: 'short' })
                         return (
                           <div key={d.month} className="flex-1 flex flex-col items-center gap-1">
-                            <p className="text-[10px] font-semibold text-[#1a1a2e]">{d.fw_count}</p>
+                            <p className="text-[10px] font-semibold text-[#1a1a2e]">${Math.round((d.normal_total||0))}</p>
                             <div className="w-full rounded-t-lg bg-[#aeb0c9]/60" style={{ height: h }} />
                             <p className="text-[10px] text-[#9b9b93]">{lbl}</p>
                           </div>
@@ -859,15 +851,15 @@ Historique FW : ${history.map(h => `${h.month}: ${h.fw_count} FW ($${h.fw_total?
           <div className="bg-white rounded-[16px] shadow-[0_2px_12px_rgba(0,0,0,0.06)] p-5">
             <div className="flex items-center gap-2 mb-5">
               <TrendingUp size={14} className="text-[#aeb0c9]" />
-              <p className="text-[10px] font-semibold uppercase tracking-[0.1em] text-[#6b6b63]">Évolution mensuelle des FW</p>
+              <p className="text-[10px] font-semibold uppercase tracking-[0.1em] text-[#6b6b63]">Total facturé / mois</p>
             </div>
             <div className="flex items-end gap-3 h-28">
               {chartData.map((d) => {
-                const h   = Math.max(4, Math.round((d.fw_count / maxFW) * 96))
+                const h   = Math.max(4, Math.round(((d.normal_total||0) / maxTotal) * 96))
                 const lbl = new Date(d.month + '-02').toLocaleDateString('fr-FR', { month: 'short' })
                 return (
                   <div key={d.month} className="flex-1 flex flex-col items-center gap-1">
-                    <p className="text-[10px] font-semibold text-[#1a1a2e]">{d.fw_count}</p>
+                    <p className="text-[10px] font-semibold text-[#1a1a2e]">${Math.round((d.normal_total||0))}</p>
                     <div className="w-full rounded-t-lg bg-[#aeb0c9]/60" style={{ height: h }} />
                     <p className="text-[10px] text-[#9b9b93]">{lbl}</p>
                   </div>
