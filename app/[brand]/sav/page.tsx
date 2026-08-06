@@ -19,6 +19,10 @@ function savFetch(input: string, init?: RequestInit): Promise<Response> {
   const url = input + (input.includes('?') ? '&' : '?') + 'brand=' + savBrand()
   return fetch(url, init)
 }
+// Libellé de marque affiché dans l'en-tête du SAV.
+function savBrandLabel(): string {
+  return savBrand() === 'bowa' ? 'Bowa' : 'Mōom Paris'
+}
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -474,7 +478,7 @@ function ConversationThread({ ticket, refreshKey }: { ticket: ProcessedTicket; r
     const url = `/api/sav/comments?ticket_id=${ticket.ticket_id}&requester_id=${ticket.requester_id ?? 0}`
     console.log(`[SAV] ConversationThread — fetching #${ticket.ticket_id} (refreshKey=${refreshKey})`)
 
-    fetch(url, { cache: 'no-store', signal: controller.signal })
+    savFetch(url, { cache: 'no-store', signal: controller.signal })
       .then(r => r.json())
       .then((d: { comments?: CommentItem[]; error?: string }) => {
         if (d.error) console.warn('[SAV] comments API error:', d.error)
@@ -1282,7 +1286,7 @@ function RulesPanel({ onClose }: { onClose: () => void }) {
       {/* Header */}
       <div className="flex items-center justify-between px-8 py-5 border-b border-[#e8e8e4] shrink-0">
         <div>
-          <p className="text-[10px] font-semibold uppercase tracking-[0.1em] text-[#aeb0c9]">SAV Mōom</p>
+          <p className="text-[10px] font-semibold uppercase tracking-[0.1em] text-[#aeb0c9]">SAV {savBrandLabel()}</p>
           <h2 className="text-base font-semibold text-[#1a1a2e] mt-0.5">Instructions & règles</h2>
         </div>
         <button onClick={onClose} className="w-8 h-8 rounded-lg flex items-center justify-center text-[#6b6b63] hover:bg-[#f8f7f5] transition-colors">
@@ -2231,7 +2235,7 @@ export default function SavPage() {
         <div className="px-4 pt-4 border-b border-[#eeede9] shrink-0">
           <div className="flex items-center justify-between mb-3">
             <div>
-              <p className="text-[9px] font-semibold uppercase tracking-[0.12em] text-[#aeb0c9]">Mōom Paris</p>
+              <p className="text-[9px] font-semibold uppercase tracking-[0.12em] text-[#aeb0c9]">{savBrandLabel()}</p>
               <p className="text-sm font-bold text-[#1a1a2e] mt-0.5">SAV</p>
             </div>
             <div className="flex items-center gap-1">
