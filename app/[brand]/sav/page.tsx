@@ -131,10 +131,18 @@ function fmtTime(iso: string) {
 
 // ─── Attribution des tickets (qui répond) ──────────────────────────────────────
 
-const ASSIGNEES = ['Satiana', 'Lary'] as const
+// Agents par marque (chaque marque a ses propres agents SAV).
+const ASSIGNEES_BY_BRAND: Record<'moom' | 'bowa', readonly string[]> = {
+  moom: ['Satiana', 'Lary'],
+  bowa: ['Léa'],
+}
+function savAssignees(): readonly string[] {
+  return ASSIGNEES_BY_BRAND[savBrand()]
+}
 const ASSIGNEE_COLORS: Record<string, [string, string]> = {
   Satiana: ['#ede9fe', '#6d28d9'],
   Lary:    ['#dbeafe', '#1d4ed8'],
+  Léa:     ['#fce7f3', '#be185d'],
 }
 
 function AssigneePill({ name, selected }: { name: string; selected?: boolean }) {
@@ -159,7 +167,7 @@ function AssignBar({ ticketId, assignee, onAssign, myName }: {
 }) {
   const options: { val: string | null; label: string; color: string }[] = [
     { val: null, label: 'Non attribué', color: '#9b9b93' },
-    ...ASSIGNEES.map(a => ({ val: a as string | null, label: a, color: ASSIGNEE_COLORS[a]?.[1] ?? '#6b6b63' })),
+    ...savAssignees().map(a => ({ val: a as string | null, label: a, color: ASSIGNEE_COLORS[a]?.[1] ?? '#6b6b63' })),
   ]
   // Ticket pris par un AUTRE agent → avertissement (le blocage réel est à l'envoi).
   const takenByOther = !!assignee && !!myName && assignee !== myName
@@ -1839,7 +1847,7 @@ export default function SavPage() {
       // ouvre par défaut sur « ses » tickets. L'admin voit tout.
       if (!filterInit.current) {
         filterInit.current = true
-        if ((ASSIGNEES as readonly string[]).includes(name)) setAssigneeFilter(name)
+        if (savAssignees().includes(name)) setAssigneeFilter(name)
       }
 
       savFetch('/api/sav/actions', {
@@ -1983,7 +1991,7 @@ export default function SavPage() {
   // se le réserve (insert-si-absent, ne vole pas un ticket déjà pris) → les autres
   // agents voient tout de suite qu'il est pris. Le vrai blocage est côté serveur à l'envoi.
   async function claimOnOpen(ticketId: number) {
-    if (!(ASSIGNEES as readonly string[]).includes(myName)) return // admin/non-agent : pas d'auto-claim
+    if (!savAssignees().includes(myName)) return // admin/non-agent : pas d'auto-claim
     if (assignments[ticketId]) return                              // déjà attribué
     setAssignments(prev => ({ ...prev, [ticketId]: myName }))      // optimiste
     try {
@@ -2357,7 +2365,7 @@ export default function SavPage() {
           {/* Filtre par personne — « mes tickets » */}
           {tab !== 'qualite' && (
             <div className="flex items-center gap-1 pb-2 pt-2 overflow-x-auto">
-              {([['', 'Tous'], ...ASSIGNEES.map(a => [a, a] as [string, string]), ['unassigned', 'Non attribué']] as [string, string][]).map(([val, label]) => {
+              {([['', 'Tous'], ...savAssignees().map(a => [a, a] as [string, string]), ['unassigned', 'Non attribué']] as [string, string][]).map(([val, label]) => {
                 const active = assigneeFilter === val
                 const isMine = !!val && val === myName
                 return (
