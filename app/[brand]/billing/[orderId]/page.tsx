@@ -123,32 +123,29 @@ function Invoice({ order, settings, mode }: { order: ShopifyOrder; settings: Inv
   // ── Avoir basé sur les remboursements Shopify ──────────────────────────────
   // L'avoir ne porte QUE sur les articles réellement remboursés (refund_line_items),
   // pas sur le total de la commande. Ex. #10033 Bowa : 13× Akupanel remboursés = 572 €.
-  const refunds  = order.refunds ?? []
-  const refItems = refunds.flatMap(r => r.refund_line_items ?? [])
-  const hasRefund = isAvoir && refItems.length > 0
+  const refunds   = order.refunds ?? []
+  const refItems  = refunds.flatMap(r => r.refund_line_items ?? [])
   // Montant réellement remboursé (TTC) = somme des transactions kind=refund.
   const refundTx  = refunds.flatMap(r => r.transactions ?? [])
     .filter(t => t.kind === 'refund')
     .reduce((s, t) => s + parseFloat(t.amount || '0'), 0)
-  const refundTVA = tvaEnabled ? refItems.reduce((s, li) => s + (li.total_tax || 0), 0) : 0
-  // Repli sur la somme des subtotals si aucune transaction n'est exposée.
-  const refundSub = refItems.reduce((s, li) => s + (li.subtotal || 0), 0)
-  const refundTTC = refundTx > 0 ? refundTx : (tvaEnabled ? refundSub : refundSub + refundTVA)
+  const refItemsTax = refItems.reduce((s, li) => s + (li.total_tax || 0), 0)
+  const refItemsSub = refItems.reduce((s, li) => s + (li.subtotal || 0), 0)
+  // Un avoir est possible dès qu'il y a un remboursement (articles détaillés OU simple montant).
+  const hasRefund = isAvoir && (refItems.length > 0 || refundTx > 0)
+
+  // TTC remboursé : transactions réelles en priorité, sinon somme des lignes.
+  const refundTTC = refundTx > 0 ? refundTx : (tvaEnabled ? refItemsSub : refItemsSub + refItemsTax)
+  // TVA : depuis les lignes si détaillées, sinon extraite proportionnellement du TTC.
+  const refundTVA = !tvaEnabled ? 0
+                    : refItemsTax > 0 ? refItemsTax
+                    : refundTTC - refundTTC / (1 + tvaRate / 100)
   const refundHT  = refundTTC - refundTVA
 
-  // Lignes à afficher (articles remboursés en avoir, sinon toutes les lignes).
-  const displayItems = hasRefund
-    ? refItems.map((li, i) => ({
-        id:            i,
-        title:         li.line_item?.title ?? 'Article remboursé',
-        variant_title: li.line_item?.variant_title ?? null,
-        sku:           li.line_item?.sku ?? null,
-        quantity:      li.quantity,
-        unitPrice:     li.line_item?.price ? parseFloat(li.line_item.price)
-                       : (li.quantity ? li.subtotal / li.quantity : li.subtotal),
-        lineTotal:     li.subtotal,
-      }))
-    : order.line_items.map(it => ({
+  // Lignes à afficher : articles remboursés si détaillés ; sinon une ligne
+  // « Remboursement » du montant ; sinon (facture) toutes les lignes.
+  const displayItems = !hasRefund
+    ? order.line_items.map(it => ({
         id:            it.id,
         title:         it.title,
         variant_title: it.variant_title ?? null,
@@ -157,6 +154,26 @@ function Invoice({ order, settings, mode }: { order: ShopifyOrder; settings: Inv
         unitPrice:     parseFloat(it.price),
         lineTotal:     parseFloat(it.price) * it.quantity - parseFloat(it.total_discount || '0'),
       }))
+    : refItems.length > 0
+      ? refItems.map((li, i) => ({
+          id:            i,
+          title:         li.line_item?.title ?? 'Article remboursé',
+          variant_title: li.line_item?.variant_title ?? null,
+          sku:           li.line_item?.sku ?? null,
+          quantity:      li.quantity,
+          unitPrice:     li.line_item?.price ? parseFloat(li.line_item.price)
+                         : (li.quantity ? li.subtotal / li.quantity : li.subtotal),
+          lineTotal:     li.subtotal,
+        }))
+      : [{
+          id:            0,
+          title:         `Remboursement commande ${order.name}`,
+          variant_title: null,
+          sku:           null,
+          quantity:      1,
+          unitPrice:     refundTTC,
+          lineTotal:     refundTTC,
+        }]
 
   // Montants affichés dans le bloc totaux.
   const dispHt  = hasRefund ? refundHT  : htAmount
