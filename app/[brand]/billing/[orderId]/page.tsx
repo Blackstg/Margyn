@@ -430,6 +430,11 @@ export default function InvoicePage({ params }: { params: { orderId: string } })
   const [loading, setLoading]   = useState(true)
   const [error, setError]       = useState<string | null>(null)
 
+  // La commande a-t-elle un remboursement Shopify ? (pastille sur l'onglet Avoir)
+  const orderHasRefund = !!order?.refunds?.some(r =>
+    (r.refund_line_items?.length ?? 0) > 0 ||
+    (r.transactions ?? []).some(t => t.kind === 'refund'))
+
   function handlePrint() {
     const el = document.getElementById('invoice-content')
     if (!el) return
@@ -490,19 +495,31 @@ export default function InvoicePage({ params }: { params: { orderId: string } })
           </button>
           {order && (
             <div className="flex items-center gap-3">
-              <span className="text-sm font-semibold text-[#1a1a2e]">{isAvoir ? "Avoir" : 'Facture'} {order.name}</span>
-              <button
-                onClick={() => router.push(`/${brand}/billing/${params.orderId}${isAvoir ? '' : '?type=avoir'}`)}
-                className={`flex items-center gap-2 px-3 py-2 rounded-xl text-sm font-medium border transition-colors ${isAvoir ? 'border-[#e8e8e4] text-[#6b6b63] hover:bg-[#f5f5f3]' : 'border-[#f5c9ce] text-[#c7293a] hover:bg-[#fdecec]'}`}
-              >
-                {isAvoir ? '↩ Revenir à la facture' : "＋ Créer un avoir"}
-              </button>
+              <span className="text-sm font-semibold text-[#1a1a2e]">{order.name}</span>
+
+              {/* Sélecteur segmenté Facture / Avoir — les deux vues restent accessibles */}
+              <div className="flex items-center rounded-xl border border-[#e8e8e4] bg-[#f3f3f1] p-0.5">
+                <button
+                  onClick={() => router.push(`/${brand}/billing/${params.orderId}`)}
+                  className={`px-3.5 py-1.5 rounded-[9px] text-sm font-medium transition-colors ${!isAvoir ? 'bg-white text-[#1a1a2e] shadow-sm' : 'text-[#6b6b63] hover:text-[#1a1a2e]'}`}
+                >
+                  Facture
+                </button>
+                <button
+                  onClick={() => router.push(`/${brand}/billing/${params.orderId}?type=avoir`)}
+                  className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-[9px] text-sm font-medium transition-colors ${isAvoir ? 'bg-[#c7293a] text-white shadow-sm' : 'text-[#6b6b63] hover:text-[#c7293a]'}`}
+                >
+                  Avoir
+                  {orderHasRefund && !isAvoir && <span className="w-1.5 h-1.5 rounded-full bg-[#c7293a]" />}
+                </button>
+              </div>
+
               <button
                 onClick={handlePrint}
                 className="flex items-center gap-2 px-4 py-2 rounded-xl bg-[#1a1a2e] text-white text-sm font-medium hover:bg-[#2d2d4a] transition-colors shadow-sm"
               >
                 <Download size={14} strokeWidth={2} />
-                Télécharger PDF
+                Télécharger {isAvoir ? "l'avoir" : 'la facture'}
               </button>
             </div>
           )}
