@@ -3,7 +3,7 @@
 export const dynamic = 'force-dynamic'
 
 import { useState, useEffect, useCallback } from 'react'
-import { useRouter } from 'next/navigation'
+import { useRouter, useSearchParams } from 'next/navigation'
 import { ArrowLeft, Download, Loader2, AlertCircle } from 'lucide-react'
 import { useBrand } from '@/context/BrandContext'
 
@@ -92,7 +92,8 @@ function paymentLabel(order: ShopifyOrder): string {
 
 // ─── Invoice Component ────────────────────────────────────────────────────────
 
-function Invoice({ order, settings }: { order: ShopifyOrder; settings: InvoiceSettings | null }) {
+function Invoice({ order, settings, mode }: { order: ShopifyOrder; settings: InvoiceSettings | null; mode: 'facture' | 'avoir' }) {
+  const isAvoir    = mode === 'avoir'
   const primary    = settings?.color_primary || '#1a1a2e'
   const tvaEnabled = settings?.tva_enabled ?? true
   const tvaRate    = settings?.tva_rate ?? 20
@@ -111,6 +112,7 @@ function Invoice({ order, settings }: { order: ShopifyOrder; settings: InvoiceSe
     || '—'
 
   const invoiceNumber = order.name.replace('#', '')
+  const docNumber     = isAvoir ? `AV-${invoiceNumber}` : invoiceNumber
 
   const S: Record<string, React.CSSProperties> = {
     page:       { fontFamily: "'Helvetica Neue', Helvetica, Arial, sans-serif", color: '#1a1a18', backgroundColor: '#fff', width: '210mm', minHeight: '297mm', position: 'relative', display: 'flex', flexDirection: 'column' },
@@ -179,8 +181,9 @@ function Invoice({ order, settings }: { order: ShopifyOrder; settings: InvoiceSe
           {/* Invoice ref + date */}
           <div style={S.headerRight}>
             <div>
-              <div style={S.invoiceLabel}>FACTURE</div>
-              <div style={S.invoiceNum} data-invoice-number>{invoiceNumber}</div>
+              <div style={{ ...S.invoiceLabel, ...(isAvoir ? { color: '#c7293a', fontWeight: 700 } : {}) }}>{isAvoir ? "FACTURE D'AVOIR" : 'FACTURE'}</div>
+              <div style={S.invoiceNum} data-invoice-number>{docNumber}</div>
+              {isAvoir && <div style={{ fontSize: 10, color: '#c7293a', marginTop: 2 }}>Avoir sur facture n° {invoiceNumber}</div>}
             </div>
             <div style={S.dateBadge}>
               <div style={S.dateLabel}>DATE D&apos;ÉMISSION</div>
@@ -300,15 +303,15 @@ function Invoice({ order, settings }: { order: ShopifyOrder; settings: InvoiceSe
                 </div>
               </>
             )}
-            {isPaid && (
+            {!isAvoir && isPaid && (
               <div style={S.totalRow}>
                 <span>Montant payé</span>
                 <span style={{ fontWeight: 600 }}>{fmtEur(totalPrice)}</span>
               </div>
             )}
-            <div style={{ ...S.totalRowBig }}>
-              <span>MONTANT DÛ</span>
-              <span>{fmtEur(amountDue)}</span>
+            <div style={{ ...S.totalRowBig, ...(isAvoir ? { backgroundColor: '#c7293a' } : {}) }}>
+              <span>{isAvoir ? 'TOTAL AVOIR TTC' : 'MONTANT DÛ'}</span>
+              <span>{isAvoir ? `− ${fmtEur(totalPrice)}` : fmtEur(amountDue)}</span>
             </div>
           </div>
         </div>
@@ -339,6 +342,9 @@ function Invoice({ order, settings }: { order: ShopifyOrder; settings: InvoiceSe
 export default function InvoicePage({ params }: { params: { orderId: string } }) {
   const brand  = useBrand()
   const router = useRouter()
+  const searchParams = useSearchParams()
+  const mode: 'facture' | 'avoir' = searchParams.get('type') === 'avoir' ? 'avoir' : 'facture'
+  const isAvoir = mode === 'avoir'
 
   const [order, setOrder]       = useState<ShopifyOrder | null>(null)
   const [settings, setSettings] = useState<InvoiceSettings | null>(null)
@@ -350,7 +356,8 @@ export default function InvoicePage({ params }: { params: { orderId: string } })
     if (!el) return
     const win = window.open('', '_blank', 'width=900,height=1200')
     if (!win) return
-    const filename = order ? `Facture-${order.name.replace('#', '')}` : `Facture-${params.orderId}`
+    const prefix   = isAvoir ? 'Avoir' : 'Facture'
+    const filename = order ? `${prefix}-${order.name.replace('#', '')}` : `${prefix}-${params.orderId}`
     win.document.write(`<!DOCTYPE html><html><head>
       <meta charset="utf-8"/>
       <title>${filename}</title>
@@ -404,7 +411,13 @@ export default function InvoicePage({ params }: { params: { orderId: string } })
           </button>
           {order && (
             <div className="flex items-center gap-3">
-              <span className="text-sm font-semibold text-[#1a1a2e]">Facture {order.name}</span>
+              <span className="text-sm font-semibold text-[#1a1a2e]">{isAvoir ? "Avoir" : 'Facture'} {order.name}</span>
+              <button
+                onClick={() => router.push(`/${brand}/billing/${params.orderId}${isAvoir ? '' : '?type=avoir'}`)}
+                className={`flex items-center gap-2 px-3 py-2 rounded-xl text-sm font-medium border transition-colors ${isAvoir ? 'border-[#e8e8e4] text-[#6b6b63] hover:bg-[#f5f5f3]' : 'border-[#f5c9ce] text-[#c7293a] hover:bg-[#fdecec]'}`}
+              >
+                {isAvoir ? '↩ Revenir à la facture' : "＋ Créer un avoir"}
+              </button>
               <button
                 onClick={handlePrint}
                 className="flex items-center gap-2 px-4 py-2 rounded-xl bg-[#1a1a2e] text-white text-sm font-medium hover:bg-[#2d2d4a] transition-colors shadow-sm"
@@ -431,7 +444,7 @@ export default function InvoicePage({ params }: { params: { orderId: string } })
             </div>
           ) : order ? (
             <div className="max-w-[210mm] mx-auto shadow-[0_8px_40px_rgba(0,0,0,0.14)] rounded-sm overflow-hidden bg-white">
-              <Invoice order={order} settings={settings} />
+              <Invoice order={order} settings={settings} mode={mode} />
             </div>
           ) : null}
         </div>

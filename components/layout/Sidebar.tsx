@@ -51,10 +51,10 @@ const NAV_SECTIONS: { label: string; items: NavItem[] }[] = [
     label: 'Opérations',
     items: [
       { key: 'reorder',   icon: PackageOpen, label: 'Réappro',      brandLock: null   },
-      { key: 'billing',   icon: Receipt,      label: 'Facturation', brandLock: null   },
+      { key: 'billing',   icon: Receipt,      label: 'Facturation clients', brandLock: null   },
       { key: 'delivery',  icon: Truck,        label: 'Delivery',    brandLock: 'bowa' },
       { key: 'stock',     icon: Boxes,        label: 'Stock',       brandLock: 'moom' },
-      { key: 'invoices',  icon: FileText,     label: 'Factures',    brandLock: 'moom' },
+      { key: 'invoices',  icon: FileText,     label: 'Coûts logisticien', brandLock: 'moom' },
       { key: 'products',  icon: Tag,          label: 'Produits',    brandLock: 'moom' },
     ],
   },

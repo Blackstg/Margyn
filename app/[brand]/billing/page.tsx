@@ -94,7 +94,7 @@ export default function BillingPage() {
         <div className="flex items-center justify-between mb-6">
           <div>
             <h1 className="text-xl font-bold text-[#1a1a18] tracking-tight">Facturation</h1>
-            <p className="text-sm text-[#6b6b63] mt-0.5">Générez une facture PDF pour chaque commande Shopify</p>
+            <p className="text-sm text-[#6b6b63] mt-0.5">Générez une facture — ou un avoir — PDF pour chaque commande Shopify</p>
           </div>
           <button
             onClick={() => router.push(`/${brand}/settings`)}
