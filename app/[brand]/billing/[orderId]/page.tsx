@@ -47,6 +47,20 @@ interface ShopifyOrder {
     phone?:    string
   } | null
   line_items: LineItem[]
+  refunds?:   Refund[]
+}
+
+interface RefundLineItem {
+  quantity:   number
+  subtotal:   number   // montant remboursé HT/TTC selon le mode taxes du store
+  total_tax:  number
+  line_item?: { title?: string; variant_title?: string | null; sku?: string | null; price?: string } | null
+}
+interface Refund {
+  id:                number
+  created_at:        string
+  refund_line_items: RefundLineItem[]
+  transactions?:     { kind: string; amount: string }[]
 }
 
 interface InvoiceSettings {
@@ -105,6 +119,49 @@ function Invoice({ order, settings, mode }: { order: ShopifyOrder; settings: Inv
   const subtotal   = parseFloat(order.subtotal_price)
   const isPaid     = order.financial_status === 'paid' || order.financial_status === 'partially_paid'
   const amountDue  = isPaid ? 0 : totalPrice
+
+  // ── Avoir basé sur les remboursements Shopify ──────────────────────────────
+  // L'avoir ne porte QUE sur les articles réellement remboursés (refund_line_items),
+  // pas sur le total de la commande. Ex. #10033 Bowa : 13× Akupanel remboursés = 572 €.
+  const refunds  = order.refunds ?? []
+  const refItems = refunds.flatMap(r => r.refund_line_items ?? [])
+  const hasRefund = isAvoir && refItems.length > 0
+  // Montant réellement remboursé (TTC) = somme des transactions kind=refund.
+  const refundTx  = refunds.flatMap(r => r.transactions ?? [])
+    .filter(t => t.kind === 'refund')
+    .reduce((s, t) => s + parseFloat(t.amount || '0'), 0)
+  const refundTVA = tvaEnabled ? refItems.reduce((s, li) => s + (li.total_tax || 0), 0) : 0
+  // Repli sur la somme des subtotals si aucune transaction n'est exposée.
+  const refundSub = refItems.reduce((s, li) => s + (li.subtotal || 0), 0)
+  const refundTTC = refundTx > 0 ? refundTx : (tvaEnabled ? refundSub : refundSub + refundTVA)
+  const refundHT  = refundTTC - refundTVA
+
+  // Lignes à afficher (articles remboursés en avoir, sinon toutes les lignes).
+  const displayItems = hasRefund
+    ? refItems.map((li, i) => ({
+        id:            i,
+        title:         li.line_item?.title ?? 'Article remboursé',
+        variant_title: li.line_item?.variant_title ?? null,
+        sku:           li.line_item?.sku ?? null,
+        quantity:      li.quantity,
+        unitPrice:     li.line_item?.price ? parseFloat(li.line_item.price)
+                       : (li.quantity ? li.subtotal / li.quantity : li.subtotal),
+        lineTotal:     li.subtotal,
+      }))
+    : order.line_items.map(it => ({
+        id:            it.id,
+        title:         it.title,
+        variant_title: it.variant_title ?? null,
+        sku:           it.sku ?? null,
+        quantity:      it.quantity,
+        unitPrice:     parseFloat(it.price),
+        lineTotal:     parseFloat(it.price) * it.quantity - parseFloat(it.total_discount || '0'),
+      }))
+
+  // Montants affichés dans le bloc totaux.
+  const dispHt  = hasRefund ? refundHT  : htAmount
+  const dispTva = hasRefund ? refundTVA : tvaAmount
+  const dispTtc = hasRefund ? refundTTC : totalPrice
 
   const billingAddr = order.billing_address
   const clientName  = billingAddr?.name
@@ -183,7 +240,15 @@ function Invoice({ order, settings, mode }: { order: ShopifyOrder; settings: Inv
             <div>
               <div style={{ ...S.invoiceLabel, ...(isAvoir ? { color: '#c7293a', fontWeight: 700 } : {}) }}>{isAvoir ? "FACTURE D'AVOIR" : 'FACTURE'}</div>
               <div style={S.invoiceNum} data-invoice-number>{docNumber}</div>
-              {isAvoir && <div style={{ fontSize: 10, color: '#c7293a', marginTop: 2 }}>Avoir sur facture n° {invoiceNumber}</div>}
+              {isAvoir && (
+                <div style={{ fontSize: 10, color: '#c7293a', marginTop: 2, textAlign: 'right' }}>
+                  Avoir sur facture n° {invoiceNumber}
+                  {hasRefund && refunds[0]?.created_at && (
+                    <div style={{ color: '#888' }}>Remboursement du {fmtDateLong(refunds[0].created_at)}</div>
+                  )}
+                  {!hasRefund && <div style={{ color: '#b45309' }}>Aucun remboursement Shopify — avoir sur la totalité</div>}
+                </div>
+              )}
             </div>
             <div style={S.dateBadge}>
               <div style={S.dateLabel}>DATE D&apos;ÉMISSION</div>
@@ -248,9 +313,7 @@ function Invoice({ order, settings, mode }: { order: ShopifyOrder; settings: Inv
             </tr>
           </thead>
           <tbody>
-            {order.line_items.map((item) => {
-              const lineTotal = parseFloat(item.price) * item.quantity - parseFloat(item.total_discount || '0')
-              return (
+            {displayItems.map((item) => (
                 <tr key={item.id}>
                   <td style={S.tdBold}>{item.title}</td>
                   <td style={S.td}>
@@ -260,12 +323,11 @@ function Invoice({ order, settings, mode }: { order: ShopifyOrder; settings: Inv
                     {item.sku && <div style={S.sku}>SKU : {item.sku}</div>}
                   </td>
                   <td style={S.tdR}>{item.quantity}</td>
-                  <td style={S.tdR}>{fmtEur(parseFloat(item.price))}</td>
+                  <td style={S.tdR}>{fmtEur(item.unitPrice)}</td>
                   <td style={S.tdR}>{tvaEnabled ? `${tvaRate}%` : 'N/A'}</td>
-                  <td style={{ ...S.tdR, fontWeight: 700 }}>{fmtEur(lineTotal)}</td>
+                  <td style={{ ...S.tdR, fontWeight: 700 }}>{fmtEur(item.lineTotal)}</td>
                 </tr>
-              )
-            })}
+            ))}
           </tbody>
         </table>
 
@@ -273,22 +335,22 @@ function Invoice({ order, settings, mode }: { order: ShopifyOrder; settings: Inv
         <div style={S.totalsWrap}>
           <div style={S.totalsBox}>
             <div style={S.totalRow}>
-              <span>Sous-total</span>
-              <span style={{ fontWeight: 600 }}>{fmtEur(subtotal)}</span>
+              <span>{hasRefund ? 'Sous-total remboursé' : 'Sous-total'}</span>
+              <span style={{ fontWeight: 600 }}>{fmtEur(hasRefund ? dispHt : subtotal)}</span>
             </div>
             {tvaEnabled ? (
               <>
                 <div style={S.totalRow}>
                   <span>Total HT</span>
-                  <span style={{ fontWeight: 600 }}>{fmtEur(htAmount)}</span>
+                  <span style={{ fontWeight: 600 }}>{fmtEur(dispHt)}</span>
                 </div>
                 <div style={S.totalRow}>
                   <span>TVA (FR TVA) {tvaRate}%</span>
-                  <span style={{ fontWeight: 600 }}>{fmtEur(tvaAmount)}</span>
+                  <span style={{ fontWeight: 600 }}>{fmtEur(dispTva)}</span>
                 </div>
                 <div style={S.totalRow}>
                   <span>Total TTC</span>
-                  <span style={{ fontWeight: 700, color: '#1a1a18' }}>{fmtEur(totalPrice)}</span>
+                  <span style={{ fontWeight: 700, color: '#1a1a18' }}>{fmtEur(dispTtc)}</span>
                 </div>
               </>
             ) : (
@@ -299,7 +361,7 @@ function Invoice({ order, settings, mode }: { order: ShopifyOrder; settings: Inv
                 </div>
                 <div style={S.totalRow}>
                   <span>Total HT</span>
-                  <span style={{ fontWeight: 700, color: '#1a1a18' }}>{fmtEur(totalPrice)}</span>
+                  <span style={{ fontWeight: 700, color: '#1a1a18' }}>{fmtEur(dispTtc)}</span>
                 </div>
               </>
             )}
@@ -311,7 +373,7 @@ function Invoice({ order, settings, mode }: { order: ShopifyOrder; settings: Inv
             )}
             <div style={{ ...S.totalRowBig, ...(isAvoir ? { backgroundColor: '#c7293a' } : {}) }}>
               <span>{isAvoir ? 'TOTAL AVOIR TTC' : 'MONTANT DÛ'}</span>
-              <span>{isAvoir ? `− ${fmtEur(totalPrice)}` : fmtEur(amountDue)}</span>
+              <span>{isAvoir ? `− ${fmtEur(dispTtc)}` : fmtEur(amountDue)}</span>
             </div>
           </div>
         </div>

@@ -18,7 +18,7 @@ export async function GET(
     return NextResponse.json({ error: 'Brand non configurée' }, { status: 400 })
   }
 
-  const fields = 'id,name,created_at,customer,total_price,subtotal_price,total_tax,total_discounts,financial_status,billing_address,currency,line_items,gateway,payment_gateway_names'
+  const fields = 'id,name,created_at,customer,total_price,subtotal_price,total_tax,total_discounts,financial_status,billing_address,currency,line_items,gateway,payment_gateway_names,refunds'
 
   try {
     const res = await fetch(
