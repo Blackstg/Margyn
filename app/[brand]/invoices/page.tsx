@@ -15,11 +15,12 @@ interface InvoiceRow {
 }
 
 interface Anomaly {
-  type: 'double_billing' | 'high_shipping' | 'suspicious'
+  type: 'double_billing' | 'high_shipping' | 'high_service' | 'suspicious'
   order_name: string
   detail: string
   amount: number
   logistician_shipping?: number  // high_shipping only
+  logistician_service?:  number  // high_service only
 }
 
 interface SplitShipment {
@@ -117,6 +118,27 @@ function detectAnomalies(
           detail: `Shipping $${r.shipping_price.toFixed(2)} vs moyenne $${mean.toFixed(2)}`,
           amount: r.shipping_price - mean,
           logistician_shipping: r.shipping_price,
+        })
+      }
+    }
+  }
+
+  // 2bis. Service fee (frais de prépa) anormalement élevé — ex. bug logisticien qui
+  // DOUBLE le service fee sur les commandes multi-produits expédiées de France.
+  // Le shipping peut être correct mais le service fee gonflé → on le détecte à part.
+  const serviceValues = normal.map(r => r.service_price).filter(v => v > 0)
+  if (serviceValues.length > 5) {
+    const mean = serviceValues.reduce((s, v) => s + v, 0) / serviceValues.length
+    const std  = Math.sqrt(serviceValues.reduce((s, v) => s + (v - mean) ** 2, 0) / serviceValues.length)
+    const threshold = mean + 2.5 * std
+    for (const r of normal) {
+      if (r.service_price > threshold && r.service_price > mean * 3) {
+        anomalies.push({
+          type: 'high_service',
+          order_name: r.order_name,
+          detail: `Service fee $${r.service_price.toFixed(2)} vs moyenne $${mean.toFixed(2)}`,
+          amount: r.service_price - mean,
+          logistician_service: r.service_price,
         })
       }
     }
@@ -730,9 +752,13 @@ Historique FW : ${history.map(h => `${h.month}: ${h.fw_count} FW ($${h.fw_total?
                           <div className="flex-1 min-w-0">
                             <div className="flex items-center gap-2 mb-0.5">
                               <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-md ${
-                                a.type === 'double_billing' ? 'bg-[#fce8ea] text-[#c7293a]' : 'bg-[#f0f0ee] text-[#6b6b63]'
+                                a.type === 'double_billing' ? 'bg-[#fce8ea] text-[#c7293a]'
+                                  : a.type === 'high_service' ? 'bg-[#fff3cd] text-[#b45309]'
+                                  : 'bg-[#f0f0ee] text-[#6b6b63]'
                               }`}>
-                                {a.type === 'double_billing' ? 'Double billing' : 'Suspect'}
+                                {a.type === 'double_billing' ? 'Double billing'
+                                  : a.type === 'high_service' ? 'Service fee élevé'
+                                  : 'Suspect'}
                               </span>
                               <span className="font-mono text-xs text-[#1a1a2e]">{a.order_name}</span>
                             </div>
