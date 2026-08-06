@@ -694,11 +694,12 @@ Historique FW : ${history.map(h => `${h.month}: ${h.fw_count} FW ($${h.fw_total?
                       if (a.type === 'high_shipping') {
                         const row        = rows.find(r => r.order_name === a.order_name)
                         const totalUsd   = row ? (row.service_price + row.shipping_price) : (a.logistician_shipping ?? 0)
-                        const totalEur   = totalUsd * usdEurRate
-                        const clientPaid = sd?.customer_paid ?? 0
-                        const netCost    = totalEur - clientPaid
-                        const isIntl     = sd && !EU_MEMBER_STATES.has(sd.country_code)
-                        const isCovered  = clientPaid > 0 && clientPaid >= totalEur
+                        const totalEur      = totalUsd * usdEurRate
+                        const clientPaidEur = sd?.customer_paid ?? 0
+                        const clientPaidUsd = usdEurRate > 0 ? clientPaidEur / usdEurRate : 0
+                        const netCost       = totalUsd - clientPaidUsd   // en $
+                        const isIntl        = sd && !EU_MEMBER_STATES.has(sd.country_code)
+                        const isCovered     = clientPaidUsd > 0 && clientPaidUsd >= totalUsd
                         const verdict    =
                           isCovered ? { label: 'Couvert', color: 'green' } :
                           isIntl    ? { label: 'International', color: 'gray' } :
@@ -732,19 +733,20 @@ Historique FW : ${history.map(h => `${h.month}: ${h.fw_count} FW ($${h.fw_total?
                             <div className="grid grid-cols-3 gap-2">
                               <div className="bg-[#f8f8f7] rounded-xl p-3 text-center">
                                 <p className="text-[10px] text-[#9b9b93] mb-1">Bowa facture</p>
-                                <p className="text-base font-bold text-[#1a1a2e]">{totalEur.toFixed(2)}€</p>
-                                <p className="text-[10px] text-[#c0bfba] mt-0.5">${totalUsd.toFixed(2)}</p>
+                                <p className="text-base font-bold text-[#1a1a2e]">${totalUsd.toFixed(2)}</p>
+                                <p className="text-[10px] text-[#c0bfba] mt-0.5">{totalEur.toFixed(2)}€</p>
                               </div>
                               <div className="bg-[#f0fdf4] rounded-xl p-3 text-center">
                                 <p className="text-[10px] text-[#9b9b93] mb-1">Client a payé</p>
                                 <p className="text-base font-bold text-[#1a7f4b]">
-                                  {clientPaid > 0 ? `${clientPaid.toFixed(2)}€` : '—'}
+                                  {clientPaidUsd > 0 ? `$${clientPaidUsd.toFixed(2)}` : '—'}
                                 </p>
+                                {clientPaidEur > 0 && <p className="text-[10px] text-[#c0bfba] mt-0.5">{clientPaidEur.toFixed(2)}€</p>}
                               </div>
                               <div className={`rounded-xl p-3 text-center ${isCovered ? 'bg-[#f0fdf4]' : netCost > 30 ? 'bg-[#fff8ec]' : 'bg-[#f8f8f7]'}`}>
                                 <p className="text-[10px] text-[#9b9b93] mb-1">Coût net Mōom</p>
                                 <p className={`text-base font-bold ${isCovered ? 'text-[#1a7f4b]' : netCost > 30 ? 'text-[#b45309]' : 'text-[#1a1a2e]'}`}>
-                                  {isCovered ? '0.00€' : `${netCost.toFixed(2)}€`}
+                                  {isCovered ? '$0.00' : `$${netCost.toFixed(2)}`}
                                 </p>
                               </div>
                             </div>
@@ -753,7 +755,7 @@ Historique FW : ${history.map(h => `${h.month}: ${h.fw_count} FW ($${h.fw_total?
                             <div className="flex items-center justify-between gap-2">
                               <p className="text-[11px] text-[#9b9b93]">
                                 {ctx && ctx.similar_orders_count > 0
-                                  ? `En France (~${ctx.order_item_count} art.) : ~${(ctx.similar_avg_shipping * usdEurRate).toFixed(0)}€ de shipping`
+                                  ? `En France (~${ctx.order_item_count} art.) : ~$${ctx.similar_avg_shipping.toFixed(0)} de shipping`
                                   : ''}
                               </p>
                               <p className="text-[10px] text-[#c0bfba] shrink-0">1$ = {usdEurRate.toFixed(4)}€</p>
@@ -780,7 +782,7 @@ Historique FW : ${history.map(h => `${h.month}: ${h.fw_count} FW ($${h.fw_total?
                             </div>
                             <p className="text-xs text-[#9b9b93]">{a.detail}</p>
                           </div>
-                          <p className="text-sm font-semibold text-[#c7293a] tabular-nums shrink-0">{a.amount.toFixed(2)}€</p>
+                          <p className="text-sm font-semibold text-[#c7293a] tabular-nums shrink-0">${a.amount.toFixed(2)}</p>
                         </div>
                       )
                     })}
