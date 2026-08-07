@@ -2479,6 +2479,39 @@ async function buildETAMap(
   return result
 }
 
+// Estime la tournée COMPLÈTE (dépôt → arrêts en séquence → dépôt) : km + temps de
+// conduite. Distance ROUTIÈRE réelle via l'API Directions Mapbox (pas à vol d'oiseau).
+// Repli haversine ×1,25 (approche la route réelle) si l'API est indispo ou > 25 arrêts.
+async function estimateTourRoute(
+  orderedCoords: [number, number][],
+  token: string,
+): Promise<{ km: number; drivingSec: number; real: boolean } | null> {
+  if (orderedCoords.length === 0) return null
+  const wps: [number, number][] = [DEPOT_COORDS, ...orderedCoords, DEPOT_COORDS]
+
+  if (token && wps.length <= 25) {
+    try {
+      const coordStr = wps.map((c) => c.join(',')).join(';')
+      const res = await fetch(
+        `https://api.mapbox.com/directions/v5/mapbox/driving/${coordStr}?overview=false&access_token=${token}`
+      )
+      if (res.ok) {
+        const data = await res.json()
+        const r = data.routes?.[0]
+        if (r && typeof r.distance === 'number' && typeof r.duration === 'number') {
+          return { km: r.distance / 1000, drivingSec: r.duration, real: true }
+        }
+      }
+    } catch { /* repli ci-dessous */ }
+  }
+
+  // Repli : somme haversine ×1,25, vitesse moyenne 45 km/h
+  let km = 0
+  for (let i = 0; i < wps.length - 1; i++) km += haversineKm(wps[i], wps[i + 1])
+  km *= 1.25
+  return { km, drivingSec: (km / 45) * 3600, real: false }
+}
+
 function LivreurView() {
   const [tours, setTours] = useState<Tour[]>([])
   const [selectedTourId, setSelectedTourId] = useState('')
@@ -2587,6 +2620,7 @@ function LivreurView() {
   const [partialNote, setPartialNote] = useState('')
   const [markingPartial, setMarkingPartial] = useState(false)
   const coordsCache = useRef<Map<string, [number, number]>>(new Map())
+  const [routeEst, setRouteEst] = useState<{ km: number; drivingSec: number; real: boolean } | null>(null)
   const [navSheet, setNavSheet] = useState(false)
   const [stopListSheet, setStopListSheet] = useState(false)
   const [optimizedOrder, setOptimizedOrder] = useState<string[] | null>(null)
@@ -2786,6 +2820,13 @@ function LivreurView() {
       if (cancelled) return
       const etas = await buildETAMap(sortedStopsForETA, coordsCache.current, token)
       if (!cancelled) setEtaMap(etas)
+
+      // Estimation km + temps de la tournée complète (dépôt → tous les arrêts → dépôt)
+      const fullCoords = sortedStopsForETA
+        .map((s) => coordsCache.current.get(s.id))
+        .filter((c): c is [number, number] => !!c)
+      const est = await estimateTourRoute(fullCoords, token)
+      if (!cancelled) setRouteEst(est)
     }
 
     run()
@@ -3324,6 +3365,27 @@ function LivreurView() {
                 <div className="text-white/50 text-sm mt-2 uppercase tracking-wide">Livrés</div>
               </div>
             </div>
+
+            {/* Distance + temps estimés de la tournée */}
+            {routeEst && sortedStops.length > 0 && (
+              <div className="flex items-center justify-center gap-8 py-5 border-t border-white/10">
+                <div className="flex items-center gap-2.5 text-white">
+                  <MapIcon size={20} strokeWidth={1.8} className="text-white/40" />
+                  <div>
+                    <div className="text-2xl font-bold leading-none">≈ {Math.round(routeEst.km)} km</div>
+                    <div className="text-white/40 text-[11px] mt-1">à parcourir</div>
+                  </div>
+                </div>
+                <div className="w-px h-9 bg-white/15" />
+                <div className="flex items-center gap-2.5 text-white">
+                  <Clock size={20} strokeWidth={1.8} className="text-white/40" />
+                  <div>
+                    <div className="text-2xl font-bold leading-none">~{formatDuration((routeEst.drivingSec + sortedStops.length * SERVICE_SECONDS) * 1000)}</div>
+                    <div className="text-white/40 text-[11px] mt-1">à prévoir (avec arrêts)</div>
+                  </div>
+                </div>
+              </div>
+            )}
 
             {/* Progress bar with inline percentage */}
             {sortedStops.length > 0 && (
