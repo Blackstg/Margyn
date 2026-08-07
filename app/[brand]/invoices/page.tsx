@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef } from 'react'
 import { read, utils } from 'xlsx'
-import { Upload, TrendingUp, Sparkles, AlertTriangle, CheckCircle, Clock } from 'lucide-react'
+import { Upload, TrendingUp, Sparkles, AlertTriangle, CheckCircle, Clock, Loader2, Scale, Gavel } from 'lucide-react'
 
 interface InvoiceRow {
   order_name: string
@@ -236,6 +236,7 @@ export default function FacturesLogisticienPage() {
   const [saved, setSaved]                   = useState(false)
   const [parseError, setParseError]         = useState('')
   const [usdEurRate, setUsdEurRate]         = useState(0.92)
+  const [view, setView]                     = useState<'facture' | 'contestation'>('facture')
 
   // Taux USD→EUR live (frankfurter.app, gratuit sans clé)
   useEffect(() => {
@@ -499,6 +500,31 @@ Historique FW : ${history.map(h => `${h.month}: ${h.fw_count} FW ($${h.fw_total?
           <p className="text-[10px] font-semibold uppercase tracking-[0.1em] text-[#aeb0c9] mb-1">Mōom</p>
           <h1 className="text-xl font-bold text-[#1a1a2e]">Factures</h1>
         </div>
+
+        {/* Onglets */}
+        <div className="flex items-center gap-1 border-b border-[#e8e4e0]">
+          {([['facture', 'Facturation'], ['contestation', 'Contestation']] as const).map(([v, l]) => (
+            <button
+              key={v}
+              onClick={() => setView(v)}
+              className={`flex items-center gap-1.5 px-4 py-2 text-sm font-medium -mb-px border-b-2 transition-colors ${
+                view === v ? 'border-[#1a1a2e] text-[#1a1a2e]' : 'border-transparent text-[#9b9b93] hover:text-[#6b6b63]'
+              }`}
+            >
+              {v === 'contestation' && <Gavel size={13} strokeWidth={2} />}
+              {l}
+            </button>
+          ))}
+        </div>
+
+        {view === 'contestation' ? (
+          <ContestationView
+            rate={usdEurRate}
+            months={sortedHistory.map(h => h.month)}
+            onPickMonth={setMonth}
+          />
+        ) : (
+        <>
 
         {/* History chips */}
         {sortedHistory.length > 0 && (
@@ -871,9 +897,231 @@ Historique FW : ${history.map(h => `${h.month}: ${h.fw_count} FW ($${h.fw_total?
           </div>
         )}
 
+        </>
+        )}
+
       </div>
 
 
+    </div>
+  )
+}
+
+// ─── Onglet Contestation (audit live poids/pays/coût juste) ───────────────────
+
+interface ContestItem { order: string; zone: string; cc: string; type: 'shipping' | 'service'; items: number; kg: number; billed: number; fair: number; delta: number }
+interface Segment { zone: string; size: string; n: number; ship: number; serv: number; total: number; client: number; loss: number; weight: number }
+interface ContestData {
+  month: string
+  usdEur: number
+  counts: { orders: number; noMatch: number; noWeight: number; weightCoverage: number }
+  regression: { n: number; intercept: number; slope: number; r2: number; perKgMedian: number; perKgMin: number; perKgMax: number }
+  serviceCorr: { r2Weight: number | null }
+  segments: Segment[]
+  contest: { strong: ContestItem[]; ch: ContestItem[]; strongTotal: number; chTotal: number }
+  margin: { zone: string; n: number; clientMed: number; costMed: number; absorbed: number }[]
+  frFree: number
+  frTot: number
+}
+
+const ZONE_LABEL: Record<string, string> = { FR: 'France', UE: 'UE hors FR', CH: 'Suisse', DOM: 'DOM-TOM', X: 'Autre' }
+
+function ContestationView({ rate, months, onPickMonth }: { rate: number; months: string[]; onPickMonth: (m: string) => void }) {
+  const [data, setData]       = useState<ContestData | null>(null)
+  const [loading, setLoading] = useState(false)
+  const [error, setError]     = useState('')
+  const [loadedMonth, setLoadedMonth] = useState('')
+
+  async function run(m: string) {
+    if (!m) return
+    setLoading(true); setError(''); setData(null)
+    try {
+      const d = await fetch(`/api/factures-logisticien/contestation?month=${m}&rate=${rate}`).then(r => r.json())
+      if (d.error) { setError(d.error); return }
+      setData(d); setLoadedMonth(m)
+    } catch (e) { setError(String(e)) } finally { setLoading(false) }
+  }
+
+  const fmt = (n: number) => `$${n.toFixed(2)}`
+  const sortedMonths = [...months].sort().reverse()
+
+  function Table({ title, items, total, muted }: { title: string; items: ContestItem[]; total: number; muted?: boolean }) {
+    return (
+      <div className={`rounded-[16px] border p-4 ${muted ? 'bg-[#faf9f7] border-[#e8e4e0]' : 'bg-white border-[#f3d6d9] shadow-[0_2px_12px_rgba(0,0,0,0.05)]'}`}>
+        <div className="flex items-center justify-between mb-3">
+          <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-[#6b6b63]">{title}</p>
+          <p className={`text-sm font-bold ${muted ? 'text-[#9b7d1f]' : 'text-[#c7293a]'}`}>{fmt(total)}</p>
+        </div>
+        {items.length === 0 ? (
+          <p className="text-xs text-[#9b9b93] py-2">Aucune commande dans cette catégorie ce mois-ci.</p>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="text-[#9b9b93] text-left">
+                  <th className="py-1.5 pr-2 font-medium">Commande</th>
+                  <th className="py-1.5 px-2 font-medium">Zone</th>
+                  <th className="py-1.5 px-2 font-medium">Type</th>
+                  <th className="py-1.5 px-2 font-medium text-right">Art.</th>
+                  <th className="py-1.5 px-2 font-medium text-right">Poids</th>
+                  <th className="py-1.5 px-2 font-medium text-right">Facturé</th>
+                  <th className="py-1.5 px-2 font-medium text-right">Juste</th>
+                  <th className="py-1.5 pl-2 font-medium text-right">Δ récup.</th>
+                </tr>
+              </thead>
+              <tbody>
+                {items.map((c, i) => (
+                  <tr key={c.order + c.type + i} className="border-t border-[#f0ede9]">
+                    <td className="py-1.5 pr-2 font-semibold text-[#1a1a2e]">{c.order}</td>
+                    <td className="py-1.5 px-2 text-[#6b6b63]">{ZONE_LABEL[c.zone] ?? c.zone}</td>
+                    <td className="py-1.5 px-2">
+                      <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${c.type === 'service' ? 'bg-[#fff3cd] text-[#b45309]' : 'bg-[#e8eefc] text-[#3457a8]'}`}>
+                        {c.type === 'service' ? 'service' : 'shipping'}
+                      </span>
+                    </td>
+                    <td className="py-1.5 px-2 text-right text-[#6b6b63]">{c.items}</td>
+                    <td className="py-1.5 px-2 text-right text-[#6b6b63]">{c.kg > 0 ? `${c.kg.toFixed(1)}kg` : '—'}</td>
+                    <td className="py-1.5 px-2 text-right font-medium text-[#1a1a2e]">{fmt(c.billed)}</td>
+                    <td className="py-1.5 px-2 text-right text-[#9b9b93]">{fmt(c.fair)}</td>
+                    <td className="py-1.5 pl-2 text-right font-bold text-[#c7293a]">+{c.delta.toFixed(2)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+    )
+  }
+
+  return (
+    <div className="space-y-5">
+      {/* Sélecteur de mois + lancement */}
+      <div className="bg-white rounded-[16px] shadow-[0_2px_12px_rgba(0,0,0,0.06)] p-5">
+        <div className="flex items-center gap-2 mb-3">
+          <Scale size={14} className="text-[#aeb0c9]" />
+          <p className="text-[10px] font-semibold uppercase tracking-[0.1em] text-[#6b6b63]">Audit contestation — poids & coût juste (live Shopify)</p>
+        </div>
+        <p className="text-xs text-[#6b6b63] mb-3">
+          Recalcule le coût « juste » de chaque commande à partir du <strong>poids réel</strong>, du <strong>pays</strong> et du <strong>nombre d&apos;articles</strong> (Shopify),
+          puis liste ce qui est <strong>sur-facturé</strong> par rapport aux commandes similaires. Choisis un mois :
+        </p>
+        <div className="flex items-center gap-2 flex-wrap">
+          {sortedMonths.map(m => (
+            <button
+              key={m}
+              onClick={() => { onPickMonth(m); run(m) }}
+              disabled={loading}
+              className={`px-3 py-1.5 rounded-xl text-xs font-medium transition-colors ${
+                loadedMonth === m ? 'bg-[#1a1a2e] text-white' : 'bg-white border border-[#e8e4e0] text-[#6b6b63] hover:border-[#aeb0c9]'
+              }`}
+            >
+              {new Date(m + '-02').toLocaleDateString('fr-FR', { month: 'short', year: '2-digit' })}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {loading && (
+        <div className="flex items-center justify-center gap-3 py-16 text-[#6b6b63] text-sm">
+          <Loader2 size={18} className="animate-spin" /> Enrichissement Shopify (poids, pays, articles)…
+        </div>
+      )}
+      {error && (
+        <div className="flex items-center gap-2 px-4 py-3 bg-red-50 border border-red-100 rounded-xl text-sm text-red-700">
+          <AlertTriangle size={15} /> {error}
+        </div>
+      )}
+
+      {data && !loading && (
+        <>
+          {/* Verdict argument logisticien */}
+          <div className="grid grid-cols-2 gap-4">
+            <div className="bg-white rounded-[16px] shadow-[0_2px_12px_rgba(0,0,0,0.06)] p-5">
+              <p className="text-[10px] font-semibold uppercase tracking-[0.1em] text-[#6b6b63] mb-2">« Shipping calculé au poids »</p>
+              <p className="text-2xl font-bold text-[#1a1a2e]">R² = {data.regression.r2.toFixed(2)}</p>
+              <p className="text-xs text-[#6b6b63] mt-1">
+                shipping ≈ {fmt(data.regression.intercept)} + {fmt(data.regression.slope)}/kg · $/kg de {data.regression.perKgMin.toFixed(1)} à {data.regression.perKgMax.toFixed(1)}
+              </p>
+              <p className={`text-xs font-semibold mt-2 ${data.regression.r2 < 0.5 ? 'text-[#c7293a]' : 'text-[#2f9e44]'}`}>
+                {data.regression.r2 < 0.5 ? `Le poids n'explique que ${Math.round(data.regression.r2 * 100)}% — pas un vrai barème au poids` : 'Corrélation forte au poids'}
+              </p>
+            </div>
+            <div className="bg-white rounded-[16px] shadow-[0_2px_12px_rgba(0,0,0,0.06)] p-5">
+              <p className="text-[10px] font-semibold uppercase tracking-[0.1em] text-[#6b6b63] mb-2">« Service fee tiré par le carton »</p>
+              <p className="text-2xl font-bold text-[#1a1a2e]">R² = {data.serviceCorr.r2Weight != null ? data.serviceCorr.r2Weight.toFixed(2) : '—'}</p>
+              <p className="text-xs text-[#6b6b63] mt-1">corrélation service fee ↔ poids du colis</p>
+              <p className={`text-xs font-semibold mt-2 ${(data.serviceCorr.r2Weight ?? 0) < 0.3 ? 'text-[#c7293a]' : 'text-[#2f9e44]'}`}>
+                {(data.serviceCorr.r2Weight ?? 0) < 0.3 ? 'Quasi aucun lien — argument carton non prouvé' : 'Lien mesurable'}
+              </p>
+            </div>
+          </div>
+
+          {/* Tables de contestation */}
+          <Table title="À contester sans réserve (FR / UE / DOM — sans douane)" items={data.contest.strong} total={data.contest.strongTotal} />
+          <Table title="Suisse — à faire justifier (douane légitime)" items={data.contest.ch} total={data.contest.chTotal} muted />
+
+          {/* Coût réel par segment */}
+          <div className="bg-white rounded-[16px] shadow-[0_2px_12px_rgba(0,0,0,0.06)] p-5">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-[#6b6b63] mb-3">Coût réel par destination × taille (médianes facturées)</p>
+            <div className="overflow-x-auto">
+              <table className="w-full text-xs">
+                <thead>
+                  <tr className="text-[#9b9b93] text-left">
+                    <th className="py-1.5 pr-2 font-medium">Destination</th>
+                    <th className="py-1.5 px-2 font-medium">Taille</th>
+                    <th className="py-1.5 px-2 font-medium text-right">n</th>
+                    <th className="py-1.5 px-2 font-medium text-right">Shipping</th>
+                    <th className="py-1.5 px-2 font-medium text-right">Service</th>
+                    <th className="py-1.5 px-2 font-medium text-right">Coût total</th>
+                    <th className="py-1.5 px-2 font-medium text-right">Port client</th>
+                    <th className="py-1.5 pl-2 font-medium text-right">Absorbé Mōom</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {data.segments.map((s, i) => (
+                    <tr key={i} className="border-t border-[#f0ede9]">
+                      <td className="py-1.5 pr-2 text-[#1a1a2e]">{ZONE_LABEL[s.zone] ?? s.zone}</td>
+                      <td className="py-1.5 px-2 text-[#6b6b63]">{s.size}</td>
+                      <td className="py-1.5 px-2 text-right text-[#9b9b93]">{s.n}</td>
+                      <td className="py-1.5 px-2 text-right text-[#6b6b63]">{fmt(s.ship)}</td>
+                      <td className="py-1.5 px-2 text-right text-[#6b6b63]">{fmt(s.serv)}</td>
+                      <td className="py-1.5 px-2 text-right font-semibold text-[#1a1a2e]">{fmt(s.total)}</td>
+                      <td className="py-1.5 px-2 text-right text-[#6b6b63]">{fmt(s.client)}</td>
+                      <td className={`py-1.5 pl-2 text-right font-semibold ${s.loss > 0 ? 'text-[#c7293a]' : 'text-[#2f9e44]'}`}>{fmt(s.loss)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <p className="text-[11px] text-[#6b6b63] mt-3 flex items-start gap-1.5">
+              <TrendingUp size={12} className="mt-0.5 shrink-0 text-[#aeb0c9]" />
+              France : {data.frFree}/{data.frTot} commandes ({data.frTot ? Math.round(100 * data.frFree / data.frTot) : 0}%) en <strong>&nbsp;port offert</strong>&nbsp; alors qu&apos;elles coûtent 13–32 $ — trou de marge à corriger côté prix client (distinct de la sur-facturation).
+            </p>
+          </div>
+
+          {/* Limites de données */}
+          <div className="bg-[#fff8ed] border border-[#f5e6c8] rounded-[16px] p-4">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-[#9b7d1f] mb-2 flex items-center gap-1.5">
+              <AlertTriangle size={13} /> Données manquantes à réclamer à Forrest
+            </p>
+            <ul className="text-xs text-[#6b6b63] space-y-1 list-disc pl-4">
+              <li>Poids <strong>pesé</strong> réel par commande (ici : poids <em>produit</em> Shopify, dispo sur {Math.round(data.counts.weightCoverage * 100)}% des commandes).</li>
+              <li><strong>Dimensions + poids volumétrique + coût carton</strong> — sans ça l&apos;argument « service = carton » est invérifiable.</li>
+              <li>Grille tarifaire poids→prix par zone · décomposition du service fee · détail douane Suisse.</li>
+              <li>Taux de change appliqué (ici supposé 1&nbsp;$&nbsp;=&nbsp;{data.usdEur.toFixed(3)}&nbsp;€, non confirmé par commande).</li>
+            </ul>
+          </div>
+
+          <p className="text-[10px] text-[#c0bfba]">
+            {data.counts.orders} commandes analysées · {data.counts.noMatch} sans correspondance Shopify · mois {loadedMonth}
+          </p>
+        </>
+      )}
+
+      {!data && !loading && !error && (
+        <div className="text-center py-16 text-[#9b9b93] text-sm">Choisis un mois ci-dessus pour lancer l&apos;audit.</div>
+      )}
     </div>
   )
 }
