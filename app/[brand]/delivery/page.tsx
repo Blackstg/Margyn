@@ -2621,6 +2621,7 @@ function LivreurView() {
   const [markingPartial, setMarkingPartial] = useState(false)
   const coordsCache = useRef<Map<string, [number, number]>>(new Map())
   const [routeEst, setRouteEst] = useState<{ km: number; drivingSec: number; real: boolean } | null>(null)
+  const [upcomingEst, setUpcomingEst] = useState<Record<string, { km: number; drivingSec: number }>>({})
   const [navSheet, setNavSheet] = useState(false)
   const [stopListSheet, setStopListSheet] = useState(false)
   const [optimizedOrder, setOptimizedOrder] = useState<string[] | null>(null)
@@ -2833,6 +2834,32 @@ function LivreurView() {
     return () => { cancelled = true }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [stopsSignature])
+
+  // Estimation km + temps pour chaque PROCHAINE tournée (liste sous la carte).
+  const upcomingList = tours.filter(t => t.status !== 'completed' && t.status !== 'cancelled' && t.id !== selectedTourId)
+  const upcomingSig = upcomingList.map(t => `${t.id}:${t.stops.length}`).join('|')
+  useEffect(() => {
+    const token = process.env.NEXT_PUBLIC_MAPBOX_TOKEN ?? ''
+    if (!token || upcomingList.length === 0) return
+    let cancelled = false
+    async function run() {
+      for (const t of upcomingList) {
+        const stops = [...t.stops].sort((a, b) => a.sequence - b.sequence)
+        await Promise.all(stops.map(async (stop) => {
+          if (coordsCache.current.has(stop.id)) return
+          const coord = await geocodeParts(stop, token)
+          if (coord) coordsCache.current.set(stop.id, coord)
+        }))
+        if (cancelled) return
+        const coords = stops.map(s => coordsCache.current.get(s.id)).filter((c): c is [number, number] => !!c)
+        const est = await estimateTourRoute(coords, token)
+        if (est && !cancelled) setUpcomingEst(prev => ({ ...prev, [t.id]: { km: est.km, drivingSec: est.drivingSec } }))
+      }
+    }
+    run()
+    return () => { cancelled = true }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [upcomingSig])
 
   const sortedStops = optimizedOrder
     ? optimizedOrder.map(id => sortedStopsForETA.find(s => s.id === id)).filter(Boolean) as typeof sortedStopsForETA
@@ -3589,6 +3616,26 @@ function LivreurView() {
                         {t.planned_date ? formatDate(t.planned_date) : 'Sans date'}
                         {' · '}{tStops.length} arrêts · {t.total_panels} panneaux
                       </p>
+                      {tStops.length > 0 && (() => {
+                        const est = upcomingEst[t.id]
+                        const days = pace.stopsPerDay
+                          ? Math.max(1, Math.ceil(tStops.length / pace.stopsPerDay))
+                          : (est && pace.kmPerDay ? Math.max(1, Math.ceil(est.km / pace.kmPerDay)) : null)
+                        return (
+                          <p className="text-xs font-medium text-[#6b6b63] mt-1 flex items-center gap-3">
+                            <span className="inline-flex items-center gap-1">
+                              <MapIcon size={12} strokeWidth={1.9} className="text-[#b8b7b1]" />
+                              {est ? `≈ ${Math.round(est.km)} km` : '…'}
+                            </span>
+                            {days && (
+                              <span className="inline-flex items-center gap-1">
+                                <Clock size={12} strokeWidth={1.9} className="text-[#b8b7b1]" />
+                                {days <= 1 ? '~1 jour' : `~${days} jours`}
+                              </span>
+                            )}
+                          </p>
+                        )
+                      })()}
                     </div>
                     {isExpanded
                       ? <ChevronUp size={16} className="text-[#d0cfc9] shrink-0" />
