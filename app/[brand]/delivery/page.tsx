@@ -2839,6 +2839,25 @@ function LivreurView() {
     : sortedStopsForETA
   const deliveredCount = sortedStops.filter((s) => s.status === 'delivered').length
 
+  // Rythme réel du livreur d'après les tournées TERMINÉES : km parcourus par jour
+  // OUVRÉ (jours distincts où il y a eu des livraisons — il ne roule pas la nuit).
+  // Sert à convertir l'estimation en nombre de jours réaliste.
+  const kmPerDay = useMemo(() => {
+    const rates: number[] = []
+    for (const t of tours) {
+      if (t.status !== 'completed' || !t.total_km || t.total_km <= 0) continue
+      const days = new Set(
+        (t.stops ?? [])
+          .filter(s => s.delivered_at)
+          .map(s => new Date(s.delivered_at!).toISOString().slice(0, 10))
+      ).size
+      if (days >= 1) rates.push(t.total_km / days)
+    }
+    if (rates.length < 2) return null   // pas assez d'historique fiable
+    rates.sort((a, b) => a - b)
+    return rates[Math.floor(rates.length / 2)]   // médiane
+  }, [tours])
+
   // Reset comment state whenever the user navigates to a different stop
   useEffect(() => {
     setCommentMode('none')
@@ -3367,25 +3386,35 @@ function LivreurView() {
             </div>
 
             {/* Distance + temps estimés de la tournée */}
-            {routeEst && sortedStops.length > 0 && (
-              <div className="flex items-center justify-center gap-8 py-5 border-t border-white/10">
-                <div className="flex items-center gap-2.5 text-white">
-                  <MapIcon size={20} strokeWidth={1.8} className="text-white/40" />
-                  <div>
-                    <div className="text-2xl font-bold leading-none">≈ {Math.round(routeEst.km)} km</div>
-                    <div className="text-white/40 text-[11px] mt-1">à parcourir</div>
+            {routeEst && sortedStops.length > 0 && (() => {
+              const workSec = routeEst.drivingSec + sortedStops.length * SERVICE_SECONDS
+              const days = kmPerDay
+                ? Math.max(1, Math.ceil(routeEst.km / kmPerDay))
+                : Math.max(1, Math.ceil(workSec / 3600 / 8))   // repli : ~8h de travail / jour ouvré
+              const timeLabel = days <= 1 ? `~${formatDuration(workSec * 1000)}` : `~${days} jours`
+              const timeSub   = days <= 1
+                ? 'à prévoir (avec arrêts)'
+                : kmPerDay ? `d'après vos tournées passées` : 'en journée (~8h/j)'
+              return (
+                <div className="flex items-center justify-center gap-8 py-5 border-t border-white/10">
+                  <div className="flex items-center gap-2.5 text-white">
+                    <MapIcon size={20} strokeWidth={1.8} className="text-white/40" />
+                    <div>
+                      <div className="text-2xl font-bold leading-none">≈ {Math.round(routeEst.km)} km</div>
+                      <div className="text-white/40 text-[11px] mt-1">à parcourir</div>
+                    </div>
+                  </div>
+                  <div className="w-px h-9 bg-white/15" />
+                  <div className="flex items-center gap-2.5 text-white">
+                    <Clock size={20} strokeWidth={1.8} className="text-white/40" />
+                    <div>
+                      <div className="text-2xl font-bold leading-none">{timeLabel}</div>
+                      <div className="text-white/40 text-[11px] mt-1">{timeSub}</div>
+                    </div>
                   </div>
                 </div>
-                <div className="w-px h-9 bg-white/15" />
-                <div className="flex items-center gap-2.5 text-white">
-                  <Clock size={20} strokeWidth={1.8} className="text-white/40" />
-                  <div>
-                    <div className="text-2xl font-bold leading-none">~{formatDuration((routeEst.drivingSec + sortedStops.length * SERVICE_SECONDS) * 1000)}</div>
-                    <div className="text-white/40 text-[11px] mt-1">à prévoir (avec arrêts)</div>
-                  </div>
-                </div>
-              </div>
-            )}
+              )
+            })()}
 
             {/* Progress bar with inline percentage */}
             {sortedStops.length > 0 && (
