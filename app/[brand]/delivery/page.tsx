@@ -9,7 +9,7 @@ import { createBrowserClient } from '@supabase/auth-helpers-nextjs'
 import { useBrand } from '@/context/BrandContext'
 import { geoAddress, streetLine } from '@/lib/delivery/geo'
 import { geocodeParts } from '@/lib/delivery/geocode'
-import { ChevronDown, ChevronUp, ChevronLeft, ChevronRight, Trash2, Mail, Plus, X, MapPin, Package, Truck, Map as MapIcon, Search, Pencil, Check, MessageSquare, GripVertical, Printer, RefreshCw, Clock } from 'lucide-react'
+import { ChevronDown, ChevronUp, ChevronLeft, ChevronRight, Trash2, Mail, Plus, X, MapPin, Package, Truck, Map as MapIcon, Search, Pencil, Check, MessageSquare, GripVertical, Printer, RefreshCw, Clock, Calendar } from 'lucide-react'
 import {
   DndContext, DragEndEvent, DragOverlay, DragStartEvent,
   PointerSensor, TouchSensor, closestCenter, useSensor, useSensors,
@@ -2654,6 +2654,7 @@ function LivreurView() {
   // Upcoming tour preview
   const [expandedUpcomingId, setExpandedUpcomingId] = useState<string | null>(null)
   const [previewTourId, setPreviewTourId] = useState<string | null>(null)
+  const [homeTab, setHomeTab] = useState<'tournee' | 'prochaines'>('tournee')
 
   async function handleCompleteTour() {
     if (!tour) return
@@ -3232,6 +3233,93 @@ function LivreurView() {
     return <div className="text-center py-16 text-sm text-[#6b6b63]">Chargement...</div>
   }
 
+  // ── Barre d'onglets mobile (bas d'écran) ───────────────────────────────────
+  const bottomNav = (active: 'tournee' | 'prochaines' | 'carte' | 'nonplan') => {
+    const items = [
+      { key: 'tournee'    as const, label: 'Tournée',    Icon: Truck,    onClick: () => { setHomeTab('tournee'); setScreen('home') } },
+      { key: 'prochaines' as const, label: 'Prochaines', Icon: Calendar, onClick: () => { setHomeTab('prochaines'); setScreen('home') } },
+      { key: 'carte'      as const, label: 'Carte',      Icon: MapIcon,  onClick: () => setScreen('overview-map') },
+      { key: 'nonplan'    as const, label: 'À planifier', Icon: Package, onClick: () => setScreen('nearby') },
+    ]
+    return (
+      <div className="fixed bottom-0 left-0 right-0 z-50 flex items-stretch bg-white border-t border-[#e8e8e4] shadow-[0_-2px_12px_rgba(0,0,0,0.06)]" style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}>
+        {items.map(({ key, label, Icon, onClick }) => {
+          const on = active === key
+          return (
+            <button
+              key={key}
+              onClick={onClick}
+              className={`relative flex-1 flex flex-col items-center justify-center gap-0.5 py-2.5 transition-colors ${on ? 'text-[#1a1a2e]' : 'text-[#9b9b93]'} active:bg-[#f5f5f3]`}
+            >
+              <Icon size={22} strokeWidth={on ? 2.3 : 1.8} />
+              <span className="text-[10px] font-semibold">{label}</span>
+              {key === 'nonplan' && nearbyOrders.length > 0 && (
+                <span className="absolute top-1.5 right-[calc(50%-18px)] min-w-[16px] h-4 px-1 rounded-full bg-[#f59e0b] text-white text-[9px] font-bold flex items-center justify-center">
+                  {nearbyOrders.length}
+                </span>
+              )}
+            </button>
+          )
+        })}
+      </div>
+    )
+  }
+
+  // Carte compacte d'une tournée à venir (carrousel « Prochaines »)
+  const renderUpcomingCard = (t: Tour) => {
+    const tStops = [...t.stops].sort((a, b) => a.sequence - b.sequence)
+    const est = upcomingEst[t.id]
+    const days = pace.stopsPerDay
+      ? Math.max(1, Math.ceil(tStops.length / pace.stopsPerDay))
+      : (est && pace.kmPerDay ? Math.max(1, Math.ceil(est.km / pace.kmPerDay)) : null)
+    return (
+      <div key={t.id} className="snap-center shrink-0 w-[86%] rounded-[20px] bg-[#1a1a2e] overflow-hidden">
+        <div className="px-6 pt-6 pb-5 text-white">
+          {t.status === 'draft'
+            ? <span className="text-[#fbbf24] text-xs font-bold uppercase tracking-widest">⏳ En préparation</span>
+            : <span className="text-white/40 text-xs font-bold uppercase tracking-widest">Tournée à venir</span>}
+          <div className="text-xl font-bold leading-tight mt-2">{t.name}</div>
+          {t.planned_date && <div className="text-white/50 text-sm mt-1 capitalize">{formatDate(t.planned_date)}</div>}
+        </div>
+        <div className="grid grid-cols-2 border-t border-white/10">
+          <div className="text-center py-5 border-r border-white/10">
+            <div className="text-4xl font-bold text-white">{tStops.length}</div>
+            <div className="text-white/50 text-xs mt-1.5 uppercase tracking-wide">Arrêts</div>
+          </div>
+          <div className="text-center py-5">
+            <div className="text-4xl font-bold text-white">{t.total_panels}</div>
+            <div className="text-white/50 text-xs mt-1.5 uppercase tracking-wide">Panneaux</div>
+          </div>
+        </div>
+        <div className="flex items-center justify-center gap-8 py-4 border-t border-white/10 text-white">
+          <div className="flex items-center gap-2">
+            <MapIcon size={18} className="text-white/40" />
+            <span className="text-lg font-bold">{est ? `≈ ${Math.round(est.km)} km` : '…'}</span>
+          </div>
+          {days && (
+            <>
+              <div className="w-px h-6 bg-white/15" />
+              <div className="flex items-center gap-2">
+                <Clock size={18} className="text-white/40" />
+                <span className="text-lg font-bold">{days <= 1 ? '~1 jour' : `~${days} jours`}</span>
+              </div>
+            </>
+          )}
+        </div>
+        <div className="px-5 pb-5 pt-1">
+          <button
+            onClick={() => { setPreviewTourId(t.id); setScreen('preview-map') }}
+            disabled={tStops.length === 0}
+            className="w-full flex items-center justify-center gap-2 py-3.5 rounded-[14px] border border-white/25 text-white font-semibold disabled:opacity-30 active:bg-white/10 transition-colors"
+          >
+            <MapIcon size={18} strokeWidth={1.9} />
+            Voir l&apos;itinéraire
+          </button>
+        </div>
+      </div>
+    )
+  }
+
   // ── Screen: celebration ──
   if (screen === 'celebration' && celebrationStats) {
     const { durationMs, delivered, failed, panels, totalKm } = celebrationStats
@@ -3301,7 +3389,7 @@ function LivreurView() {
   // ── Screen: overview-map ──────────────────────────────────────────────────
   if (screen === 'overview-map') {
     return (
-      <div className="w-full flex flex-col" style={{ height: '100dvh' }}>
+      <div className="w-full flex flex-col" style={{ height: '100dvh', paddingBottom: 'calc(64px + env(safe-area-inset-bottom))' }}>
         {/* Header */}
         <div className="flex items-center gap-3 px-4 pt-4 pb-3 shrink-0">
           <button
@@ -3352,6 +3440,7 @@ function LivreurView() {
             }))}
           />
         </div>
+        {bottomNav('carte')}
       </div>
     )
   }
@@ -3363,7 +3452,7 @@ function LivreurView() {
     const upcomingTours = activeTours.filter(t => t.id !== selectedTourId)
 
     return (
-      <div className="w-full space-y-4 px-4 py-4">
+      <div className="w-full px-4 py-4 space-y-4" style={{ paddingBottom: 'calc(76px + env(safe-area-inset-bottom))' }}>
 
         {/* Bandeau d'activation de la position (si non accordée / iOS) */}
         {geoNeedsEnable && (
@@ -3380,6 +3469,23 @@ function LivreurView() {
           </button>
         )}
 
+        {homeTab === 'prochaines' ? (
+          upcomingTours.length > 0 ? (
+            <>
+              <p className="text-xs font-semibold uppercase tracking-widest text-[#9b9b93] px-1">
+                Prochaines tournées · glisse pour naviguer
+              </p>
+              <div className="flex gap-3 overflow-x-auto snap-x snap-mandatory -mx-4 px-4 pb-2">
+                {upcomingTours.map(renderUpcomingCard)}
+              </div>
+            </>
+          ) : (
+            <div className="w-full rounded-[20px] bg-white py-16 text-center text-base text-[#6b6b63]">
+              Aucune autre tournée à venir
+            </div>
+          )
+        ) : (
+        <>
         {tour ? (
           <div className="w-full rounded-[20px] bg-[#1a1a2e] overflow-hidden">
             {/* Header */}
@@ -3595,9 +3701,10 @@ function LivreurView() {
             Aucune tournée disponible
           </div>
         )}
+        </>
+        )}
 
-        {/* Upcoming tours */}
-        {upcomingTours.length > 0 && (
+        {false && (
           <div className="space-y-2">
             <p className="text-xs font-semibold uppercase tracking-widest text-[#9b9b93] px-1">
               Prochaines tournées
@@ -3695,41 +3802,7 @@ function LivreurView() {
           </div>
         )}
 
-        {/* Overview map button */}
-        <button
-          onClick={() => setScreen('overview-map')}
-          className="w-full flex items-center gap-4 px-5 py-4 rounded-[18px] bg-[#eff6ff] border border-[#bfdbfe] active:bg-[#dbeafe] transition-colors"
-        >
-          <span className="w-10 h-10 rounded-full bg-[#2563eb] flex items-center justify-center shrink-0">
-            <MapIcon size={20} strokeWidth={1.8} className="text-white" />
-          </span>
-          <div className="flex-1 text-left min-w-0">
-            <p className="text-sm font-bold text-[#1e3a8a]">Carte des commandes</p>
-            <p className="text-xs text-[#1e3a8a]/60">
-              {plannedStops.length} planifiée{plannedStops.length !== 1 ? 's' : ''} · {nearbyOrders.length} non planifiée{nearbyOrders.length !== 1 ? 's' : ''}
-            </p>
-          </div>
-          <ChevronRight size={18} className="text-[#2563eb] shrink-0" />
-        </button>
-
-        {/* Nearby orders button */}
-        <button
-          onClick={() => setScreen('nearby')}
-          className="w-full flex items-center gap-4 px-5 py-4 rounded-[18px] bg-[#fffbeb] border border-[#fde68a] active:bg-[#fef3c7] transition-colors"
-        >
-          <span className="w-10 h-10 rounded-full bg-[#f59e0b] flex items-center justify-center text-white font-bold text-xl shrink-0">+</span>
-          <div className="flex-1 text-left min-w-0">
-            <p className="text-sm font-bold text-[#92400e]">Commandes non planifiées</p>
-            <p className="text-xs text-[#92400e]/70">
-              {nearbyLoading
-                ? 'Chargement...'
-                : nearbyOrders.length > 0
-                  ? `${nearbyOrders.length} commande${nearbyOrders.length > 1 ? 's' : ''} disponible${nearbyOrders.length > 1 ? 's' : ''}`
-                  : 'Aucune commande en attente'}
-            </p>
-          </div>
-          <ChevronRight size={18} className="text-[#f59e0b] shrink-0" />
-        </button>
+        {bottomNav(homeTab)}
       </div>
     )
   }
@@ -3844,7 +3917,7 @@ function LivreurView() {
     }
 
     return (
-      <div className="w-full px-4 py-4 pb-8">
+      <div className="w-full px-4 py-4" style={{ paddingBottom: 'calc(76px + env(safe-area-inset-bottom))' }}>
         {/* Header */}
         <div className="flex items-center gap-3 mb-4">
           <button
@@ -3967,6 +4040,7 @@ function LivreurView() {
             })}
           </div>
         )}
+        {bottomNav('nonplan')}
       </div>
     )
   }
