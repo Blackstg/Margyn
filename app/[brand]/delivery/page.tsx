@@ -2839,23 +2839,26 @@ function LivreurView() {
     : sortedStopsForETA
   const deliveredCount = sortedStops.filter((s) => s.status === 'delivered').length
 
-  // Rythme réel du livreur d'après les tournées TERMINÉES : km parcourus par jour
-  // OUVRÉ (jours distincts où il y a eu des livraisons — il ne roule pas la nuit).
-  // Sert à convertir l'estimation en nombre de jours réaliste.
-  const kmPerDay = useMemo(() => {
-    const rates: number[] = []
+  // Rythme réel du livreur d'après les tournées TERMINÉES. On mesure les ARRÊTS
+  // livrés par jour ouvré (le nb d'arrêts est exact, contrairement au km estimé qui
+  // dépend du géocodage). Jours ouvrés = dates distinctes de livraison À PARTIR de la
+  // date planifiée (on ignore les livraisons isolées bien avant = ré-livraisons/stragglers).
+  const pace = useMemo(() => {
+    const stopRates: number[] = []
+    const kmRates: number[]   = []
     for (const t of tours) {
-      if (t.status !== 'completed' || !t.total_km || t.total_km <= 0) continue
-      const days = new Set(
-        (t.stops ?? [])
-          .filter(s => s.delivered_at)
-          .map(s => new Date(s.delivered_at!).toISOString().slice(0, 10))
-      ).size
-      if (days >= 1) rates.push(t.total_km / days)
+      if (t.status !== 'completed') continue
+      const plannedDay = t.planned_date ? t.planned_date.slice(0, 10) : ''
+      const deliv = (t.stops ?? []).filter(
+        s => s.delivered_at && (!plannedDay || s.delivered_at.slice(0, 10) >= plannedDay)
+      )
+      const days = new Set(deliv.map(s => s.delivered_at!.slice(0, 10))).size
+      if (days < 1 || deliv.length < 3) continue
+      stopRates.push(deliv.length / days)
+      if (t.total_km && t.total_km > 0) kmRates.push(t.total_km / days)
     }
-    if (rates.length < 2) return null   // pas assez d'historique fiable
-    rates.sort((a, b) => a - b)
-    return rates[Math.floor(rates.length / 2)]   // médiane
+    const med = (a: number[]) => { const s = [...a].sort((x, y) => x - y); return s.length ? s[Math.floor(s.length / 2)] : null }
+    return { stopsPerDay: stopRates.length >= 2 ? med(stopRates) : null, kmPerDay: kmRates.length >= 2 ? med(kmRates) : null }
   }, [tours])
 
   // Reset comment state whenever the user navigates to a different stop
@@ -3388,13 +3391,18 @@ function LivreurView() {
             {/* Distance + temps estimés de la tournée */}
             {routeEst && sortedStops.length > 0 && (() => {
               const workSec = routeEst.drivingSec + sortedStops.length * SERVICE_SECONDS
-              const days = kmPerDay
-                ? Math.max(1, Math.ceil(routeEst.km / kmPerDay))
-                : Math.max(1, Math.ceil(workSec / 3600 / 8))   // repli : ~8h de travail / jour ouvré
+              // Jours estimés : d'abord le rythme réel arrêts/jour (stable), sinon km/jour,
+              // sinon repli ~8h de travail par jour ouvré.
+              const days = pace.stopsPerDay
+                ? Math.max(1, Math.ceil(sortedStops.length / pace.stopsPerDay))
+                : pace.kmPerDay
+                  ? Math.max(1, Math.ceil(routeEst.km / pace.kmPerDay))
+                  : Math.max(1, Math.ceil(workSec / 3600 / 8))
+              const calibrated = !!(pace.stopsPerDay || pace.kmPerDay)
               const timeLabel = days <= 1 ? `~${formatDuration(workSec * 1000)}` : `~${days} jours`
               const timeSub   = days <= 1
                 ? 'à prévoir (avec arrêts)'
-                : kmPerDay ? `d'après vos tournées passées` : 'en journée (~8h/j)'
+                : calibrated ? `d'après vos tournées passées` : 'en journée (~8h/j)'
               return (
                 <div className="flex items-center justify-center gap-8 py-5 border-t border-white/10">
                   <div className="flex items-center gap-2.5 text-white">
