@@ -2095,7 +2095,7 @@ function PlanificateurView() {
 
 // ─── Livreur View ─────────────────────────────────────────────────────────────
 
-type LivreurScreen = 'home' | 'loading' | 'tour' | 'map' | 'nearby' | 'reorder' | 'celebration' | 'overview-map'
+type LivreurScreen = 'home' | 'loading' | 'tour' | 'map' | 'nearby' | 'reorder' | 'celebration' | 'overview-map' | 'preview-map'
 
 // ─── Drag-and-drop stop item ──────────────────────────────────────────────────
 
@@ -2653,6 +2653,7 @@ function LivreurView() {
   } | null>(null)
   // Upcoming tour preview
   const [expandedUpcomingId, setExpandedUpcomingId] = useState<string | null>(null)
+  const [previewTourId, setPreviewTourId] = useState<string | null>(null)
 
   async function handleCompleteTour() {
     if (!tour) return
@@ -3656,6 +3657,15 @@ function LivreurView() {
                   {/* Stops preview */}
                   {isExpanded && (
                     <div className="border-t border-[#f0efec]">
+                      {tStops.length > 0 && (
+                        <button
+                          onClick={() => { setPreviewTourId(t.id); setScreen('preview-map') }}
+                          className="w-full flex items-center justify-center gap-2 px-5 py-3 border-b border-[#f0efec] text-sm font-semibold text-[#1a1a2e] active:bg-[#f5f5f3] transition-colors"
+                        >
+                          <MapIcon size={16} strokeWidth={1.9} />
+                          Voir l&apos;aperçu sur la carte
+                        </button>
+                      )}
                       {tStops.length === 0
                         ? <p className="px-5 py-4 text-sm text-[#9b9b93]">Aucun arrêt planifié.</p>
                         : tStops.map((s, i) => (
@@ -3725,6 +3735,18 @@ function LivreurView() {
   }
 
   // ── Screen: map ──
+  if (screen === 'preview-map') {
+    const pTour = tours.find(t => t.id === previewTourId)
+    const pStops = pTour ? [...pTour.stops].sort((a, b) => a.sequence - b.sequence) : []
+    return (
+      <TourMap
+        stops={pStops}
+        onBack={() => { setPreviewTourId(null); setScreen('home') }}
+        precomputedCoords={coordsCache.current}
+      />
+    )
+  }
+
   if (screen === 'map') {
     return (
       <TourMap
