@@ -2483,10 +2483,21 @@ async function buildETAMap(
 // conduite. Distance ROUTIÈRE réelle via l'API Directions Mapbox (pas à vol d'oiseau).
 // Repli haversine ×1,25 (approche la route réelle) si l'API est indispo ou > 25 arrêts.
 async function estimateTourRoute(
-  orderedCoords: [number, number][],
+  inputCoords: [number, number][],
   token: string,
 ): Promise<{ km: number; drivingSec: number; real: boolean } | null> {
-  if (orderedCoords.length === 0) return null
+  // 1) Écarte les géocodages aberrants : Bowa livre en France (+ voisins). Un arrêt à
+  //    plus de 1200 km du dépôt = adresse mal géocodée (tombe à l'autre bout du monde)
+  //    et ferait exploser la distance. On l'ignore pour l'estimation.
+  const MAX_RADIUS_KM = 1200
+  const coords = inputCoords.filter((c) => haversineKm(DEPOT_COORDS, c) <= MAX_RADIUS_KM)
+  if (coords.length === 0) return null
+
+  // 2) Ordonne comme une vraie tournée optimisée (un brouillon non trié gonflerait le km).
+  const nullable: ([number, number] | null)[] = coords
+  const order = optimizeTSP(DEPOT_COORDS, coords.map((_, i) => i), nullable)
+  const orderedCoords = order.map((i) => coords[i])
+
   const wps: [number, number][] = [DEPOT_COORDS, ...orderedCoords, DEPOT_COORDS]
 
   if (token && wps.length <= 25) {
