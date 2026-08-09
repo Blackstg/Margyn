@@ -2640,6 +2640,7 @@ function LivreurView() {
   const [optimizedOrder, setOptimizedOrder] = useState<string[] | null>(null)
   const [optimizing, setOptimizing] = useState(false)
   const [optimizingTour, setOptimizingTour] = useState(false) // ré-optimisation persistée de la tournée
+  const [optimizingUpcomingId, setOptimizingUpcomingId] = useState<string | null>(null)
   const [optimizeError, setOptimizeError] = useState<string | null>(null)
   const [nearbyOrders, setNearbyOrders]   = useState<ShopifyOrder[]>([])
   const [nearbyLoading, setNearbyLoading] = useState(false)
@@ -3040,6 +3041,23 @@ function LivreurView() {
     }
   }
 
+  // Optimise une prochaine tournée (carrousel) sans la sélectionner.
+  async function handleOptimizeUpcoming(t: Tour) {
+    if (t.stops.length < 2 || optimizingUpcomingId) return
+    setOptimizingUpcomingId(t.id)
+    try {
+      const ok = await optimizeTourStops(t.stops)
+      if (ok) {
+        setUpcomingEst(prev => { const n = { ...prev }; delete n[t.id]; return n })  // force le recalcul km/temps
+        await fetchTours()
+      }
+    } catch {
+      alert('Optimisation impossible, réessaie')
+    } finally {
+      setOptimizingUpcomingId(null)
+    }
+  }
+
   // Full-tour Maps URL: depot → all pending stops in order
   const tourMapsUrl = (() => {
     const pending = sortedStops.filter((s) => s.status !== 'delivered' && s.status !== 'failed')
@@ -3310,7 +3328,7 @@ function LivreurView() {
             </>
           )}
         </div>
-        <div className="px-5 pb-5 pt-1">
+        <div className="px-5 pb-5 pt-1 space-y-3">
           <button
             onClick={() => { setPreviewTourId(t.id); setScreen('preview-map') }}
             disabled={tStops.length === 0}
@@ -3318,6 +3336,28 @@ function LivreurView() {
           >
             <MapIcon size={18} strokeWidth={1.9} />
             Voir l&apos;itinéraire
+          </button>
+          <button
+            onClick={() => handleOptimizeUpcoming(t)}
+            disabled={tStops.length < 2 || optimizingUpcomingId === t.id}
+            className="w-full flex items-center justify-center gap-2 py-3.5 rounded-[14px] border border-white/25 text-white font-semibold disabled:opacity-30 active:bg-white/10 transition-colors"
+          >
+            {optimizingUpcomingId === t.id ? (
+              <>
+                <svg className="animate-spin h-5 w-5" viewBox="0 0 24 24" fill="none">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" />
+                </svg>
+                Optimisation…
+              </>
+            ) : (
+              <>
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
+                </svg>
+                Optimiser la tournée
+              </>
+            )}
           </button>
         </div>
       </div>
