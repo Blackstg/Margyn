@@ -2655,6 +2655,8 @@ function LivreurView() {
   const [expandedUpcomingId, setExpandedUpcomingId] = useState<string | null>(null)
   const [previewTourId, setPreviewTourId] = useState<string | null>(null)
   const [homeTab, setHomeTab] = useState<'tournee' | 'prochaines'>('tournee')
+  const carouselRef = useRef<HTMLDivElement>(null)
+  const [carouselIdx, setCarouselIdx] = useState(0)
 
   async function handleCompleteTour() {
     if (!tour) return
@@ -3237,7 +3239,7 @@ function LivreurView() {
   const bottomNav = (active: 'tournee' | 'prochaines' | 'carte' | 'nonplan') => {
     const items = [
       { key: 'tournee'    as const, label: 'Tournée',    Icon: Truck,    onClick: () => { setHomeTab('tournee'); setScreen('home') } },
-      { key: 'prochaines' as const, label: 'Prochaines', Icon: Calendar, onClick: () => { setHomeTab('prochaines'); setScreen('home') } },
+      { key: 'prochaines' as const, label: 'Prochaines', Icon: Calendar, onClick: () => { setHomeTab('prochaines'); setCarouselIdx(0); setScreen('home') } },
       { key: 'carte'      as const, label: 'Carte',      Icon: MapIcon,  onClick: () => setScreen('overview-map') },
       { key: 'nonplan'    as const, label: 'À planifier', Icon: Package, onClick: () => setScreen('nearby') },
     ]
@@ -3273,7 +3275,7 @@ function LivreurView() {
       ? Math.max(1, Math.ceil(tStops.length / pace.stopsPerDay))
       : (est && pace.kmPerDay ? Math.max(1, Math.ceil(est.km / pace.kmPerDay)) : null)
     return (
-      <div key={t.id} className="snap-center shrink-0 w-[86%] rounded-[20px] bg-[#1a1a2e] overflow-hidden">
+      <div key={t.id} className="snap-start shrink-0 w-full rounded-[20px] bg-[#1a1a2e] overflow-hidden">
         <div className="px-6 pt-6 pb-5 text-white">
           {t.status === 'draft'
             ? <span className="text-[#fbbf24] text-xs font-bold uppercase tracking-widest">⏳ En préparation</span>
@@ -3472,12 +3474,48 @@ function LivreurView() {
         {homeTab === 'prochaines' ? (
           upcomingTours.length > 0 ? (
             <>
-              <p className="text-xs font-semibold uppercase tracking-widest text-[#9b9b93] px-1">
-                Prochaines tournées · glisse pour naviguer
-              </p>
-              <div className="flex gap-3 overflow-x-auto snap-x snap-mandatory -mx-4 px-4 pb-2">
+              <div className="flex items-center justify-between px-1">
+                <p className="text-xs font-semibold uppercase tracking-widest text-[#9b9b93]">
+                  Prochaines tournées
+                </p>
+                {upcomingTours.length > 1 && (
+                  <p className="text-xs font-medium text-[#9b9b93]">{carouselIdx + 1} / {upcomingTours.length}</p>
+                )}
+              </div>
+              <div
+                ref={carouselRef}
+                onScroll={(e) => {
+                  const el = e.currentTarget
+                  const kids = Array.from(el.children) as HTMLElement[]
+                  let best = 0, bestDist = Infinity
+                  kids.forEach((k, i) => {
+                    const d = Math.abs(k.offsetLeft - el.scrollLeft)
+                    if (d < bestDist) { bestDist = d; best = i }
+                  })
+                  if (best !== carouselIdx) setCarouselIdx(best)
+                }}
+                className="flex gap-3 overflow-x-auto snap-x snap-mandatory -mx-4 px-4 pb-1 no-scrollbar"
+                style={{ scrollbarWidth: 'none' }}
+              >
                 {upcomingTours.map(renderUpcomingCard)}
               </div>
+              {/* Points de pagination */}
+              {upcomingTours.length > 1 && (
+                <div className="flex items-center justify-center gap-2 pt-1">
+                  {upcomingTours.map((t, i) => (
+                    <button
+                      key={t.id}
+                      aria-label={`Tournée ${i + 1}`}
+                      onClick={() => {
+                        const el = carouselRef.current
+                        const kid = el?.children[i] as HTMLElement | undefined
+                        if (el && kid) el.scrollTo({ left: kid.offsetLeft, behavior: 'smooth' })
+                      }}
+                      className={`h-2 rounded-full transition-all ${i === carouselIdx ? 'w-6 bg-[#1a1a2e]' : 'w-2 bg-[#d0cfc9]'}`}
+                    />
+                  ))}
+                </div>
+              )}
             </>
           ) : (
             <div className="w-full rounded-[20px] bg-white py-16 text-center text-base text-[#6b6b63]">
