@@ -52,6 +52,7 @@ interface ShopifyOrder {
   shopify_order_id: string
   customer_name: string
   email: string
+  phone?: string | null
   created_at: string | null
   is_preorder: boolean
   preorder_ready?: boolean
@@ -558,6 +559,7 @@ function PlanificateurView() {
           shopify_order_id: stop.shopify_order_id ?? '',
           customer_name:    stop.customer_name,
           email:            stop.email,
+          phone:            stop.phone ?? '',
           created_at:       null,
           is_preorder:      false,
           preorder_ready:   false,
@@ -3877,6 +3879,7 @@ function LivreurView() {
               shopify_order_id: order.shopify_order_id,
               customer_name:    order.customer_name,
               email:            order.email,
+              phone:            order.phone ?? '',
               address1:         order.address1,
               address2:         order.address2 ?? '',
               city:             order.city,
@@ -3935,6 +3938,7 @@ function LivreurView() {
             shopify_order_id: order.shopify_order_id,
             customer_name:    order.customer_name,
             email:            order.email,
+            phone:            order.phone ?? '',
             address1:         order.address1,
             address2:         order.address2 ?? '',
             city:             order.city,

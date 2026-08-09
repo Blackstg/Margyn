@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
-import { ChevronLeft, CheckCircle2 } from 'lucide-react'
+import { ChevronLeft, CheckCircle2, Phone } from 'lucide-react'
 import type mapboxgl from 'mapbox-gl'
 import { geocodeParts } from '@/lib/delivery/geocode'
 import { streetLine } from '@/lib/delivery/geo'
@@ -17,6 +17,7 @@ interface MapStop {
   id: string
   order_name: string
   customer_name: string
+  phone?: string | null
   address1: string
   address2?: string
   city: string
@@ -90,6 +91,7 @@ export interface NearbyOrder {
   shopify_order_id: string
   customer_name: string
   email: string
+  phone?: string | null
   address1: string
   address2?: string
   city: string
@@ -498,6 +500,16 @@ export default function TourMap({ stops, onBack, precomputedCoords, onMarkDelive
                 </div>
                 <p className="text-lg font-bold text-[#1a1a2e] mt-1">{selectedStop.customer_name}</p>
                 <p className="text-sm text-[#6b6b63]">{streetLine(selectedStop.address1, selectedStop.address2)}, {selectedStop.city} {selectedStop.zip}</p>
+                {selectedStop.phone && (
+                  <a
+                    href={`tel:${selectedStop.phone}`}
+                    onClick={(e) => e.stopPropagation()}
+                    className="inline-flex items-center gap-1.5 mt-2 text-sm font-semibold text-[#2563eb] active:opacity-70"
+                  >
+                    <Phone size={14} strokeWidth={2.2} />
+                    {selectedStop.phone}
+                  </a>
+                )}
               </div>
               <button
                 onClick={() => { setSelectedStop(null); setConfirmRemove(false); setCommentMode('none'); setPendingComment(''); setSelectedChip('') }}

@@ -124,8 +124,24 @@ interface ShopifyOrder {
   created_at:       string
   tags:             string
   shipping_address: ShopifyShippingAddress | null
+  billing_address:  ShopifyShippingAddress | null
+  customer:         { phone?: string | null; default_address?: { phone?: string | null } | null } | null
   line_items:       ShopifyLineItem[]
   fulfillments:     ShopifyFulfillment[]
+}
+
+// Le téléphone Shopify peut vivre à 5 endroits ; l'admin affiche souvent celui du
+// client alors que shipping_address.phone est vide → le livreur ne l'avait pas.
+// On cascade sur toutes les sources pour toujours en trouver un s'il existe.
+function pickPhone(order: ShopifyOrder, addr: ShopifyShippingAddress | null): string {
+  return (
+    addr?.phone?.trim() ||
+    order.phone?.trim() ||
+    order.billing_address?.phone?.trim() ||
+    order.customer?.phone?.trim() ||
+    order.customer?.default_address?.phone?.trim() ||
+    ''
+  )
 }
 
 // ─── Shopify fetch (unfulfilled + partial in parallel) ────────────────────────
@@ -134,7 +150,7 @@ interface ShopifyOrder {
 
 async function fetchShopifyOrders(shop: string, token: string): Promise<ShopifyOrder[]> {
   const fields =
-    'id,name,email,phone,created_at,tags,shipping_address,line_items,fulfillments'
+    'id,name,email,phone,created_at,tags,shipping_address,billing_address,customer,line_items,fulfillments'
 
   async function paginate(fulfillmentStatus: string): Promise<ShopifyOrder[]> {
     const result: ShopifyOrder[] = []
@@ -423,7 +439,7 @@ export async function GET() {
         shopify_order_id:  String(order.id),
         customer_name,
         email:             order.email ?? '',
-        phone:             addr?.phone?.trim() || order.phone?.trim() || '',
+        phone:             pickPhone(order, addr),
         created_at:        order.created_at ?? null,
         is_preorder,
         is_b2b,
