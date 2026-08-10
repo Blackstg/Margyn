@@ -121,6 +121,67 @@ function catBadge(category: TicketCategory) {
   )
 }
 
+// ─── Balises manuelles (identification rapide du souci) ─────────────────────────
+// L'agent pose une balise sur un ticket pour voir d'un coup d'œil de quoi il s'agit.
+const TICKET_TAGS: { key: string; label: string; bg: string; text: string }[] = [
+  { key: 'en_attente',          label: 'En attente',          bg: '#f0efec', text: '#6b6b63' },
+  { key: 'retour_expediteur',   label: 'Retour expéditeur',   bg: '#fef3c7', text: '#b45309' },
+  { key: 'colis_perdu',         label: 'Colis perdu',         bg: '#fee2e2', text: '#c7293a' },
+  { key: 'renvoi',              label: 'Renvoi à faire',      bg: '#e0f0ff', text: '#1565c0' },
+  { key: 'remboursement',       label: 'Remboursement',       bg: '#fff3e0', text: '#e65100' },
+  { key: 'litige_transporteur', label: 'Litige transporteur', bg: '#ede7f6', text: '#4527a0' },
+  { key: 'attente_client',      label: 'Attente réponse client', bg: '#e0f7fa', text: '#00695c' },
+  { key: 'resolu',              label: 'Réglé',               bg: '#e7f6ec', text: '#1a7f4b' },
+]
+const TAG_BY_KEY: Record<string, { label: string; bg: string; text: string }> =
+  Object.fromEntries(TICKET_TAGS.map(t => [t.key, t]))
+
+function tagBadge(tagKey: string, selected?: boolean) {
+  const t = TAG_BY_KEY[tagKey]
+  if (!t) return null
+  return (
+    <span
+      className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold shrink-0"
+      style={selected ? { background: 'rgba(255,255,255,0.18)', color: '#fff' } : { backgroundColor: t.bg, color: t.text }}
+    >
+      🏷️ {t.label}
+    </span>
+  )
+}
+
+// Barre de sélection de balise (détail du ticket)
+function TagBar({ ticketId, tag, onTag }: {
+  ticketId: number
+  tag?: string
+  onTag: (ticketId: number, tag: string | null) => void
+}) {
+  return (
+    <div className="shrink-0 border-b border-[#eeede9] bg-white">
+      <div className="flex items-center gap-3 px-6 py-2.5 flex-wrap">
+        <span className="text-[11px] font-bold uppercase tracking-[0.1em] text-[#9b9b93]">Balise</span>
+        <div className="flex items-center gap-1.5 flex-wrap">
+          {TICKET_TAGS.map(t => {
+            const active = tag === t.key
+            return (
+              <button
+                key={t.key}
+                onClick={() => onTag(ticketId, active ? null : t.key)}
+                className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-semibold border transition-colors"
+                style={active
+                  ? { background: t.text, color: '#fff', borderColor: t.text }
+                  : { background: t.bg, color: t.text, borderColor: 'transparent' }}
+              >
+                {active && <span className="text-[12px] leading-none">✓</span>}
+                {t.label}
+              </button>
+            )
+          })}
+        </div>
+      </div>
+    </div>
+  )
+}
+
 function fmtTime(iso: string) {
   const d = new Date(iso), now = new Date()
   const sameDay = d.toDateString() === now.toDateString()
@@ -207,7 +268,7 @@ function AssignBar({ ticketId, assignee, onAssign, myName }: {
 
 // ─── Left column ──────────────────────────────────────────────────────────────
 
-function TicketRow({ raw, processed, selected, doneAction, isProcessing, onClick, assignee }: {
+function TicketRow({ raw, processed, selected, doneAction, isProcessing, onClick, assignee, tag }: {
   raw: RawTicket
   processed?: ProcessedTicket
   selected: boolean
@@ -215,6 +276,7 @@ function TicketRow({ raw, processed, selected, doneAction, isProcessing, onClick
   isProcessing?: boolean
   onClick: () => void
   assignee?: string
+  tag?: string
 }) {
   const email     = processed?.customer_email ?? `#${raw.requester_id}`
   const isPending = raw.status === 'pending'
@@ -241,6 +303,7 @@ function TicketRow({ raw, processed, selected, doneAction, isProcessing, onClick
         <span className={`text-[10px] truncate flex-1 ${selected ? 'text-white/60' : 'text-[#6b6b63]'}`}>
           {email}
         </span>
+        {tag && tagBadge(tag, selected)}
         {assignee
           ? <AssigneePill name={assignee} selected={selected} />
           : <span
@@ -1785,6 +1848,7 @@ function QualiteDashboard() {
 export default function SavPage() {
   const [rawTickets, setRawTickets]         = useState<RawTicket[]>([])
   const [assignments, setAssignments]       = useState<Record<number, string>>({})
+  const [ticketTags, setTicketTags]         = useState<Record<number, string>>({})
   const [myEmail, setMyEmail]               = useState('')
   const [myName, setMyName]                 = useState('')
   const [assigneeFilter, setAssigneeFilter] = useState<string>('')  // '' = tous · 'unassigned' · nom d'agent
@@ -1971,6 +2035,29 @@ export default function SavPage() {
       .then(d => setAssignments(d.assignments ?? {}))
       .catch(() => {})
   }, [])
+
+  // ── Balises manuelles des tickets ──────────────────────────────────────
+  useEffect(() => {
+    savFetch('/api/sav/tags')
+      .then(r => r.json())
+      .then(d => setTicketTags(d.tags ?? {}))
+      .catch(() => {})
+  }, [])
+
+  async function setTag(ticketId: number, tag: string | null) {
+    setTicketTags(prev => {
+      const next = { ...prev }
+      if (tag) next[ticketId] = tag
+      else delete next[ticketId]
+      return next
+    })
+    try {
+      await savFetch('/api/sav/tags', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ticket_id: ticketId, tag }),
+      })
+    } catch { /* optimiste */ }
+  }
 
   async function assignTicket(ticketId: number, assignee: string | null) {
     setAssignments(prev => {
@@ -2411,6 +2498,7 @@ export default function SavPage() {
                   key={t.ticket_id}
                   raw={t}
                   assignee={assignments[t.ticket_id]}
+                  tag={ticketTags[t.ticket_id]}
                   processed={processedCache[t.ticket_id]}
                   selected={t.ticket_id === selectedId}
                   isProcessing={processingId === t.ticket_id}
@@ -2434,6 +2522,7 @@ export default function SavPage() {
                         key={t.ticket_id}
                         raw={t}
                         assignee={assignments[t.ticket_id]}
+                  tag={ticketTags[t.ticket_id]}
                         processed={processedCache[t.ticket_id]}
                         selected={t.ticket_id === selectedId}
                         isProcessing={processingId === t.ticket_id}
@@ -2460,6 +2549,7 @@ export default function SavPage() {
                   key={t.ticket_id}
                   raw={t}
                   assignee={assignments[t.ticket_id]}
+                  tag={ticketTags[t.ticket_id]}
                   processed={processedCache[t.ticket_id]}
                   selected={t.ticket_id === selectedId}
                   doneAction={doneStatuses[t.ticket_id]?.action}
@@ -2509,6 +2599,7 @@ export default function SavPage() {
               : selectedProcessed
                 ? <>
                     <AssignBar ticketId={selectedProcessed.ticket_id} assignee={assignments[selectedProcessed.ticket_id]} onAssign={assignTicket} myName={myName} />
+                    <TagBar ticketId={selectedProcessed.ticket_id} tag={ticketTags[selectedProcessed.ticket_id]} onTag={setTag} />
                     <TicketDetail ticket={selectedProcessed} refreshKey={commentRefreshKey} />
                   </>
                 : <CenterEmpty />
