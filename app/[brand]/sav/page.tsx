@@ -5,7 +5,7 @@ import { createBrowserClient } from '@supabase/auth-helpers-nextjs'
 import {
   RefreshCw, Send, ArrowUpRight, Archive, Package, ExternalLink,
   Inbox, CheckCheck, ChevronDown, ChevronUp, Search,
-  Settings, Trash2, Plus, X, Download, RotateCcw, Paperclip, ArrowRight,
+  Settings, Trash2, Plus, X, Download, RotateCcw, Paperclip, ArrowRight, Forward,
 } from 'lucide-react'
 
 // ─── Marque courante (Moom ou Bowa) ─────────────────────────────────────────
@@ -844,6 +844,37 @@ function ReplyPanel({ ticket, draft, solved, onDraftChange, onSolvedChange, onSe
   const [attachments, setAttachments]     = useState<AttachmentState[]>([])
   const [uploading, setUploading]         = useState(false)
   const fileInputRef                      = useRef<HTMLInputElement>(null)
+  const [showForward, setShowForward]     = useState(false)
+  const [forwardTo, setForwardTo]         = useState('')
+  const [forwardNote, setForwardNote]     = useState('')
+  const [forwarding, setForwarding]       = useState(false)
+  const [forwardOk, setForwardOk]         = useState(false)
+
+  async function forwardTicket() {
+    const to = forwardTo.trim()
+    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(to)) { setError('Adresse e-mail invalide'); return }
+    setForwarding(true); setError(null)
+    try {
+      const res = await savFetch('/api/sav/forward', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          ticket_id:      ticket.ticket_id,
+          requester_id:   ticket.requester_id,
+          to,
+          note:           forwardNote.trim(),
+          customer_email: ticket.customer_email,
+          subject:        ticket.subject,
+        }),
+      })
+      const d = await res.json()
+      if (!res.ok) throw new Error(d.error ?? `HTTP ${res.status}`)
+      setForwardOk(true)
+      setForwardNote('')
+      setTimeout(() => { setShowForward(false); setForwardOk(false); setForwardTo('') }, 1500)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Transfert impossible')
+    } finally { setForwarding(false) }
+  }
 
   async function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
     const files = Array.from(e.target.files ?? [])
@@ -1211,6 +1242,42 @@ function ReplyPanel({ ticket, draft, solved, onDraftChange, onSolvedChange, onSe
             Escalader
           </button>
         </div>
+        {/* Transférer à un tiers (collègue, entrepôt, fournisseur…) */}
+        {!showForward ? (
+          <button
+            onClick={() => setShowForward(true)} disabled={sending || archiving || regenerating}
+            className="w-full flex items-center justify-center gap-1.5 py-2 rounded-xl border border-[#e8e8e4] text-[#6b6b63] text-xs font-medium hover:bg-[#f0efec] transition-colors disabled:opacity-50"
+          >
+            <Forward size={13} strokeWidth={1.8} />
+            Transférer à quelqu&apos;un
+          </button>
+        ) : (
+          <div className="rounded-xl border border-[#e8e8e4] bg-[#faf9f7] p-3 space-y-2">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-bold uppercase tracking-[0.1em] text-[#9b9b93]">Transférer le ticket</span>
+              <button onClick={() => { setShowForward(false); setForwardOk(false) }} className="text-[#9b9b93] hover:text-[#6b6b63]"><X size={13} /></button>
+            </div>
+            <input
+              type="email" value={forwardTo} onChange={e => setForwardTo(e.target.value)}
+              placeholder="email@destinataire.com"
+              className="w-full px-3 py-2 rounded-lg border border-[#e8e8e4] text-xs text-[#1a1a2e] outline-none focus:border-[#aeb0c9]"
+            />
+            <textarea
+              value={forwardNote} onChange={e => setForwardNote(e.target.value)} rows={2}
+              placeholder="Message pour le destinataire (optionnel)"
+              className="w-full px-3 py-2 rounded-lg border border-[#e8e8e4] text-xs text-[#1a1a2e] outline-none focus:border-[#aeb0c9] resize-none"
+            />
+            <p className="text-[10px] text-[#9b9b93] leading-snug">La conversation du ticket est jointe. Le destinataire peut répondre directement au client.</p>
+            <button
+              onClick={forwardTicket} disabled={forwarding || forwardOk}
+              className="w-full flex items-center justify-center gap-1.5 py-2 rounded-lg bg-[#1a1a2e] text-white text-xs font-semibold hover:bg-[#2a2a4e] transition-colors disabled:opacity-50"
+            >
+              {forwardOk ? <CheckCheck size={13} /> : forwarding ? <RefreshCw size={13} className="animate-spin" /> : <Forward size={13} strokeWidth={1.8} />}
+              {forwardOk ? 'Transféré ✓' : forwarding ? 'Envoi…' : 'Transférer'}
+            </button>
+          </div>
+        )}
+
         <button
           onClick={archive} disabled={sending || archiving || regenerating}
           className="w-full flex items-center justify-center gap-1.5 py-2 rounded-xl border border-[#e8e8e4] text-[#9b9b93] text-xs font-medium hover:bg-[#f8f7f5] hover:text-[#6b6b63] transition-colors disabled:opacity-50"

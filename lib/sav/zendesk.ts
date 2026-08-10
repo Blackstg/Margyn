@@ -230,6 +230,18 @@ export async function postReply(
   if (!res.ok) throw new Error(`[Zendesk] postReply ${res.status}: ${await res.text()}`)
 }
 
+// Adds an INTERNAL (private) note to a ticket — invisible to the customer.
+// Utilisé pour tracer un transfert de mail vers un tiers.
+export async function addInternalNote(ticketId: number, body: string, brand: SavBrand = 'moom'): Promise<void> {
+  const res = await fetchWithRetry(
+    `${base(brand)}/tickets/${ticketId}.json`,
+    { method: 'PUT', headers: authHeaders(brand), body: JSON.stringify({ ticket: { comment: { body, public: false } } }) },
+    3,
+    1000,
+  )
+  if (!res.ok) throw new Error(`[Zendesk] addInternalNote ${res.status}: ${await res.text()}`)
+}
+
 // Adds one or more tags to a ticket (fire-and-forget safe)
 export async function tagTicket(ticketId: number, tags: string[], brand: SavBrand = 'moom'): Promise<void> {
   const getRes = await fetchWithRetry(
