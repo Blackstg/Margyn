@@ -65,6 +65,7 @@ interface ZendeskComment {
   id:          number
   author_id:   number
   body:        string
+  html_body?:  string
   public:      boolean
   created_at:  string
   attachments: ZendeskAttachment[]
@@ -352,14 +353,42 @@ export async function getTicketComments(
   // If we have a valid requesterId, use it to distinguish client vs agent.
   // Otherwise, fall back: the first public comment is from the client,
   // subsequent ones alternate but we mark them all as agent (better than nothing).
-  const mapAttachments = (c: ZendeskComment): ZendeskFileAttachment[] =>
-    (c.attachments ?? []).map(a => ({
+  const mapAttachments = (c: ZendeskComment): ZendeskFileAttachment[] => {
+    const out: ZendeskFileAttachment[] = (c.attachments ?? []).map(a => ({
       id:           a.id,
       file_name:    a.file_name,
       content_url:  a.content_url,
       content_type: a.content_type,
       size:         a.size,
     }))
+    // Images INLINE (photos envoyées par le client dans le corps du mail) : elles ne
+    // figurent PAS dans attachments[] mais dans html_body sous forme d'URL Zendesk
+    // /attachments/token/…. On les récupère pour les afficher comme pièces jointes.
+    const seen = new Set(out.map(a => a.content_url))
+    const html = c.html_body ?? ''
+    const md   = c.body ?? ''
+    const urls = new Set<string>()
+    for (const m of html.matchAll(/<img[^>]+src="([^"]+)"/gi)) urls.add(m[1])
+    for (const m of md.matchAll(/!\[[^\]]*\]\(([^)\s]+)/g)) urls.add(m[1])
+    let idx = 0
+    for (let u of urls) {
+      u = u.replace(/&amp;/g, '&').replace(/[)\s]+$/, '')
+      // On ne garde que les vraies pièces jointes Zendesk (pas les logos de signature CDN).
+      if (!/\/attachments\/token\//.test(u)) continue
+      if (seen.has(u)) continue
+      seen.add(u)
+      const nameMatch = u.match(/[?&]name=([^&]+)/)
+      const fileName = nameMatch ? decodeURIComponent(nameMatch[1]) : `image-${++idx}.jpg`
+      out.push({
+        id:           c.id * 1000 + idx++,
+        file_name:    fileName,
+        content_url:  u,
+        content_type: /\.(png|gif|webp)/i.test(fileName) ? `image/${fileName.split('.').pop()!.toLowerCase()}` : 'image/jpeg',
+        size:         0,
+      })
+    }
+    return out
+  }
 
   if (requesterId) {
     return publicComments.map(c => ({
