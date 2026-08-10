@@ -149,23 +149,23 @@ function tagBadge(tagKey: string, selected?: boolean) {
   )
 }
 
-// Barre de sélection de balise (détail du ticket)
-function TagBar({ ticketId, tag, onTag }: {
+// Barre de sélection de balises (détail du ticket) — multi-sélection.
+function TagBar({ ticketId, tags, onToggle }: {
   ticketId: number
-  tag?: string
-  onTag: (ticketId: number, tag: string | null) => void
+  tags: string[]
+  onToggle: (ticketId: number, tag: string) => void
 }) {
   return (
     <div className="shrink-0 border-b border-[#eeede9] bg-white">
       <div className="flex items-center gap-3 px-6 py-2.5 flex-wrap">
-        <span className="text-[11px] font-bold uppercase tracking-[0.1em] text-[#9b9b93]">Balise</span>
+        <span className="text-[11px] font-bold uppercase tracking-[0.1em] text-[#9b9b93]">Balises</span>
         <div className="flex items-center gap-1.5 flex-wrap">
           {TICKET_TAGS.map(t => {
-            const active = tag === t.key
+            const active = tags.includes(t.key)
             return (
               <button
                 key={t.key}
-                onClick={() => onTag(ticketId, active ? null : t.key)}
+                onClick={() => onToggle(ticketId, t.key)}
                 className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-semibold border transition-colors"
                 style={active
                   ? { background: t.text, color: '#fff', borderColor: t.text }
@@ -268,7 +268,7 @@ function AssignBar({ ticketId, assignee, onAssign, myName }: {
 
 // ─── Left column ──────────────────────────────────────────────────────────────
 
-function TicketRow({ raw, processed, selected, doneAction, isProcessing, onClick, assignee, tag }: {
+function TicketRow({ raw, processed, selected, doneAction, isProcessing, onClick, assignee, tags }: {
   raw: RawTicket
   processed?: ProcessedTicket
   selected: boolean
@@ -276,7 +276,7 @@ function TicketRow({ raw, processed, selected, doneAction, isProcessing, onClick
   isProcessing?: boolean
   onClick: () => void
   assignee?: string
-  tag?: string
+  tags?: string[]
 }) {
   const email     = processed?.customer_email ?? `#${raw.requester_id}`
   const isPending = raw.status === 'pending'
@@ -303,7 +303,7 @@ function TicketRow({ raw, processed, selected, doneAction, isProcessing, onClick
         <span className={`text-[10px] truncate flex-1 ${selected ? 'text-white/60' : 'text-[#6b6b63]'}`}>
           {email}
         </span>
-        {tag && tagBadge(tag, selected)}
+        {(tags ?? []).map(t => <span key={t}>{tagBadge(t, selected)}</span>)}
         {assignee
           ? <AssigneePill name={assignee} selected={selected} />
           : <span
@@ -1848,7 +1848,7 @@ function QualiteDashboard() {
 export default function SavPage() {
   const [rawTickets, setRawTickets]         = useState<RawTicket[]>([])
   const [assignments, setAssignments]       = useState<Record<number, string>>({})
-  const [ticketTags, setTicketTags]         = useState<Record<number, string>>({})
+  const [ticketTags, setTicketTags]         = useState<Record<number, string[]>>({})
   const [myEmail, setMyEmail]               = useState('')
   const [myName, setMyName]                 = useState('')
   const [assigneeFilter, setAssigneeFilter] = useState<string>('')  // '' = tous · 'unassigned' · nom d'agent
@@ -2044,17 +2044,21 @@ export default function SavPage() {
       .catch(() => {})
   }, [])
 
-  async function setTag(ticketId: number, tag: string | null) {
+  async function toggleTag(ticketId: number, tag: string) {
+    const current = ticketTags[ticketId] ?? []
+    const on = !current.includes(tag)
     setTicketTags(prev => {
+      const cur = prev[ticketId] ?? []
+      const nextTags = on ? [...cur, tag] : cur.filter(t => t !== tag)
       const next = { ...prev }
-      if (tag) next[ticketId] = tag
+      if (nextTags.length) next[ticketId] = nextTags
       else delete next[ticketId]
       return next
     })
     try {
       await savFetch('/api/sav/tags', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ticket_id: ticketId, tag }),
+        body: JSON.stringify({ ticket_id: ticketId, tag, on }),
       })
     } catch { /* optimiste */ }
   }
@@ -2498,7 +2502,7 @@ export default function SavPage() {
                   key={t.ticket_id}
                   raw={t}
                   assignee={assignments[t.ticket_id]}
-                  tag={ticketTags[t.ticket_id]}
+                  tags={ticketTags[t.ticket_id]}
                   processed={processedCache[t.ticket_id]}
                   selected={t.ticket_id === selectedId}
                   isProcessing={processingId === t.ticket_id}
@@ -2522,7 +2526,7 @@ export default function SavPage() {
                         key={t.ticket_id}
                         raw={t}
                         assignee={assignments[t.ticket_id]}
-                  tag={ticketTags[t.ticket_id]}
+                  tags={ticketTags[t.ticket_id]}
                         processed={processedCache[t.ticket_id]}
                         selected={t.ticket_id === selectedId}
                         isProcessing={processingId === t.ticket_id}
@@ -2549,7 +2553,7 @@ export default function SavPage() {
                   key={t.ticket_id}
                   raw={t}
                   assignee={assignments[t.ticket_id]}
-                  tag={ticketTags[t.ticket_id]}
+                  tags={ticketTags[t.ticket_id]}
                   processed={processedCache[t.ticket_id]}
                   selected={t.ticket_id === selectedId}
                   doneAction={doneStatuses[t.ticket_id]?.action}
@@ -2599,7 +2603,7 @@ export default function SavPage() {
               : selectedProcessed
                 ? <>
                     <AssignBar ticketId={selectedProcessed.ticket_id} assignee={assignments[selectedProcessed.ticket_id]} onAssign={assignTicket} myName={myName} />
-                    <TagBar ticketId={selectedProcessed.ticket_id} tag={ticketTags[selectedProcessed.ticket_id]} onTag={setTag} />
+                    <TagBar ticketId={selectedProcessed.ticket_id} tags={ticketTags[selectedProcessed.ticket_id] ?? []} onToggle={toggleTag} />
                     <TicketDetail ticket={selectedProcessed} refreshKey={commentRefreshKey} />
                   </>
                 : <CenterEmpty />
