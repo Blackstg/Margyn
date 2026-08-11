@@ -204,6 +204,19 @@ export async function createOutboundTicket(
   return data.ticket.id
 }
 
+// Convertit le texte brut d'une réponse en HTML simple pour que Zendesk n'applique
+// PAS le markdown (sinon "Bien cordialement," suivi du séparateur de signature "--"
+// devenait un titre H2 affiché en gros chez le client).
+function replyTextToHtml(text: string): string {
+  const esc = text
+    .replace(/\r\n/g, '\n')
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+  return esc
+    .split('\n\n')
+    .map(p => `<p>${p.split('\n').join('<br>')}</p>`)
+    .join('')
+}
+
 export async function postReply(
   ticketId: number,
   body:     string,
@@ -211,7 +224,8 @@ export async function postReply(
   uploads:  string[] = [],
   brand: SavBrand = 'moom',
 ): Promise<void> {
-  const comment: Record<string, unknown> = { body, public: true }
+  // html_body = rendu sans interprétation markdown (Zendesk dérive le texte brut seul).
+  const comment: Record<string, unknown> = { html_body: replyTextToHtml(body), public: true }
   if (uploads.length > 0) comment.uploads = uploads
 
   const ticket: Record<string, unknown> = {
