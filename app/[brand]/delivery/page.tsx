@@ -2645,6 +2645,7 @@ function LivreurView() {
   const [nearbyOrders, setNearbyOrders]   = useState<ShopifyOrder[]>([])
   const [nearbyLoading, setNearbyLoading] = useState(false)
   const [nearbyZoneFilter, setNearbyZoneFilter] = useState<string>('all')
+  const [nearbySameProducts, setNearbySameProducts] = useState(false)
   const [addingOrderName, setAddingOrderName]   = useState<string | null>(null)
   const [addedToTourNames, setAddedToTourNames] = useState<Set<string>>(new Set())
   // Complete tour
@@ -3976,9 +3977,25 @@ function LivreurView() {
   // ── Screen: nearby (unplanned orders) ──
   if (screen === 'nearby') {
     const ZONES = ['all', 'nord-est', 'nord-ouest', 'sud-est', 'sud-ouest'] as const
-    const filteredNearby = nearbyOrders.filter(
+
+    // Produits « en trop » dans le camion = panneaux des arrêts NON livrés (échoués ou
+    // client indisponible). On matche les commandes à proximité qui en ont besoin →
+    // le livreur recase ce qu'il a déjà chargé au lieu de rentrer plein.
+    const panelKey = (p: PanelItem) => (p.sku?.trim() ? 's:' + p.sku.trim().toLowerCase() : 't:' + p.title.trim().toLowerCase())
+    const excessStops = (tour?.stops ?? []).filter(
+      s => s.status === 'failed' || (s.client_availability === 'unavailable' && s.status !== 'delivered')
+    )
+    const excessKeys = new Set<string>()
+    for (const s of excessStops) for (const p of (s.panel_details ?? [])) if (p.qty > 0) excessKeys.add(panelKey(p))
+    const hasExcess = excessKeys.size > 0
+    const matchCount = (o: ShopifyOrder) => (o.panel_details ?? []).reduce((n, p) => n + (excessKeys.has(panelKey(p)) ? 1 : 0), 0)
+
+    let filteredNearby = nearbyOrders.filter(
       o => nearbyZoneFilter === 'all' || o.zone === nearbyZoneFilter
     )
+    if (nearbySameProducts && hasExcess) filteredNearby = filteredNearby.filter(o => matchCount(o) > 0)
+    // Commandes ayant les mêmes panneaux en tête de liste
+    if (hasExcess) filteredNearby = [...filteredNearby].sort((a, b) => matchCount(b) - matchCount(a))
 
     async function handleAddToTour(order: ShopifyOrder) {
       if (!selectedTourId) return
@@ -4030,6 +4047,22 @@ function LivreurView() {
           </div>
           {nearbyLoading && <span className="text-xs text-[#9b9b93]">Actualisation...</span>}
         </div>
+
+        {/* Filtre : recaser les panneaux non livrés (mêmes produits) */}
+        {hasExcess && (
+          <button
+            onClick={() => setNearbySameProducts(v => !v)}
+            className={`w-full flex items-center gap-2 mb-3 px-4 py-2.5 rounded-[14px] text-sm font-semibold border-2 transition-colors ${
+              nearbySameProducts
+                ? 'bg-[#1a7f4b] text-white border-[#1a7f4b]'
+                : 'bg-[#eafaf0] text-[#1a7f4b] border-[#a7e3c0]'
+            }`}
+          >
+            <span>♻️</span>
+            <span className="flex-1 text-left">Recaser mes panneaux non livrés</span>
+            {nearbySameProducts && <Check size={16} strokeWidth={2.4} />}
+          </button>
+        )}
 
         {/* Zone filter */}
         <div className="flex gap-2 overflow-x-auto pb-1 mb-4">
@@ -4085,6 +4118,11 @@ function LivreurView() {
                           <span className="px-2 py-0.5 rounded-full bg-[#f5f5f3] text-[#6b6b63] text-[10px]">
                             {order.panel_count} panneau{order.panel_count !== 1 ? 'x' : ''}
                           </span>
+                          {hasExcess && matchCount(order) > 0 && (
+                            <span className="px-2 py-0.5 rounded-full bg-[#eafaf0] text-[#1a7f4b] text-[10px] font-bold border border-[#a7e3c0]">
+                              ♻️ mêmes panneaux
+                            </span>
+                          )}
                         </div>
                         <p className="text-base font-bold text-[#1a1a2e] leading-tight">{order.customer_name}</p>
                         <p className="text-sm text-[#6b6b63] mt-0.5">{streetLine(order.address1, order.address2)}</p>
