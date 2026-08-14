@@ -220,6 +220,7 @@ export async function POST(
             body: JSON.stringify({
               from: 'Léa – Bowa Concept <notifications@notifications.bowa-concept.com>',
               to: stop.email,
+              reply_to: 'lea@bowa-concept.com',
               subject: 'BOWA CONCEPT : LIVRAISON',
               html,
             }),

@@ -3664,6 +3664,20 @@ function LivreurView() {
               </div>
             )}
 
+            {/* Alerte : clients ayant signalé être indisponibles */}
+            {(() => {
+              const unavail = sortedStops.filter(s => s.client_availability === 'unavailable' && s.status !== 'delivered' && s.status !== 'failed')
+              if (unavail.length === 0) return null
+              return (
+                <div className="mx-6 mt-3 px-4 py-3 rounded-[14px] bg-[#fef2f2] border-2 border-[#fca5a5]">
+                  <p className="text-sm font-bold text-[#b91c1c] flex items-center gap-1.5">⚠️ {unavail.length} client{unavail.length > 1 ? 's' : ''} indisponible{unavail.length > 1 ? 's' : ''} cette semaine</p>
+                  <p className="text-xs text-[#b91c1c]/85 mt-1 leading-snug">
+                    {unavail.map(s => `${s.customer_name} (${s.order_name})`).join(', ')} — appelle-les avant de passer.
+                  </p>
+                </div>
+              )
+            })()}
+
             {/* Actions */}
             <div className="px-6 pt-4 pb-6 space-y-3">
               {tour.status === 'draft' && (
@@ -4324,6 +4338,9 @@ function LivreurView() {
                       <div className="flex items-center gap-1.5 min-w-0">
                         <span className="font-semibold text-sm text-[#1a1a2e] truncate">{stop.customer_name}</span>
                         <span className="font-mono text-xs text-[#6b6b63] shrink-0">{stop.order_name}</span>
+                        {stop.client_availability === 'unavailable' && (
+                          <span className="shrink-0 inline-flex items-center gap-0.5 text-[10px] font-bold text-[#b91c1c] bg-[#fef2f2] border border-[#fca5a5] px-1.5 py-0.5 rounded-full">⚠️ Indispo</span>
+                        )}
                       </div>
                       <div className="text-xs text-[#6b6b63]">{stop.city} {stop.zip}</div>
                       {stop.phone && (
@@ -4505,7 +4522,10 @@ function LivreurView() {
                   {i + 1}
                 </div>
                 <div className="flex-1 min-w-0">
-                  <div className="font-semibold text-sm truncate">{stop.customer_name}</div>
+                  <div className="font-semibold text-sm truncate flex items-center gap-1.5">
+                    {stop.customer_name}
+                    {stop.client_availability === 'unavailable' && <span className="shrink-0 text-[11px]" title="Client indisponible">⚠️</span>}
+                  </div>
                   <div className={`text-xs truncate ${i === stopIdx ? 'text-white/60' : 'text-[#9b9b93]'}`}>{stop.city}</div>
                 </div>
                 {stop.status === 'delivered' && (
@@ -4651,6 +4671,15 @@ function LivreurView() {
             <div className="text-3xl font-bold text-[#1a1a2e] leading-tight mb-1">
               {currentStop.customer_name}
             </div>
+            {currentStop.client_availability === 'unavailable' && (
+              <div className="flex items-start gap-2.5 my-2 px-4 py-3 rounded-[14px] bg-[#fef2f2] border-2 border-[#fca5a5]">
+                <span className="text-lg leading-none">⚠️</span>
+                <div>
+                  <p className="text-sm font-bold text-[#b91c1c] leading-snug">Client indisponible cette semaine</p>
+                  <p className="text-xs text-[#b91c1c]/80 leading-snug mt-0.5">Il a répondu qu&apos;il ne serait pas là — appelle-le avant de te déplacer.</p>
+                </div>
+              </div>
+            )}
             {currentStop.phone && (
               <a
                 href={`tel:${currentStop.phone}`}
