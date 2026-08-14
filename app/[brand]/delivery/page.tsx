@@ -2645,7 +2645,7 @@ function LivreurView() {
   const [nearbyOrders, setNearbyOrders]   = useState<ShopifyOrder[]>([])
   const [nearbyLoading, setNearbyLoading] = useState(false)
   const [nearbyZoneFilter, setNearbyZoneFilter] = useState<string>('all')
-  const [nearbySameProducts, setNearbySameProducts] = useState(false)
+  const [recaseStop, setRecaseStop] = useState<TourStop | null>(null)
   const [addingOrderName, setAddingOrderName]   = useState<string | null>(null)
   const [addedToTourNames, setAddedToTourNames] = useState<Set<string>>(new Set())
   // Complete tour
@@ -3978,24 +3978,19 @@ function LivreurView() {
   if (screen === 'nearby') {
     const ZONES = ['all', 'nord-est', 'nord-ouest', 'sud-est', 'sud-ouest'] as const
 
-    // Produits « en trop » dans le camion = panneaux des arrêts NON livrés (échoués ou
-    // client indisponible). On matche les commandes à proximité qui en ont besoin →
-    // le livreur recase ce qu'il a déjà chargé au lieu de rentrer plein.
+    // Mode « recasage » : on recase les panneaux d'UNE commande précise (celle que le
+    // client a refusée). On ne montre alors que les commandes proches ayant besoin des
+    // mêmes panneaux, avec nom + adresse.
     const panelKey = (p: PanelItem) => (p.sku?.trim() ? 's:' + p.sku.trim().toLowerCase() : 't:' + p.title.trim().toLowerCase())
-    const excessStops = (tour?.stops ?? []).filter(
-      s => s.status === 'failed' || (s.client_availability === 'unavailable' && s.status !== 'delivered')
-    )
-    const excessKeys = new Set<string>()
-    for (const s of excessStops) for (const p of (s.panel_details ?? [])) if (p.qty > 0) excessKeys.add(panelKey(p))
-    const hasExcess = excessKeys.size > 0
-    const matchCount = (o: ShopifyOrder) => (o.panel_details ?? []).reduce((n, p) => n + (excessKeys.has(panelKey(p)) ? 1 : 0), 0)
+    const recaseKeys = new Set<string>()
+    for (const p of (recaseStop?.panel_details ?? [])) if (p.qty > 0) recaseKeys.add(panelKey(p))
+    const isRecasing = !!recaseStop && recaseKeys.size > 0
+    const matchCount = (o: ShopifyOrder) => (o.panel_details ?? []).reduce((n, p) => n + (recaseKeys.has(panelKey(p)) ? 1 : 0), 0)
 
     let filteredNearby = nearbyOrders.filter(
       o => nearbyZoneFilter === 'all' || o.zone === nearbyZoneFilter
     )
-    if (nearbySameProducts && hasExcess) filteredNearby = filteredNearby.filter(o => matchCount(o) > 0)
-    // Commandes ayant les mêmes panneaux en tête de liste
-    if (hasExcess) filteredNearby = [...filteredNearby].sort((a, b) => matchCount(b) - matchCount(a))
+    if (isRecasing) filteredNearby = filteredNearby.filter(o => matchCount(o) > 0)
 
     async function handleAddToTour(order: ShopifyOrder) {
       if (!selectedTourId) return
@@ -4048,20 +4043,19 @@ function LivreurView() {
           {nearbyLoading && <span className="text-xs text-[#9b9b93]">Actualisation...</span>}
         </div>
 
-        {/* Filtre : recaser les panneaux non livrés (mêmes produits) */}
-        {hasExcess && (
-          <button
-            onClick={() => setNearbySameProducts(v => !v)}
-            className={`w-full flex items-center gap-2 mb-3 px-4 py-2.5 rounded-[14px] text-sm font-semibold border-2 transition-colors ${
-              nearbySameProducts
-                ? 'bg-[#1a7f4b] text-white border-[#1a7f4b]'
-                : 'bg-[#eafaf0] text-[#1a7f4b] border-[#a7e3c0]'
-            }`}
-          >
-            <span>♻️</span>
-            <span className="flex-1 text-left">Recaser mes panneaux non livrés</span>
-            {nearbySameProducts && <Check size={16} strokeWidth={2.4} />}
-          </button>
+        {/* Bandeau recasage : commande précise à recaser */}
+        {isRecasing && (
+          <div className="mb-3 px-4 py-3 rounded-[14px] bg-[#eafaf0] border-2 border-[#a7e3c0]">
+            <div className="flex items-start justify-between gap-2">
+              <p className="text-sm font-bold text-[#1a7f4b] leading-snug flex-1">
+                ♻️ Recaser les panneaux de {recaseStop!.order_name}
+                <span className="block text-xs font-medium text-[#1a7f4b]/80 mt-0.5">
+                  {filteredNearby.length} commande{filteredNearby.length !== 1 ? 's' : ''} proche{filteredNearby.length !== 1 ? 's' : ''} avec les mêmes panneaux
+                </span>
+              </p>
+              <button onClick={() => setRecaseStop(null)} className="shrink-0 text-[#1a7f4b] active:opacity-60"><X size={16} /></button>
+            </div>
+          </div>
         )}
 
         {/* Zone filter */}
@@ -4118,7 +4112,7 @@ function LivreurView() {
                           <span className="px-2 py-0.5 rounded-full bg-[#f5f5f3] text-[#6b6b63] text-[10px]">
                             {order.panel_count} panneau{order.panel_count !== 1 ? 'x' : ''}
                           </span>
-                          {hasExcess && matchCount(order) > 0 && (
+                          {isRecasing && matchCount(order) > 0 && (
                             <span className="px-2 py-0.5 rounded-full bg-[#eafaf0] text-[#1a7f4b] text-[10px] font-bold border border-[#a7e3c0]">
                               ♻️ mêmes panneaux
                             </span>
@@ -4898,6 +4892,14 @@ function LivreurView() {
                 <div className="rounded-[12px] bg-[#fff7ed] border border-[#fed7aa] px-3 py-2">
                   <p className="text-xs text-[#c2680a]">💬 {currentStop.comment}</p>
                 </div>
+              )}
+              {(currentStop.panel_details?.length ?? 0) > 0 && (
+                <button
+                  onClick={() => { setRecaseStop(currentStop); setNearbyZoneFilter('all'); setScreen('nearby') }}
+                  className="w-full flex items-center justify-center gap-2 py-4 rounded-[16px] bg-[#1a7f4b] text-white font-bold text-base active:bg-[#166a3f] transition-colors"
+                >
+                  ♻️ Recaser ces panneaux ailleurs
+                </button>
               )}
             </>
           ) : commentMode === 'proof' ? (
