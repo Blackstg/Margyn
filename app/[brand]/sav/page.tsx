@@ -195,7 +195,7 @@ function fmtTime(iso: string) {
 // Agents par marque (chaque marque a ses propres agents SAV).
 const ASSIGNEES_BY_BRAND: Record<'moom' | 'bowa', readonly string[]> = {
   moom: ['Satiana', 'Lary'],
-  bowa: ['Léa'],
+  bowa: ['Léa', 'Lary', 'Satiana'],
 }
 function savAssignees(): readonly string[] {
   return ASSIGNEES_BY_BRAND[savBrand()]
