@@ -3765,7 +3765,17 @@ function LivreurView() {
                 confirmComplete ? (
                   <div className="rounded-[16px] bg-[#7f1d1d]/40 border border-red-400/30 p-4 space-y-3">
                     <p className="text-white text-sm font-semibold text-center">Terminer et archiver cette tournée ?</p>
-                    <p className="text-white/60 text-xs text-center">Cette action est définitive. La tournée passera en statut &ldquo;Terminée&rdquo;.</p>
+                    {(() => {
+                      const pend = sortedStops.filter(s => s.status !== 'delivered' && s.status !== 'failed' && s.status !== 'partial').length
+                      return pend > 0 ? (
+                        <div className="rounded-[12px] bg-[#fbbf24]/15 border border-[#fbbf24]/40 px-3 py-2.5">
+                          <p className="text-[#fbbf24] text-xs font-bold text-center">⚠️ {pend} arrêt{pend > 1 ? 's' : ''} pas encore validé{pend > 1 ? 's' : ''}</p>
+                          <p className="text-white/70 text-[11px] text-center mt-1 leading-snug">Marque chaque livraison comme « livré » ou « non livré » avant de terminer, sinon elles compteront comme 0 panneau livré.</p>
+                        </div>
+                      ) : (
+                        <p className="text-white/60 text-xs text-center">Cette action est définitive. La tournée passera en statut &ldquo;Terminée&rdquo;.</p>
+                      )
+                    })()}
                     <div className="flex gap-2">
                       <button
                         onClick={() => setConfirmComplete(false)}
