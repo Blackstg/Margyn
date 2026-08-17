@@ -220,11 +220,13 @@ function AssigneePill({ name, selected }: { name: string; selected?: boolean }) 
 }
 
 // Barre d'attribution au-dessus du détail d'un ticket — « Qui répond ? »
-function AssignBar({ ticketId, assignee, onAssign, myName }: {
+function AssignBar({ ticketId, assignee, onAssign, myName, by, at }: {
   ticketId: number
   assignee?: string
   onAssign: (ticketId: number, assignee: string | null) => void
   myName?: string
+  by?: string | null
+  at?: string | null
 }) {
   const options: { val: string | null; label: string; color: string }[] = [
     { val: null, label: 'Non attribué', color: '#9b9b93' },
@@ -235,7 +237,7 @@ function AssignBar({ ticketId, assignee, onAssign, myName }: {
   return (
     <div className="shrink-0 border-b border-[#eeede9] bg-[#faf9f7]">
       <div className="flex items-center gap-3 px-6 py-2.5 flex-wrap">
-        <span className="text-[11px] font-bold uppercase tracking-[0.1em] text-[#9b9b93]">Qui répond ?</span>
+        <span className="text-[11px] font-bold uppercase tracking-[0.1em] text-[#9b9b93]">Affecter à</span>
         <div className="flex items-center gap-1.5">
           {options.map(opt => {
             const active = (assignee ?? null) === opt.val
@@ -254,6 +256,11 @@ function AssignBar({ ticketId, assignee, onAssign, myName }: {
             )
           })}
         </div>
+        {assignee && by && !by.includes('@') && (
+          <span className="text-[10px] text-[#9b9b93] w-full">
+            Affecté à <b className="text-[#6b6b63]">{assignee}</b> par {by}{at ? ` · ${fmtTime(at)}` : ''}
+          </span>
+        )}
       </div>
       {takenByOther && (
         <div className="px-6 pb-2.5 -mt-1">
@@ -268,7 +275,7 @@ function AssignBar({ ticketId, assignee, onAssign, myName }: {
 
 // ─── Left column ──────────────────────────────────────────────────────────────
 
-function TicketRow({ raw, processed, selected, doneAction, isProcessing, onClick, assignee, tags }: {
+function TicketRow({ raw, processed, selected, doneAction, isProcessing, onClick, assignee, tags, handoffFrom, agents, menuOpen, onOpenMenu, onAssignPick }: {
   raw: RawTicket
   processed?: ProcessedTicket
   selected: boolean
@@ -277,17 +284,23 @@ function TicketRow({ raw, processed, selected, doneAction, isProcessing, onClick
   onClick: () => void
   assignee?: string
   tags?: string[]
+  handoffFrom?: string
+  agents?: readonly string[]
+  menuOpen?: boolean
+  onOpenMenu?: () => void
+  onAssignPick?: (name: string | null) => void
 }) {
   const email     = processed?.customer_email ?? `#${raw.requester_id}`
   const isPending = raw.status === 'pending'
   // Barre latérale : couleur de l'agent si attribué, orange sinon (= à attribuer)
   const accent    = assignee ? (ASSIGNEE_COLORS[assignee]?.[1] ?? '#6b6b63') : '#f59e0b'
+  const stop = (e: React.MouseEvent) => { e.preventDefault(); e.stopPropagation() }
 
   return (
     <button
       onClick={onClick}
       style={{ borderLeft: `4px solid ${accent}` }}
-      className={`w-full text-left pl-3 pr-4 py-3 border-b border-[#eeede9] transition-colors ${
+      className={`relative w-full text-left pl-3 pr-4 py-3 border-b border-[#eeede9] transition-colors ${
         raw.is_reopened ? 'bg-[#fffbeb]' : selected ? 'bg-[#1a1a2e]' : !assignee ? 'bg-[#fffaf3] hover:bg-[#fff4e6]' : 'hover:bg-[#f0efec]'
       }`}
     >
@@ -295,6 +308,11 @@ function TicketRow({ raw, processed, selected, doneAction, isProcessing, onClick
         <span className={`text-[11px] font-semibold truncate flex-1 ${selected ? 'text-white' : 'text-[#1a1a2e]'}`}>
           {raw.subject}
         </span>
+        {handoffFrom && (
+          <span className="shrink-0 inline-flex items-center gap-0.5 text-[9px] font-bold text-[#6d28d9] bg-[#ede9fe] px-1.5 py-0.5 rounded-full">
+            ➡️ de {handoffFrom}
+          </span>
+        )}
         <span className={`text-[10px] shrink-0 ${selected ? 'text-white/50' : 'text-[#9b9b93]'}`}>
           {fmtTime(raw.updated_at ?? raw.created_at ?? new Date().toISOString())}
         </span>
@@ -312,6 +330,18 @@ function TicketRow({ raw, processed, selected, doneAction, isProcessing, onClick
             >
               À attribuer
             </span>}
+        {/* Affecter depuis la liste (menu rapide) */}
+        {agents && agents.length > 0 && onOpenMenu && (
+          <span
+            role="button"
+            tabIndex={0}
+            onClick={(e) => { stop(e); onOpenMenu() }}
+            className={`shrink-0 inline-flex items-center justify-center w-5 h-5 rounded-full text-[11px] ${selected ? 'text-white/70 hover:bg-white/15' : 'text-[#9b9b93] hover:bg-[#e8e8e4]'}`}
+            title="Affecter à une collègue"
+          >
+            ⋯
+          </span>
+        )}
         {raw.is_reopened && (
           <span className="inline-flex items-center gap-1 text-[10px] font-bold shrink-0 bg-[#fef3c7] text-[#b45309] px-1.5 py-0.5 rounded-full border border-[#fcd34d]">
             💬 Nouveau message
@@ -348,6 +378,33 @@ function TicketRow({ raw, processed, selected, doneAction, isProcessing, onClick
           <RefreshCw size={10} strokeWidth={1.8} className={`animate-spin shrink-0 ${selected ? 'text-white/40' : 'text-[#aeb0c9]'}`} />
         )}
       </div>
+
+      {/* Menu d'affectation rapide (depuis la liste) */}
+      {menuOpen && agents && onAssignPick && (
+        <span className="absolute right-3 top-9 z-30 flex flex-col min-w-[130px] rounded-xl border border-[#e8e8e4] bg-white shadow-lg overflow-hidden py-1">
+          <span className="px-3 py-1 text-[9px] font-bold uppercase tracking-wide text-[#9b9b93]">Affecter à</span>
+          {agents.map(a => (
+            <span
+              key={a}
+              role="button"
+              tabIndex={0}
+              onClick={(e) => { stop(e); onAssignPick(a) }}
+              className="flex items-center gap-2 px-3 py-1.5 text-xs font-medium text-[#1a1a2e] hover:bg-[#f5f5f3]"
+            >
+              <span className="w-2 h-2 rounded-full" style={{ background: ASSIGNEE_COLORS[a]?.[1] ?? '#6b6b63' }} />
+              {a}{assignee === a ? ' ✓' : ''}
+            </span>
+          ))}
+          <span
+            role="button"
+            tabIndex={0}
+            onClick={(e) => { stop(e); onAssignPick(null) }}
+            className="px-3 py-1.5 text-xs font-medium text-[#9b9b93] hover:bg-[#f5f5f3] border-t border-[#f0efec]"
+          >
+            Retirer l&apos;affectation
+          </span>
+        </span>
+      )}
     </button>
   )
 }
@@ -1915,6 +1972,8 @@ function QualiteDashboard() {
 export default function SavPage() {
   const [rawTickets, setRawTickets]         = useState<RawTicket[]>([])
   const [assignments, setAssignments]       = useState<Record<number, string>>({})
+  const [assignMeta, setAssignMeta]         = useState<Record<number, { by: string | null; at: string | null }>>({})
+  const [assignMenuTicket, setAssignMenuTicket] = useState<number | null>(null)
   const [ticketTags, setTicketTags]         = useState<Record<number, string[]>>({})
   const [myEmail, setMyEmail]               = useState('')
   const [myName, setMyName]                 = useState('')
@@ -2099,7 +2158,7 @@ export default function SavPage() {
   useEffect(() => {
     savFetch('/api/sav/assign')
       .then(r => r.json())
-      .then(d => setAssignments(d.assignments ?? {}))
+      .then(d => { setAssignments(d.assignments ?? {}); setAssignMeta(d.meta ?? {}) })
       .catch(() => {})
   }, [])
 
@@ -2130,6 +2189,15 @@ export default function SavPage() {
     } catch { /* optimiste */ }
   }
 
+  // Nom de la collègue qui m'a affecté ce ticket (si c'est bien à MOI et par une AUTRE).
+  function handoffFrom(ticketId: number): string | undefined {
+    const a = assignments[ticketId]
+    const by = assignMeta[ticketId]?.by
+    // Affiché seulement si c'est à MOI, par une AUTRE, et qu'on a un prénom (pas un email legacy).
+    if (a && a === myName && by && !by.includes('@') && by !== myName) return by
+    return undefined
+  }
+
   async function assignTicket(ticketId: number, assignee: string | null) {
     setAssignments(prev => {
       const next = { ...prev }
@@ -2137,10 +2205,13 @@ export default function SavPage() {
       else delete next[ticketId]
       return next
     })
+    // Trace : qui affecte (nom) et quand.
+    setAssignMeta(prev => ({ ...prev, [ticketId]: { by: myName || myEmail, at: new Date().toISOString() } }))
+    setAssignMenuTicket(null)
     try {
       await savFetch('/api/sav/assign', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ticket_id: ticketId, assignee, updated_by: myEmail }),
+        body: JSON.stringify({ ticket_id: ticketId, assignee, updated_by: myName || myEmail }),
       })
     } catch { /* optimiste — l'UI reste à jour */ }
   }
@@ -2289,6 +2360,11 @@ export default function SavPage() {
 
   return (
     <div className="h-screen overflow-hidden flex relative">
+
+      {/* Fermeture du menu d'affectation rapide au clic extérieur */}
+      {assignMenuTicket !== null && (
+        <div className="fixed inset-0 z-20" onClick={() => setAssignMenuTicket(null)} />
+      )}
 
       {/* Rules overlay */}
       {showRules && <RulesPanel onClose={() => setShowRules(false)} />}
@@ -2570,6 +2646,11 @@ export default function SavPage() {
                   raw={t}
                   assignee={assignments[t.ticket_id]}
                   tags={ticketTags[t.ticket_id]}
+                  handoffFrom={handoffFrom(t.ticket_id)}
+                  agents={savAssignees()}
+                  menuOpen={assignMenuTicket === t.ticket_id}
+                  onOpenMenu={() => setAssignMenuTicket(id => id === t.ticket_id ? null : t.ticket_id)}
+                  onAssignPick={(name) => assignTicket(t.ticket_id, name)}
                   processed={processedCache[t.ticket_id]}
                   selected={t.ticket_id === selectedId}
                   isProcessing={processingId === t.ticket_id}
@@ -2669,7 +2750,7 @@ export default function SavPage() {
               ? <CenterSkeleton />
               : selectedProcessed
                 ? <>
-                    <AssignBar ticketId={selectedProcessed.ticket_id} assignee={assignments[selectedProcessed.ticket_id]} onAssign={assignTicket} myName={myName} />
+                    <AssignBar ticketId={selectedProcessed.ticket_id} assignee={assignments[selectedProcessed.ticket_id]} onAssign={assignTicket} myName={myName} by={assignMeta[selectedProcessed.ticket_id]?.by} at={assignMeta[selectedProcessed.ticket_id]?.at} />
                     <TagBar ticketId={selectedProcessed.ticket_id} tags={ticketTags[selectedProcessed.ticket_id] ?? []} onToggle={toggleTag} />
                     <TicketDetail ticket={selectedProcessed} refreshKey={commentRefreshKey} />
                   </>

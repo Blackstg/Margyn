@@ -24,11 +24,25 @@ async function upsertAssign(
 export async function GET(req: NextRequest) {
   const sb = createAdminClient()
   const brand = savBrandFromRequest(req)
-  const { data, error } = await sb.from('sav_assignments').select('ticket_id, assignee').eq('brand', brand)
-  if (error) return NextResponse.json({ assignments: {} }) // table/colonne peut ne pas exister encore
+  // On tente de récupérer aussi qui a affecté (updated_by) et quand (updated_at).
+  // Repli sur la sélection minimale si ces colonnes n'existent pas encore.
+  type Row = { ticket_id: number; assignee: string | null; updated_by?: string | null; updated_at?: string | null }
+  const full = await sb.from('sav_assignments').select('ticket_id, assignee, updated_by, updated_at').eq('brand', brand)
+  let rows: Row[] = []
+  if (full.error) {
+    const min = await sb.from('sav_assignments').select('ticket_id, assignee').eq('brand', brand)
+    if (min.error) return NextResponse.json({ assignments: {}, meta: {} })
+    rows = (min.data ?? []) as Row[]
+  } else {
+    rows = (full.data ?? []) as Row[]
+  }
   const map: Record<number, string> = {}
-  for (const r of data ?? []) if (r.assignee) map[r.ticket_id] = r.assignee
-  return NextResponse.json({ assignments: map })
+  const meta: Record<number, { by: string | null; at: string | null }> = {}
+  for (const r of rows) {
+    if (r.assignee) map[r.ticket_id] = r.assignee
+    meta[r.ticket_id] = { by: r.updated_by ?? null, at: r.updated_at ?? null }
+  }
+  return NextResponse.json({ assignments: map, meta })
 }
 
 export async function POST(req: NextRequest) {
