@@ -248,9 +248,15 @@ export async function GET(req: NextRequest) {
       // décalé (ex. tout à la fin), ce qui fausse started_at/completed_at. On recale
       // sur les vraies livraisons : début = le plus tôt entre started_at et la 1re
       // livraison, fin = le plus tard entre completed_at et la dernière livraison.
+      // On exclut les livraisons « égarées » très antérieures à la date planifiée
+      // (re-livraisons / quirks) : elles ne représentent pas le vrai début de tournée.
+      const windowStart = tour.planned_date
+        ? new Date(new Date(tour.planned_date).getTime() - 2 * 86_400_000).toISOString().slice(0, 10)
+        : null
       const deliveredAts = stopEvents
         .filter(s => (s.status === 'delivered' || s.status === 'partial') && s.delivered_at)
         .map(s => s.delivered_at as string)
+        .filter(d => !windowStart || d.slice(0, 10) >= windowStart)
         .sort()
       const firstDeliv = deliveredAts[0] ?? null
       const lastDeliv  = deliveredAts[deliveredAts.length - 1] ?? null
