@@ -1486,6 +1486,9 @@ function PlanificateurView() {
                             const delivered = tour.stops.filter(s => s.status === 'delivered' || s.status === 'partial').length
                             const failed    = tour.stops.filter(s => s.status === 'failed').length
                             const panels    = tour.stops.filter(s => s.status === 'delivered' || s.status === 'partial').reduce((n, s) => n + s.panel_count, 0)
+                            // Panneaux planifiés (total de la tournée) : sert de dénominateur pour distinguer
+                            // « 0 panneau planifié » de « 0 panneau marqué livré » (arrêts jamais validés).
+                            const plannedPanels = tour.total_panels
                             return (<>
                               <div>
                                 <p className="text-sm font-bold text-[#1a1a2e]">{formatDuration(durationMs)}</p>
@@ -1496,8 +1499,8 @@ function PlanificateurView() {
                                 <p className="text-[10px] text-[#9b9b93] mt-0.5">Livraisons</p>
                               </div>
                               <div>
-                                <p className="text-sm font-bold text-[#1a1a2e]">{panels}</p>
-                                <p className="text-[10px] text-[#9b9b93] mt-0.5">Panneaux</p>
+                                <p className="text-sm font-bold text-[#1a1a2e]">{panels}<span className="text-[#9b9b93] font-medium"> / {plannedPanels}</span></p>
+                                <p className="text-[10px] text-[#9b9b93] mt-0.5">Panneaux livrés</p>
                               </div>
                               <div>
                                 <p className="text-sm font-bold text-[#1a1a2e]">{tour.total_km ?? '—'} km</p>
