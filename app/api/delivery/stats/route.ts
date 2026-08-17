@@ -244,13 +244,27 @@ export async function GET(req: NextRequest) {
           ),
         }))
 
+      // Début/fin EFFECTIFS : le livreur peut cliquer « Démarrer »/« Terminer » en
+      // décalé (ex. tout à la fin), ce qui fausse started_at/completed_at. On recale
+      // sur les vraies livraisons : début = le plus tôt entre started_at et la 1re
+      // livraison, fin = le plus tard entre completed_at et la dernière livraison.
+      const deliveredAts = stopEvents
+        .filter(s => (s.status === 'delivered' || s.status === 'partial') && s.delivered_at)
+        .map(s => s.delivered_at as string)
+        .sort()
+      const firstDeliv = deliveredAts[0] ?? null
+      const lastDeliv  = deliveredAts[deliveredAts.length - 1] ?? null
+      const effStarted = [tour.started_at, firstDeliv].filter(Boolean).sort()[0] ?? tour.started_at
+      const effEndArr  = [tour.completed_at, lastDeliv].filter(Boolean).sort()
+      const effCompleted = effEndArr.length ? effEndArr[effEndArr.length - 1] : tour.completed_at
+
       // Days with activity vs idle days since start
       const daysWithActivity = days.length
       let daysSinceStart: number | null = null
       let idleDays = 0
-      if (tour.started_at) {
-        const startDay  = toParisDayISO(tour.started_at)
-        const endStr    = tour.completed_at ? toParisDayISO(tour.completed_at) : toParisDayISO(new Date().toISOString())
+      if (effStarted) {
+        const startDay  = toParisDayISO(effStarted)
+        const endStr    = effCompleted ? toParisDayISO(effCompleted) : toParisDayISO(new Date().toISOString())
         const startMs   = new Date(startDay).getTime()
         const endMs     = new Date(endStr).getTime()
         const totalDays = Math.floor((endMs - startMs) / 86_400_000) + 1
@@ -263,8 +277,8 @@ export async function GET(req: NextRequest) {
       const panels_delivered = delivered.reduce((s, e) => s + e.panels, 0)
 
       const duration_ms =
-        tour.started_at && tour.completed_at
-          ? new Date(tour.completed_at).getTime() - new Date(tour.started_at).getTime()
+        effStarted && effCompleted
+          ? new Date(effCompleted).getTime() - new Date(effStarted).getTime()
           : null
 
       const stat: TourStat = {
@@ -272,8 +286,8 @@ export async function GET(req: NextRequest) {
         name:            tour.name,
         status:          tour.status,
         planned_date:    tour.planned_date,
-        started_at:      tour.started_at,
-        completed_at:    tour.completed_at,
+        started_at:      effStarted,
+        completed_at:    effCompleted,
         duration_ms,
         total_km:        tour.total_km ?? null,
         panels_delivered,
