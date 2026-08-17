@@ -9,7 +9,7 @@ import { createBrowserClient } from '@supabase/auth-helpers-nextjs'
 import { useBrand } from '@/context/BrandContext'
 import { geoAddress, streetLine } from '@/lib/delivery/geo'
 import { geocodeParts } from '@/lib/delivery/geocode'
-import { ChevronDown, ChevronUp, ChevronLeft, ChevronRight, Trash2, Mail, Plus, X, MapPin, Package, Truck, Map as MapIcon, Search, Pencil, Check, MessageSquare, GripVertical, Printer, RefreshCw, Clock, Calendar } from 'lucide-react'
+import { ChevronDown, ChevronUp, ChevronLeft, ChevronRight, Trash2, Mail, Plus, X, MapPin, Package, Truck, Map as MapIcon, Search, Pencil, Check, MessageSquare, GripVertical, Printer, RefreshCw, Clock, Calendar, ArrowLeftRight } from 'lucide-react'
 import {
   DndContext, DragEndEvent, DragOverlay, DragStartEvent,
   PointerSensor, TouchSensor, closestCenter, useSensor, useSensors,
@@ -2097,7 +2097,7 @@ function PlanificateurView() {
 
 // ─── Livreur View ─────────────────────────────────────────────────────────────
 
-type LivreurScreen = 'home' | 'loading' | 'tour' | 'map' | 'nearby' | 'reorder' | 'celebration' | 'overview-map' | 'preview-map'
+type LivreurScreen = 'home' | 'loading' | 'tour' | 'map' | 'nearby' | 'reorder' | 'celebration' | 'overview-map' | 'preview-map' | 'recasage'
 
 // ─── Drag-and-drop stop item ──────────────────────────────────────────────────
 
@@ -2645,7 +2645,8 @@ function LivreurView() {
   const [nearbyOrders, setNearbyOrders]   = useState<ShopifyOrder[]>([])
   const [nearbyLoading, setNearbyLoading] = useState(false)
   const [nearbyZoneFilter, setNearbyZoneFilter] = useState<string>('all')
-  const [recaseStop, setRecaseStop] = useState<TourStop | null>(null)
+  const [recaseLeftId, setRecaseLeftId] = useState<string | null>(null)
+  const [recaseMoving, setRecaseMoving] = useState<string | null>(null)
   const [addingOrderName, setAddingOrderName]   = useState<string | null>(null)
   const [addedToTourNames, setAddedToTourNames] = useState<Set<string>>(new Set())
   // Complete tour
@@ -3257,12 +3258,13 @@ function LivreurView() {
   }
 
   // ── Barre d'onglets mobile (bas d'écran) ───────────────────────────────────
-  const bottomNav = (active: 'tournee' | 'prochaines' | 'carte' | 'nonplan') => {
+  const bottomNav = (active: 'tournee' | 'prochaines' | 'carte' | 'nonplan' | 'recasage') => {
     const items = [
       { key: 'tournee'    as const, label: 'Tournée',    Icon: Truck,    onClick: () => { setHomeTab('tournee'); setScreen('home') } },
       { key: 'prochaines' as const, label: 'Prochaines', Icon: Calendar, onClick: () => { setHomeTab('prochaines'); setCarouselIdx(0); setScreen('home') } },
       { key: 'carte'      as const, label: 'Carte',      Icon: MapIcon,  onClick: () => setScreen('overview-map') },
       { key: 'nonplan'    as const, label: 'À planifier', Icon: Package, onClick: () => setScreen('nearby') },
+      { key: 'recasage'   as const, label: 'Recaser',    Icon: ArrowLeftRight, onClick: () => setScreen('recasage') },
     ]
     return (
       <div className="fixed bottom-0 left-0 right-0 z-50 flex items-stretch bg-white border-t border-[#e8e8e4] shadow-[0_-2px_12px_rgba(0,0,0,0.06)]" style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}>
@@ -3974,23 +3976,133 @@ function LivreurView() {
     )
   }
 
+  // ── Screen: recasage (2 colonnes : non livrables ↔ commande d'une tournée future) ──
+  if (screen === 'recasage') {
+    const pKey = (p: PanelItem) => (p.sku?.trim() ? 's:' + p.sku.trim().toLowerCase() : 't:' + p.title.trim().toLowerCase())
+    const panelsLabel = (s: TourStop) =>
+      (s.panel_details ?? []).filter(p => p.qty > 0).map(p => `${p.qty}× ${p.title}`).join(', ') || `${s.panel_count} panneau(x)`
+
+    // Gauche : arrêts de la tournée EN COURS non livrables (refusé/échoué ou client indisponible).
+    const undeliverable = (tour?.stops ?? []).filter(
+      s => s.status === 'failed' || (s.client_availability === 'unavailable' && s.status !== 'delivered')
+    )
+    const leftStop = undeliverable.find(s => s.id === recaseLeftId) ?? undeliverable[0] ?? null
+    const leftKeys = new Set<string>()
+    for (const p of (leftStop?.panel_details ?? [])) if (p.qty > 0) leftKeys.add(pKey(p))
+
+    // Droite : arrêts des AUTRES tournées (futures) qui ont besoin des mêmes panneaux.
+    const candidates: { stop: TourStop; tourName: string; date: string | null; match: number }[] = []
+    if (leftStop) {
+      for (const t of tours) {
+        if (t.id === selectedTourId || t.status === 'completed' || t.status === 'cancelled') continue
+        for (const s of t.stops) {
+          if (s.status === 'delivered' || s.status === 'failed') continue
+          const m = (s.panel_details ?? []).reduce((n, p) => n + (leftKeys.has(pKey(p)) ? 1 : 0), 0)
+          if (m > 0) candidates.push({ stop: s, tourName: t.name, date: t.planned_date, match: m })
+        }
+      }
+      candidates.sort((a, b) => b.match - a.match)
+    }
+
+    async function deliverInstead(c: { stop: TourStop; tourName: string }) {
+      if (!selectedTourId) return
+      setRecaseMoving(c.stop.id)
+      try {
+        // 1) Ajoute la commande future à la tournée en cours
+        await fetch(`/api/delivery/tours/${selectedTourId}/stops`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ stops: [{
+            order_name:       c.stop.order_name,
+            shopify_order_id: c.stop.shopify_order_id,
+            customer_name:    c.stop.customer_name,
+            email:            c.stop.email,
+            phone:            c.stop.phone ?? '',
+            address1:         c.stop.address1,
+            address2:         c.stop.address2 ?? '',
+            city:             c.stop.city,
+            zip:              c.stop.zip,
+            zone:             c.stop.zone,
+            panel_count:      c.stop.panel_count,
+            panel_details:    c.stop.panel_details,
+            lat:              c.stop.lat ?? null,
+            lng:              c.stop.lng ?? null,
+          }] }),
+        })
+        // 2) Retire la commande de sa tournée future
+        await fetch(`/api/delivery/stops/${c.stop.id}`, { method: 'DELETE' })
+        await fetchTours()
+      } catch { alert('Déplacement impossible, réessaie') }
+      finally { setRecaseMoving(null) }
+    }
+
+    return (
+      <div className="flex flex-col" style={{ height: '100dvh' }}>
+        {/* Header */}
+        <div className="flex items-center gap-3 px-4 pt-4 pb-3 shrink-0">
+          <div className="flex-1">
+            <h2 className="text-base font-bold text-[#1a1a2e]">Recaser une commande</h2>
+            <p className="text-xs text-[#9b9b93]">À gauche : non livrable · À droite : à livrer à la place</p>
+          </div>
+        </div>
+
+        <div className="flex-1 min-h-0 grid grid-cols-2 gap-2 px-3 pb-2" style={{ paddingBottom: 'calc(64px + env(safe-area-inset-bottom))' }}>
+          {/* Colonne gauche */}
+          <div className="min-h-0 overflow-y-auto space-y-2">
+            <p className="text-[11px] font-bold uppercase tracking-wide text-[#b91c1c] px-1 sticky top-0 bg-[#f5f5f3] py-1">Non livrables ({undeliverable.length})</p>
+            {undeliverable.length === 0 ? (
+              <p className="text-xs text-[#9b9b93] px-1 py-4">Aucune commande refusée pour l&apos;instant.</p>
+            ) : undeliverable.map(s => {
+              const sel = leftStop?.id === s.id
+              return (
+                <button
+                  key={s.id}
+                  onClick={() => setRecaseLeftId(s.id)}
+                  className={`w-full text-left rounded-[12px] p-2.5 border-2 transition-colors ${sel ? 'bg-[#fef2f2] border-[#fca5a5]' : 'bg-white border-transparent'}`}
+                >
+                  <p className="text-xs font-bold text-[#1a1a2e]">{s.order_name}</p>
+                  <p className="text-xs text-[#6b6b63] truncate">{s.customer_name}</p>
+                  <p className="text-[10px] text-[#9b9b93] mt-0.5 leading-snug">{panelsLabel(s)}</p>
+                </button>
+              )
+            })}
+          </div>
+
+          {/* Colonne droite */}
+          <div className="min-h-0 overflow-y-auto space-y-2">
+            <p className="text-[11px] font-bold uppercase tracking-wide text-[#1a7f4b] px-1 sticky top-0 bg-[#f5f5f3] py-1">Livrer à la place</p>
+            {!leftStop ? (
+              <p className="text-xs text-[#9b9b93] px-1 py-4">Choisis une commande à gauche.</p>
+            ) : candidates.length === 0 ? (
+              <p className="text-xs text-[#9b9b93] px-1 py-4">Aucune commande d&apos;une tournée future avec les mêmes panneaux.</p>
+            ) : candidates.map(c => (
+              <div key={c.stop.id} className="rounded-[12px] p-2.5 bg-white border border-[#e8e8e4]">
+                <p className="text-xs font-bold text-[#1a1a2e]">{c.stop.order_name}</p>
+                <p className="text-xs text-[#6b6b63] truncate">{c.stop.customer_name}</p>
+                <p className="text-[10px] text-[#6b6b63] leading-snug mt-0.5">{streetLine(c.stop.address1, c.stop.address2)}, {c.stop.city} {c.stop.zip}</p>
+                <p className="text-[10px] text-[#9b9b93] mt-0.5">📅 {c.tourName}</p>
+                <button
+                  onClick={() => deliverInstead(c)}
+                  disabled={recaseMoving === c.stop.id}
+                  className="mt-2 w-full flex items-center justify-center gap-1 py-2 rounded-[10px] bg-[#1a7f4b] text-white text-[11px] font-bold active:bg-[#166a3f] disabled:opacity-50"
+                >
+                  {recaseMoving === c.stop.id ? 'Ajout…' : '→ Livrer à la place'}
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
+        {bottomNav('recasage')}
+      </div>
+    )
+  }
+
   // ── Screen: nearby (unplanned orders) ──
   if (screen === 'nearby') {
     const ZONES = ['all', 'nord-est', 'nord-ouest', 'sud-est', 'sud-ouest'] as const
 
-    // Mode « recasage » : on recase les panneaux d'UNE commande précise (celle que le
-    // client a refusée). On ne montre alors que les commandes proches ayant besoin des
-    // mêmes panneaux, avec nom + adresse.
-    const panelKey = (p: PanelItem) => (p.sku?.trim() ? 's:' + p.sku.trim().toLowerCase() : 't:' + p.title.trim().toLowerCase())
-    const recaseKeys = new Set<string>()
-    for (const p of (recaseStop?.panel_details ?? [])) if (p.qty > 0) recaseKeys.add(panelKey(p))
-    const isRecasing = !!recaseStop && recaseKeys.size > 0
-    const matchCount = (o: ShopifyOrder) => (o.panel_details ?? []).reduce((n, p) => n + (recaseKeys.has(panelKey(p)) ? 1 : 0), 0)
-
-    let filteredNearby = nearbyOrders.filter(
+    const filteredNearby = nearbyOrders.filter(
       o => nearbyZoneFilter === 'all' || o.zone === nearbyZoneFilter
     )
-    if (isRecasing) filteredNearby = filteredNearby.filter(o => matchCount(o) > 0)
 
     async function handleAddToTour(order: ShopifyOrder) {
       if (!selectedTourId) return
@@ -4042,21 +4154,6 @@ function LivreurView() {
           </div>
           {nearbyLoading && <span className="text-xs text-[#9b9b93]">Actualisation...</span>}
         </div>
-
-        {/* Bandeau recasage : commande précise à recaser */}
-        {isRecasing && (
-          <div className="mb-3 px-4 py-3 rounded-[14px] bg-[#eafaf0] border-2 border-[#a7e3c0]">
-            <div className="flex items-start justify-between gap-2">
-              <p className="text-sm font-bold text-[#1a7f4b] leading-snug flex-1">
-                ♻️ Recaser les panneaux de {recaseStop!.order_name}
-                <span className="block text-xs font-medium text-[#1a7f4b]/80 mt-0.5">
-                  {filteredNearby.length} commande{filteredNearby.length !== 1 ? 's' : ''} proche{filteredNearby.length !== 1 ? 's' : ''} avec les mêmes panneaux
-                </span>
-              </p>
-              <button onClick={() => setRecaseStop(null)} className="shrink-0 text-[#1a7f4b] active:opacity-60"><X size={16} /></button>
-            </div>
-          </div>
-        )}
 
         {/* Zone filter */}
         <div className="flex gap-2 overflow-x-auto pb-1 mb-4">
@@ -4112,11 +4209,6 @@ function LivreurView() {
                           <span className="px-2 py-0.5 rounded-full bg-[#f5f5f3] text-[#6b6b63] text-[10px]">
                             {order.panel_count} panneau{order.panel_count !== 1 ? 'x' : ''}
                           </span>
-                          {isRecasing && matchCount(order) > 0 && (
-                            <span className="px-2 py-0.5 rounded-full bg-[#eafaf0] text-[#1a7f4b] text-[10px] font-bold border border-[#a7e3c0]">
-                              ♻️ mêmes panneaux
-                            </span>
-                          )}
                         </div>
                         <p className="text-base font-bold text-[#1a1a2e] leading-tight">{order.customer_name}</p>
                         <p className="text-sm text-[#6b6b63] mt-0.5">{streetLine(order.address1, order.address2)}</p>
@@ -4895,7 +4987,7 @@ function LivreurView() {
               )}
               {(currentStop.panel_details?.length ?? 0) > 0 && (
                 <button
-                  onClick={() => { setRecaseStop(currentStop); setNearbyZoneFilter('all'); setScreen('nearby') }}
+                  onClick={() => { setRecaseLeftId(currentStop.id); setScreen('recasage') }}
                   className="w-full flex items-center justify-center gap-2 py-4 rounded-[16px] bg-[#1a7f4b] text-white font-bold text-base active:bg-[#166a3f] transition-colors"
                 >
                   ♻️ Recaser ces panneaux ailleurs
