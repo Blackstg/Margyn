@@ -1546,6 +1546,47 @@ function PrivateSalesSection({ brand }: { brand: string }) {
   const [loading, setLoading] = useState(true)
   const [save, setSave] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle')
 
+  // Import CSV Choose
+  interface ImpMonth { month: string; ca: number; reverse: number; commission: number; cogs: number; cogs_matched: number; cogs_total: number; orders: number; products: number; unmatched: { product: string; qty: number }[] }
+  const [importing, setImporting] = useState(false)
+  const [impMonths, setImpMonths] = useState<ImpMonth[] | null>(null)
+  const [impCogs, setImpCogs] = useState<Record<string, string>>({})
+  const [impSaving, setImpSaving] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle')
+  const impFileRef = useRef<HTMLInputElement>(null)
+
+  async function handleImportFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    if (impFileRef.current) impFileRef.current.value = ''
+    if (!file) return
+    setImporting(true); setImpMonths(null)
+    try {
+      const csv = await file.text()
+      const res = await fetch('/api/ventes-privees/import', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ csv }),
+      })
+      const d = await res.json()
+      if (d.months) {
+        setImpMonths(d.months)
+        setImpCogs(Object.fromEntries((d.months as ImpMonth[]).map(m => [m.month, String(Math.round(m.cogs))])))
+      }
+    } catch { /* ignore */ } finally { setImporting(false) }
+  }
+
+  async function saveImport() {
+    if (!impMonths) return
+    setImpSaving('saving')
+    try {
+      for (const m of impMonths) {
+        const cogs = parseFloat(impCogs[m.month]) || 0
+        // Reversé Choose = revenu net (CA − commission) ; COGS = coût produit déduit du net.
+        await supabase.from('supplementary_revenue').delete().eq('brand', brand).eq('month', m.month).eq('source', 'Choose')
+        await supabase.from('supplementary_revenue').insert({ brand, month: m.month, source: 'Choose', amount: Math.round(m.reverse), fees: Math.round(cogs) })
+      }
+      setImpSaving('saved'); setTimeout(() => { setImpSaving('idle'); setImpMonths(null) }, 2000)
+      load(month)
+    } catch { setImpSaving('error'); setTimeout(() => setImpSaving('idle'), 3000) }
+  }
+
   const load = useCallback(async (m: string) => {
     setLoading(true)
     const { data } = await supabase.from('supplementary_revenue')
@@ -1592,6 +1633,64 @@ function PrivateSalesSection({ brand }: { brand: string }) {
           </div>
           <MonthNav month={month} onChange={setMonth} />
         </div>
+        {/* Import CSV Choose */}
+        <div className="px-6 py-3 border-b border-[#f0f0ee] bg-[#faf9f7]">
+          <div className="flex items-center justify-between gap-3 flex-wrap">
+            <p className="text-xs text-[#6b6b63]">Importer l&apos;export CSV Choose — calcule le CA, le reversé et le COGS (Shopify) par mois</p>
+            <input ref={impFileRef} type="file" accept=".csv" onChange={handleImportFile} className="hidden" />
+            <button onClick={() => impFileRef.current?.click()} disabled={importing}
+              className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-[#e8e8e4] text-sm font-medium text-[#1a1a2e] hover:bg-[#f0efec] disabled:opacity-50">
+              {importing ? <Loader2 size={14} className="animate-spin" /> : <FileText size={14} />}
+              {importing ? 'Analyse…' : 'Importer CSV Choose'}
+            </button>
+          </div>
+
+          {impMonths && (
+            <div className="mt-3 space-y-2">
+              {impMonths.map(m => {
+                const cogs = parseFloat(impCogs[m.month]) || 0
+                const profit = Math.round(m.reverse - cogs)
+                return (
+                  <div key={m.month} className="rounded-xl border border-[#e8e8e4] bg-white p-3">
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="text-sm font-bold text-[#1a1a2e]">{new Date(m.month).toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' })}</span>
+                      <span className="text-[10px] text-[#9b9b93]">{m.orders} cmd · {m.products} produits</span>
+                    </div>
+                    <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs">
+                      <span className="text-[#6b6b63]">CA (retail)</span><span className="text-right font-medium">{Math.round(m.ca).toLocaleString('fr-FR')} €</span>
+                      <span className="text-[#6b6b63]">Commission Choose</span><span className="text-right text-[#c7293a]">− {Math.round(m.commission).toLocaleString('fr-FR')} €</span>
+                      <span className="text-[#6b6b63]">Reversé (encaissé)</span><span className="text-right font-medium">{Math.round(m.reverse).toLocaleString('fr-FR')} €</span>
+                      <span className="text-[#6b6b63] flex items-center gap-1">COGS
+                        <span className="text-[9px] text-[#9b9b93]">({m.cogs_matched}/{m.cogs_total} matchés)</span>
+                      </span>
+                      <span className="text-right flex items-center justify-end gap-1">
+                        <span className="text-[#c7293a]">−</span>
+                        <input type="number" value={impCogs[m.month] ?? ''} onChange={e => setImpCogs(p => ({ ...p, [m.month]: e.target.value }))}
+                          className="w-20 px-2 py-1 rounded border border-[#e8e8e4] text-xs text-right tabular-nums" /> €
+                      </span>
+                    </div>
+                    <div className="flex items-center justify-between mt-2 pt-2 border-t border-[#f0f0ee]">
+                      <span className="text-xs font-bold text-[#1a1a2e]">Profit vente privée</span>
+                      <span className={`text-sm font-bold ${profit >= 0 ? 'text-[#1a7f4b]' : 'text-[#c7293a]'}`}>{profit.toLocaleString('fr-FR')} €</span>
+                    </div>
+                    {m.unmatched.length > 0 && (
+                      <p className="text-[10px] text-[#b45309] mt-1.5 leading-snug">⚠️ COGS non trouvé pour : {m.unmatched.map(u => `${u.product} (×${u.qty})`).join(', ')} → ajuste le COGS ci-dessus.</p>
+                    )}
+                  </div>
+                )
+              })}
+              <div className="flex items-center justify-end gap-2">
+                <button onClick={() => setImpMonths(null)} className="px-3 py-2 rounded-lg text-sm text-[#6b6b63] hover:bg-[#f0efec]">Annuler</button>
+                <button onClick={saveImport} disabled={impSaving === 'saving'}
+                  className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-[#1a7f4b] text-white text-sm font-semibold disabled:opacity-50">
+                  {impSaving === 'saving' ? <Loader2 size={15} className="animate-spin" /> : impSaving === 'saved' ? <Check size={15} /> : null}
+                  {impSaving === 'saving' ? 'Enregistrement…' : impSaving === 'saved' ? 'Enregistré' : 'Enregistrer dans le dashboard'}
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+
         {loading ? (
           <div className="px-6 py-6 text-sm text-[#9b9b93]">Chargement…</div>
         ) : (
