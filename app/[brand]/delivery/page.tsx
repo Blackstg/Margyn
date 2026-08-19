@@ -358,7 +358,7 @@ function PlanificateurView() {
   }
 
   // Notifier les clients modal
-  type NotifStop = { id: string; customer_name: string; email: string; email_sent_at: string | null }
+  type NotifStop = { id: string; customer_name: string; email: string; email_sent_at: string | null; client_availability?: 'confirmed' | 'unavailable' | null; status?: string }
   const [notifModal, setNotifModal] = useState<{ tourId: string; tourName: string; plannedDate: string; stops: NotifStop[] } | null>(null)
   const [notifSending, setNotifSending] = useState(false)
   const [notifResult, setNotifResult] = useState<{ sent: number; errors: number } | null>(null)
@@ -378,14 +378,14 @@ function PlanificateurView() {
     setNotifModal({ tourId, tourName, plannedDate, stops: data.stops ?? [] })
   }
 
-  async function sendNotifEmails(force = false) {
+  async function sendNotifEmails(opts: { force?: boolean; reminder?: boolean } = {}) {
     if (!notifModal) return
     setNotifSending(true)
     try {
       const r = await fetch(`/api/delivery/tours/${notifModal.tourId}/emails`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ force }),
+        body: JSON.stringify({ force: opts.force ?? false, reminder: opts.reminder ?? false }),
       })
       const data = await r.json()
       setNotifResult(data)
@@ -2054,9 +2054,29 @@ function PlanificateurView() {
                   >
                     Annuler
                   </button>
+                  {(() => {
+                    const noResponse = stopsWithEmail.filter(s => !s.client_availability && s.status === 'pending')
+                    if (noResponse.length === 0) return null
+                    return (
+                      <button
+                        onClick={() => sendNotifEmails({ reminder: true })}
+                        disabled={notifSending}
+                        className="flex items-center gap-1.5 px-4 py-2 rounded-[10px] bg-[#0e7490] text-white text-sm font-medium disabled:opacity-40"
+                        title="Relancer les clients qui n'ont pas encore répondu"
+                      >
+                        {notifSending ? (
+                          <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24" fill="none">
+                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
+                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"/>
+                          </svg>
+                        ) : <Mail size={14} />}
+                        Relancer les {noResponse.length} sans réponse
+                      </button>
+                    )
+                  })()}
                   {allAlreadyNotified ? (
                     <button
-                      onClick={() => sendNotifEmails(true)}
+                      onClick={() => sendNotifEmails({ force: true })}
                       disabled={notifSending}
                       className="flex items-center gap-1.5 px-4 py-2 rounded-[10px] bg-[#c2680a] text-white text-sm font-medium disabled:opacity-40"
                     >
@@ -2070,7 +2090,7 @@ function PlanificateurView() {
                     </button>
                   ) : pendingNotif.length > 0 ? (
                     <button
-                      onClick={() => sendNotifEmails(false)}
+                      onClick={() => sendNotifEmails({})}
                       disabled={notifSending}
                       className="flex items-center gap-1.5 px-4 py-2 rounded-[10px] bg-[#1a1a2e] text-white text-sm font-medium disabled:opacity-40"
                     >
