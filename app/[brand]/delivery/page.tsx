@@ -2531,6 +2531,18 @@ async function estimateTourRoute(
   return { km, drivingSec: (km / 45) * 3600, real: false }
 }
 
+// Badge tri-état de la réponse du client au mail de livraison (vue livreur).
+function ClientAvailBadge({ stop, size = 'sm' }: { stop: { client_availability?: 'confirmed' | 'unavailable' | null; email_sent_at?: string | null; status: string }; size?: 'sm' | 'md' }) {
+  const cls = size === 'md' ? 'text-xs px-2 py-1' : 'text-[10px] px-1.5 py-0.5'
+  if (stop.client_availability === 'confirmed')
+    return <span className={`${cls} font-bold rounded-full leading-none bg-[#dcfce7] text-[#1a7f4b]`}>✓ Présent</span>
+  if (stop.client_availability === 'unavailable')
+    return <span className={`${cls} font-bold rounded-full leading-none bg-[#fff7ed] text-[#c2410c] border border-[#fed7aa]`}>✕ Absent</span>
+  if (stop.email_sent_at && stop.status === 'pending')
+    return <span className={`${cls} font-medium rounded-full leading-none bg-[#f0efec] text-[#6b6b63]`}>⏳ Sans réponse</span>
+  return null
+}
+
 function LivreurView() {
   const [tours, setTours] = useState<Tour[]>([])
   const [selectedTourId, setSelectedTourId] = useState('')
@@ -4478,9 +4490,7 @@ function LivreurView() {
                       <div className="flex items-center gap-1.5 min-w-0">
                         <span className="font-semibold text-sm text-[#1a1a2e] truncate">{stop.customer_name}</span>
                         <span className="font-mono text-xs text-[#6b6b63] shrink-0">{stop.order_name}</span>
-                        {stop.client_availability === 'unavailable' && (
-                          <span className="shrink-0 inline-flex items-center gap-0.5 text-[10px] font-bold text-[#b91c1c] bg-[#fef2f2] border border-[#fca5a5] px-1.5 py-0.5 rounded-full">⚠️ Indispo</span>
-                        )}
+                        <span className="shrink-0"><ClientAvailBadge stop={stop} /></span>
                       </div>
                       <div className="text-xs text-[#6b6b63]">{stop.city} {stop.zip}</div>
                       {stop.phone && (
@@ -4811,6 +4821,9 @@ function LivreurView() {
             <div className="text-3xl font-bold text-[#1a1a2e] leading-tight mb-1">
               {currentStop.customer_name}
             </div>
+            {currentStop.client_availability !== 'unavailable' && (
+              <div className="mb-1"><ClientAvailBadge stop={currentStop} size="md" /></div>
+            )}
             {currentStop.client_availability === 'unavailable' && (
               <div className="flex items-start gap-2.5 my-2 px-4 py-3 rounded-[14px] bg-[#fef2f2] border-2 border-[#fca5a5]">
                 <span className="text-lg leading-none">⚠️</span>
