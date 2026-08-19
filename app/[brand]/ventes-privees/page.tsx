@@ -19,7 +19,10 @@ interface ImpMonth {
 }
 interface SavedRow { id: string | number; month: string; source: string; amount: number; fees: number }
 
-const fmtMonth = (m: string) => new Date(m).toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' })
+const fmtMonth = (m: string) => {
+  const d = new Date(m)
+  return isNaN(d.getTime()) ? 'Date inconnue' : d.toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' })
+}
 const eur = (n: number) => `${Math.round(n).toLocaleString('fr-FR')} €`
 
 export default function VentesPriveesPage() {

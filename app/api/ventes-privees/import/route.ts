@@ -120,11 +120,21 @@ export async function POST(req: NextRequest) {
 
   const rows = parseCsv(body.csv).filter(r => (r['Produit'] ?? '').trim() && r['Référence'] !== 'Total :')
 
+  // Choose ne met « Commandé le » que sur la 1re ligne d'une commande multi-produits.
+  // On propage la date de la commande (par Référence) à ses lignes suivantes, sinon
+  // ces lignes tombaient dans un groupe « Invalid Date ».
+  const dateByRef = new Map<string, string>()
+  for (const r of rows) {
+    const d = (r['Commandé le'] ?? '').trim()
+    if (d.length >= 10 && r['Référence']) dateByRef.set(r['Référence'], d)
+  }
+
   type Agg = { ca: number; reverse: number; cogs: number; matched: number; total: number; orders: Set<string>; products: number; unmatched: Map<string, number> }
   const byMonth = new Map<string, Agg>()
 
   for (const r of rows) {
-    const d = (r['Commandé le'] ?? '').trim() // dd/mm/yyyy
+    let d = (r['Commandé le'] ?? '').trim() // dd/mm/yyyy
+    if (d.length < 10 && r['Référence'] && dateByRef.has(r['Référence'])) d = dateByRef.get(r['Référence'])!
     const month = d.length >= 10 ? `${d.slice(6, 10)}-${d.slice(3, 5)}-01` : 'inconnu'
     const a = byMonth.get(month) ?? { ca: 0, reverse: 0, cogs: 0, matched: 0, total: 0, orders: new Set(), products: 0, unmatched: new Map() }
 
