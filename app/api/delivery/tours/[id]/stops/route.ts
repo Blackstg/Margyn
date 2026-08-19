@@ -52,8 +52,11 @@ export async function POST(
       .map((s) => existingByName.get(s.order_name))
       .filter((s): s is { id: string; order_name: string; status: string } => !!s && (s.status === 'failed' || s.status === 'partial'))
     for (const s of toReplan) {
+      // Nouvelle tentative → on repart de zéro : la réponse du client (présent/absent)
+      // ET l'envoi du mail sont réinitialisés, sinon un ancien « Présent » resterait
+      // affiché alors qu'on n'a pas encore re-sollicité le client pour cette tentative.
       await admin.from('delivery_stops')
-        .update({ status: 'pending', comment: null, delivered_at: null })
+        .update({ status: 'pending', comment: null, delivered_at: null, client_availability: null, email_sent_at: null })
         .eq('id', s.id)
     }
 

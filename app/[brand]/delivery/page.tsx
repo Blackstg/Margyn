@@ -1634,10 +1634,13 @@ function PlanificateurView() {
                                         <Mail size={12} className="text-[#1a7f4b]" />
                                       )}
                                       {stop.client_availability === 'confirmed' && (
-                                        <span title="Client confirmé" className="text-[10px] font-bold text-[#1a7f4b] bg-[#dcfce7] px-1.5 py-0.5 rounded-full leading-none">✓ Présent</span>
+                                        <span title="Le client a répondu au mail qu'il serait présent" className="text-[10px] font-bold text-[#1a7f4b] bg-[#dcfce7] px-1.5 py-0.5 rounded-full leading-none">✓ Présent</span>
                                       )}
                                       {stop.client_availability === 'unavailable' && (
-                                        <span title="Client indisponible" className="text-[10px] font-bold text-[#c2410c] bg-[#fff7ed] px-1.5 py-0.5 rounded-full leading-none border border-[#fed7aa]">⚠ Indispo</span>
+                                        <span title="Le client a répondu au mail qu'il serait absent" className="text-[10px] font-bold text-[#c2410c] bg-[#fff7ed] px-1.5 py-0.5 rounded-full leading-none border border-[#fed7aa]">✕ Absent</span>
+                                      )}
+                                      {!stop.client_availability && stop.email_sent_at && stop.status === 'pending' && (
+                                        <span title="Mail envoyé — le client n'a pas encore répondu" className="text-[10px] font-medium text-[#6b6b63] bg-[#f0efec] px-1.5 py-0.5 rounded-full leading-none">⏳ Sans réponse</span>
                                       )}
                                       {stop.sav_note && (
                                         <div className="relative group/savnote">
