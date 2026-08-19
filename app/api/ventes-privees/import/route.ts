@@ -17,10 +17,29 @@ const num = (s: string | undefined) => {
   return isNaN(n) ? 0 : n
 }
 
-// Token distinctif d'un nom de produit Mōom (ex. « CaryExplorer », « MumMoot »).
+// Normalise un titre pour comparer Choose ↔ Shopify : minuscules, sans accents, sans
+// ™ ni espaces ni ponctuation. Ainsi « Mum Explorer » == « MumExplorer ».
+function norm(t: string): string {
+  return (t || '')
+    .normalize('NFD').replace(/[̀-ͯ]/g, '') // enlève les accents
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, '')                        // enlève espaces/™/ponctuation
+}
+
+// Tokens produits Mōom (déjà normalisés). Le plus spécifique gagne.
+const PRODUCT_TOKENS = [
+  'mumexplorer', 'mumessential', 'mummoot', 'matexplorer', 'toteessential',
+  'kitexplorer', 'wrapexplorer', 'caryexplorer', 'walkexplorer', 'pouchexplorer',
+  'fluffyexplorer', 'pochexplorer',
+]
+
+// Token distinctif d'un nom de produit (marche que le nom ait un espace ou non).
 function nameToken(t: string): string | null {
-  const m = t.match(/([A-Za-zÀ-ÿ]+Explorer|MumMoot|MumEssential|MumExplorer|ToteEssential|KitExplorer|WrapExplorer|MatExplorer|CaryExplorer|WalkExplorer|PouchExplorer|FluffyExplorer)/i)
-  return m ? m[1].toLowerCase() : null
+  const n = norm(t)
+  for (const tok of PRODUCT_TOKENS) if (n.includes(tok)) return tok
+  // Repli : un mot « …explorer » collé (ex. autre variante non listée).
+  const m = n.match(/([a-z]{3,}explorer)/)
+  return m ? m[1] : null
 }
 
 interface ShopVariant { sku?: string | null; inventory_item_id: number }
