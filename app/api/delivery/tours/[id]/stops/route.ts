@@ -33,18 +33,32 @@ export async function POST(
     const { stops } = (await req.json()) as { stops: ShopifyOrderSummary[] }
     const admin = getAdmin()
 
-    // Get existing stops for this tour (sequence + order_name)
+    // Get existing stops for this tour (sequence + order_name + status)
     const { data: existingStops } = await admin
       .from('delivery_stops')
-      .select('sequence, order_name')
+      .select('id, sequence, order_name, status')
       .eq('tour_id', params.id)
       .order('sequence', { ascending: false })
 
-    const existingOrderNames = new Set((existingStops ?? []).map((s: { order_name: string }) => s.order_name))
+    const existingByName = new Map(
+      (existingStops ?? []).map((s: { id: string; order_name: string; status: string }) => [s.order_name, s])
+    )
     const maxSeq = existingStops?.[0]?.sequence ?? -1
 
-    const newStops = stops.filter((s) => !existingOrderNames.has(s.order_name))
-    if (newStops.length === 0) return NextResponse.json({ added: 0 })
+    // Ré-ajouter une commande déjà présente MAIS échouée/partielle = la REPLANIFIER :
+    // on remet l'arrêt en 'pending' (efface l'échec) au lieu d'ignorer l'ajout, sinon
+    // elle resterait signalée « à replanifier » à gauche malgré sa présence dans la tournée.
+    const toReplan = stops
+      .map((s) => existingByName.get(s.order_name))
+      .filter((s): s is { id: string; order_name: string; status: string } => !!s && (s.status === 'failed' || s.status === 'partial'))
+    for (const s of toReplan) {
+      await admin.from('delivery_stops')
+        .update({ status: 'pending', comment: null, delivered_at: null })
+        .eq('id', s.id)
+    }
+
+    const newStops = stops.filter((s) => !existingByName.has(s.order_name))
+    if (newStops.length === 0) return NextResponse.json({ added: 0, replanned: toReplan.length })
 
     const rows = newStops.map((s, i) => ({
       tour_id: params.id,
@@ -74,7 +88,7 @@ export async function POST(
     }
     if (error) throw error
 
-    return NextResponse.json({ added: rows.length, skipped: stops.length - rows.length })
+    return NextResponse.json({ added: rows.length, replanned: toReplan.length, skipped: stops.length - rows.length - toReplan.length })
   } catch (err) {
     console.error('[delivery/tours/:id/stops POST]', err)
     return NextResponse.json({ error: String(err) }, { status: 500 })
