@@ -4,7 +4,7 @@
 // note INTERNE sur le ticket Zendesk pour tracer le transfert.
 import { NextRequest, NextResponse } from 'next/server'
 import { savBrandFromRequest } from '@/lib/sav/brand'
-import { getTicketComments, addInternalNote } from '@/lib/sav/zendesk'
+import { getTicketComments, addInternalNote, type SavBrand } from '@/lib/sav/zendesk'
 
 export const dynamic = 'force-dynamic'
 
@@ -60,9 +60,15 @@ export async function POST(req: NextRequest) {
   <p style="color:#9b9b93;font-size:12px">Transféré via Steero · SAV ${brandLabel}${body.customer_email ? ' · répondez à ce mail pour écrire au client' : ''}</p>
 </div>`
 
-  // 2) Envoi Resend
+  // 2) Envoi Resend — depuis un domaine VÉRIFIÉ par marque (steero.co ne l'est pas).
+  //    Moom : moom-paris.co (sert déjà aux mails partenariat).
+  //    Bowa : notifications.bowa-concept.com (sert déjà aux mails de livraison).
+  const fromByBrand: Record<SavBrand, string> = {
+    moom: 'Mōom SAV <sav@moom-paris.co>',
+    bowa: 'Bowa SAV <notifications@notifications.bowa-concept.com>',
+  }
   const payload: Record<string, unknown> = {
-    from:    'Steero SAV <sav@steero.co>',
+    from:    fromByBrand[brand] ?? fromByBrand.moom,
     to,
     subject: `[SAV ${brandLabel}] Transfert — ${subject}`,
     html,
