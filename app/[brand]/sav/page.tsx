@@ -704,13 +704,16 @@ function ConversationThread({ ticket, refreshKey }: { ticket: ProcessedTicket; r
                     const isImage = a.content_type.startsWith('image/')
                     const isPdf   = a.content_type === 'application/pdf'
                     const sizeKb  = Math.round(a.size / 1024)
+                    // Proxy authentifié : certains Zendesk (Bowa) exigent l'auth pour
+                    // afficher les pièces jointes → on passe par notre serveur.
+                    const proxied = `/api/sav/attachment?brand=${savBrand()}&url=${encodeURIComponent(a.content_url)}`
                     return (
                       <div key={a.id}>
                         {isImage ? (
-                          <a href={a.content_url} target="_blank" rel="noopener noreferrer" title={a.file_name}>
+                          <a href={proxied} target="_blank" rel="noopener noreferrer" title={a.file_name}>
                             {/* eslint-disable-next-line @next/next/no-img-element */}
                             <img
-                              src={a.content_url}
+                              src={proxied}
                               alt={a.file_name}
                               className="max-w-full max-h-48 rounded-lg object-contain border border-[#e8e8e4] cursor-pointer hover:opacity-90 transition-opacity"
                             />
@@ -718,7 +721,7 @@ function ConversationThread({ ticket, refreshKey }: { ticket: ProcessedTicket; r
                           </a>
                         ) : (
                           <a
-                            href={a.content_url}
+                            href={proxied}
                             target="_blank"
                             rel="noopener noreferrer"
                             download={a.file_name}

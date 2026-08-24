@@ -33,6 +33,20 @@ function base(brand: SavBrand) {
   return `https://${zdConfig(brand).subdomain}.zendesk.com/api/v2`
 }
 
+// Récupère une pièce jointe Zendesk en s'authentifiant (certains comptes — ex. Bowa —
+// exigent l'auth pour accéder aux attachments → l'affichage direct dans le navigateur
+// échoue). Garde anti-SSRF : uniquement le sous-domaine Zendesk de la marque.
+export async function fetchZendeskAttachment(brand: SavBrand, url: string): Promise<Response | null> {
+  const c = zdConfig(brand)
+  try {
+    const u = new URL(url)
+    if (u.hostname !== `${c.subdomain}.zendesk.com`) return null
+    if (!u.pathname.startsWith('/attachments/')) return null
+  } catch { return null }
+  const creds = Buffer.from(`${c.email}/token:${c.token}`).toString('base64')
+  return fetch(url, { headers: { Authorization: `Basic ${creds}` }, redirect: 'follow' })
+}
+
 function authHeaders(brand: SavBrand): Record<string, string> {
   const c = zdConfig(brand)
   const creds = Buffer.from(`${c.email}/token:${c.token}`).toString('base64')
