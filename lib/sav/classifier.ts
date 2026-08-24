@@ -255,7 +255,7 @@ export async function generateReply(
 
   // Exemples de ton = historique Moom uniquement → on ne les injecte PAS pour Bowa
   // (règles/ton différents ; Bowa démarre sur ses propres règles).
-  const similarExamples = brand === 'moom' ? await findSimilarExamples(subject, description, 5) : []
+  const similarExamples = brand === 'moom' ? await findSimilarExamples(subject, description, 5, category) : []
   if (similarExamples.length > 0) {
     console.log(
       `[SAV] findSimilarExamples — ${similarExamples.length} exemple(s) trouvé(s) pour "${subject.slice(0, 60)}" :`,
