@@ -1625,7 +1625,7 @@ function PlanificateurView() {
                                       <button
                                         onClick={() => handleSyncStop(stop.id)}
                                         disabled={syncingStopId === stop.id}
-                                        title="Resync depuis Shopify"
+                                        title="Resync depuis Shopify (adresse + panneaux)"
                                         className="p-0.5 rounded text-[#6b6b63] hover:text-[#1d4ed8] disabled:opacity-40"
                                       >
                                         <RefreshCw size={13} className={syncingStopId === stop.id ? 'animate-spin' : ''} />

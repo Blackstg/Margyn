@@ -4,6 +4,7 @@
 
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
+import { geocodeParts } from '@/lib/delivery/geocode'
 
 function getAdmin() {
   return createClient(
@@ -38,11 +39,16 @@ interface ShopifyLineItem {
   variant_id:       number | null
 }
 
+interface ShopifyAddress {
+  address1?: string; address2?: string; city?: string; zip?: string
+  latitude?: number | null; longitude?: number | null
+}
 interface ShopifyOrder {
   id:           string
   name:         string
   line_items:   ShopifyLineItem[]
   fulfillments: never[]  // kept for API compat but not needed
+  shipping_address?: ShopifyAddress | null
 }
 
 // current_quantity is provided by Shopify and already accounts for both
@@ -78,7 +84,7 @@ export async function POST(
 
     // 2. Fetch the Shopify order
     const shopifyRes = await fetch(
-      `https://${shop}/admin/api/2024-01/orders/${stop.shopify_order_id}.json?fields=id,name,line_items,fulfillments`,
+      `https://${shop}/admin/api/2024-01/orders/${stop.shopify_order_id}.json?fields=id,name,line_items,fulfillments,shipping_address`,
       { headers: { 'X-Shopify-Access-Token': token }, cache: 'no-store' }
     )
     if (!shopifyRes.ok) throw new Error(`Shopify ${shopifyRes.status}: ${await shopifyRes.text()}`)
@@ -116,10 +122,30 @@ export async function POST(
       .filter((p) => isPanel(p.title))
       .reduce((sum, p) => sum + panelSlots(p.title, p.qty), 0)
 
-    // 4. Update the stop
+    // 4. Adresse : resynchronise depuis Shopify (ex. le client a corrigé son adresse
+    //    après la planification) + re-géocode pour repositionner l'arrêt sur la carte.
+    const addrUpdate: Record<string, unknown> = {}
+    const addr = order.shipping_address
+    if (addr && (addr.address1 || addr.city || addr.zip)) {
+      addrUpdate.address1 = addr.address1 ?? ''
+      addrUpdate.address2 = addr.address2 ?? ''
+      addrUpdate.city     = addr.city ?? ''
+      addrUpdate.zip      = addr.zip ?? ''
+      const mapboxToken = process.env.NEXT_PUBLIC_MAPBOX_TOKEN ?? ''
+      if (mapboxToken) {
+        const coord = await geocodeParts(
+          { address1: addr.address1 ?? '', address2: addr.address2 ?? '', city: addr.city ?? '', zip: addr.zip ?? '',
+            lat: addr.latitude ?? null, lng: addr.longitude ?? null },
+          mapboxToken,
+        ).catch(() => null)
+        if (coord) { addrUpdate.lng = coord[0]; addrUpdate.lat = coord[1] } // mapbox = [lng, lat]
+      }
+    }
+
+    // 5. Update the stop
     const { data: updated, error: updateErr } = await admin
       .from('delivery_stops')
-      .update({ panel_details, panel_count })
+      .update({ panel_details, panel_count, ...addrUpdate })
       .eq('id', params.id)
       .select()
       .single()
