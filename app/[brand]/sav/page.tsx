@@ -19,6 +19,17 @@ function savFetch(input: string, init?: RequestInit): Promise<Response> {
   const url = input + (input.includes('?') ? '&' : '?') + 'brand=' + savBrand()
   return fetch(url, init)
 }
+// Parse JSON de façon robuste : si le serveur renvoie une page d'erreur (HTML/texte,
+// ex. 500/504 transitoire), on lève une erreur claire au lieu du cryptique
+// « Unexpected token … is not valid JSON » qui cassait tout le SAV.
+async function savJson<T = unknown>(res: Response, label = 'Le serveur'): Promise<T> {
+  const text = await res.text()
+  try {
+    return JSON.parse(text) as T
+  } catch {
+    throw new Error(`${label} a renvoyé une réponse invalide (HTTP ${res.status}). Réessaie dans un instant.`)
+  }
+}
 // Libellé de marque affiché dans l'en-tête du SAV.
 function savBrandLabel(): string {
   return savBrand() === 'bowa' ? 'Bowa' : 'Mōom Paris'
@@ -977,7 +988,7 @@ function ReplyPanel({ ticket, draft, solved, onDraftChange, onSolvedChange, onSe
           requester_id:   ticket.requester_id ?? 0,
         }),
       })
-      const d = await res.json() as { body?: string; solved?: boolean; error?: string }
+      const d = await savJson<{ body?: string; solved?: boolean; error?: string }>(res, 'La régénération')
       if (!res.ok) throw new Error(d.error ?? `HTTP ${res.status}`)
       if (d.body) onDraftChange(d.body)
       if (d.solved !== undefined) onSolvedChange(d.solved)
@@ -995,7 +1006,7 @@ function ReplyPanel({ ticket, draft, solved, onDraftChange, onSolvedChange, onSe
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ ticket_id: ticket.ticket_id, reply_body: draft, solved, action, category: ticket.category, uploads }),
       })
-      if (!res.ok) { const d = await res.json(); throw new Error(d.error ?? `HTTP ${res.status}`) }
+      if (!res.ok) { const d = await savJson<{ error?: string }>(res, 'L\'envoi'); throw new Error(d.error ?? `HTTP ${res.status}`) }
       const wasModified = draft.trim() !== ticket.draft_reply.trim()
       setAttachments([])
       onSent(action, wasModified)
@@ -1012,7 +1023,7 @@ function ReplyPanel({ ticket, draft, solved, onDraftChange, onSolvedChange, onSe
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ ticket_id: ticket.ticket_id }),
       })
-      if (!res.ok) { const d = await res.json(); throw new Error(d.error ?? `HTTP ${res.status}`) }
+      if (!res.ok) { const d = await savJson<{ error?: string }>(res); throw new Error(d.error ?? `HTTP ${res.status}`) }
       onArchive()
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Erreur inconnue')
@@ -1037,7 +1048,7 @@ function ReplyPanel({ ticket, draft, solved, onDraftChange, onSolvedChange, onSe
           requester_id:   ticket.requester_id ?? 0,
         }),
       })
-      const d = await res.json() as { body?: string; solved?: boolean; error?: string }
+      const d = await savJson<{ body?: string; solved?: boolean; error?: string }>(res, 'La décision')
       if (!res.ok) throw new Error(d.error ?? `HTTP ${res.status}`)
       if (d.body) onDraftChange(d.body)
       if (d.solved !== undefined) onSolvedChange(d.solved)
@@ -1056,7 +1067,7 @@ function ReplyPanel({ ticket, draft, solved, onDraftChange, onSolvedChange, onSe
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ current_draft: draft }),
       })
-      const d = await res.json() as { body?: string; error?: string }
+      const d = await savJson<{ body?: string; error?: string }>(res, 'L’amélioration')
       if (!res.ok) throw new Error(d.error ?? `HTTP ${res.status}`)
       if (d.body) onDraftChange(d.body)
     } catch (e) {
@@ -1370,7 +1381,7 @@ function FollowUpPanel({ ticket, onSent }: {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ ticket_id: ticket.ticket_id, reply_body: body, solved: false, action: 'auto_reply' }),
       })
-      if (!res.ok) { const d = await res.json(); throw new Error(d.error ?? `HTTP ${res.status}`) }
+      if (!res.ok) { const d = await savJson<{ error?: string }>(res); throw new Error(d.error ?? `HTTP ${res.status}`) }
       onSent('auto_reply')
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Erreur inconnue')
@@ -1385,7 +1396,7 @@ function FollowUpPanel({ ticket, onSent }: {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ ticket_id: ticket.ticket_id }),
       })
-      if (!res.ok) { const d = await res.json(); throw new Error(d.error ?? `HTTP ${res.status}`) }
+      if (!res.ok) { const d = await savJson<{ error?: string }>(res); throw new Error(d.error ?? `HTTP ${res.status}`) }
       onSent('auto_reply')
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Erreur inconnue')
@@ -2097,7 +2108,7 @@ export default function SavPage() {
           status:       raw.status,
         }),
       })
-      const ticket = await res.json() as ProcessedTicket & { error?: string }
+      const ticket = await savJson<ProcessedTicket & { error?: string }>(res, 'La génération de réponse')
       if (!res.ok) { console.error('[SAV] /api/sav/process failed:', ticket.error); return }
       setProcessedCache(prev => ({ ...prev, [raw.ticket_id]: ticket }))
       setDrafts(prev => { if (raw.ticket_id in prev) return prev; return { ...prev, [raw.ticket_id]: ticket.draft_reply } })
@@ -2115,7 +2126,7 @@ export default function SavPage() {
     setListLoading(true)
     try {
       const res  = await savFetch('/api/sav/tickets')
-      const data = await res.json() as { tickets?: RawTicket[]; error?: string }
+      const data = await savJson<{ tickets?: RawTicket[]; error?: string }>(res, 'La liste des tickets')
 
       if (!res.ok || !Array.isArray(data.tickets)) {
         console.error('[SAV] /api/sav/tickets failed:', res.status, data.error ?? '(no error field)')
