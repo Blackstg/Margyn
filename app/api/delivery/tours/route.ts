@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
+import { normalizeDriverName } from '@/lib/delivery/driver'
 
 export const dynamic = 'force-dynamic'
 
@@ -82,7 +83,7 @@ export async function POST(req: NextRequest) {
     const admin = getAdmin()
     const { data, error } = await admin
       .from('delivery_tours')
-      .insert({ name, zone, driver_name, planned_date, brand: 'bowa' })
+      .insert({ name, zone, driver_name: normalizeDriverName(driver_name), planned_date, brand: 'bowa' })
       .select()
       .single()
 

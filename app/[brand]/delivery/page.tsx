@@ -9,6 +9,7 @@ import { createBrowserClient } from '@supabase/auth-helpers-nextjs'
 import { useBrand } from '@/context/BrandContext'
 import { geoAddress, streetLine } from '@/lib/delivery/geo'
 import { geocodeParts } from '@/lib/delivery/geocode'
+import { normalizeDriverName } from '@/lib/delivery/driver'
 import { ChevronDown, ChevronUp, ChevronLeft, ChevronRight, Trash2, Mail, Plus, X, MapPin, Package, Truck, Map as MapIcon, Search, Pencil, Check, MessageSquare, GripVertical, Printer, RefreshCw, Clock, Calendar, ArrowLeftRight } from 'lucide-react'
 import {
   DndContext, DragEndEvent, DragOverlay, DragStartEvent,
@@ -316,6 +317,8 @@ function DeliveryPageInner() {
 function PlanificateurView() {
   const [shopifyOrders, setShopifyOrders] = useState<ShopifyOrder[]>([])
   const [tours, setTours] = useState<Tour[]>([])
+  const [drivers, setDrivers] = useState<string[]>([])
+  const [driverIsCustom, setDriverIsCustom] = useState(false)
   const [selectedOrders, setSelectedOrders] = useState<Set<string>>(new Set())
   const [zoneFilter, setZoneFilter] = useState<'all' | Zone>('all')
   const [preorderFilter, setPreorderFilter] = useState(false)
@@ -440,11 +443,22 @@ function PlanificateurView() {
     }
   }, [])
 
+  const fetchDrivers = useCallback(async () => {
+    try {
+      const r = await fetch('/api/delivery/drivers', { cache: 'no-store' })
+      const data = await r.json()
+      setDrivers(data.drivers ?? [])
+    } catch (e) {
+      console.error(e)
+    }
+  }, [])
+
   useEffect(() => {
     fetchOrders()
     fetchTours()
     fetchDeferredOrders()
-  }, [fetchOrders, fetchTours, fetchDeferredOrders])
+    fetchDrivers()
+  }, [fetchOrders, fetchTours, fetchDeferredOrders, fetchDrivers])
 
   useEffect(() => {
     if (!tourDropdownOpen) return
@@ -517,6 +531,7 @@ function PlanificateurView() {
       }
       setShowNewTour(false)
       setNewTourForm({ name: '', zone: 'mixte', driver_name: '', planned_date: '' })
+      setDriverIsCustom(false)
       await fetchTours()
     } finally {
       setSavingTour(false)
@@ -1207,7 +1222,7 @@ function PlanificateurView() {
                 </button>
                 {!showHistory && (
                   <button
-                    onClick={() => setShowNewTour(true)}
+                    onClick={() => { setDriverIsCustom(false); setShowNewTour(true) }}
                     className="flex items-center gap-1.5 px-3 py-1.5 rounded-[10px] bg-[#1a1a2e] text-white text-xs font-medium hover:bg-[#2a2a4e] transition-colors"
                   >
                     <Plus size={14} />
@@ -1293,13 +1308,36 @@ function PlanificateurView() {
                     <option value="sud-est">Sud-Est</option>
                     <option value="sud-ouest">Sud-Ouest</option>
                   </select>
-                  <input
-                    type="text"
-                    placeholder="Chauffeur"
-                    value={newTourForm.driver_name}
-                    onChange={(e) => setNewTourForm((f) => ({ ...f, driver_name: e.target.value }))}
-                    className="col-span-2 px-3 py-2 text-sm border border-[#e8e8e4] rounded-[10px] outline-none focus:border-[#aeb0c9] bg-white"
-                  />
+                  {driverIsCustom ? (
+                    <input
+                      type="text"
+                      placeholder="Nom du chauffeur"
+                      autoFocus
+                      value={newTourForm.driver_name}
+                      onChange={(e) => setNewTourForm((f) => ({ ...f, driver_name: e.target.value }))}
+                      onBlur={(e) => setNewTourForm((f) => ({ ...f, driver_name: normalizeDriverName(e.target.value) }))}
+                      className="col-span-2 px-3 py-2 text-sm border border-[#e8e8e4] rounded-[10px] outline-none focus:border-[#aeb0c9] bg-white"
+                    />
+                  ) : (
+                    <select
+                      value={newTourForm.driver_name}
+                      onChange={(e) => {
+                        if (e.target.value === '__custom__') {
+                          setDriverIsCustom(true)
+                          setNewTourForm((f) => ({ ...f, driver_name: '' }))
+                        } else {
+                          setNewTourForm((f) => ({ ...f, driver_name: e.target.value }))
+                        }
+                      }}
+                      className="col-span-2 px-3 py-2 text-sm border border-[#e8e8e4] rounded-[10px] outline-none focus:border-[#aeb0c9] bg-white"
+                    >
+                      <option value="">Chauffeur…</option>
+                      {drivers.map((d) => (
+                        <option key={d} value={d}>{d}</option>
+                      ))}
+                      <option value="__custom__">＋ Autre (saisir)…</option>
+                    </select>
+                  )}
                 </div>
                 <div className="flex gap-2 mt-3">
                   <button
@@ -1447,7 +1485,7 @@ function PlanificateurView() {
                               </div>
                             )}
                             {tour.driver_name && (
-                              <div className="text-xs text-[#6b6b63]">{tour.driver_name}</div>
+                              <div className="text-xs text-[#6b6b63]">{normalizeDriverName(tour.driver_name)}</div>
                             )}
                           </div>
                           <div className="flex items-center gap-1">
@@ -5360,6 +5398,16 @@ const DRIVER_PHONES: Record<string, string> = {
   'Khalid': '06 62 89 30 14',
 }
 
+// Case-insensitive phone lookup so mixed-casing driver names still resolve.
+function driverPhoneFor(name: string | null | undefined): string | undefined {
+  const target = normalizeDriverName(name)
+  if (!target) return undefined
+  for (const [k, v] of Object.entries(DRIVER_PHONES)) {
+    if (normalizeDriverName(k) === target) return v
+  }
+  return undefined
+}
+
 interface SavStopSummary {
   city: string
   order_name: string
@@ -5843,7 +5891,7 @@ function SavView() {
                     <span className="w-2.5 h-2.5 rounded-full bg-[#1a7f4b] animate-pulse flex-shrink-0" />
                     <div>
                       <p className="text-base font-bold text-[#1a1a2e] leading-snug">
-                        {rep.driver_name ?? 'Livreur'} · {rep.tour_name}
+                        {normalizeDriverName(rep.driver_name) || 'Livreur'} · {rep.tour_name}
                         {weekNum && <span className="font-normal text-[#6b6b63]"> · Semaine {weekNum}</span>}
                       </p>
                       <p className="text-xs text-[#9b9b93]">Tournée en cours</p>
@@ -6158,7 +6206,7 @@ function SavView() {
       {selected && (() => {
         const zc = ZONE_COLOR[selected.zone] ?? { bg: '#f5f5f3', text: '#6b6b63' }
         const emailText = buildSavEmail(selected)
-        const driverPhone = selected.driver_name ? DRIVER_PHONES[selected.driver_name] : undefined
+        const driverPhone = driverPhoneFor(selected.driver_name)
 
         // Timeline
         const stepIndex = ['pending', 'planned', 'in_progress', 'delivered'].indexOf(selected.sav_status)
@@ -6271,7 +6319,7 @@ function SavView() {
                     </p>
                   )}
                   {selected.driver_name && (
-                    <p className="text-xs text-[#6b6b63] mt-1">Livreur · <span className="font-medium text-[#1a1a2e]">{selected.driver_name}</span></p>
+                    <p className="text-xs text-[#6b6b63] mt-1">Livreur · <span className="font-medium text-[#1a1a2e]">{normalizeDriverName(selected.driver_name)}</span></p>
                   )}
                 </div>
               )}
@@ -6302,7 +6350,7 @@ function SavView() {
                   <div className="rounded-[14px] bg-[#f0f4ff] p-4 space-y-3">
                     <div className="flex items-center justify-between">
                       <span className="text-sm font-bold text-[#1a1a2e]">
-                        {selected.driver_name ?? 'Livreur'} · {selected.tour_delivered_stops} arrêt{selected.tour_delivered_stops !== 1 ? 's' : ''} livré{selected.tour_delivered_stops !== 1 ? 's' : ''} sur {selected.tour_total_stops}
+                        {normalizeDriverName(selected.driver_name) || 'Livreur'} · {selected.tour_delivered_stops} arrêt{selected.tour_delivered_stops !== 1 ? 's' : ''} livré{selected.tour_delivered_stops !== 1 ? 's' : ''} sur {selected.tour_total_stops}
                       </span>
                       <span className="text-lg font-extrabold text-[#1d4ed8]">{pct}%</span>
                     </div>
