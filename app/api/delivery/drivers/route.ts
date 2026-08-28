@@ -3,6 +3,7 @@ import { createClient } from '@supabase/supabase-js'
 import { normalizeDriverName } from '@/lib/delivery/driver'
 
 export const dynamic = 'force-dynamic'
+export const fetchCache = 'force-no-store'   // toujours relire les comptes (nouveaux chauffeurs)
 
 function getAdmin() {
   return createClient(
