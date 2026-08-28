@@ -181,6 +181,18 @@ export async function getMostRecentOrder(
   return formatOrder(order)
 }
 
+// Récupère une commande par son NUMÉRO (ex. 10530), sans vérification de nom —
+// utilisé par la recherche SAV pour retrouver la commande même sans ticket.
+export async function getOrderByNumber(orderNum: string, brand: SavBrand = 'moom'): Promise<MoomOrder | null> {
+  const n = orderNum.replace(/^#/, '').trim()
+  if (!/^\d+$/.test(n)) return null
+  const url = `${base(brand)}/orders.json?name=${encodeURIComponent(`#${n}`)}&status=any&limit=1&fields=${ORDER_FIELDS}`
+  const res = await fetch(url, { headers: authHeaders(brand), cache: 'no-store' }).catch(() => null)
+  if (!res || !res.ok) return null
+  const data = await res.json() as { orders?: ShopifyOrder[] }
+  return data.orders && data.orders.length > 0 ? formatOrder(data.orders[0]) : null
+}
+
 // ─── Internal types ───────────────────────────────────────────────────────────
 
 interface ShopifyFulfillment {

@@ -1994,6 +1994,7 @@ export default function SavPage() {
   const [assigneeFilter, setAssigneeFilter] = useState<string>('')  // '' = tous · 'unassigned' · nom d'agent
   const [search, setSearch]         = useState('')
   const [zdResults, setZdResults]   = useState<SearchResult[] | null>(null)
+  const [zdOrder, setZdOrder]       = useState<MoomOrder | null>(null)
   const [zdSearching, setZdSearching] = useState(false)
   const [zdError, setZdError]       = useState<string | null>(null)
   const filterInit                          = useRef(false)
@@ -2251,13 +2252,14 @@ export default function SavPage() {
   // absent de la file — évite d'aller sur Zendesk.
   async function runZendeskSearch() {
     const q = search.trim()
-    if (q.length < 2) { setZdResults(null); return }
+    if (q.length < 2) { setZdResults(null); setZdOrder(null); return }
     setZdSearching(true); setZdError(null)
     try {
       const r = await savFetch(`/api/sav/search?q=${encodeURIComponent(q)}`)
-      const d = await r.json() as { tickets?: SearchResult[]; error?: string }
+      const d = await savJson<{ tickets?: SearchResult[]; order?: MoomOrder | null; error?: string }>(r, 'La recherche')
       if (d.error) setZdError(d.error)
       setZdResults(d.tickets ?? [])
+      setZdOrder(d.order ?? null)
     } catch { setZdError('Recherche impossible') } finally { setZdSearching(false) }
   }
 
@@ -2269,7 +2271,7 @@ export default function SavPage() {
       status: (r.status === 'new' || r.status === 'pending') ? r.status : 'open',
     }
     setRawTickets(prev => prev.some(t => t.ticket_id === raw.ticket_id) ? prev : [raw, ...prev])
-    setZdResults(null); setSearch('')
+    setZdResults(null); setZdOrder(null); setSearch('')
     handleTicketClick(raw)
   }
 
@@ -2568,13 +2570,13 @@ export default function SavPage() {
                 <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-[#9b9b93]" />
                 <input
                   value={search}
-                  onChange={e => { setSearch(e.target.value); if (!e.target.value.trim()) { setZdResults(null); setZdError(null) } }}
+                  onChange={e => { setSearch(e.target.value); if (!e.target.value.trim()) { setZdResults(null); setZdOrder(null); setZdError(null) } }}
                   onKeyDown={e => { if (e.key === 'Enter') runZendeskSearch() }}
                   placeholder="Rechercher : n° commande, email, sujet, #ticket…"
                   className="w-full pl-8 pr-24 py-1.5 rounded-lg border border-[#e8e8e4] text-xs focus:outline-none focus:border-[#1a1a2e]"
                 />
                 {search && (
-                  <button onClick={() => { setSearch(''); setZdResults(null); setZdError(null) }}
+                  <button onClick={() => { setSearch(''); setZdResults(null); setZdOrder(null); setZdError(null) }}
                     className="absolute right-[68px] top-1/2 -translate-y-1/2 text-[#9b9b93] hover:text-[#1a1a2e]"><X size={13} /></button>
                 )}
                 <button onClick={runZendeskSearch} disabled={zdSearching || search.trim().length < 2}
@@ -2582,16 +2584,37 @@ export default function SavPage() {
                   {zdSearching ? '…' : 'Zendesk'}
                 </button>
               </div>
-              {zdResults && (
+              {(zdResults || zdOrder) && (
                 <div className="mt-2 border border-[#e8e8e4] rounded-lg overflow-hidden bg-white">
                   <div className="px-3 py-1.5 bg-[#f5f4f2] text-[10px] font-semibold text-[#6b6b63] flex items-center justify-between">
-                    <span>Résultats Zendesk{zdResults.length ? ` (${zdResults.length})` : ''}</span>
-                    <button onClick={() => setZdResults(null)} className="text-[#9b9b93] hover:text-[#1a1a2e]"><X size={12} /></button>
+                    <span>Résultats{zdResults?.length ? ` · ${zdResults.length} ticket${zdResults.length > 1 ? 's' : ''}` : ''}</span>
+                    <button onClick={() => { setZdResults(null); setZdOrder(null) }} className="text-[#9b9b93] hover:text-[#1a1a2e]"><X size={12} /></button>
                   </div>
                   {zdError && <p className="px-3 py-2 text-[11px] text-[#c7293a]">{zdError}</p>}
-                  {!zdError && zdResults.length === 0 && <p className="px-3 py-2 text-[11px] text-[#9b9b93]">Aucun ticket trouvé.</p>}
+                  {/* Commande Shopify trouvée (même sans ticket) */}
+                  {zdOrder && (
+                    <div className="px-3 py-2 border-t border-[#f0efec] bg-[#f8fafc]">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-[11px] font-bold text-[#1a1a2e]">📦 Commande {zdOrder.order_number?.startsWith('#') ? zdOrder.order_number : `#${zdOrder.order_number}`}</span>
+                        <span className="text-[9px] font-semibold text-[#6b6b63] shrink-0">{zdOrder.status_fr}</span>
+                      </div>
+                      <div className="text-[10px] text-[#6b6b63] mt-0.5 leading-snug">
+                        {zdOrder.created_at ? new Date(zdOrder.created_at).toLocaleDateString('fr-FR') : ''}
+                        {zdOrder.financial_status_fr ? ` · ${zdOrder.financial_status_fr}` : ''}
+                        {zdOrder.carrier ? ` · ${zdOrder.carrier}` : ''}
+                      </div>
+                      {zdOrder.tracking_url && (
+                        <a href={zdOrder.tracking_url} target="_blank" rel="noopener noreferrer" className="text-[10px] text-[#1d4ed8] underline">Suivi{zdOrder.tracking_number ? ` : ${zdOrder.tracking_number}` : ''}</a>
+                      )}
+                      {(zdOrder.products?.length ?? 0) > 0 && (
+                        <p className="text-[10px] text-[#9b9b93] mt-0.5 leading-snug truncate">{zdOrder.products.map(p => `${p.quantity}× ${p.name}`).join(', ')}</p>
+                      )}
+                    </div>
+                  )}
+                  {!zdError && (zdResults?.length ?? 0) === 0 && !zdOrder && <p className="px-3 py-2 text-[11px] text-[#9b9b93]">Aucun ticket trouvé.</p>}
+                  {!zdError && (zdResults?.length ?? 0) === 0 && zdOrder && <p className="px-3 py-2 text-[11px] text-[#9b9b93]">Commande trouvée, mais aucun ticket SAV pour ce client.</p>}
                   <div className="max-h-64 overflow-y-auto">
-                    {zdResults.map(r => (
+                    {(zdResults ?? []).map(r => (
                       <button key={r.ticket_id} onClick={() => openSearchedTicket(r)}
                         className="w-full text-left px-3 py-2 border-t border-[#f0efec] hover:bg-[#faf9f7]">
                         <div className="flex items-center justify-between gap-2">

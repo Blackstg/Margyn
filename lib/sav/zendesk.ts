@@ -109,7 +109,14 @@ export async function getNewTickets(brand: SavBrand = 'moom'): Promise<ZendeskTi
 export async function searchTickets(q: string, brand: SavBrand = 'moom'): Promise<ZendeskTicket[]> {
   const raw = q.trim()
   if (!raw) return []
-  // N° de ticket exact (#12345 ou 12345) → lecture directe.
+  const out: ZendeskTicket[] = []
+  const seen = new Set<number>()
+  const push = (t?: ZendeskTicket | null) => { if (t?.id && !seen.has(t.id)) { seen.add(t.id); out.push(t) } }
+
+  // N° purement numérique (ex. 10530) = AMBIGU : peut être un n° de ticket OU un n° de
+  // commande (chez Bowa les deux plages se chevauchent). On fait DONC les DEUX : lecture
+  // directe du ticket par ID + recherche plein texte (qui trouve le ticket de la
+  // COMMANDE). Avant, on s'arrêtait au ticket par ID → on ratait la vraie commande.
   const idMatch = raw.match(/^#?(\d{3,})$/)
   if (idMatch) {
     const res = await fetchWithRetry(
@@ -118,18 +125,22 @@ export async function searchTickets(q: string, brand: SavBrand = 'moom'): Promis
     ).catch(() => null)
     if (res && res.ok) {
       const { ticket } = await res.json() as { ticket?: ZendeskTicket }
-      if (ticket) return [ticket]
+      push(ticket)
     }
-    // sinon on retombe sur la recherche plein texte
   }
+
   const query = encodeURIComponent(`type:ticket ${raw}`)
   const res = await fetchWithRetry(
     `${base(brand)}/search.json?query=${query}&sort_by=updated_at&sort_order=desc&per_page=25`,
     { headers: authHeaders(brand), cache: 'no-store' }, 3, 1000,
   )
-  if (!res.ok) throw new Error(`[Zendesk] searchTickets ${res.status}: ${await res.text()}`)
+  if (!res.ok) {
+    if (out.length > 0) return out // au moins le ticket par ID
+    throw new Error(`[Zendesk] searchTickets ${res.status}: ${await res.text()}`)
+  }
   const data = await res.json() as { results?: ZendeskTicket[] }
-  return (data.results ?? []).filter(t => t.id)
+  for (const t of (data.results ?? [])) push(t)
+  return out
 }
 
 export interface CustomerTicketSummary {
