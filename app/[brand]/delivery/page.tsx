@@ -202,9 +202,15 @@ function DeliveryPageInner() {
     supabase.auth.getUser().then(({ data }) => {
       const meta  = data.user?.user_metadata
       const views = meta?.delivery_views as string[] | undefined
+      const role  = meta?.role as string | undefined
+      // Sécurité : un compte 'delivery' (livreur) ne doit JAMAIS voir Planificateur/SAV.
+      // Si delivery_views n'est pas défini, on retombe sur 'livreur' seul pour ces comptes
+      // (avant : défaut = toutes les vues → un livreur voyait le SAV).
       const base: DeliveryView[] = views
         ? views.filter((v): v is DeliveryView => ALL_VIEWS.includes(v as DeliveryView))
-        : ALL_VIEWS
+        : role === 'delivery'
+          ? ['livreur']
+          : ALL_VIEWS
       // Stats tab is only shown to users who have planificateur access
       const withStats: DeliveryView[] = base.includes('planificateur')
         ? [...base, 'stats']
@@ -325,7 +331,7 @@ function PlanificateurView() {
   const [laPosteFilter,  setLaPosteFilter]  = useState(false)
   const [search, setSearch] = useState('')
   const [showNewTour, setShowNewTour] = useState(false)
-  const [newTourForm, setNewTourForm] = useState({ name: '', zone: 'mixte', driver_name: '', planned_date: '' })
+  const [newTourForm, setNewTourForm] = useState({ name: '', zone: 'mixte', driver_name: '', driver_name_2: '', planned_date: '' })
   const [loadingOrders, setLoadingOrders] = useState(true)
   const [loadingTours, setLoadingTours] = useState(true)
   const [targetTourId, setTargetTourId] = useState('')
@@ -518,10 +524,13 @@ function PlanificateurView() {
     if (!newTourForm.name) return
     setSavingTour(true)
     try {
+      // Tournée à deux : on combine « Chauffeur1 & Chauffeur2 » (dédoublé côté menu).
+      const driver_name = [newTourForm.driver_name, newTourForm.driver_name_2]
+        .map(d => d.trim()).filter(Boolean).join(' & ')
       const res = await fetch('/api/delivery/tours', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(newTourForm),
+        body: JSON.stringify({ ...newTourForm, driver_name }),
       })
       if (!res.ok) {
         const err = await res.json().catch(() => ({}))
@@ -530,7 +539,7 @@ function PlanificateurView() {
         return
       }
       setShowNewTour(false)
-      setNewTourForm({ name: '', zone: 'mixte', driver_name: '', planned_date: '' })
+      setNewTourForm({ name: '', zone: 'mixte', driver_name: '', driver_name_2: '', planned_date: '' })
       setDriverIsCustom(false)
       await fetchTours()
     } finally {
@@ -1338,6 +1347,17 @@ function PlanificateurView() {
                       <option value="__custom__">＋ Autre (saisir)…</option>
                     </select>
                   )}
+                  {/* 2ᵉ chauffeur (optionnel) — ex. tournée à deux */}
+                  <select
+                    value={newTourForm.driver_name_2}
+                    onChange={(e) => setNewTourForm((f) => ({ ...f, driver_name_2: e.target.value }))}
+                    className="col-span-2 px-3 py-2 text-sm border border-[#e8e8e4] rounded-[10px] outline-none focus:border-[#aeb0c9] bg-white"
+                  >
+                    <option value="">2ᵉ chauffeur (optionnel)…</option>
+                    {drivers.filter(d => d !== newTourForm.driver_name).map((d) => (
+                      <option key={d} value={d}>{d}</option>
+                    ))}
+                  </select>
                 </div>
                 <div className="flex gap-2 mt-3">
                   <button

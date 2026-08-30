@@ -46,8 +46,12 @@ export async function GET() {
       .eq('brand', 'bowa')
     if (tourErr) throw tourErr
     for (const t of tours ?? []) {
-      const n = normalizeDriverName(t.driver_name as string | null)
-      if (n) names.add(n)
+      // Une tournée à deux est stockée « Chauffeur1 & Chauffeur2 » → on ajoute chacun
+      // séparément dans le menu (pas le combo).
+      for (const part of String(t.driver_name ?? '').split(/\s*[&,]\s*/)) {
+        const n = normalizeDriverName(part)
+        if (n) names.add(n)
+      }
     }
 
     const drivers = [...names].sort((a, b) => a.localeCompare(b, 'fr-FR'))
