@@ -345,6 +345,7 @@ function PlanificateurView() {
   const [renamingTourId, setRenamingTourId] = useState<string | null>(null)
   const [renameValue, setRenameValue] = useState('')
   const [editingDateTourId, setEditingDateTourId] = useState<string | null>(null)
+  const [editingDriverTourId, setEditingDriverTourId] = useState<string | null>(null)
   const [showHistory, setShowHistory] = useState(false)
   // Deferred orders
   const [deferredOrders, setDeferredOrders] = useState<Map<string, { deferred_until: string | null; note: string | null }>>(new Map())
@@ -645,6 +646,23 @@ function PlanificateurView() {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ planned_date: planned_date || null }),
+    })
+    await fetchTours()
+  }
+
+  // Change le(s) chauffeur(s) d'une tournée existante. On stocke « A & B »
+  // (ou « A » seul), même format que la création — voir /api/delivery/drivers
+  // qui redécoupe sur & pour le menu.
+  async function handleUpdateTourDriver(tourId: string, d1: string, d2: string) {
+    setEditingDriverTourId(null)
+    const driver_name = [d1, d2]
+      .map(d => normalizeDriverName(d.trim()))
+      .filter(Boolean)
+      .join(' & ')
+    await fetch(`/api/delivery/tours/${tourId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ driver_name: driver_name || null }),
     })
     await fetchTours()
   }
@@ -1504,8 +1522,52 @@ function PlanificateurView() {
                                 <Pencil size={10} className="text-[#6b6b63] opacity-0 group-hover/date:opacity-60 transition-opacity" />
                               </div>
                             )}
-                            {tour.driver_name && (
-                              <div className="text-xs text-[#6b6b63]">{normalizeDriverName(tour.driver_name)}</div>
+                            {editingDriverTourId === tour.id ? (
+                              (() => {
+                                // Sépare la valeur actuelle « A & B » en chauffeur 1 / 2.
+                                const parts = String(tour.driver_name ?? '').split(/\s*[&,]\s*/).map(p => p.trim()).filter(Boolean)
+                                const cur1 = parts[0] ?? ''
+                                const cur2 = parts[1] ?? ''
+                                return (
+                                  <div className="mt-0.5 flex flex-wrap items-center gap-1" onClick={e => e.stopPropagation()}>
+                                    <select
+                                      autoFocus
+                                      defaultValue={cur1}
+                                      className="text-xs border border-[#d4d4c9] rounded-md px-1.5 py-0.5 bg-white text-[#1a1a2e] focus:outline-none focus:ring-1 focus:ring-[#1a1a2e]"
+                                      onChange={e => handleUpdateTourDriver(tour.id, e.target.value, cur2)}
+                                    >
+                                      <option value="">Chauffeur…</option>
+                                      {[...new Set([...drivers, cur1].filter(Boolean))].map(d => (
+                                        <option key={d} value={d}>{normalizeDriverName(d)}</option>
+                                      ))}
+                                    </select>
+                                    <select
+                                      defaultValue={cur2}
+                                      className="text-xs border border-[#d4d4c9] rounded-md px-1.5 py-0.5 bg-white text-[#1a1a2e] focus:outline-none focus:ring-1 focus:ring-[#1a1a2e]"
+                                      onChange={e => handleUpdateTourDriver(tour.id, cur1, e.target.value)}
+                                    >
+                                      <option value="">2ᵉ chauffeur…</option>
+                                      {[...new Set([...drivers, cur2].filter(Boolean))].filter(d => d !== cur1).map(d => (
+                                        <option key={d} value={d}>{normalizeDriverName(d)}</option>
+                                      ))}
+                                    </select>
+                                    <button
+                                      className="text-[10px] text-[#6b6b63] underline"
+                                      onClick={() => setEditingDriverTourId(null)}
+                                    >fermer</button>
+                                  </div>
+                                )
+                              })()
+                            ) : (
+                              <div
+                                className="flex items-center gap-1 mt-0.5 group/driver cursor-pointer"
+                                onClick={e => { e.stopPropagation(); setEditingDriverTourId(tour.id) }}
+                              >
+                                <span className="text-xs text-[#6b6b63]">
+                                  {tour.driver_name ? normalizeDriverName(tour.driver_name) : <span className="italic opacity-50">Aucun chauffeur</span>}
+                                </span>
+                                <Pencil size={10} className="text-[#6b6b63] opacity-0 group-hover/driver:opacity-60 transition-opacity" />
+                              </div>
                             )}
                           </div>
                           <div className="flex items-center gap-1">
