@@ -6,6 +6,14 @@
 :root {
   --background: #faf9f8;
   --foreground: #1a1a2e;
+  /* « only light » = opt-out explicite du mode sombre forcé (Auto Dark Theme
+     de Chrome Android / Samsung Internet). Sans ça, la page était inversée et
+     le canvas de signature devenait noir sur noir → signature invisible. */
+  color-scheme: only light;
+}
+
+html {
+  color-scheme: only light;
 }
 
 body {
@@ -14,6 +22,14 @@ body {
   font-family: var(--font-bricolage), system-ui, -apple-system, sans-serif;
   font-size: 16px;
   -webkit-font-smoothing: antialiased;
+}
+
+/* Le canvas de signature ne doit jamais être assombri/inversé par le navigateur,
+   même si un réglage système tente de forcer le sombre. */
+canvas {
+  color-scheme: only light;
+  forced-color-adjust: none;
+  background: #ffffff;
 }
 
 @media print {

@@ -1,4 +1,4 @@
-import type { Metadata } from 'next'
+import type { Metadata, Viewport } from 'next'
 import { Bricolage_Grotesque } from 'next/font/google'
 import ConditionalLayout from '@/components/layout/ConditionalLayout'
 import './globals.css'
@@ -12,13 +12,32 @@ const bricolage = Bricolage_Grotesque({
 export const metadata: Metadata = {
   title: 'Steero',
   description: 'Dashboard analytique e-commerce',
-  viewport: {
-    width: 'device-width',
-    initialScale: 1,
-    maximumScale: 1,
-    userScalable: false,
-    viewportFit: 'cover',
+  manifest: '/manifest.webmanifest',
+  applicationName: 'Steero',
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: 'default',
+    title: 'Steero',
   },
+  icons: {
+    icon: [
+      { url: '/api/icon?size=192', sizes: '192x192', type: 'image/png' },
+      { url: '/api/icon?size=512', sizes: '512x512', type: 'image/png' },
+    ],
+    apple: [{ url: '/api/icon?size=192', sizes: '192x192', type: 'image/png' }],
+  },
+}
+
+export const viewport: Viewport = {
+  width: 'device-width',
+  initialScale: 1,
+  maximumScale: 1,
+  userScalable: false,
+  viewportFit: 'cover',
+  themeColor: '#1a1a2e',
+  // Force le thème clair : empêche le mode sombre forcé de Samsung Internet /
+  // Chrome Android d'inverser la page (canvas de signature devenait illisible).
+  colorScheme: 'light',
 }
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
