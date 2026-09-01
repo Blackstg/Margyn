@@ -1634,7 +1634,7 @@ function QualiteDashboard() {
       {/* Header */}
       <div className="flex items-start justify-between gap-4">
         <div>
-          <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-[#aeb0c9]">Admin · SAV Mōom</p>
+          <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-[#aeb0c9]">Admin · SAV {savBrand() === 'bowa' ? 'Bowa' : 'Mōom'}</p>
           <h2 className="text-base font-bold text-[#1a1a2e] mt-0.5">Qualité SAV</h2>
         </div>
         <div className="flex flex-col items-end gap-2">
