@@ -1576,6 +1576,7 @@ interface QualiteMetrics {
   active_weekdays:   Record<number, number>  // 1=Lun…7=Dim
   daily_timeline:    DailyEntry[]
   distinct_users:    string[]
+  user_names:        Record<string, string>  // email → prénom
   by_category: Record<string, { total: number; sent: number; escalated: number }>
 }
 
@@ -1667,7 +1668,7 @@ function QualiteDashboard() {
                 Tous
               </button>
               {metrics.distinct_users.map(email => {
-                const short = email.split('@')[0]
+                const short = metrics.user_names[email] ?? email.split('@')[0]
                 return (
                   <button
                     key={email}
@@ -1706,7 +1707,7 @@ function QualiteDashboard() {
         <>
           {/* ── Récap en tête : temps de travail + tickets (matin/après-midi) ── */}
           {(metrics.total > 0 || metrics.sessions_count > 0) && (() => {
-            const who   = selectedUser ? selectedUser.split('@')[0] : "l'équipe"
+            const who   = selectedUser ? (metrics.user_names[selectedUser] ?? selectedUser.split('@')[0]) : "l'équipe"
             const quand = isToday ? "aujourd'hui" : `sur ${days} jours`
             return (
               <div className="grid grid-cols-2 gap-3">

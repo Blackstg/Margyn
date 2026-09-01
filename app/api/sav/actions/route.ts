@@ -91,11 +91,13 @@ export async function GET(req: NextRequest) {
     user_email: string | null
   }[]
 
-  // Email de l'agent pour une ligne : user_email (nouveau) ; pour les vieilles
-  // lignes session_start, l'email était stocké dans `category`.
+  // Email de l'agent pour une ligne : user_email (nouveau). Pour les vieilles
+  // lignes de session (start ET end), l'email était stocké dans `category`.
+  // NB : pour une action ticket, `category` = catégorie du ticket (jamais un
+  // email) → le test `includes('@')` ne matche pas par erreur.
   function rowEmail(r: typeof allRows[0]): string | null {
     if (r.user_email && r.user_email.includes('@')) return r.user_email
-    if (r.action === 'session_start' && r.category && r.category.includes('@')) return r.category
+    if (r.category && r.category.includes('@')) return r.category
     return null
   }
 
@@ -103,6 +105,16 @@ export async function GET(req: NextRequest) {
   const distinct_users = [...new Set(
     allRows.map(rowEmail).filter((e): e is string => !!e)
   )].sort()
+
+  // Prénoms des agents (email → full_name) pour l'affichage côté UI
+  const user_names: Record<string, string> = {}
+  try {
+    const { data: ud } = await sb.auth.admin.listUsers({ perPage: 1000 })
+    for (const u of ud?.users ?? []) {
+      const m = u.user_metadata as { full_name?: string; name?: string } | undefined
+      if (u.email && (m?.full_name || m?.name)) user_names[u.email] = (m.full_name || m.name)!
+    }
+  } catch { /* si l'admin API échoue, on retombera sur le préfixe d'email */ }
 
   // Filtre agent — s'applique maintenant AUSSI aux tickets (avant : sessions seules)
   function matchesUser(r: typeof allRows[0]) {
@@ -180,6 +192,7 @@ export async function GET(req: NextRequest) {
         sessions_count, visits_per_day, avg_session_ms, total_session_ms,
         active_hours, active_weekdays, daily_timeline: [],
         distinct_users,
+        user_names,
         by_category: {},
       }
     })
@@ -247,6 +260,7 @@ export async function GET(req: NextRequest) {
       active_weekdays,
       daily_timeline,
       distinct_users,
+      user_names,
       by_category,
     }
   })
