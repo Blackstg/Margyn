@@ -17,6 +17,7 @@ export async function POST(req: NextRequest) {
     category?:          string | null
     confidence?:        number | null
     time_to_action_ms?: number | null
+    user_email?:        string | null
   }
 
   const sb = createAdminClient()
@@ -28,6 +29,10 @@ export async function POST(req: NextRequest) {
     category:           body.category ?? null,
     confidence:         body.confidence ?? null,
     time_to_action_ms:  body.time_to_action_ms ?? null,
+    // Agent qui a fait l'action (envoi/escalade/archive + session). Permet
+    // d'attribuer les tickets par agent (avant : seul le temps de session
+    // l'était, via category sur session_start).
+    user_email:         body.user_email ?? null,
   })
 
   if (error) {
@@ -47,13 +52,24 @@ function getParisHour(iso: string): number {
   return new Date(parisStr).getHours()
 }
 
+// Minuit Paris (aujourd'hui) exprimé en instant UTC — pour le filtre « Aujourd'hui ».
+function parisMidnightUTC(): Date {
+  const now = new Date()
+  const parisNow = new Date(now.toLocaleString('en-US', { timeZone: 'Europe/Paris' }))
+  // décalage entre l'heure Paris et l'heure locale du serveur, à cet instant
+  const offsetMs = now.getTime() - parisNow.getTime()
+  parisNow.setHours(0, 0, 0, 0)
+  return new Date(parisNow.getTime() + offsetMs)
+}
+
 export async function GET(req: NextRequest) {
+  const range     = req.nextUrl.searchParams.get('range') ?? ''   // 'today' | ''
   const days      = parseInt(req.nextUrl.searchParams.get('days') ?? '7', 10)
   const userEmail = req.nextUrl.searchParams.get('user_email') ?? ''
+  const isToday   = range === 'today'
 
   const sb = createAdminClient()
-  const since = new Date()
-  since.setDate(since.getDate() - days)
+  const since = isToday ? parisMidnightUTC() : (() => { const d = new Date(); d.setDate(d.getDate() - days); return d })()
 
   const { data, error } = await sb
     .from('sav_actions')
@@ -72,25 +88,33 @@ export async function GET(req: NextRequest) {
     confidence: number | null
     time_to_action_ms: number | null
     created_at: string
+    user_email: string | null
   }[]
 
-  // Distinct users: emails stored in `category` of session_start events
-  const allSessionStarts = allRows.filter(r => r.action === 'session_start')
+  // Email de l'agent pour une ligne : user_email (nouveau) ; pour les vieilles
+  // lignes session_start, l'email était stocké dans `category`.
+  function rowEmail(r: typeof allRows[0]): string | null {
+    if (r.user_email && r.user_email.includes('@')) return r.user_email
+    if (r.action === 'session_start' && r.category && r.category.includes('@')) return r.category
+    return null
+  }
+
+  // Liste des agents (emails) vus sur la période
   const distinct_users = [...new Set(
-    allSessionStarts.map(r => r.category).filter((e): e is string => !!e && e.includes('@'))
+    allRows.map(rowEmail).filter((e): e is string => !!e)
   )].sort()
 
-  // Apply user filter if provided
+  // Filtre agent — s'applique maintenant AUSSI aux tickets (avant : sessions seules)
   function matchesUser(r: typeof allRows[0]) {
     if (!userEmail) return true
-    return r.category === userEmail
+    return rowEmail(r) === userEmail
   }
 
   // Split session events from ticket events
   const sessionStarts = allRows.filter(r => r.action === 'session_start' && matchesUser(r))
   const sessionEnds   = allRows.filter(r => r.action === 'session_end'   && matchesUser(r))
   const rows = allRows.filter(
-    r => r.action !== 'session_start' && r.action !== 'session_end' && r.action !== 'heartbeat'
+    r => r.action !== 'session_start' && r.action !== 'session_end' && r.action !== 'heartbeat' && matchesUser(r)
   )
 
   // ── Session metrics ───────────────────────────────────────────────────────
@@ -150,6 +174,7 @@ export async function GET(req: NextRequest) {
       metrics: {
         total: 0, sent: 0, escalated: 0, archived: 0,
         pct_sent: 0, pct_escalated: 0, pct_archived: 0,
+        tickets_morning: 0, tickets_afternoon: 0,
         avg_time_ms: null,
         modification_rate: null,
         sessions_count, visits_per_day, avg_session_ms, total_session_ms,
@@ -159,6 +184,10 @@ export async function GET(req: NextRequest) {
       }
     })
   }
+
+  // Matin (< 13h Paris) vs après-midi — utile pour « combien ce matin »
+  const tickets_morning   = rows.filter(r => getParisHour(r.created_at) < 13).length
+  const tickets_afternoon = rows.length - tickets_morning
 
   const sent      = rows.filter(r => r.action === 'sent')
   const escalated = rows.filter(r => r.action === 'escalated')
@@ -206,6 +235,8 @@ export async function GET(req: NextRequest) {
       pct_sent:       Math.round((sent.length / rows.length) * 100),
       pct_escalated:  Math.round((escalated.length / rows.length) * 100),
       pct_archived:   Math.round((archived.length / rows.length) * 100),
+      tickets_morning,
+      tickets_afternoon,
       avg_time_ms,
       modification_rate,
       sessions_count,

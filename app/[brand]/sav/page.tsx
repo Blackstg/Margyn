@@ -1564,6 +1564,8 @@ interface DailyEntry { date: string; sessions: number; tickets: number }
 interface QualiteMetrics {
   total: number; sent: number; escalated: number; archived: number
   pct_sent: number; pct_escalated: number; pct_archived: number
+  tickets_morning:   number
+  tickets_afternoon: number
   avg_time_ms:       number | null
   modification_rate: number | null
   sessions_count:    number
@@ -1606,12 +1608,15 @@ function QualiteDashboard() {
   const [metrics, setMetrics]       = useState<QualiteMetrics | null>(null)
   const [loading, setLoading]       = useState(true)
   const [error, setError]           = useState<string | null>(null)
-  const [days, setDays]             = useState(7)
+  // 'today' | 7 | 30
+  const [period, setPeriod]         = useState<'today' | 7 | 30>('today')
   const [selectedUser, setSelectedUser] = useState<string>('')  // '' = tous
+  const isToday = period === 'today'
+  const days    = isToday ? 1 : period
 
   useEffect(() => {
     setLoading(true); setError(null)
-    const params = new URLSearchParams({ days: String(days) })
+    const params = new URLSearchParams(isToday ? { range: 'today' } : { days: String(period) })
     if (selectedUser) params.set('user_email', selectedUser)
     savFetch(`/api/sav/actions?${params}`)
       .then(r => r.json())
@@ -1621,7 +1626,7 @@ function QualiteDashboard() {
       })
       .catch(e => setError(e instanceof Error ? e.message : 'Erreur'))
       .finally(() => setLoading(false))
-  }, [days, selectedUser])
+  }, [period, isToday, selectedUser])
 
   return (
     <div className="flex flex-col h-full overflow-y-auto px-8 py-6 gap-6">
@@ -1634,17 +1639,17 @@ function QualiteDashboard() {
         <div className="flex flex-col items-end gap-2">
           {/* Filtre période */}
           <div className="flex gap-1.5">
-            {[7, 30].map(d => (
+            {([['today', "Aujourd'hui"], [7, '7j'], [30, '30j']] as const).map(([val, label]) => (
               <button
-                key={d}
-                onClick={() => setDays(d)}
+                key={val}
+                onClick={() => setPeriod(val)}
                 className={`px-3 py-1.5 rounded-lg text-[11px] font-semibold transition-colors ${
-                  days === d
+                  period === val
                     ? 'bg-[#1a1a2e] text-white'
                     : 'bg-[#f3f3f1] text-[#6b6b63] hover:bg-[#eeede9]'
                 }`}
               >
-                {d}j
+                {label}
               </button>
             ))}
           </div>
@@ -1699,23 +1704,49 @@ function QualiteDashboard() {
 
       {!loading && !error && metrics && (
         <>
-          {metrics.total === 0 ? (
+          {/* ── Récap en tête : temps de travail + tickets (matin/après-midi) ── */}
+          {(metrics.total > 0 || metrics.sessions_count > 0) && (() => {
+            const who   = selectedUser ? selectedUser.split('@')[0] : "l'équipe"
+            const quand = isToday ? "aujourd'hui" : `sur ${days} jours`
+            return (
+              <div className="grid grid-cols-2 gap-3">
+                <div className="rounded-2xl bg-[#1a1a2e] px-5 py-4">
+                  <p className="text-[10px] font-semibold uppercase tracking-[0.1em] text-white/40">Temps de travail · {who}</p>
+                  <p className="text-3xl font-bold text-white mt-1">
+                    {metrics.total_session_ms !== null ? fmtMs(metrics.total_session_ms) : '—'}
+                  </p>
+                  <p className="text-[10px] text-white/40 mt-0.5">
+                    {quand} · {metrics.sessions_count} ouverture{metrics.sessions_count > 1 ? 's' : ''} de l&apos;app
+                  </p>
+                </div>
+                <div className="rounded-2xl bg-[#f5f3ff] border border-[#e0e7ff] px-5 py-4">
+                  <p className="text-[10px] font-semibold uppercase tracking-[0.1em] text-[#6366f1]">Tickets traités · {who}</p>
+                  <p className="text-3xl font-bold text-[#1a1a2e] mt-1">{metrics.total}</p>
+                  <p className="text-[10px] text-[#6b6b63] mt-0.5">
+                    <b className="text-[#4338ca]">{metrics.tickets_morning}</b> le matin ·{' '}
+                    <b className="text-[#4338ca]">{metrics.tickets_afternoon}</b> l&apos;après-midi
+                  </p>
+                </div>
+              </div>
+            )
+          })()}
+
+          {metrics.total === 0 && metrics.sessions_count === 0 ? (
             <div className="flex flex-col items-center justify-center gap-3 py-16 text-center">
               <p className="text-3xl">📊</p>
               <p className="text-sm font-semibold text-[#1a1a2e]">Pas encore de données</p>
               <p className="text-xs text-[#9b9b93] max-w-xs">Les métriques s&apos;accumuleront au fur et à mesure que l&apos;équipe traite des tickets.</p>
+            </div>
+          ) : metrics.total === 0 ? (
+            <div className="rounded-2xl bg-[#fafaf9] border border-[#e8e8e4] px-5 py-6 text-center">
+              <p className="text-sm font-semibold text-[#1a1a2e]">Présent·e, mais aucun ticket traité {isToday ? "aujourd'hui" : 'sur la période'}</p>
+              <p className="text-xs text-[#9b9b93] mt-1">Le temps de travail ci-dessus est comptabilisé, mais aucun envoi/escalade/archivage n&apos;a été enregistré.</p>
             </div>
           ) : (
             <>
               {/* KPI grid — 6 cards, 2 colonnes */}
               <div className="grid grid-cols-2 gap-3">
                 {/* Ligne 1 — tickets */}
-                <div className="rounded-2xl bg-[#f8f7f5] border border-[#e8e8e4] px-5 py-4">
-                  <p className="text-[10px] font-semibold uppercase tracking-[0.1em] text-[#aeb0c9]">Tickets traités</p>
-                  <p className="text-3xl font-bold text-[#1a1a2e] mt-1">{metrics.total}</p>
-                  <p className="text-[10px] text-[#9b9b93] mt-0.5">sur {days} jours</p>
-                </div>
-
                 <div className="rounded-2xl bg-[#f8f7f5] border border-[#e8e8e4] px-5 py-4">
                   <p className="text-[10px] font-semibold uppercase tracking-[0.1em] text-[#aeb0c9]">Tps moyen / ticket</p>
                   <p className="text-3xl font-bold text-[#1a1a2e] mt-1">
@@ -1724,19 +1755,15 @@ function QualiteDashboard() {
                   <p className="text-[10px] text-[#9b9b93] mt-0.5">de la sélection à l&apos;envoi</p>
                 </div>
 
-                {/* Ligne 2 — temps dans Steero */}
-                <div className="col-span-2 rounded-2xl bg-[#1a1a2e] px-5 py-4">
-                  <p className="text-[10px] font-semibold uppercase tracking-[0.1em] text-white/40">Temps total dans Steero</p>
-                  <p className="text-3xl font-bold text-white mt-1">
-                    {metrics.total_session_ms !== null ? fmtMs(metrics.total_session_ms) : '—'}
+                <div className="rounded-2xl bg-[#f8f7f5] border border-[#e8e8e4] px-5 py-4">
+                  <p className="text-[10px] font-semibold uppercase tracking-[0.1em] text-[#aeb0c9]">Durée moyenne / visite</p>
+                  <p className="text-3xl font-bold text-[#1a1a2e] mt-1">
+                    {metrics.avg_session_ms !== null ? fmtMs(metrics.avg_session_ms) : '—'}
                   </p>
-                  <p className="text-[10px] text-white/40 mt-0.5">
-                    {metrics.sessions_count} session{metrics.sessions_count > 1 ? 's' : ''} · moy.{' '}
-                    {metrics.avg_session_ms !== null ? fmtMs(metrics.avg_session_ms) : '?'} par visite
-                  </p>
+                  <p className="text-[10px] text-[#9b9b93] mt-0.5">par ouverture de l&apos;app</p>
                 </div>
 
-                {/* Ligne 3 — brouillons & visites */}
+                {/* Ligne 2 — brouillons & visites */}
                 <div className="rounded-2xl bg-[#f8f7f5] border border-[#e8e8e4] px-5 py-4">
                   <p className="text-[10px] font-semibold uppercase tracking-[0.1em] text-[#aeb0c9]">Brouillons modifiés</p>
                   <p className="text-3xl font-bold text-[#1a1a2e] mt-1">
@@ -2058,7 +2085,7 @@ export default function SavPage() {
       savFetch('/api/sav/actions', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'session_start', ticket_id: 0, category: userEmail }),
+        body: JSON.stringify({ action: 'session_start', ticket_id: 0, category: userEmail, user_email: userEmail }),
       }).catch(() => {})
     })
 
@@ -2075,7 +2102,7 @@ export default function SavPage() {
       const duration = activeMs()
       if (duration < 5_000) return
       navigator.sendBeacon('/api/sav/actions', new Blob(
-        [JSON.stringify({ action: 'session_end', ticket_id: 0, time_to_action_ms: duration, category: userEmail })],
+        [JSON.stringify({ action: 'session_end', ticket_id: 0, time_to_action_ms: duration, category: userEmail, user_email: userEmail })],
         { type: 'application/json' }
       ))
     }
@@ -2314,6 +2341,7 @@ export default function SavPage() {
         category:          processed?.category ?? null,
         confidence:        processed?.confidence ?? null,
         time_to_action_ms,
+        user_email:        myEmail || null,
       }),
     }).catch(err => console.warn('[SAV] logAction error:', err))
   }
