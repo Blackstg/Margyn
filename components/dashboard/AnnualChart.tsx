@@ -373,12 +373,20 @@ export default function AnnualChart({ data, loading, stockValue, stockLoading }:
             </div>
           </div>
           {/* Stock immobilisé (cash bloqué dans l'inventaire, au coût d'achat) */}
-          <div className="col-span-2 rounded-[14px] bg-[#faf9f8] px-4 py-3">
+          <div className="rounded-[14px] bg-[#faf9f8] px-4 py-3">
             <p className="text-[10px] font-semibold uppercase tracking-[0.1em] text-[#aeb0c9]">Stock immobilisé</p>
             <p className="text-2xl font-bold text-[#1a1a2e] tabular-nums mt-0.5">
               {stockLoading ? '…' : (stockValue != null ? fmtEur(stockValue) : '—')}
             </p>
-            <p className="text-[10px] text-[#6b6b63] mt-0.5">Valeur du stock actuel au coût d&apos;achat (cash immobilisé, non compté dans la marge)</p>
+            <p className="text-[10px] text-[#6b6b63] mt-0.5">Stock actuel au coût d&apos;achat (cash bloqué, hors marge)</p>
+          </div>
+          {/* Cash-flow estimé = marge à l'année − stock immobilisé */}
+          <div className="rounded-[14px] bg-[#faf9f8] px-4 py-3">
+            <p className="text-[10px] font-semibold uppercase tracking-[0.1em] text-[#aeb0c9]">Cash-flow (marge − stock)</p>
+            <p className={`text-2xl font-bold tabular-nums mt-0.5 ${stockValue != null && (totalMargin - stockValue) < 0 ? 'text-[#c2410c]' : 'text-[#1a1a2e]'}`}>
+              {stockLoading ? '…' : (stockValue != null ? fmtEur(totalMargin - stockValue) : '—')}
+            </p>
+            <p className="text-[10px] text-[#6b6b63] mt-0.5">Marge à l&apos;année moins le stock immobilisé (proxy, hors acomptes, impôts &amp; prélèvements)</p>
           </div>
         </div>
       )}
