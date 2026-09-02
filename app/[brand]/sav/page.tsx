@@ -1001,13 +1001,14 @@ function ReplyPanel({ ticket, draft, solved, onDraftChange, onSolvedChange, onSe
     setSending(true); setError(null)
     try {
       const uploads = attachments.map(a => a.token)
+      const wasModified = draft.trim() !== ticket.draft_reply.trim()
       const res = await savFetch('/api/sav/send', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ticket_id: ticket.ticket_id, reply_body: draft, solved, action, category: ticket.category, uploads }),
+        // was_modified est transmis pour que le LOG serveur (attribution fiable) l'enregistre.
+        body: JSON.stringify({ ticket_id: ticket.ticket_id, reply_body: draft, solved, action, category: ticket.category, uploads, was_modified: wasModified }),
       })
       if (!res.ok) { const d = await savJson<{ error?: string }>(res, 'L\'envoi'); throw new Error(d.error ?? `HTTP ${res.status}`) }
-      const wasModified = draft.trim() !== ticket.draft_reply.trim()
       setAttachments([])
       onSent(action, wasModified)
     } catch (e) {
@@ -1021,7 +1022,7 @@ function ReplyPanel({ ticket, draft, solved, onDraftChange, onSolvedChange, onSe
       const res = await savFetch('/api/sav/archive', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ticket_id: ticket.ticket_id }),
+        body: JSON.stringify({ ticket_id: ticket.ticket_id, category: ticket.category }),
       })
       if (!res.ok) { const d = await savJson<{ error?: string }>(res); throw new Error(d.error ?? `HTTP ${res.status}`) }
       onArchive()
@@ -1394,7 +1395,7 @@ function FollowUpPanel({ ticket, onSent }: {
       const res = await savFetch('/api/sav/archive', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ticket_id: ticket.ticket_id }),
+        body: JSON.stringify({ ticket_id: ticket.ticket_id, category: ticket.category }),
       })
       if (!res.ok) { const d = await savJson<{ error?: string }>(res); throw new Error(d.error ?? `HTTP ${res.status}`) }
       onSent('auto_reply')
@@ -2397,29 +2398,13 @@ export default function SavPage() {
     }
   }
 
-  function logAction(ticketId: number, action: 'sent' | 'escalated' | 'archived', wasModified?: boolean | null) {
-    const processed = processedCache[ticketId]
-    const startTime = ticketStartTimes.current[ticketId]
-    const time_to_action_ms = startTime ? Date.now() - startTime : null
-    savFetch('/api/sav/actions', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        ticket_id:         ticketId,
-        action,
-        was_modified:      wasModified ?? null,
-        category:          processed?.category ?? null,
-        confidence:        processed?.confidence ?? null,
-        time_to_action_ms,
-        user_email:        myEmail || null,
-      }),
-    }).catch(err => console.warn('[SAV] logAction error:', err))
-  }
-
-  function handleSent(action: ReplyAction, wasModified?: boolean) {
+  // NB : le log de l'action (sent/escalated/archived) pour les métriques Qualité
+  // est désormais fait CÔTÉ SERVEUR dans /api/sav/send et /api/sav/archive
+  // (attribution fiable via l'agent authentifié). Le navigateur ne logue plus
+  // (des envois n'étaient pas comptés quand le POST client échouait).
+  function handleSent(action: ReplyAction) {
     if (selectedId === null) return
     const status: 'escalated' | 'sent' = action === 'escalate' ? 'escalated' : 'sent'
-    logAction(selectedId, status, action === 'escalate' ? null : (wasModified ?? null))
     const doneAfter = { ...doneStatuses, [selectedId]: { action: status, doneAt: new Date().toISOString() } }
     setDoneStatuses(doneAfter)
     advanceSelection(selectedId, doneAfter)
@@ -2427,7 +2412,6 @@ export default function SavPage() {
 
   function handleArchive() {
     if (selectedId === null) return
-    logAction(selectedId, 'archived', null)
     const doneAfter = { ...doneStatuses, [selectedId]: { action: 'archived' as const, doneAt: new Date().toISOString() } }
     setDoneStatuses(doneAfter)
     advanceSelection(selectedId, doneAfter)

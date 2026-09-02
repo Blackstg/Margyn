@@ -20,6 +20,14 @@ export async function POST(req: NextRequest) {
     user_email?:        string | null
   }
 
+  // Les actions ticket (sent/escalated/archived) sont désormais loguées CÔTÉ
+  // SERVEUR dans /api/sav/send et /api/sav/archive (attribution fiable). On
+  // ignore ici ces actions pour ne pas doubler le comptage avec les onglets
+  // encore ouverts sur l'ancienne version. On ne garde que les sessions/battements.
+  if (['sent', 'escalated', 'archived'].includes(body.action)) {
+    return NextResponse.json({ ok: true, skipped: 'logged server-side' })
+  }
+
   const sb = createAdminClient()
   const { error } = await sb.from('sav_actions').insert({
     brand:              savBrandFromRequest(req),

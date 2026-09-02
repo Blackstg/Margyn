@@ -13,8 +13,8 @@ import { savBrandFromRequest } from '@/lib/sav/brand'
 
 export const dynamic = 'force-dynamic'
 
-// Nom de l'agent connecté (pour l'attribution). Lu depuis la session, pas du client.
-async function currentAgent(): Promise<{ name: string; role: string }> {
+// Agent connecté (pour l'attribution). Lu depuis la session, pas du client.
+async function currentAgent(): Promise<{ name: string; role: string; email: string }> {
   try {
     const store = await cookies()
     const sb = createServerClient(
@@ -24,9 +24,9 @@ async function currentAgent(): Promise<{ name: string; role: string }> {
     )
     const { data: { user } } = await sb.auth.getUser()
     const m = user?.user_metadata ?? {}
-    return { name: ((m.full_name ?? m.name ?? '') as string).trim(), role: (m.role as string) ?? 'admin' }
+    return { name: ((m.full_name ?? m.name ?? '') as string).trim(), role: (m.role as string) ?? 'admin', email: user?.email ?? '' }
   } catch {
-    return { name: '', role: 'admin' }
+    return { name: '', role: 'admin', email: '' }
   }
 }
 
@@ -58,7 +58,7 @@ export async function POST(req: NextRequest) {
   // Deux agents ne doivent pas répondre au même ticket. On revendique le ticket de
   // façon ATOMIQUE (insert-si-absent) : le 1er à envoyer le « verrouille ». Si un
   // AUTRE agent le détient déjà, on bloque (409) — sauf reprise explicite (force).
-  const { name: agent, role } = await currentAgent()
+  const { name: agent, role, email: agentEmail } = await currentAgent()
   if (agent) {
     try {
       const admin = createAdminClient()
@@ -112,6 +112,25 @@ export async function POST(req: NextRequest) {
     await sendValidatedReply(ticket_id, reply_body, solved ?? false, action, allUploads, brand)
     // Persist so this ticket is excluded from future fetches
     await markTicketProcessed(ticket_id, action === 'escalate' ? 'escalated' : 'sent', brand)
+
+    // Log métrique Qualité CÔTÉ SERVEUR (source unique fiable). Avant, seul le
+    // navigateur loguait via /api/sav/actions → des envois n'étaient pas comptés
+    // (ex. tickets Moom de Lary invisibles). Ici, chaque envoi est attribué à
+    // l'agent authentifié, quoi qu'il arrive côté client.
+    try {
+      const savAction = action === 'escalate' ? 'escalated' : 'sent'
+      await createAdminClient().from('sav_actions').insert({
+        brand,
+        ticket_id,
+        action:            savAction,
+        category:          category ?? null,
+        was_modified:      savAction === 'sent' ? ((body as { was_modified?: boolean }).was_modified ?? null) : null,
+        time_to_action_ms: (body as { time_to_action_ms?: number }).time_to_action_ms ?? null,
+        user_email:        agentEmail || null,
+      })
+    } catch (e) {
+      console.error('[SAV] log sav_actions (send) échoué:', e)
+    }
     return NextResponse.json({ ok: true })
   } catch (err) {
     console.error('[SAV] sendValidatedReply error:', err)
