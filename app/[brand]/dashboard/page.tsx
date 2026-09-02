@@ -708,7 +708,7 @@ async function fetchInventory(brand: Brand, inProd: Record<string, number> = {})
 async function fetchStockValuation(brand: Brand, inProd: Record<string, number> = {}): Promise<StockValuation> {
   const [variantsRes, productsRes] = await Promise.all([
     supabase.from('product_variants')
-      .select('shopify_variant_id, shopify_product_id, product_title, variant_title, stock_quantity, cost_price, sell_price, image_url')
+      .select('shopify_variant_id, shopify_product_id, product_title, variant_title, stock_quantity, cost_price, sell_price, image_url, updated_at')
       .eq('brand', brand),
     supabase.from('products')
       .select('shopify_id, cost_price, sell_price')
@@ -724,8 +724,10 @@ async function fetchStockValuation(brand: Brand, inProd: Record<string, number> 
 
   let totalCost = 0, totalRetail = 0, units = 0, skusMissingCost = 0
   let prodUnits = 0, prodCostTotal = 0, prodRetail = 0
+  let updatedAt: string | null = null
   const items: StockValItem[] = []
   for (const v of variantsRes.data ?? []) {
+    if (v.updated_at && (!updatedAt || v.updated_at > updatedAt)) updatedAt = v.updated_at
     const qty     = Math.max(0, v.stock_quantity ?? 0)
     const qtyProd = Math.max(0, inProd[v.shopify_variant_id] ?? 0)
     if (qty === 0 && qtyProd === 0) continue
@@ -746,7 +748,7 @@ async function fetchStockValuation(brand: Brand, inProd: Record<string, number> 
     })
   }
   items.sort((a, b) => (b.blocked + (b.qty_prod * (b.cost ?? 0))) - (a.blocked + (a.qty_prod * (a.cost ?? 0))))
-  return { totalCost, totalRetail, units, skusMissingCost, items, prodUnits, prodCost: prodCostTotal, prodRetail }
+  return { totalCost, totalRetail, units, skusMissingCost, items, prodUnits, prodCost: prodCostTotal, prodRetail, updatedAt }
 }
 
 async function fetchSparklines(brand: Brand, from: string, to: string): Promise<SparklineData> {
@@ -954,6 +956,7 @@ function DashboardPage() {
   const [annualData, setAnnualData]               = useState<MonthPoint[]>([])
   const [annualLoading, setAnnualLoading]         = useState(true)
   const [stockVal, setStockVal]                   = useState<StockValuation | null>(null)
+  const [refreshingStock, setRefreshingStock]     = useState(false)
   const yesterday = getYesterday()
 
   const load = useCallback(async () => {
@@ -987,6 +990,16 @@ function DashboardPage() {
     setStockVal(stock)
     setLoading(false)
   }, [brand, period, selectedMonth, yesterday])
+
+  // Rafraîchir le stock à la demande : relance la synchro Shopify puis recharge.
+  const refreshStock = useCallback(async () => {
+    setRefreshingStock(true)
+    try {
+      await fetch(`/api/sync-all?brand=${brand}`, { method: 'POST' })
+    } catch { /* on recharge quand même */ }
+    await load()
+    setRefreshingStock(false)
+  }, [brand, load])
 
   useEffect(() => { load() }, [load])
 
@@ -1194,7 +1207,15 @@ Stock faible (<20 unités): ${lowStock || 'Aucun'}`
             </section>
 
             {/* Annual view */}
-            <AnnualChart data={annualData} loading={annualLoading} stockValue={stockVal?.totalCost ?? null} stockLoading={loading} />
+            <AnnualChart
+              data={annualData}
+              loading={annualLoading}
+              stockValue={stockVal?.totalCost ?? null}
+              stockLoading={loading}
+              stockSyncedAt={stockVal?.updatedAt ?? null}
+              onRefreshStock={refreshStock}
+              stockRefreshing={refreshingStock}
+            />
           </div>
 
           {/* Sticky AI sidebar */}

@@ -23,6 +23,7 @@ export interface StockValuation {
   prodUnits:       number   // unités en production (à recevoir)
   prodCost:        number   // coût d'achat engagé en production
   prodRetail:      number   // valeur de revente potentielle de la production
+  updatedAt:       string | null  // dernière synchro du stock (max updated_at des variantes)
 }
 
 const fmtEur = (n: number) =>

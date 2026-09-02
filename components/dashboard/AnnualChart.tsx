@@ -19,12 +19,22 @@ interface Props {
   loading: boolean
   stockValue?: number | null
   stockLoading?: boolean
+  stockSyncedAt?: string | null
+  onRefreshStock?: () => void
+  stockRefreshing?: boolean
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 const fmtEur = (n: number) =>
   new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR', maximumFractionDigits: 0 }).format(n)
+
+function fmtSyncedAt(iso: string | null | undefined): string | null {
+  if (!iso) return null
+  const d = new Date(iso)
+  if (isNaN(d.getTime())) return null
+  return d.toLocaleString('fr-FR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })
+}
 
 function fmtAxis(v: number): string {
   if (v === 0) return '0'
@@ -112,7 +122,7 @@ function TooltipContent({ point, currentYear }: { point: MonthPoint; currentYear
 
 // ─── AnnualChart ──────────────────────────────────────────────────────────────
 
-export default function AnnualChart({ data, loading, stockValue, stockLoading }: Props) {
+export default function AnnualChart({ data, loading, stockValue, stockLoading, stockSyncedAt, onRefreshStock, stockRefreshing }: Props) {
   const wrapperRef  = useRef<HTMLDivElement>(null)
   const [svgWidth, setSvgWidth] = useState(0)
   const [tooltip, setTooltip]   = useState<{ x: number; point: MonthPoint } | null>(null)
@@ -374,11 +384,25 @@ export default function AnnualChart({ data, loading, stockValue, stockLoading }:
           </div>
           {/* Stock immobilisé (cash bloqué dans l'inventaire, au coût d'achat) */}
           <div className="rounded-[14px] bg-[#faf9f8] px-4 py-3">
-            <p className="text-[10px] font-semibold uppercase tracking-[0.1em] text-[#aeb0c9]">Stock immobilisé</p>
+            <div className="flex items-center justify-between gap-2">
+              <p className="text-[10px] font-semibold uppercase tracking-[0.1em] text-[#aeb0c9]">Stock immobilisé</p>
+              {onRefreshStock && (
+                <button
+                  onClick={onRefreshStock}
+                  disabled={stockRefreshing}
+                  className="text-[10px] font-medium text-[#6b21a8] hover:underline disabled:opacity-50 disabled:cursor-wait shrink-0"
+                >
+                  {stockRefreshing ? 'Synchro…' : '↻ Rafraîchir'}
+                </button>
+              )}
+            </div>
             <p className="text-2xl font-bold text-[#1a1a2e] tabular-nums mt-0.5">
               {stockLoading ? '…' : (stockValue != null ? fmtEur(stockValue) : '—')}
             </p>
             <p className="text-[10px] text-[#6b6b63] mt-0.5">Stock actuel au coût d&apos;achat (cash bloqué, hors marge)</p>
+            {fmtSyncedAt(stockSyncedAt) && (
+              <p className="text-[10px] text-[#9b9b93] mt-0.5">Dernière synchro : {fmtSyncedAt(stockSyncedAt)}</p>
+            )}
           </div>
           {/* Cash-flow estimé = marge à l'année − stock immobilisé */}
           <div className="rounded-[14px] bg-[#faf9f8] px-4 py-3">
