@@ -17,6 +17,8 @@ export interface MonthPoint {
 interface Props {
   data: MonthPoint[]
   loading: boolean
+  stockValue?: number | null
+  stockLoading?: boolean
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -110,7 +112,7 @@ function TooltipContent({ point, currentYear }: { point: MonthPoint; currentYear
 
 // ─── AnnualChart ──────────────────────────────────────────────────────────────
 
-export default function AnnualChart({ data, loading }: Props) {
+export default function AnnualChart({ data, loading, stockValue, stockLoading }: Props) {
   const wrapperRef  = useRef<HTMLDivElement>(null)
   const [svgWidth, setSvgWidth] = useState(0)
   const [tooltip, setTooltip]   = useState<{ x: number; point: MonthPoint } | null>(null)
@@ -369,6 +371,14 @@ export default function AnnualChart({ data, loading }: Props) {
               <span className="text-[10px] text-[#6b6b63]">{marginPct.toFixed(0)}% du CA</span>
               {yoyBadge(marginYoY)}
             </div>
+          </div>
+          {/* Stock immobilisé (cash bloqué dans l'inventaire, au coût d'achat) */}
+          <div className="col-span-2 rounded-[14px] bg-[#faf9f8] px-4 py-3">
+            <p className="text-[10px] font-semibold uppercase tracking-[0.1em] text-[#aeb0c9]">Stock immobilisé</p>
+            <p className="text-2xl font-bold text-[#1a1a2e] tabular-nums mt-0.5">
+              {stockLoading ? '…' : (stockValue != null ? fmtEur(stockValue) : '—')}
+            </p>
+            <p className="text-[10px] text-[#6b6b63] mt-0.5">Valeur du stock actuel au coût d&apos;achat (cash immobilisé, non compté dans la marge)</p>
           </div>
         </div>
       )}

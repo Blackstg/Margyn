@@ -1194,7 +1194,7 @@ Stock faible (<20 unités): ${lowStock || 'Aucun'}`
             </section>
 
             {/* Annual view */}
-            <AnnualChart data={annualData} loading={annualLoading} />
+            <AnnualChart data={annualData} loading={annualLoading} stockValue={stockVal?.totalCost ?? null} stockLoading={loading} />
           </div>
 
           {/* Sticky AI sidebar */}
