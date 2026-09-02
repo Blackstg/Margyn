@@ -354,6 +354,8 @@ function PlanificateurView() {
   const [ordersViewMode, setOrdersViewMode] = useState<'list' | 'map'>('list')
   const [toursViewMode, setToursViewMode] = useState<'list' | 'map'>('list')
   const [syncingStopId, setSyncingStopId] = useState<string | null>(null)
+  // Date de commande Shopify par shopify_order_id (chargée à l'ouverture de la carte)
+  const [orderDates, setOrderDates] = useState<Record<string, string>>({})
 
   async function handleSyncStop(stopId: string) {
     setSyncingStopId(stopId)
@@ -466,6 +468,29 @@ function PlanificateurView() {
     fetchDeferredOrders()
     fetchDrivers()
   }, [fetchOrders, fetchTours, fetchDeferredOrders, fetchDrivers])
+
+  // Dates de commande Shopify pour la carte (arrêts déjà planifiés) : chargées à
+  // l'ouverture de la vue carte, seulement pour les ids pas encore connus.
+  useEffect(() => {
+    if (toursViewMode !== 'map') return
+    const ids = [...new Set(
+      tours
+        .filter(t => t.status !== 'completed' && t.status !== 'cancelled')
+        .flatMap(t => t.stops.map(s => s.shopify_order_id))
+        .filter((id): id is string => !!id && !orderDates[id]),
+    )]
+    if (ids.length === 0) return
+    fetch('/api/delivery/order-dates', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ids }),
+    })
+      .then(r => r.json())
+      .then((d: { dates?: Record<string, string> }) => {
+        if (d.dates && Object.keys(d.dates).length) setOrderDates(prev => ({ ...prev, ...d.dates }))
+      })
+      .catch(() => {/* best-effort */})
+  }, [toursViewMode, tours, orderDates])
 
   useEffect(() => {
     if (!tourDropdownOpen) return
@@ -1284,6 +1309,7 @@ function PlanificateurView() {
                     stops:        t.stops.map(s => ({
                       id:            s.id,
                       order_name:    s.order_name,
+                      shopify_order_id: s.shopify_order_id,
                       customer_name: s.customer_name,
                       address1:      s.address1,
                       address2:      s.address2,
@@ -1297,6 +1323,7 @@ function PlanificateurView() {
                     })),
                   }))}
                   height={480}
+                  orderDates={orderDates}
                   onMoveStop={async (stopId, targetTourId) => {
                     await fetch(`/api/delivery/stops/${stopId}`, {
                       method: 'PATCH',

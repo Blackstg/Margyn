@@ -10,6 +10,7 @@ import { streetLine } from '@/lib/delivery/geo'
 export interface TourMapStop {
   id:            string
   order_name:    string
+  shopify_order_id?: string
   customer_name: string
   address1:      string
   address2?:     string
@@ -34,6 +35,18 @@ interface Props {
   height?: number
   // Déplacer un arrêt vers une autre tournée directement depuis la carte.
   onMoveStop?: (stopId: string, targetTourId: string) => Promise<void>
+  // Date de commande Shopify par shopify_order_id (pour juger l'urgence).
+  orderDates?: Record<string, string>
+}
+
+// Date de commande + ancienneté, avec couleur d'urgence.
+function orderDateInfo(iso: string): { label: string; color: string } {
+  const d = new Date(iso)
+  const label = d.toLocaleDateString('fr-FR', { day: 'numeric', month: 'short', year: 'numeric' })
+  const days = Math.floor((Date.now() - d.getTime()) / 86_400_000)
+  const age = days <= 0 ? "aujourd'hui" : days === 1 ? 'il y a 1 j' : `il y a ${days} j`
+  const color = days >= 14 ? '#c7293a' : days >= 7 ? '#c2680a' : '#6b6b63'
+  return { label: `Commandé le ${label} · ${age}`, color }
 }
 
 // ── Palette ──────────────────────────────────────────────────────────────────
@@ -131,11 +144,13 @@ function makeMultiMarkerEl(label: string, color: string): HTMLElement {
 
 const FRANCE_CENTER: [number, number] = [2.35, 46.8]
 
-export default function ToursMap({ tours, height = 480, onMoveStop }: Props) {
+export default function ToursMap({ tours, height = 480, onMoveStop, orderDates }: Props) {
   // Réf. stable vers le callback pour l'utiliser dans les listeners de popup
   // sans reconstruire toute la carte à chaque rendu.
   const onMoveStopRef = useRef(onMoveStop)
   onMoveStopRef.current = onMoveStop
+  // Nb de dates connues → change quand elles arrivent (rebuild pour les afficher).
+  const orderDatesCount = Object.keys(orderDates ?? {}).length
   const containerRef = useRef<HTMLDivElement>(null)
   const mapRef       = useRef<mapboxgl.Map | null>(null)
   const markersRef   = useRef<mapboxgl.Marker[]>([])
@@ -235,9 +250,12 @@ export default function ToursMap({ tours, height = 480, onMoveStop }: Props) {
 
           const content = document.createElement('div')
           content.style.cssText = 'font-size:12px;line-height:1.6;font-family:system-ui,sans-serif'
+          const od = orderDates?.[stop.shopify_order_id ?? '']
+          const odInfo = od ? orderDateInfo(od) : null
           content.innerHTML = `
             <div style="font-weight:700;color:#1a1a2e">${esc(stop.customer_name || stop.order_name)}</div>
             <div style="font-family:ui-monospace,monospace;color:#888;font-size:11px">${esc(stop.order_name)}</div>
+            ${odInfo ? `<div style="margin-top:2px;font-size:11px;font-weight:600;color:${odInfo.color}">🗓️ ${odInfo.label}</div>` : ''}
             <div style="color:#6b6b63">${streetLine(stop.address1, stop.address2) ? esc(streetLine(stop.address1, stop.address2)) + ', ' : ''}${esc(stop.city)} ${esc(stop.zip)}</div>
             <div style="margin-top:4px;display:flex;align-items:center;gap:6px">
               <span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:${color};flex-shrink:0"></span>
@@ -291,14 +309,19 @@ export default function ToursMap({ tours, height = 480, onMoveStop }: Props) {
           const color = sameTour ? tourColor(sorted[0].tourIdx) : '#1a1a2e'
           const label = sorted.map(r => r.stop.sequence).join('·')
           const el = makeMultiMarkerEl(label, color)
-          const rows = sorted.map(r => `
+          const rows = sorted.map(r => {
+            const od = orderDates?.[r.stop.shopify_order_id ?? '']
+            const odInfo = od ? orderDateInfo(od) : null
+            return `
             <div style="display:flex;align-items:center;gap:7px;padding:5px 0;border-top:1px solid #f0f0ee">
               <span style="flex-shrink:0;width:18px;height:18px;border-radius:50%;background:${tourColor(r.tourIdx)};color:#fff;font-size:10px;font-weight:700;display:flex;align-items:center;justify-content:center">${r.stop.sequence}</span>
               <div style="min-width:0">
                 <div style="font-weight:600;color:#1a1a2e">${esc(r.stop.customer_name || r.stop.order_name)} <span style="font-family:ui-monospace,monospace;color:#888;font-weight:400">${esc(r.stop.order_name)}</span></div>
                 <div style="color:#6b6b63;font-size:11px">${esc(r.tour.name)} · ${r.stop.panel_count} panneau${r.stop.panel_count !== 1 ? 'x' : ''}</div>
+                ${odInfo ? `<div style="font-size:10px;font-weight:600;color:${odInfo.color}">🗓️ ${odInfo.label}</div>` : ''}
               </div>
-            </div>`).join('')
+            </div>`
+          }).join('')
           const popup = new mgl.Popup({ offset: 14, closeButton: true, maxWidth: '280px' }).setHTML(`
             <div style="font-size:12px;line-height:1.5;font-family:system-ui,sans-serif">
               <div style="font-weight:700;color:#1a1a2e">${group.length} commandes — même adresse</div>
@@ -329,8 +352,9 @@ export default function ToursMap({ tours, height = 480, onMoveStop }: Props) {
       markersRef.current.forEach(m => m.remove())
       markersRef.current = []
     }
+  // orderDatesCount : rebuild quand les dates de commande arrivent (async)
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [toursKey])
+  }, [toursKey, orderDatesCount])
 
   // Cleanup map on unmount
   useEffect(() => {
