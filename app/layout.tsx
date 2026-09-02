@@ -19,13 +19,8 @@ export const metadata: Metadata = {
     statusBarStyle: 'default',
     title: 'Steero',
   },
-  icons: {
-    icon: [
-      { url: '/api/icon?size=192', sizes: '192x192', type: 'image/png' },
-      { url: '/api/icon?size=512', sizes: '512x512', type: 'image/png' },
-    ],
-    apple: [{ url: '/api/icon?size=192', sizes: '192x192', type: 'image/png' }],
-  },
+  // Pas de `icons` explicite : Next reprend automatiquement app/icon.png (le vrai
+  // logo Steero) comme favicon. (Un bloc icons manuel l'écrasait par l'icône PWA générée.)
 }
 
 export const viewport: Viewport = {
