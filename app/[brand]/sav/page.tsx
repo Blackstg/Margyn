@@ -1572,6 +1572,7 @@ interface QualiteMetrics {
   visits_per_day:    number
   avg_session_ms:    number | null
   total_session_ms:  number | null
+  active_ms:         number   // temps de travail reconstitué (heartbeats)
   active_hours:      Record<number, number>
   active_weekdays:   Record<number, number>  // 1=Lun…7=Dim
   daily_timeline:    DailyEntry[]
@@ -1714,10 +1715,12 @@ function QualiteDashboard() {
                 <div className="rounded-2xl bg-[#1a1a2e] px-5 py-4">
                   <p className="text-[10px] font-semibold uppercase tracking-[0.1em] text-white/40">Temps de travail · {who}</p>
                   <p className="text-3xl font-bold text-white mt-1">
-                    {metrics.total_session_ms !== null ? fmtMs(metrics.total_session_ms) : '—'}
+                    {/* temps « en direct » (heartbeats) ; sinon historique des sessions */}
+                    {metrics.active_ms > 0 ? fmtMs(metrics.active_ms)
+                      : metrics.total_session_ms !== null ? fmtMs(metrics.total_session_ms) : '—'}
                   </p>
                   <p className="text-[10px] text-white/40 mt-0.5">
-                    {quand} · {metrics.sessions_count} ouverture{metrics.sessions_count > 1 ? 's' : ''} de l&apos;app
+                    temps actif · {quand} · {metrics.sessions_count} ouverture{metrics.sessions_count > 1 ? 's' : ''}
                   </p>
                 </div>
                 <div className="rounded-2xl bg-[#f5f3ff] border border-[#e0e7ff] px-5 py-4">
@@ -2088,14 +2091,37 @@ export default function SavPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ action: 'session_start', ticket_id: 0, category: userEmail, user_email: userEmail }),
       }).catch(() => {})
+      sendHeartbeat()   // 1er battement immédiat (compte la minute d'ouverture)
     })
+
+    // ── Temps de travail « en direct » via heartbeats ─────────────────────────
+    // Problème : si l'onglet reste ouvert en permanence, session_end ne part
+    // jamais → temps de travail = 0. Solution : on envoie un battement toutes
+    // les 60 s TANT QUE l'agent est actif (onglet au 1er plan + interaction
+    // récente). Le serveur reconstitue le temps réel en additionnant les écarts
+    // entre battements consécutifs (les pauses = pas de battement = exclues).
+    const HB_INTERVAL_MS = 120_000      // 1 battement / 2 min (volume maîtrisé)
+    const IDLE_LIMIT_MS  = 5 * 60_000   // sans interaction depuis 5 min → inactif
+    let lastActivity     = Date.now()
+    function markActivity() { lastActivity = Date.now() }
+    function sendHeartbeat() {
+      if (!userEmail) return
+      if (document.hidden) return
+      if (Date.now() - lastActivity > IDLE_LIMIT_MS) return
+      savFetch('/api/sav/actions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'heartbeat', ticket_id: 0, category: userEmail, user_email: userEmail }),
+      }).catch(() => {})
+    }
+    const hbTimer = setInterval(sendHeartbeat, HB_INTERVAL_MS)
 
     function activeMs() {
       return accumulatedMs + (document.hidden ? 0 : Date.now() - visibleSince)
     }
     function handleVisibility() {
       if (document.hidden) { accumulatedMs += Date.now() - visibleSince }
-      else                 { visibleSince = Date.now() }
+      else                 { visibleSince = Date.now(); markActivity() }
     }
     function sendEnd() {
       if (sent) return
@@ -2108,10 +2134,14 @@ export default function SavPage() {
       ))
     }
 
+    const ACTIVITY_EVENTS = ['pointerdown', 'keydown', 'mousemove', 'scroll', 'wheel', 'touchstart']
+    ACTIVITY_EVENTS.forEach(e => window.addEventListener(e, markActivity, { passive: true }))
     document.addEventListener('visibilitychange', handleVisibility)
     window.addEventListener('pagehide', sendEnd)
     window.addEventListener('beforeunload', sendEnd)
     return () => {
+      clearInterval(hbTimer)
+      ACTIVITY_EVENTS.forEach(e => window.removeEventListener(e, markActivity))
       document.removeEventListener('visibilitychange', handleVisibility)
       window.removeEventListener('pagehide', sendEnd)
       window.removeEventListener('beforeunload', sendEnd)

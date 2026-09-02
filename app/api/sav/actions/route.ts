@@ -71,17 +71,29 @@ export async function GET(req: NextRequest) {
   const sb = createAdminClient()
   const since = isToday ? parisMidnightUTC() : (() => { const d = new Date(); d.setDate(d.getDate() - days); return d })()
 
-  const { data, error } = await sb
-    .from('sav_actions')
-    .select('*')
-    .eq('brand', savBrandFromRequest(req))
-    .gte('created_at', since.toISOString())
-
-  if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 })
+  // PostgREST plafonne à 1000 lignes/requête. Avec les battements (1 / 2 min /
+  // agent), 7j ou 30j dépassent largement 1000 → on pagine pour tout récupérer.
+  const brand = savBrandFromRequest(req)
+  const COLS  = 'action,was_modified,category,confidence,time_to_action_ms,created_at,user_email'
+  const PAGE  = 1000
+  const MAX   = 100_000  // garde-fou
+  const acc: Record<string, unknown>[] = []
+  for (let from = 0; from < MAX; from += PAGE) {
+    const { data, error } = await sb
+      .from('sav_actions')
+      .select(COLS)
+      .eq('brand', brand)
+      .gte('created_at', since.toISOString())
+      .order('created_at', { ascending: true })
+      .range(from, from + PAGE - 1)
+    if (error) {
+      return NextResponse.json({ error: error.message }, { status: 500 })
+    }
+    acc.push(...(data ?? []))
+    if (!data || data.length < PAGE) break
   }
 
-  const allRows = (data ?? []) as {
+  const allRows = acc as {
     action: string
     was_modified: boolean | null
     category: string | null
@@ -125,9 +137,36 @@ export async function GET(req: NextRequest) {
   // Split session events from ticket events
   const sessionStarts = allRows.filter(r => r.action === 'session_start' && matchesUser(r))
   const sessionEnds   = allRows.filter(r => r.action === 'session_end'   && matchesUser(r))
+  const heartbeats    = allRows.filter(r => r.action === 'heartbeat'     && matchesUser(r))
   const rows = allRows.filter(
     r => r.action !== 'session_start' && r.action !== 'session_end' && r.action !== 'heartbeat' && matchesUser(r)
   )
+
+  // ── Temps de travail « réel » reconstitué depuis les battements ────────────
+  // Un battement est envoyé toutes les 60 s tant que l'agent est actif. On
+  // additionne, PAR agent, les écarts entre battements consécutifs ≤ 3 min
+  // (au-delà = pause/onglet fermé, exclu), + 1 min par grappe pour la dernière
+  // minute. Robuste à un onglet laissé ouvert en permanence.
+  const HB_MS = 120_000, MAX_GAP = 5 * 60_000  // battement /2 min ; tolère 1 raté
+  function activeMsFromBeats(timestamps: number[]): number {
+    if (timestamps.length === 0) return 0
+    const t = timestamps.slice().sort((a, b) => a - b)
+    let total = HB_MS  // 1er intervalle (grappe initiale)
+    for (let i = 1; i < t.length; i++) {
+      const gap = t[i] - t[i - 1]
+      if (gap <= MAX_GAP) total += gap
+      else total += HB_MS  // nouvelle grappe → son 1er intervalle
+    }
+    return total
+  }
+  // Regroupe les battements par agent (pour ne pas mélanger deux personnes
+  // quand aucun filtre agent n'est appliqué)
+  const beatsByUser: Record<string, number[]> = {}
+  for (const h of heartbeats) {
+    const e = rowEmail(h) ?? '?'
+    ;(beatsByUser[e] ??= []).push(new Date(h.created_at).getTime())
+  }
+  const active_ms = Object.values(beatsByUser).reduce((s, ts) => s + activeMsFromBeats(ts), 0)
 
   // ── Session metrics ───────────────────────────────────────────────────────
   const sessions_count = sessionStarts.length
@@ -189,7 +228,7 @@ export async function GET(req: NextRequest) {
         tickets_morning: 0, tickets_afternoon: 0,
         avg_time_ms: null,
         modification_rate: null,
-        sessions_count, visits_per_day, avg_session_ms, total_session_ms,
+        sessions_count, visits_per_day, avg_session_ms, total_session_ms, active_ms,
         active_hours, active_weekdays, daily_timeline: [],
         distinct_users,
         user_names,
