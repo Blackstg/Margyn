@@ -52,24 +52,36 @@ function getParisHour(iso: string): number {
   return new Date(parisStr).getHours()
 }
 
-// Minuit Paris (aujourd'hui) exprimé en instant UTC — pour le filtre « Aujourd'hui ».
-function parisMidnightUTC(): Date {
-  const now = new Date()
-  const parisNow = new Date(now.toLocaleString('en-US', { timeZone: 'Europe/Paris' }))
-  // décalage entre l'heure Paris et l'heure locale du serveur, à cet instant
-  const offsetMs = now.getTime() - parisNow.getTime()
-  parisNow.setHours(0, 0, 0, 0)
-  return new Date(parisNow.getTime() + offsetMs)
+// Minuit Paris (00:00 heure de Paris) d'un jour donné, exprimé en instant UTC.
+// dayStr = 'YYYY-MM-DD' ; sans argument → aujourd'hui (date Paris).
+function parisMidnightUTC(dayStr?: string): Date {
+  const day = dayStr ?? new Date().toLocaleDateString('en-CA', { timeZone: 'Europe/Paris' })
+  const utcMidnight = new Date(day + 'T00:00:00Z')
+  // Heure murale Paris correspondant à cet instant UTC → donne le décalage TZ
+  const parisWall = new Date(utcMidnight.toLocaleString('en-US', { timeZone: 'Europe/Paris' }))
+  const offsetMs  = parisWall.getTime() - utcMidnight.getTime()
+  return new Date(utcMidnight.getTime() - offsetMs)
+}
+// Jour suivant (YYYY-MM-DD) — pour la borne haute d'une journée précise.
+function nextDayStr(dayStr: string): string {
+  const x = new Date(dayStr + 'T12:00:00Z')
+  x.setUTCDate(x.getUTCDate() + 1)
+  return x.toISOString().slice(0, 10)
 }
 
 export async function GET(req: NextRequest) {
   const range     = req.nextUrl.searchParams.get('range') ?? ''   // 'today' | ''
+  const dayParam  = req.nextUrl.searchParams.get('day') ?? ''      // 'YYYY-MM-DD' | ''
   const days      = parseInt(req.nextUrl.searchParams.get('days') ?? '7', 10)
   const userEmail = req.nextUrl.searchParams.get('user_email') ?? ''
-  const isToday   = range === 'today'
+  const isDay     = /^\d{4}-\d{2}-\d{2}$/.test(dayParam)
 
   const sb = createAdminClient()
-  const since = isToday ? parisMidnightUTC() : (() => { const d = new Date(); d.setDate(d.getDate() - days); return d })()
+  // Fenêtre : journée précise [minuit; minuit+1] · aujourd'hui [minuit; ∞] · sinon N derniers jours
+  const since = isDay ? parisMidnightUTC(dayParam)
+              : range === 'today' ? parisMidnightUTC()
+              : (() => { const d = new Date(); d.setDate(d.getDate() - days); return d })()
+  const until = isDay ? parisMidnightUTC(nextDayStr(dayParam)) : null
 
   // PostgREST plafonne à 1000 lignes/requête. Avec les battements (1 / 2 min /
   // agent), 7j ou 30j dépassent largement 1000 → on pagine pour tout récupérer.
@@ -79,11 +91,13 @@ export async function GET(req: NextRequest) {
   const MAX   = 100_000  // garde-fou
   const acc: Record<string, unknown>[] = []
   for (let from = 0; from < MAX; from += PAGE) {
-    const { data, error } = await sb
+    let q = sb
       .from('sav_actions')
       .select(COLS)
       .eq('brand', brand)
       .gte('created_at', since.toISOString())
+    if (until) q = q.lt('created_at', until.toISOString())
+    const { data, error } = await q
       .order('created_at', { ascending: true })
       .range(from, from + PAGE - 1)
     if (error) {

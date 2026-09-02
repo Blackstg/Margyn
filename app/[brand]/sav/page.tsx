@@ -1610,15 +1610,25 @@ function QualiteDashboard() {
   const [metrics, setMetrics]       = useState<QualiteMetrics | null>(null)
   const [loading, setLoading]       = useState(true)
   const [error, setError]           = useState<string | null>(null)
-  // 'today' | 7 | 30
-  const [period, setPeriod]         = useState<'today' | 7 | 30>('today')
+  // 'today' | 'day' (journée précise) | 7 | 30
+  const [period, setPeriod]         = useState<'today' | 'day' | 7 | 30>('today')
+  const [dayValue, setDayValue]     = useState<string>('')       // 'YYYY-MM-DD' quand period==='day'
   const [selectedUser, setSelectedUser] = useState<string>('')  // '' = tous
-  const isToday = period === 'today'
-  const days    = isToday ? 1 : period
+  const isDay      = period === 'day' && /^\d{4}-\d{2}-\d{2}$/.test(dayValue)
+  const singleDay  = period === 'today' || isDay   // vue « une journée » (matin/AM pertinent)
+  const days       = typeof period === 'number' ? period : 1
+  // date Paris décalée de n jours (n=-1 → hier)
+  const parisDay = (n: number) => {
+    const d = new Date(); d.setDate(d.getDate() + n)
+    return d.toLocaleDateString('en-CA', { timeZone: 'Europe/Paris' })
+  }
 
   useEffect(() => {
     setLoading(true); setError(null)
-    const params = new URLSearchParams(isToday ? { range: 'today' } : { days: String(period) })
+    const params =
+      period === 'today' ? new URLSearchParams({ range: 'today' })
+      : isDay            ? new URLSearchParams({ day: dayValue })
+      :                    new URLSearchParams({ days: String(period) })
     if (selectedUser) params.set('user_email', selectedUser)
     savFetch(`/api/sav/actions?${params}`)
       .then(r => r.json())
@@ -1628,7 +1638,7 @@ function QualiteDashboard() {
       })
       .catch(e => setError(e instanceof Error ? e.message : 'Erreur'))
       .finally(() => setLoading(false))
-  }, [period, isToday, selectedUser])
+  }, [period, dayValue, isDay, selectedUser])
 
   return (
     <div className="flex flex-col h-full overflow-y-auto px-8 py-6 gap-6">
@@ -1640,7 +1650,7 @@ function QualiteDashboard() {
         </div>
         <div className="flex flex-col items-end gap-2">
           {/* Filtre période */}
-          <div className="flex gap-1.5">
+          <div className="flex items-center gap-1.5">
             {([['today', "Aujourd'hui"], [7, '7j'], [30, '30j']] as const).map(([val, label]) => (
               <button
                 key={val}
@@ -1654,6 +1664,30 @@ function QualiteDashboard() {
                 {label}
               </button>
             ))}
+            {/* Hier */}
+            <button
+              onClick={() => { setDayValue(parisDay(-1)); setPeriod('day') }}
+              className={`px-3 py-1.5 rounded-lg text-[11px] font-semibold transition-colors ${
+                isDay && dayValue === parisDay(-1)
+                  ? 'bg-[#1a1a2e] text-white'
+                  : 'bg-[#f3f3f1] text-[#6b6b63] hover:bg-[#eeede9]'
+              }`}
+            >
+              Hier
+            </button>
+            {/* Jour précis */}
+            <input
+              type="date"
+              max={parisDay(0)}
+              value={period === 'day' ? dayValue : ''}
+              onChange={e => { if (e.target.value) { setDayValue(e.target.value); setPeriod('day') } }}
+              className={`px-2 py-1.5 rounded-lg text-[11px] font-semibold border outline-none transition-colors ${
+                isDay
+                  ? 'bg-[#1a1a2e] text-white border-[#1a1a2e]'
+                  : 'bg-[#f3f3f1] text-[#6b6b63] border-transparent hover:bg-[#eeede9]'
+              }`}
+              title="Choisir une journée précise"
+            />
           </div>
           {/* Filtre utilisateur — affiché dès que plusieurs emails détectés */}
           {metrics && metrics.distinct_users.length > 0 && (
@@ -1709,7 +1743,10 @@ function QualiteDashboard() {
           {/* ── Récap en tête : temps de travail + tickets (matin/après-midi) ── */}
           {(metrics.total > 0 || metrics.sessions_count > 0) && (() => {
             const who   = selectedUser ? (metrics.user_names[selectedUser] ?? selectedUser.split('@')[0]) : "l'équipe"
-            const quand = isToday ? "aujourd'hui" : `sur ${days} jours`
+            const dayLabel = isDay
+              ? new Date(dayValue + 'T12:00:00').toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' })
+              : ''
+            const quand = period === 'today' ? "aujourd'hui" : isDay ? `le ${dayLabel}` : `sur ${days} jours`
             return (
               <div className="grid grid-cols-2 gap-3">
                 <div className="rounded-2xl bg-[#1a1a2e] px-5 py-4">
@@ -1745,7 +1782,7 @@ function QualiteDashboard() {
             </div>
           ) : metrics.total === 0 ? (
             <div className="rounded-2xl bg-[#fafaf9] border border-[#e8e8e4] px-5 py-6 text-center">
-              <p className="text-sm font-semibold text-[#1a1a2e]">Présent·e, mais aucun ticket traité {isToday ? "aujourd'hui" : 'sur la période'}</p>
+              <p className="text-sm font-semibold text-[#1a1a2e]">Présent·e, mais aucun ticket traité {singleDay ? 'ce jour-là' : 'sur la période'}</p>
               <p className="text-xs text-[#9b9b93] mt-1">Le temps de travail ci-dessus est comptabilisé, mais aucun envoi/escalade/archivage n&apos;a été enregistré.</p>
             </div>
           ) : (
