@@ -32,6 +32,8 @@ export interface TourMapTour {
 interface Props {
   tours:  TourMapTour[]
   height?: number
+  // Déplacer un arrêt vers une autre tournée directement depuis la carte.
+  onMoveStop?: (stopId: string, targetTourId: string) => Promise<void>
 }
 
 // ── Palette ──────────────────────────────────────────────────────────────────
@@ -129,7 +131,11 @@ function makeMultiMarkerEl(label: string, color: string): HTMLElement {
 
 const FRANCE_CENTER: [number, number] = [2.35, 46.8]
 
-export default function ToursMap({ tours, height = 480 }: Props) {
+export default function ToursMap({ tours, height = 480, onMoveStop }: Props) {
+  // Réf. stable vers le callback pour l'utiliser dans les listeners de popup
+  // sans reconstruire toute la carte à chaque rendu.
+  const onMoveStopRef = useRef(onMoveStop)
+  onMoveStopRef.current = onMoveStop
   const containerRef = useRef<HTMLDivElement>(null)
   const mapRef       = useRef<mapboxgl.Map | null>(null)
   const markersRef   = useRef<mapboxgl.Marker[]>([])
@@ -222,21 +228,61 @@ export default function ToursMap({ tours, height = 480 }: Props) {
           const { stop, tour, tourIdx } = base
           const color = tourColor(tourIdx)
           const el = makeMarkerEl(color, stop.sequence, stop.status)
-          const popup = new mgl.Popup({ offset: 14, closeButton: false, maxWidth: '240px' }).setHTML(`
-            <div style="font-size:12px;line-height:1.6;font-family:system-ui,sans-serif">
-              <div style="font-weight:700;color:#1a1a2e">${esc(stop.customer_name || stop.order_name)}</div>
-              <div style="font-family:ui-monospace,monospace;color:#888;font-size:11px">${esc(stop.order_name)}</div>
-              <div style="color:#6b6b63">${streetLine(stop.address1, stop.address2) ? esc(streetLine(stop.address1, stop.address2)) + ', ' : ''}${esc(stop.city)} ${esc(stop.zip)}</div>
-              <div style="margin-top:4px;display:flex;align-items:center;gap:6px">
-                <span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:${color};flex-shrink:0"></span>
-                <span style="color:#1a1a2e;font-weight:600">${esc(tour.name)}</span>
-              </div>
-              <div style="color:#6b6b63;font-size:11px">${esc(tour.driver_name)} · ${stop.panel_count} panneau${stop.panel_count !== 1 ? 'x' : ''}</div>
+
+          // Tournées cibles possibles = autres tournées actives non démarrées.
+          const otherTours = activeTours.filter(t => t.id !== tour.id && t.status !== 'in_progress')
+          const canMove = !!onMoveStopRef.current && tour.status !== 'in_progress' && otherTours.length > 0
+
+          const content = document.createElement('div')
+          content.style.cssText = 'font-size:12px;line-height:1.6;font-family:system-ui,sans-serif'
+          content.innerHTML = `
+            <div style="font-weight:700;color:#1a1a2e">${esc(stop.customer_name || stop.order_name)}</div>
+            <div style="font-family:ui-monospace,monospace;color:#888;font-size:11px">${esc(stop.order_name)}</div>
+            <div style="color:#6b6b63">${streetLine(stop.address1, stop.address2) ? esc(streetLine(stop.address1, stop.address2)) + ', ' : ''}${esc(stop.city)} ${esc(stop.zip)}</div>
+            <div style="margin-top:4px;display:flex;align-items:center;gap:6px">
+              <span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:${color};flex-shrink:0"></span>
+              <span style="color:#1a1a2e;font-weight:600">${esc(tour.name)}</span>
             </div>
-          `)
+            <div style="color:#6b6b63;font-size:11px">${esc(tour.driver_name)} · ${stop.panel_count} panneau${stop.panel_count !== 1 ? 'x' : ''}</div>
+          `
+
+          const popup = new mgl.Popup({ offset: 14, closeButton: canMove, maxWidth: '240px' })
+
+          if (canMove) {
+            const moveWrap = document.createElement('div')
+            moveWrap.style.cssText = 'margin-top:8px;border-top:1px solid #f0f0ee;padding-top:6px'
+            const lbl = document.createElement('div')
+            lbl.textContent = 'Déplacer vers :'
+            lbl.style.cssText = 'color:#6b6b63;font-size:10px;margin-bottom:4px;font-weight:600'
+            moveWrap.appendChild(lbl)
+            otherTours.forEach(t => {
+              const i = activeTours.findIndex(a => a.id === t.id)
+              const b = document.createElement('button')
+              b.type = 'button'
+              b.innerHTML = `<span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:${tourColor(i)};margin-right:6px"></span>${esc(t.name)}`
+              b.style.cssText = 'display:flex;align-items:center;width:100%;text-align:left;padding:5px 8px;margin-bottom:3px;border:1px solid #e8e8e4;border-radius:8px;background:#fff;cursor:pointer;font-size:11px;color:#1a1a2e'
+              b.addEventListener('click', async () => {
+                if (!onMoveStopRef.current) return
+                b.disabled = true
+                b.style.opacity = '0.5'
+                b.textContent = 'Déplacement…'
+                try { await onMoveStopRef.current(stop.id, t.id); popup.remove() }
+                catch { b.disabled = false; b.style.opacity = '1'; b.textContent = 'Réessayer' }
+              })
+              moveWrap.appendChild(b)
+            })
+            content.appendChild(moveWrap)
+          }
+
+          popup.setDOMContent(content)
           const marker = new mgl.Marker({ element: el }).setLngLat(base.coord).setPopup(popup).addTo(map)
-          el.addEventListener('mouseenter', () => popup.addTo(map))
-          el.addEventListener('mouseleave', () => popup.remove())
+          if (canMove) {
+            // Clic = popup persistant (pour cliquer les boutons de déplacement)
+            el.addEventListener('click', (e) => { e.stopPropagation(); popup.addTo(map) })
+          } else {
+            el.addEventListener('mouseenter', () => popup.addTo(map))
+            el.addEventListener('mouseleave', () => popup.remove())
+          }
           markersRef.current.push(marker)
         } else {
           // Plusieurs commandes à la même adresse → pastille « 3·4 » + liste au clic

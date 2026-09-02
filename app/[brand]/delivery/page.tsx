@@ -1297,6 +1297,14 @@ function PlanificateurView() {
                     })),
                   }))}
                   height={480}
+                  onMoveStop={async (stopId, targetTourId) => {
+                    await fetch(`/api/delivery/stops/${stopId}`, {
+                      method: 'PATCH',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({ tour_id: targetTourId }),
+                    })
+                    await fetchTours()
+                  }}
                 />
               </div>
             )}

@@ -174,7 +174,7 @@ export async function PATCH(
 ) {
   try {
     const body = await req.json()
-    const { status, sequence, email_sent_at, comment, sav_note, signature_url, photo_url, partial_delivered } = body as {
+    const { status, sequence, email_sent_at, comment, sav_note, signature_url, photo_url, partial_delivered, tour_id } = body as {
       status?: string
       sequence?: number
       email_sent_at?: string
@@ -183,6 +183,29 @@ export async function PATCH(
       signature_url?: string | null
       photo_url?: string | null
       partial_delivered?: { sku: string; title: string; qty_ordered: number; qty_delivered: number }[] | null
+      tour_id?: string
+    }
+
+    // Déplacer l'arrêt vers UNE AUTRE tournée : change tour_id et le place en fin
+    // de séquence de la tournée cible (le planificateur réordonne ensuite si besoin).
+    if (tour_id !== undefined) {
+      const admin = getAdmin()
+      const { data: last } = await admin
+        .from('delivery_stops')
+        .select('sequence')
+        .eq('tour_id', tour_id)
+        .order('sequence', { ascending: false })
+        .limit(1)
+        .maybeSingle()
+      const nextSeq = ((last?.sequence as number | undefined) ?? -1) + 1
+      const { data, error } = await admin
+        .from('delivery_stops')
+        .update({ tour_id, sequence: nextSeq })
+        .eq('id', params.id)
+        .select()
+        .single()
+      if (error) throw error
+      return NextResponse.json({ stop: data })
     }
 
     const updates: Record<string, unknown> = {}
