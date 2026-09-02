@@ -1400,6 +1400,28 @@ function PlanificateurView() {
               const activeTours  = tours.filter(t => t.status !== 'completed' && t.status !== 'cancelled')
               const historyTours = tours.filter(t => t.status === 'completed' || t.status === 'cancelled')
               const displayTours = showHistory ? historyTours : activeTours
+              // Calibration « minutes par arrêt » = rythme réel du livreur, mesuré
+              // sur l'ÉCART entre deux livraisons consécutives des tournées TERMINÉES
+              // (conduite + déchargement). On exclut les écarts < 3 min (arrêts
+              // pointés en lot) et > 60 min (pauses / nuits) → reflète le travail
+              // effectif, pas du 24h/24. Médiane globale = robuste aux aberrations.
+              const estMinPerStop = (() => {
+                const gaps: number[] = []
+                for (const t of tours) {
+                  if (t.status !== 'completed') continue
+                  const times = t.stops
+                    .filter(s => s.delivered_at && (s.status === 'delivered' || s.status === 'partial'))
+                    .map(s => +new Date(s.delivered_at as string))
+                    .sort((a, b) => a - b)
+                  for (let i = 1; i < times.length; i++) {
+                    const g = (times[i] - times[i - 1]) / 60000
+                    if (g >= 3 && g <= 60) gaps.push(g)
+                  }
+                }
+                if (gaps.length < 5) return null
+                gaps.sort((a, b) => a - b)
+                return gaps[Math.floor(gaps.length / 2)]         // médiane
+              })()
               return (
             <div className="space-y-3 max-h-[calc(100vh-300px)] overflow-y-auto pr-1">
               {loadingTours ? (
@@ -1586,6 +1608,24 @@ function PlanificateurView() {
                             <span>{tour.total_panels} / 100 panneaux</span>
                             <span>{tour.stops.length} arrêt{tour.stops.length !== 1 ? 's' : ''}</span>
                           </div>
+                          {/* Durée estimée (tournées en préparation/à venir) — calibrée sur l'historique */}
+                          {tour.status !== 'completed' && tour.status !== 'cancelled' && tour.stops.length > 0 && (
+                            <div className="flex items-center gap-1 text-[11px] mb-1.5">
+                              {estMinPerStop ? (() => {
+                                const totalMin = tour.stops.length * estMinPerStop
+                                const days = totalMin / 60 > 8 ? Math.ceil(totalMin / 60 / 8) : 0   // journée ~8h
+                                return (
+                                  <span className="text-[#6b6b63]">
+                                    ⏱️ ≈ <span className="font-semibold text-[#1a1a2e]">{formatDuration(totalMin * 60000)}</span> de tournée
+                                    {days > 0 && <span className="font-semibold text-[#c2680a]"> · ~{days} jour{days > 1 ? 's' : ''} de travail</span>}
+                                    <span className="text-[#9b9b93]"> · ~{Math.round(estMinPerStop)} min/arrêt (historique)</span>
+                                  </span>
+                                )
+                              })() : (
+                                <span className="text-[#9b9b93]">⏱️ Estimation dispo après quelques tournées terminées</span>
+                              )}
+                            </div>
+                          )}
                           <div className="w-full h-1.5 bg-[#f5f5f3] rounded-full overflow-hidden">
                             <div
                               className="h-full rounded-full transition-all"
