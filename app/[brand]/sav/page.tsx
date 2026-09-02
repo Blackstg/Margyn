@@ -1715,12 +1715,14 @@ function QualiteDashboard() {
                 <div className="rounded-2xl bg-[#1a1a2e] px-5 py-4">
                   <p className="text-[10px] font-semibold uppercase tracking-[0.1em] text-white/40">Temps de travail · {who}</p>
                   <p className="text-3xl font-bold text-white mt-1">
-                    {/* temps « en direct » (heartbeats) ; sinon historique des sessions */}
-                    {metrics.active_ms > 0 ? fmtMs(metrics.active_ms)
-                      : metrics.total_session_ms !== null ? fmtMs(metrics.total_session_ms) : '—'}
+                    {/* Uniquement le temps ACTIF reconstitué par battements (fiable).
+                        L'ancien cumul de sessions se chevauchait → chiffres faux. */}
+                    {metrics.active_ms > 0 ? fmtMs(metrics.active_ms) : '—'}
                   </p>
                   <p className="text-[10px] text-white/40 mt-0.5">
-                    temps actif · {quand} · {metrics.sessions_count} ouverture{metrics.sessions_count > 1 ? 's' : ''}
+                    {metrics.active_ms > 0
+                      ? <>temps actif dans le SAV · {quand}</>
+                      : <>se calcule pendant l&apos;activité · {metrics.sessions_count} ouverture{metrics.sessions_count > 1 ? 's' : ''}</>}
                   </p>
                 </div>
                 <div className="rounded-2xl bg-[#f5f3ff] border border-[#e0e7ff] px-5 py-4">
