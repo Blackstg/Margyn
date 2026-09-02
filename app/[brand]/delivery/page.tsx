@@ -2917,7 +2917,12 @@ function LivreurView() {
       setTours(all)
       let selected: Tour | undefined
       setSelectedTourId(prev => {
-        const kept = prev && all.find((t) => t.id === prev) ? prev : (() => {
+        // On NE garde PAS une tournée terminée comme tournée sélectionnée du
+        // livreur : sinon après « Terminer », elle reste affichée avec le bouton
+        // « Démarrer/Continuer » actif → un tap la ressuscite (started_at posé
+        // après completed_at → durée négative « 4 min », tournée coincée).
+        const keptTour = prev ? all.find((t) => t.id === prev) : undefined
+        const kept = (keptTour && keptTour.status !== 'completed') ? prev : (() => {
           const active = all.filter((t: Tour) => t.status !== 'completed')
           // 1. a tour already underway
           const inProgress = active.find((t: Tour) => t.status === 'in_progress')
@@ -3857,11 +3862,14 @@ function LivreurView() {
               </button>
               <button
                 onClick={async () => {
+                  // Une tournée terminée ne doit jamais être redémarrée (sinon
+                  // started_at repasse après completed_at → durée aberrante + coincée).
+                  if (!tour || tour.status === 'completed') return
                   const resumeIdx = sortedStops.findIndex(s => s.status !== 'delivered' && s.status !== 'failed')
                   setStopIdx(resumeIdx !== -1 ? resumeIdx : 0)
                   setScreen('tour')
                   // Passe la tournée en "en cours" si elle ne l'est pas déjà
-                  if (tour && tour.status !== 'in_progress') {
+                  if (tour.status !== 'in_progress') {
                     await fetch(`/api/delivery/tours/${tour.id}`, {
                       method: 'PATCH',
                       headers: { 'Content-Type': 'application/json' },
@@ -3870,7 +3878,7 @@ function LivreurView() {
                     fetchTours()
                   }
                 }}
-                disabled={sortedStops.length === 0 || tour.status === 'draft'}
+                disabled={sortedStops.length === 0 || tour.status === 'draft' || tour.status === 'completed'}
                 className="w-full flex items-center justify-center gap-3 py-5 rounded-[16px] bg-[#4ade80] text-[#1a1a2e] font-bold text-lg disabled:opacity-30 active:bg-[#22c55e] transition-colors"
               >
                 <Truck size={24} strokeWidth={1.8} />
