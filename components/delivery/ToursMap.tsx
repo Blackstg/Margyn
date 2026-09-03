@@ -391,15 +391,18 @@ export default function ToursMap({ tours, height = 480, onMoveStop, orderDates }
           className="absolute top-3 right-3 bg-white rounded-[10px] shadow-md px-3 py-2 space-y-1.5 max-h-56 overflow-y-auto"
           style={{ minWidth: 140, maxWidth: 220 }}
         >
-          {activeTours.map((tour, i) => (
-            <div key={tour.id} className="flex items-center gap-2">
-              <div className="w-3 h-3 rounded-full shrink-0" style={{ background: tourColor(i) }} />
-              <div className="min-w-0">
-                <p className="text-[11px] font-semibold text-[#1a1a2e] truncate leading-tight">{tour.name}</p>
-                <p className="text-[10px] text-[#9b9b93] leading-tight">{tour.stops.length} stops</p>
+          {activeTours.map((tour, i) => {
+            const panels = tour.stops.reduce((n, s) => n + (s.panel_count ?? 0), 0)
+            return (
+              <div key={tour.id} className="flex items-center gap-2">
+                <div className="w-3 h-3 rounded-full shrink-0" style={{ background: tourColor(i) }} />
+                <div className="min-w-0">
+                  <p className="text-[11px] font-semibold text-[#1a1a2e] truncate leading-tight">{tour.name}</p>
+                  <p className="text-[10px] text-[#9b9b93] leading-tight">{tour.stops.length} stops · {panels} panneau{panels !== 1 ? 'x' : ''}</p>
+                </div>
               </div>
-            </div>
-          ))}
+            )
+          })}
         </div>
       )}
     </div>
