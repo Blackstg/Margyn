@@ -575,9 +575,20 @@ function PlanificateurView() {
 
   async function handleAddStops() {
     if (!targetTourId || selectedOrders.size === 0) return
+    const stops = shopifyOrders.filter((o) => selectedOrders.has(o.order_name))
+    // Garde-fou : une commande « La Poste » (accessoire, 0 panneau) n'a rien à
+    // faire dans une tournée camion → on demande confirmation explicite.
+    const laposte = stops.filter((o) => o.is_accessory_only)
+    if (laposte.length > 0) {
+      const label = laposte.map((o) => o.order_name).join(', ')
+      const ok = confirm(
+        `⚠️ ${label} : marquée${laposte.length > 1 ? 's' : ''} « 📦 La Poste » (0 panneau, à expédier par colis).\n\n` +
+        `L'ajouter à la tournée quand même ?`
+      )
+      if (!ok) return
+    }
     setAddingStops(true)
     try {
-      const stops = shopifyOrders.filter((o) => selectedOrders.has(o.order_name))
       const res = await fetch(`/api/delivery/tours/${targetTourId}/stops`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -4179,6 +4190,9 @@ function LivreurView() {
         tourId={selectedTourId}
         onAddToTour={async (order) => {
           if (!selectedTourId) return
+          if (order.is_accessory_only && !confirm(
+            `⚠️ ${order.order_name} est marquée « 📦 La Poste » (0 panneau, à expédier par colis).\n\nL'ajouter à la tournée quand même ?`
+          )) return
           await fetch(`/api/delivery/tours/${selectedTourId}/stops`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -4357,6 +4371,10 @@ function LivreurView() {
 
     async function handleAddToTour(order: ShopifyOrder) {
       if (!selectedTourId) return
+      // Garde-fou : commande « La Poste » (0 panneau) → confirmation explicite.
+      if (order.is_accessory_only && !confirm(
+        `⚠️ ${order.order_name} est marquée « 📦 La Poste » (0 panneau, à expédier par colis).\n\nL'ajouter à la tournée quand même ?`
+      )) return
       setAddingOrderName(order.order_name)
       try {
         await fetch(`/api/delivery/tours/${selectedTourId}/stops`, {
