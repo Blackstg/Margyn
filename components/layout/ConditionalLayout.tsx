@@ -8,7 +8,12 @@ import { Menu } from 'lucide-react'
 
 export default function ConditionalLayout({ children }: { children: React.ReactNode }) {
   const pathname   = usePathname()
-  const isAuthPage = pathname === '/login' || pathname === '/reconciliation' || pathname === '/tracking' || pathname.startsWith('/tracking/')
+  // Pages PUBLIQUES (client final) : jamais de menu/sidebar interne Steero.
+  const isAuthPage = pathname === '/login' || pathname === '/reconciliation'
+    || pathname === '/tracking' || pathname.startsWith('/tracking/')
+    || pathname.startsWith('/facture/')
+    || pathname.startsWith('/rapport-defauts/')
+    || pathname.startsWith('/install')
 
   const [role, setRole] = useState<string | null>(() => {
     if (typeof window !== 'undefined') return localStorage.getItem('bowa_role')

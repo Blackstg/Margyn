@@ -222,7 +222,7 @@ Règles pour "decision_options" (seulement si needs_decision=true, 2 à 4 option
 - Si needs_decision=false, mettre decision_options: []`
 
   const msg = await client.messages.create({
-    model:      'claude-sonnet-4-6',
+    model:      'claude-haiku-4-5',
     max_tokens: 512,
     messages:   [{ role: 'user', content: prompt }],
   })

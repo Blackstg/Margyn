@@ -54,8 +54,12 @@ export default function FacturePubliquePage({ params }: { params: { brand: strin
 
       <style>{`
         @media print {
+          /* globals.css masque tout sauf .print-summary → on RÉTABLIT la visibilité
+             ici pour que la facture s'imprime (sinon page blanche pour le client). */
+          body * { visibility: visible !important; }
           .no-print { display: none !important; }
           body { background: #fff !important; }
+          html, body { margin: 0 !important; padding: 0 !important; }
         }
       `}</style>
     </div>
