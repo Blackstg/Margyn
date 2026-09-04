@@ -53,6 +53,8 @@ export default function FacturePubliquePage({ params }: { params: { brand: strin
       </div>
 
       <style>{`
+        /* Force le format portrait A4 (par défaut certains navigateurs ouvrent en paysage). */
+        @page { size: A4 portrait; margin: 12mm; }
         @media print {
           /* globals.css masque tout sauf .print-summary → on RÉTABLIT la visibilité
              ici pour que la facture s'imprime (sinon page blanche pour le client). */
