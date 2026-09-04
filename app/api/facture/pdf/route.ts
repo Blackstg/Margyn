@@ -162,19 +162,20 @@ export async function GET(req: NextRequest) {
     text(money(it.unit), cPU, y, { size: 10, align: 'right' })
     text(tvaEnabled ? `${tvaRate}%` : 'N/A', cTVA, y, { size: 10, align: 'right' })
     text(money(it.total), cTot, y, { size: 10, font: bold, align: 'right' })
-    let sub = y - 12
-    const desc = [it.variant && it.variant !== 'Default Title' ? it.variant : '', it.sku ? `SKU : ${it.sku}` : ''].filter(Boolean).join('  ')
-    if (desc) { text(desc, L, sub, { size: 8, color: grey }); sub -= 12 }
-    y = sub - 6
-    line(y + 4)
+    y -= 13
+    const desc = [it.variant && it.variant !== 'Default Title' ? it.variant : '', it.sku ? `SKU : ${it.sku}` : ''].filter(Boolean).join('   ')
+    if (desc) { text(desc, L, y, { size: 8, color: grey }); y -= 13 }
+    y -= 6
+    line(y)          // séparateur SOUS la ligne (ne barre plus le texte)
+    y -= 15
   }
 
   // Totaux (bloc droite)
-  y -= 10
-  const tbL = 340
+  y -= 6
+  const tbL = 350
   const totRow = (k: string, v: string, opt: { bold?: boolean } = {}) => {
     text(k, tbL, y, { size: 10, color: rgb(0.27, 0.27, 0.27), font: opt.bold ? bold : font })
-    text(v, R, y, { size: 10, font: opt.bold ? bold : font })
+    text(v, R, y, { size: 10, font: opt.bold ? bold : font, align: 'right' })   // aligné à droite → plus de valeur coupée
     y -= 16
   }
   totRow('Sous-total', money(subtotal))
@@ -187,11 +188,11 @@ export async function GET(req: NextRequest) {
     totRow('Total HT', money(totalPrice), { bold: true })
   }
   if (isPaid) totRow('Montant paye', money(totalPrice))
-  // Bande montant dû
-  y -= 2
-  page.drawRectangle({ x: tbL - 8, y: y - 4, width: R - tbL + 8, height: 24, color: primary })
-  text('MONTANT DU', tbL, y + 4, { size: 11, font: bold, color: rgb(1, 1, 1) })
-  text(money(amountDue), R - 4, y + 4, { size: 11, font: bold, color: rgb(1, 1, 1), align: 'right' })
+  // Bande montant dû (gap suffisant pour ne pas recouvrir la ligne précédente)
+  y -= 6
+  page.drawRectangle({ x: tbL - 10, y: y - 6, width: R - tbL + 14, height: 24, color: primary })
+  text('MONTANT DU', tbL, y + 2, { size: 11, font: bold, color: rgb(1, 1, 1) })
+  text(money(amountDue), R, y + 2, { size: 11, font: bold, color: rgb(1, 1, 1), align: 'right' })
 
   // Footer
   const fy = 70
