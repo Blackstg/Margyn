@@ -13,6 +13,13 @@ import { createAdminClient } from '@/lib/supabase'
 
 const client = new Anthropic()
 
+// Parse JSON même quand le modèle emballe sa réponse dans des fences markdown
+// (```json … ```). Haiku le fait plus souvent que Sonnet → sinon JSON.parse plante.
+function parseJsonSafe<T>(raw: string): T {
+  const cleaned = raw.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim()
+  return JSON.parse(cleaned) as T
+}
+
 // Persona par marque (nom + description) injectée dans les prompts.
 export const BRAND_PROFILE: Record<SavBrand, { name: string; description: string }> = {
   moom: { name: 'Mōom', description: 'cosmétiques naturels français haut de gamme' },
@@ -228,7 +235,7 @@ Règles pour "decision_options" (seulement si needs_decision=true, 2 à 4 option
   })
 
   const text = (msg.content[0] as { type: string; text: string }).text.trim()
-  const result = JSON.parse(text) as ClassificationResult
+  const result = parseJsonSafe<ClassificationResult>(text)
   // Ensure arrays are always present
   if (!result.decision_options) result.decision_options = []
   return result
@@ -445,7 +452,7 @@ Réponds UNIQUEMENT avec un objet JSON valide (sans markdown, sans backticks) :
   })
 
   const text = (msg.content[0] as { type: string; text: string }).text.trim()
-  const result = JSON.parse(text) as ReplyResult
+  const result = parseJsonSafe<ReplyResult>(text)
   console.log(`[SAV] generateReply — situation_detectee: "${result.situation_detectee}"`)
   return result
 }
