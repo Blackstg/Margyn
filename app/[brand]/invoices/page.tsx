@@ -758,7 +758,7 @@ Historique FW : ${history.map(h => `${h.month}: ${h.fw_count} FW ($${h.fw_total?
                             {/* 3 chiffres clés */}
                             <div className="grid grid-cols-3 gap-2">
                               <div className="bg-[#f8f8f7] rounded-xl p-3 text-center">
-                                <p className="text-[10px] text-[#9b9b93] mb-1">Bowa facture</p>
+                                <p className="text-[10px] text-[#9b9b93] mb-1">Facturé (logisticien)</p>
                                 <p className="text-base font-bold text-[#1a1a2e]">${totalUsd.toFixed(2)}</p>
                                 <p className="text-[10px] text-[#c0bfba] mt-0.5">{totalEur.toFixed(2)}€</p>
                               </div>
