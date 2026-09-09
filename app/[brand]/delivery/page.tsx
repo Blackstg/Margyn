@@ -4190,8 +4190,9 @@ function LivreurView() {
         tourId={selectedTourId}
         onAddToTour={async (order) => {
           if (!selectedTourId) return
-          // Accessoire = 0 panneau (= La Poste) → confirmation explicite.
-          if (order.panel_count === 0 && !confirm(
+          // La Poste = 0 panneau SANS accessoire encombrant (un tasseau reste en tournée).
+          const laposte = order.is_accessory_only ?? (order.panel_count === 0)
+          if (laposte && !confirm(
             `⚠️ ${order.order_name} est marquée « 📦 La Poste » (0 panneau, à expédier par colis).\n\nL'ajouter à la tournée quand même ?`
           )) return
           await fetch(`/api/delivery/tours/${selectedTourId}/stops`, {

@@ -101,6 +101,7 @@ export interface NearbyOrder {
   zone: string
   panel_count: number
   panel_details: PanelItem[]
+  is_accessory_only?: boolean
 }
 
 interface TourMapProps {

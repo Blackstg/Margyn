@@ -71,6 +71,10 @@ const isNonGoods = (title: string) => isSample(title) || isTip(title)
 // title says "Stonepanel" not "panneau" — match it explicitly so it counts toward
 // the tour capacity instead of being shipped via La Poste.
 const isPanel    = (title: string) => /panneau|stonepanel/i.test(title)
+// Accessoires LONGS/encombrants (profilés ~240 cm) : PAS de panneau, mais ne
+// peuvent PAS partir par La Poste → doivent être livrés par le camion (tournée).
+// Ex. « Akupanel | Tasseau de finition », « Extpanel | Tasseau d'angle ».
+const isBulkyAccessory = (title: string) => /tasseau|profil[ée]?s?\b|baguette|plinthe|corniche|liteau|lambourde/i.test(title)
 // Exterior panels: packaged 4/box → ceil(qty/4) slots
 const isExtPanel = (title: string) => /extpanel|ext[_\s-]?panel/i.test(title)
 // Akupanel 60 (60×60 cm): 2 panels = 1 slot → ceil(qty/2) slots
@@ -444,7 +448,9 @@ export async function GET() {
         is_preorder,
         is_b2b,
         is_leroy,
-        is_accessory_only: panel_count === 0,
+        // La Poste = 0 panneau ET aucun accessoire encombrant (tasseau/profilé…).
+        // Un tasseau seul (ex. reliquat #10573) doit rester en tournée, pas La Poste.
+        is_accessory_only: panel_count === 0 && !panel_details.some((p) => isBulkyAccessory(p.title)),
         needs_replan:      replanOrderNames.has(order.name),
         address1:          addr?.address1 ?? '',
         address2:          addr?.address2 ?? '',
