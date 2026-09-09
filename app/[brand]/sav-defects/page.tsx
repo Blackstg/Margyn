@@ -616,7 +616,7 @@ function NewClaimForm({ brand, activeBatchLabel, onClose, onCreated }: { brand: 
       // Messages précis (avant : un seul message générique qui laissait croire
       // que l'order n'était pas rempli alors que seul l'article reçu manquait).
       if (!form.shopify_order_id) { setError('Look up the order first (order number field at the top).'); return }
-      if (!form.received_sku)     { setError('Select the WRONGLY RECEIVED item in the catalogue dropdown (currently “— Select —”).'); return }
+      if (!form.received_sku)     { setError('Select the WRONGLY RECEIVED item in the catalogue dropdown. — If the customer simply did NOT receive their order (nothing wrong received), use the “Incomplete” tab instead.'); return }
     }
     if (type === 'livraison_incomplete') {
       const chosen = Object.keys(missingSel).map(Number)
