@@ -612,8 +612,11 @@ function NewClaimForm({ brand, activeBatchLabel, onClose, onCreated }: { brand: 
   }
 
   async function submit() {
-    if (type === 'erreur_envoi' && (!form.shopify_order_id || !form.received_sku)) {
-      setError('Please fill in the order and the wrongly received item.'); return
+    if (type === 'erreur_envoi') {
+      // Messages précis (avant : un seul message générique qui laissait croire
+      // que l'order n'était pas rempli alors que seul l'article reçu manquait).
+      if (!form.shopify_order_id) { setError('Look up the order first (order number field at the top).'); return }
+      if (!form.received_sku)     { setError('Select the WRONGLY RECEIVED item in the catalogue dropdown (currently “— Select —”).'); return }
     }
     if (type === 'livraison_incomplete') {
       const chosen = Object.keys(missingSel).map(Number)
