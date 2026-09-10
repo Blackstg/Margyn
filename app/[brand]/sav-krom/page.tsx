@@ -652,8 +652,8 @@ export default function SavKromPage() {
   ), [])
 
   // ── Load thread list ────────────────────────────────────────────────────
-  const load = useCallback(async () => {
-    setListLoading(true)
+  const load = useCallback(async (silent = false) => {
+    if (!silent) setListLoading(true)
     setListError(null)
     try {
       const res  = await fetch('/api/sav-krom/emails')
@@ -674,11 +674,26 @@ export default function SavKromPage() {
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Erreur réseau'
       setListError(msg)
-    } finally { setListLoading(false) }
+    } finally { if (!silent) setListLoading(false) }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   useEffect(() => { load() }, [load])
+
+  // Rafraîchissement auto (comme le SAV Moom/Bowa) : re-fetch silencieux toutes
+  // les 60 s + au retour sur l'onglet, pour que les nouveaux mails apparaissent
+  // sans rechargement manuel.
+  useEffect(() => {
+    const tick = () => { if (!document.hidden) load(true) }
+    const id = setInterval(tick, 60_000)
+    window.addEventListener('focus', tick)
+    document.addEventListener('visibilitychange', tick)
+    return () => {
+      clearInterval(id)
+      window.removeEventListener('focus', tick)
+      document.removeEventListener('visibilitychange', tick)
+    }
+  }, [load])
 
   // ── Access control — redirect if not allowed ────────────────────────────
   useEffect(() => {
@@ -803,7 +818,7 @@ export default function SavKromPage() {
                 <Settings size={12} strokeWidth={1.8} /> Règles
               </button>
               <button
-                onClick={load} disabled={listLoading}
+                onClick={() => load()} disabled={listLoading}
                 className="w-7 h-7 rounded-lg flex items-center justify-center text-[#6b6b63] hover:bg-[#eeede9] transition-colors disabled:opacity-40"
                 title="Actualiser"
               >
