@@ -174,8 +174,7 @@ function isSageFemme(subject: string, description: string): boolean {
 // auto (on ne route surtout PAS vers la boîte d'une autre marque).
 const PARTNERSHIP_ROUTING: Record<SavBrand, { from: string; to: string; label: string } | null> = {
   moom: { from: 'Mōom SAV <sav@moom-paris.co>', to: 'pauline@moom-paris.co', label: 'Mōom' },
-  // Bowa : destinataire (Clémence ?) à confirmer — désactivé pour ne plus envoyer à Pauline (Moom).
-  bowa: null,
+  bowa: { from: 'Bowa SAV <notifications@notifications.bowa-concept.com>', to: 'clemence@bowa-concept.com', label: 'Bowa' },
 }
 
 // Tag Zendesk d'idempotence : une fois le transfert fait, on ne le refait pas
