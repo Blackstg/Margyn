@@ -2221,8 +2221,8 @@ export default function SavPage() {
   }
 
   // ── Fast list load (no AI) ────────────────────────────────────────────────
-  const load = useCallback(async () => {
-    setListLoading(true)
+  const load = useCallback(async (silent = false) => {
+    if (!silent) setListLoading(true)
     try {
       const res  = await savFetch('/api/sav/tickets')
       const data = await savJson<{ tickets?: RawTicket[]; error?: string }>(res, 'La liste des tickets')
@@ -2261,11 +2261,27 @@ export default function SavPage() {
           rest.slice(0, 2).forEach(t => processTicket(t))
         }
       }
-    } finally { setListLoading(false) }
+    } finally { if (!silent) setListLoading(false) }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   useEffect(() => { load() }, [load])
+
+  // ── Rafraîchissement auto de la liste ─────────────────────────────────────
+  // La page reste souvent ouverte toute la journée (suivi du temps par heartbeat).
+  // Sans ça, les tickets reçus après l'ouverture n'apparaissent qu'au rechargement
+  // manuel. On re-fetch en silence toutes les 60 s + au retour sur l'onglet.
+  useEffect(() => {
+    const tick = () => { if (!document.hidden) load(true) }
+    const id = setInterval(tick, 60_000)
+    window.addEventListener('focus', tick)
+    document.addEventListener('visibilitychange', tick)
+    return () => {
+      clearInterval(id)
+      window.removeEventListener('focus', tick)
+      document.removeEventListener('visibilitychange', tick)
+    }
+  }, [load])
 
   // ── Attributions des tickets (qui répond : agents SAV) ────────────────
   useEffect(() => {
@@ -2588,7 +2604,7 @@ export default function SavPage() {
                 Nouveau
               </button>
               <button
-                onClick={load} disabled={listLoading}
+                onClick={() => load()} disabled={listLoading}
                 className="w-7 h-7 rounded-lg flex items-center justify-center text-[#6b6b63] hover:bg-[#eeede9] transition-colors disabled:opacity-40"
                 title="Actualiser"
               >
