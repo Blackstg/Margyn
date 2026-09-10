@@ -283,6 +283,18 @@ export async function addInternalNote(ticketId: number, body: string, brand: Sav
 }
 
 // Adds one or more tags to a ticket (fire-and-forget safe)
+// Lit les tags d'un ticket — sert à l'idempotence (ne pas refaire une action déjà faite).
+export async function ticketHasTag(ticketId: number, tag: string, brand: SavBrand = 'moom'): Promise<boolean> {
+  const res = await fetchWithRetry(
+    `${base(brand)}/tickets/${ticketId}.json`,
+    { headers: authHeaders(brand), cache: 'no-store' },
+    3, 1000,
+  )
+  if (!res.ok) return false
+  const { ticket } = await res.json() as { ticket: ZendeskTicket }
+  return (ticket.tags ?? []).includes(tag)
+}
+
 export async function tagTicket(ticketId: number, tags: string[], brand: SavBrand = 'moom'): Promise<void> {
   const getRes = await fetchWithRetry(
     `${base(brand)}/tickets/${ticketId}.json`,

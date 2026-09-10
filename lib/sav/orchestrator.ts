@@ -4,7 +4,7 @@
 //   - Semi-auto (default): classify + draft reply, return for human validation
 //   - Auto: classify + draft + post reply immediately (for high-confidence auto_reply)
 
-import { getNewTickets, getRequesterEmail, postReply, escalateTicket, tagTicket, getTicketComments } from './zendesk'
+import { getNewTickets, getRequesterEmail, postReply, escalateTicket, tagTicket, ticketHasTag, getTicketComments } from './zendesk'
 import type { SavBrand } from './zendesk'
 import { getMostRecentOrder } from './shopify'
 import { classifyTicket, generateReply, detectPhishing } from './classifier'
@@ -170,26 +170,54 @@ function isSageFemme(subject: string, description: string): boolean {
 // Forwards partnership requests to Pauline via Resend (same provider used for
 // delivery emails). Fire-and-forget — failure is logged but does not block.
 
+// Destinataire du transfert partenariat, PAR MARQUE. `null` = pas de transfert
+// auto (on ne route surtout PAS vers la boîte d'une autre marque).
+const PARTNERSHIP_ROUTING: Record<SavBrand, { from: string; to: string; label: string } | null> = {
+  moom: { from: 'Mōom SAV <sav@moom-paris.co>', to: 'pauline@moom-paris.co', label: 'Mōom' },
+  // Bowa : destinataire (Clémence ?) à confirmer — désactivé pour ne plus envoyer à Pauline (Moom).
+  bowa: null,
+}
+
+// Tag Zendesk d'idempotence : une fois le transfert fait, on ne le refait pas
+// même si l'agent ré-ouvre le ticket (l'envoi vit dans processOneTicket).
+const PARTNERSHIP_TAG = 'partenariat_transmis'
+
 async function sendPartnershipEmail(
+  brand:       SavBrand,
+  ticketId:    number,
   subject:     string,
   description: string,
   fromEmail:   string,
 ): Promise<boolean> {
+  const route = PARTNERSHIP_ROUTING[brand]
+  if (!route) {
+    console.log(`[SAV] #${ticketId} partenariat ${brand} — aucun destinataire configuré, transfert ignoré`)
+    return false
+  }
+
   const apiKey = process.env.RESEND_API_KEY
   if (!apiKey) {
     console.warn('[SAV] RESEND_API_KEY not set — partnership email skipped')
     return false
   }
 
+  // Idempotence : déjà transmis ? on ne renvoie pas.
+  try {
+    if (await ticketHasTag(ticketId, PARTNERSHIP_TAG, brand)) {
+      console.log(`[SAV] #${ticketId} partenariat déjà transmis (tag présent) — envoi ignoré`)
+      return true
+    }
+  } catch { /* lecture tags échouée → on continue, best-effort */ }
+
   const emailSubject = `Demande partenariat à étudier — ${subject}`
   const emailHtml = `
 <div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;padding:24px">
   <h2 style="color:#1a1a2e;margin-bottom:4px">Nouvelle demande de partenariat</h2>
-  <p style="color:#6b6b63;margin-top:0">Reçue via Zendesk SAV — expéditeur : <strong>${fromEmail}</strong></p>
+  <p style="color:#6b6b63;margin-top:0">Reçue via Zendesk SAV ${route.label} — expéditeur : <strong>${fromEmail}</strong></p>
   <hr style="border:none;border-top:1px solid #e8e8e4;margin:16px 0">
   <p style="color:#1a1a2e;white-space:pre-wrap;line-height:1.6">${description.replace(/</g, '&lt;').replace(/>/g, '&gt;')}</p>
   <hr style="border:none;border-top:1px solid #e8e8e4;margin:16px 0">
-  <p style="color:#9b9b93;font-size:12px">Envoyé automatiquement par Steero · SAV Mōom</p>
+  <p style="color:#9b9b93;font-size:12px">Envoyé automatiquement par Steero · SAV ${route.label}</p>
 </div>`
 
   const res = await fetch('https://api.resend.com/emails', {
@@ -199,8 +227,8 @@ async function sendPartnershipEmail(
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({
-      from:    'sav@moom-paris.co',
-      to:      'pauline@moom-paris.co',
+      from:    route.from,
+      to:      route.to,
       reply_to: fromEmail,
       subject: emailSubject,
       html:    emailHtml,
@@ -212,7 +240,10 @@ async function sendPartnershipEmail(
     return false
   }
 
-  console.log(`[SAV] Partnership email sent for ticket "${subject}"`)
+  // Marque le ticket comme transmis (idempotence) — best-effort.
+  try { await tagTicket(ticketId, [PARTNERSHIP_TAG], brand) } catch { /* non bloquant */ }
+
+  console.log(`[SAV] Partnership email sent (${brand} → ${route.to}) for ticket "${subject}"`)
   return true
 }
 
@@ -346,7 +377,7 @@ export async function processOneTicket(
     if (isSageFemme(subject, description)) {
       console.log(`[SAV] #${ticketId} partenariat sage-femme — pas de transfert Pauline`)
     } else {
-      partnershipEmailSent = await sendPartnershipEmail(subject, description, email).catch((err) => {
+      partnershipEmailSent = await sendPartnershipEmail(brand, ticketId, subject, description, email).catch((err) => {
         console.error(`[SAV] #${ticketId} partnership email error:`, err)
         return false
       })
