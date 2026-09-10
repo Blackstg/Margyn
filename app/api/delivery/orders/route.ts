@@ -254,9 +254,10 @@ export async function GET() {
           .neq('status', 'failed')
           .neq('status', 'partial'),
 
-        // Failed stops → needs replan
+        // Failed stops → needs replan (panel_details pour juger si le reliquat
+        // nécessite le camion : panneau/accessoire long vs simple colle/vis)
         admin.from('delivery_stops')
-          .select('order_name')
+          .select('order_name, panel_details')
           .eq('status', 'failed'),
 
         // Bug 2 fix (Supabase side): delivered stops with their panel_details so we
@@ -292,9 +293,24 @@ export async function GET() {
     // PAS dans le lot Shopify (qui ne prend que unfulfilled/partial) → son reliquat
     // disparaissait. On récupère explicitement ces commandes (status=any) : le
     // reliquat se recalcule ensuite via current_quantity − quantités livrées (Steero).
+    // Un reliquat ne justifie une réapparition (via status=any) QUE s'il contient un
+    // panneau ou un accessoire LONG (tasseau…). Un reliquat de simple colle/vis ne
+    // doit pas ressortir des mois plus tard (ex. #10264 juin : seule la colle non
+    // livrée alors que la commande est expédiée sur Shopify).
+    const needsTruck = (title: string) => isPanel(title) || isBulkyAccessory(title)
+    const replanNeedsTruck = new Set<string>()
+    for (const s of (failedStops ?? []) as { order_name: string; panel_details?: { title?: string }[] }[]) {
+      if ((s.panel_details ?? []).some((p) => needsTruck(p.title ?? ''))) replanNeedsTruck.add(s.order_name)
+    }
+    for (const s of (partialStops ?? []) as { order_name: string; partial_delivered?: { title?: string; qty_ordered?: number; qty_delivered?: number }[] }[]) {
+      const undelivered = (s.partial_delivered ?? []).filter((p) => (p.qty_ordered ?? 0) > (p.qty_delivered ?? 0))
+      if (undelivered.some((p) => needsTruck(p.title ?? ''))) replanNeedsTruck.add(s.order_name)
+    }
+
     let allOrders = allOrdersInit
     const fetchedNames = new Set(allOrders.map(o => o.name))
-    const missingReplan = [...replanOrderNames].filter(n => !fetchedNames.has(n))
+    // Seuls les reliquats « camion » sont re-récupérés s'ils manquent (fulfilled Shopify).
+    const missingReplan = [...replanOrderNames].filter(n => !fetchedNames.has(n) && replanNeedsTruck.has(n))
     if (missingReplan.length) {
       const extra = await Promise.all(missingReplan.map(async (name) => {
         const num = String(name).replace(/^#/, '')
