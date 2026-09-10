@@ -239,7 +239,7 @@ export async function GET() {
 
     // Parallel: Shopify orders + Supabase stop data
     const admin = getAdmin()
-    const [allOrders, { data: assignedStops }, { data: failedStops }, { data: deliveredStops }, { data: partialStops }] =
+    const [allOrdersInit, { data: assignedStops }, { data: failedStops }, { data: deliveredStops }, { data: partialStops }] =
       await Promise.all([
         fetchShopifyOrders(shop, token),
 
@@ -275,7 +275,7 @@ export async function GET() {
           .eq('status', 'partial'),
       ])
 
-    console.log(`[delivery/orders] Shopify: ${allOrders.length} orders fetched`)
+    console.log(`[delivery/orders] Shopify: ${allOrdersInit.length} orders fetched`)
 
     // Build sets for quick lookup
     const assignedOrderNames = new Set(
@@ -286,6 +286,28 @@ export async function GET() {
       ...(failedStops  ?? []).map((s: { order_name: string }) => s.order_name),
       ...(partialStops ?? []).map((s: { order_name: string }) => s.order_name),
     ])
+
+    // Une commande partielle/échouée peut avoir été marquée « fulfilled » côté
+    // Shopify (ex. #10547 : tasseau non livré mais commande fulfilled) → elle n'est
+    // PAS dans le lot Shopify (qui ne prend que unfulfilled/partial) → son reliquat
+    // disparaissait. On récupère explicitement ces commandes (status=any) : le
+    // reliquat se recalcule ensuite via current_quantity − quantités livrées (Steero).
+    let allOrders = allOrdersInit
+    const fetchedNames = new Set(allOrders.map(o => o.name))
+    const missingReplan = [...replanOrderNames].filter(n => !fetchedNames.has(n))
+    if (missingReplan.length) {
+      const extra = await Promise.all(missingReplan.map(async (name) => {
+        const num = String(name).replace(/^#/, '')
+        const res = await fetch(
+          `https://${shop}/admin/api/2024-01/orders.json?status=any&name=${encodeURIComponent('#' + num)}&fields=id,name,email,phone,created_at,tags,shipping_address,billing_address,customer,line_items,fulfillments,cancelled_at`,
+          { headers: { 'X-Shopify-Access-Token': token }, cache: 'no-store' },
+        ).catch(() => null)
+        if (!res || !res.ok) return null
+        const o = (await res.json()).orders?.[0] ?? null
+        return o && !o.cancelled_at ? o as ShopifyOrder : null
+      }))
+      allOrders = allOrders.concat(extra.filter((o): o is ShopifyOrder => !!o))
+    }
 
     // Bug 2 fix: map of order_name → { item_key → delivered_qty }
     // item_key = sku if available, else title
