@@ -1,6 +1,9 @@
 import { NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 
+// Route de données live (Shopify/Supabase) — jamais de pré-génération statique au build.
+export const dynamic = 'force-dynamic'
+
 function getAdmin() {
   return createClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,

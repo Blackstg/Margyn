@@ -2,6 +2,8 @@ import { NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 
 export const maxDuration = 30
+// Route de données live — jamais de pré-génération statique au build.
+export const dynamic = 'force-dynamic'
 
 function getSupabase() {
   return createClient(
