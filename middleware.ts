@@ -51,7 +51,23 @@ export async function middleware(req: NextRequest) {
     }
   )
 
-  const { data: { user } } = await supabase.auth.getUser()
+  // Résilience panne Auth Supabase : getUser() appelle le service auth (réseau).
+  // Si ce service est lent/HS, on ne veut PAS faire tomber tout le site en 504.
+  // → timeout court, puis repli sur la session cookie (locale, sans réseau) pour
+  //   que les utilisateurs déjà connectés continuent de travailler pendant la panne.
+  const withTimeout = <T>(p: Promise<T>, ms: number): Promise<T> =>
+    Promise.race([p, new Promise<T>((_, reject) => setTimeout(() => reject(new Error('auth timeout')), ms))])
+
+  let user: Awaited<ReturnType<typeof supabase.auth.getUser>>['data']['user'] = null
+  try {
+    const { data } = await withTimeout(supabase.auth.getUser(), 3000)
+    user = data.user
+  } catch {
+    try {
+      const { data } = await withTimeout(supabase.auth.getSession(), 1500)
+      user = data.session?.user ?? null
+    } catch { user = null }
+  }
 
   // ── Not authenticated ──────────────────────────────────────────────────────
   if (!user) {
