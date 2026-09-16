@@ -763,6 +763,78 @@ function ConversationThread({ ticket, refreshKey }: { ticket: ProcessedTicket; r
   )
 }
 
+// ── Preuve de livraison (Bowa) ────────────────────────────────────────────────
+// Remonte, dans le SAV, la livraison correspondant au client (date+heure signée
+// par le livreur + signature + photo) pour traiter les plaintes.
+type DeliveryStopProof = {
+  order_name: string | null; customer_name: string | null; delivered_at: string | null
+  status: string | null; signature_url: string | null; photo_url: string | null
+  address1: string | null; zip: string | null; city: string | null; comment: string | null
+}
+const DELIVERY_STATUS: Record<string, { label: string; cls: string }> = {
+  delivered: { label: 'Livré ✓',        cls: 'bg-[#dcf5e7] text-[#1a7f4b]' },
+  partial:   { label: 'Partiel',        cls: 'bg-[#fef3c7] text-[#b45309]' },
+  failed:    { label: 'Échec livraison', cls: 'bg-[#fce8ea] text-[#c7293a]' },
+}
+function BowaDeliveryProof({ email }: { email: string }) {
+  const [stops, setStops] = useState<DeliveryStopProof[] | null>(null)
+  useEffect(() => {
+    if (savBrand() !== 'bowa' || !email) { setStops(null); return }
+    let cancelled = false
+    fetch(`/api/sav/delivery-proof?email=${encodeURIComponent(email)}`, { cache: 'no-store' })
+      .then(r => r.json())
+      .then(d => { if (!cancelled) setStops(d.stops ?? []) })
+      .catch(() => { if (!cancelled) setStops([]) })
+    return () => { cancelled = true }
+  }, [email])
+
+  if (savBrand() !== 'bowa' || !stops || stops.length === 0) return null
+
+  const fmt = (iso: string | null) => iso
+    ? new Date(iso).toLocaleString('fr-FR', { day: '2-digit', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Paris' })
+    : '—'
+
+  return (
+    <div>
+      <p className="text-[10px] font-semibold uppercase tracking-[0.1em] text-[#aeb0c9] mb-3">Livraison (preuve)</p>
+      <div className="space-y-3">
+        {stops.map((s, i) => {
+          const st = DELIVERY_STATUS[s.status ?? ''] ?? { label: s.status ?? 'En attente', cls: 'bg-[#eeede9] text-[#6b6b63]' }
+          return (
+            <div key={i} className="rounded-xl border border-[#e8e8e4] bg-white px-4 py-3">
+              <div className="flex items-center gap-2 flex-wrap mb-1.5">
+                <span className={`inline-flex px-2 py-0.5 rounded-full text-[10px] font-semibold ${st.cls}`}>{st.label}</span>
+                {s.order_name && <span className="font-mono text-xs text-[#6b6b63]">{s.order_name}</span>}
+              </div>
+              {s.delivered_at && <p className="text-sm text-[#1a1a2e]"><span className="text-[#9b9b93]">📅 </span>{fmt(s.delivered_at)}</p>}
+              {(s.address1 || s.city) && <p className="text-xs text-[#6b6b63] mt-0.5">{[s.address1, s.zip, s.city].filter(Boolean).join(' · ')}</p>}
+              {s.comment && <p className="text-xs text-[#8a6d1f] mt-1">🗒 {s.comment}</p>}
+              {(s.signature_url || s.photo_url) && (
+                <div className="flex gap-3 mt-2 flex-wrap">
+                  {s.signature_url && (
+                    <a href={s.signature_url} target="_blank" rel="noreferrer">
+                      <span className="block text-[10px] text-[#9b9b93] mb-1">Signature</span>
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img src={s.signature_url} alt="Signature" className="h-20 rounded-lg border border-[#e8e8e4] bg-white object-contain" />
+                    </a>
+                  )}
+                  {s.photo_url && (
+                    <a href={s.photo_url} target="_blank" rel="noreferrer">
+                      <span className="block text-[10px] text-[#9b9b93] mb-1">Photo</span>
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img src={s.photo_url} alt="Photo livraison" className="h-20 rounded-lg border border-[#e8e8e4] object-cover" />
+                    </a>
+                  )}
+                </div>
+              )}
+            </div>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
 function TicketDetail({ ticket, refreshKey }: { ticket: ProcessedTicket; refreshKey: number }) {
   return (
     <div className="flex flex-col h-full overflow-hidden">
@@ -818,6 +890,9 @@ function TicketDetail({ ticket, refreshKey }: { ticket: ProcessedTicket; refresh
           </p>
           <ConversationThread ticket={ticket} refreshKey={refreshKey} />
         </div>
+
+        {/* Preuve de livraison (Bowa) */}
+        <BowaDeliveryProof email={ticket.customer_email} />
 
         {/* Order */}
         {ticket.order && (
