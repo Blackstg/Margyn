@@ -121,8 +121,8 @@ export default function ReconciliationPage() {
   }
 
   async function handleLogout() {
-    await supabase.auth.signOut()
-    router.push('/login')
+    try { await supabase.auth.signOut({ scope: 'local' }) } catch { /* on déconnecte quand même */ }
+    window.location.href = '/login'
   }
 
   if (submitted) {

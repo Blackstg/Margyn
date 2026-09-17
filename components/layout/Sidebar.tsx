@@ -160,9 +160,11 @@ export default function Sidebar({ isOpen, collapsed, onToggleCollapse }: Sidebar
   }, [pathname])
 
   async function handleLogout() {
-    await supabase.auth.signOut()
-    router.push('/login')
-    router.refresh()
+    // scope:'local' vide la session côté client SANS appel réseau au service auth
+    // (sinon, si l'auth est lente/HS, le bouton reste bloqué). Puis redirection
+    // dure pour repartir sur un état propre quoi qu'il arrive.
+    try { await supabase.auth.signOut({ scope: 'local' }) } catch { /* on déconnecte quand même */ }
+    window.location.href = '/login'
   }
 
   if (!isOpen) return null
