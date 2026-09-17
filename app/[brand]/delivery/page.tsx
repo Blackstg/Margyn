@@ -2777,6 +2777,8 @@ function LivreurView() {
   // ── GPS tracking (auto au chargement + bandeau d'activation si refusé/iOS) ──
   const driverNameRef  = useRef<string>('')
   const geoIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const geoWatchRef    = useRef<number | null>(null)
+  const geoLastPostRef = useRef<number>(0)
   const [geoNeedsEnable, setGeoNeedsEnable] = useState(false)
 
   const sendPos = useCallback(async (): Promise<boolean> => {
@@ -2805,9 +2807,23 @@ function LivreurView() {
   }, [])
 
   const startTracking = useCallback(() => {
-    if (geoIntervalRef.current) return
-    sendPos()
-    geoIntervalRef.current = setInterval(() => sendPos(), 5 * 60 * 1000)
+    if (geoIntervalRef.current || geoWatchRef.current != null) return
+    geoLastPostRef.current = 0
+    sendPos().then(() => { geoLastPostRef.current = Date.now() })
+    // watchPosition : mises à jour pilotées par l'OS (sur mouvement), plus fiables
+    // qu'un setInterval tant que l'app est au 1er plan. On limite l'enregistrement
+    // à 1 point / 60 s pour ne pas saturer.
+    if (navigator.geolocation.watchPosition) {
+      geoWatchRef.current = navigator.geolocation.watchPosition(
+        () => { if (Date.now() - geoLastPostRef.current > 60_000) { geoLastPostRef.current = Date.now(); sendPos() } },
+        () => { /* silencieux : le filet setInterval prend le relais */ },
+        { enableHighAccuracy: true, maximumAge: 30_000, timeout: 20_000 },
+      )
+    }
+    // Filet de sécurité : flush toutes les 2 min même sans événement watch.
+    geoIntervalRef.current = setInterval(() => {
+      if (Date.now() - geoLastPostRef.current > 90_000) { geoLastPostRef.current = Date.now(); sendPos() }
+    }, 2 * 60 * 1000)
   }, [sendPos])
 
   // Appelé par le bandeau : le tap fournit le geste utilisateur (popup fiable, iOS inclus)
@@ -2855,7 +2871,11 @@ function LivreurView() {
         if (ok && !cancelled) { setGeoNeedsEnable(false); startTracking() }
       }
     })
-    return () => { cancelled = true; if (geoIntervalRef.current) { clearInterval(geoIntervalRef.current); geoIntervalRef.current = null } }
+    return () => {
+      cancelled = true
+      if (geoIntervalRef.current) { clearInterval(geoIntervalRef.current); geoIntervalRef.current = null }
+      if (geoWatchRef.current != null) { navigator.geolocation.clearWatch(geoWatchRef.current); geoWatchRef.current = null }
+    }
   }, [sendPos, startTracking])
   const [screen, setScreen] = useState<LivreurScreen>('home')
   const [stopIdx, setStopIdx] = useState(0)
@@ -3323,6 +3343,9 @@ function LivreurView() {
     photo_url?: string
   } = {}): Promise<boolean> {
     if (!currentStop) return false
+    // Capture GPS au moment EXACT du « livré » (app au 1er plan → position fiable) :
+    // permet de vérifier a posteriori que le livreur était bien sur place.
+    void sendPos()
     setMarking(true)
     try {
       const res = await fetch(`/api/delivery/stops/${currentStop.id}`, {
@@ -3449,6 +3472,7 @@ function LivreurView() {
 
   async function handleMarkPartial() {
     if (!currentStop) return
+    void sendPos()   // position au moment du marquage (preuve de présence)
     setMarkingPartial(true)
     const items = currentStop.panel_details ?? []
     const partial_delivered = items.map((item, i) => ({
@@ -3483,6 +3507,7 @@ function LivreurView() {
 
   async function handleMarkFailed(comment: string) {
     if (!currentStop) return
+    void sendPos()   // position au moment du marquage (preuve de présence)
     setMarking(true)
     await fetch(`/api/delivery/stops/${currentStop.id}`, {
       method: 'PATCH',
@@ -4235,6 +4260,7 @@ function LivreurView() {
           fetchNearbyOrders()
         }}
         onMarkDelivered={async (stopId, comment) => {
+          void sendPos()   // position au moment du marquage (preuve de présence)
           await fetch(`/api/delivery/stops/${stopId}`, {
             method: 'PATCH',
             headers: { 'Content-Type': 'application/json' },
@@ -4243,6 +4269,7 @@ function LivreurView() {
           await fetchTours()
         }}
         onMarkFailed={async (stopId, comment) => {
+          void sendPos()   // position au moment du marquage (preuve de présence)
           await fetch(`/api/delivery/stops/${stopId}`, {
             method: 'PATCH',
             headers: { 'Content-Type': 'application/json' },
