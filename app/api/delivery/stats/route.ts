@@ -206,7 +206,7 @@ export async function GET(req: NextRequest) {
         status:        string
         delivered_at:  string | null
         panel_count:   number
-        panel_details?: { title?: string; qty?: number }[]
+        panel_details?: { title?: string; qty?: number; sku?: string; variant_title?: string }[]
         partial_delivered?: { title?: string; sku?: string; qty_ordered?: number; qty_delivered?: number }[]
       }[]
 
@@ -217,13 +217,22 @@ export async function GET(req: NextRequest) {
       const stopEvents: StopEvent[] = stops.map(s => {
         const details = s.panel_details ?? []
         const panels  = details.length > 0 ? computePanelCount(details) : (s.panel_count ?? 0)
-        // Partiel : liste ce qui N'A PAS été livré (qty_ordered − qty_delivered)
+        // Partiel : liste ce qui N'A PAS été livré (qty_ordered − qty_delivered).
+        // On ajoute la VARIANTE (couleur/taille), récupérée dans panel_details via le
+        // SKU, sinon deux variantes du même produit s'affichent à l'identique.
         let missing: string | undefined
         if (s.status === 'partial') {
+          const variantBySku = new Map((s.panel_details ?? []).map(p => [p.sku, p.variant_title]))
           const notDelivered = (s.partial_delivered ?? [])
-            .map(p => ({ title: p.title ?? p.sku ?? 'Article', qty: (p.qty_ordered ?? 0) - (p.qty_delivered ?? 0) }))
+            .map(p => {
+              const variant = variantBySku.get(p.sku)
+              const label = variant && variant !== 'Default Title'
+                ? `${p.title ?? p.sku ?? 'Article'} — ${variant}`
+                : (p.title ?? p.sku ?? 'Article')
+              return { label, qty: (p.qty_ordered ?? 0) - (p.qty_delivered ?? 0) }
+            })
             .filter(p => p.qty > 0)
-          if (notDelivered.length) missing = notDelivered.map(p => `${p.title} ×${p.qty}`).join(', ')
+          if (notDelivered.length) missing = notDelivered.map(p => `${p.label} ×${p.qty}`).join(', ')
         }
         return {
           sequence:      s.sequence ?? 0,
