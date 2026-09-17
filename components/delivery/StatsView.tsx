@@ -85,10 +85,16 @@ function StopLine({ stop, showTime = true }: { stop: StopEvent; showTime?: boole
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2 flex-wrap">
           {showTime && stop.delivered_at && (
-            <span className="text-[10px] font-mono text-[#9b9b93] shrink-0">{fmtTime(stop.delivered_at)}</span>
+            <span className="text-[10px] font-mono shrink-0" style={{ color: stop.time_suspect ? '#b45309' : '#9b9b93' }}>{fmtTime(stop.delivered_at)}</span>
           )}
           <span className="text-xs font-semibold text-[#1a1a2e] truncate">{stop.customer_name || stop.order_name}</span>
           {stop.city && <span className="text-[10px] text-[#9b9b93] shrink-0">— {stop.city}</span>}
+          {stop.time_suspect && (
+            <span className="text-[9px] font-semibold px-1.5 py-0.5 rounded-md shrink-0" style={{ background: '#fff3cd', color: '#b45309' }}
+              title="Heure incohérente avec l'arrêt précédent (distance/temps impossible) — probablement pointé après coup">
+              ⚠ heure à vérifier
+            </span>
+          )}
         </div>
         <div className="flex items-center gap-2 mt-0.5 flex-wrap">
           <span className="text-[10px] text-[#9b9b93]">{stop.order_name}</span>

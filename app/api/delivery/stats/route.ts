@@ -39,6 +39,7 @@ export interface StopEvent {
   delivered_at:  string | null
   panels:        number
   missing?:      string    // articles NON livrés (partiel), ex. "Tasseau ×2, Colle ×1"
+  time_suspect?: boolean   // horodatage douteux : vitesse impossible depuis l'arrêt précédent (marquage a posteriori)
 }
 
 export interface DayActivity {
@@ -133,7 +134,7 @@ export async function GET(req: NextRequest) {
         started_at, completed_at, total_km,
         delivery_stops(
           sequence, order_name, customer_name, city,
-          status, delivered_at, panel_count, panel_details, partial_delivered
+          status, delivered_at, panel_count, panel_details, partial_delivered, lat, lng
         )
       `)
       .eq('brand', 'bowa')
@@ -206,6 +207,8 @@ export async function GET(req: NextRequest) {
         status:        string
         delivered_at:  string | null
         panel_count:   number
+        lat:           number | null
+        lng:           number | null
         panel_details?: { title?: string; qty?: number; sku?: string; variant_title?: string }[]
         partial_delivered?: { title?: string; sku?: string; qty_ordered?: number; qty_delivered?: number }[]
       }[]
@@ -245,6 +248,29 @@ export async function GET(req: NextRequest) {
           missing,
         }
       })
+
+      // ── Horodatage douteux (marquage a posteriori) ──────────────────────────
+      // Si deux arrêts pointés « livré » à la suite impliquent une vitesse
+      // physiquement impossible (ex. Benquet→Vendée, ~350 km en 26 min ⇒ 800 km/h),
+      // c'est que le livreur a pointé les livraisons APRÈS coup → l'heure n'est pas
+      // fiable. On flague l'arrêt concerné (⚠) sans supposer de mauvaise foi.
+      const coordByName = new Map(stops.map(s => [s.order_name, { lat: s.lat, lng: s.lng }]))
+      const timed = stopEvents
+        .filter(e => (e.status === 'delivered' || e.status === 'partial') && e.delivered_at)
+        .sort((a, b) => (a.delivered_at! < b.delivered_at! ? -1 : 1))
+      const haversineKm = (a: {lat:number;lng:number}, b: {lat:number;lng:number}) => {
+        const R = 6371, dLat = (b.lat-a.lat)*Math.PI/180, dLng = (b.lng-a.lng)*Math.PI/180
+        const h = Math.sin(dLat/2)**2 + Math.cos(a.lat*Math.PI/180)*Math.cos(b.lat*Math.PI/180)*Math.sin(dLng/2)**2
+        return R * 2 * Math.atan2(Math.sqrt(h), Math.sqrt(1-h))
+      }
+      for (let i = 1; i < timed.length; i++) {
+        const prev = coordByName.get(timed[i-1].order_name), cur = coordByName.get(timed[i].order_name)
+        if (!prev?.lat || !prev?.lng || !cur?.lat || !cur?.lng) continue
+        const km = haversineKm({lat:prev.lat,lng:prev.lng}, {lat:cur.lat,lng:cur.lng})
+        const hours = (new Date(timed[i].delivered_at!).getTime() - new Date(timed[i-1].delivered_at!).getTime()) / 3_600_000
+        // vitesse implicite ; on ignore les micro-distances (bruit GPS < 8 km)
+        if (km > 8 && hours > 0 && km / hours > 120) timed[i].time_suspect = true
+      }
 
       // Group deliveries by Paris calendar day
       const dayMap = new Map<string, StopEvent[]>()
