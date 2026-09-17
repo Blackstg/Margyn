@@ -38,9 +38,11 @@ function fmt(d: Date): string {
 }
 
 function getYesterday(): string {
-  const d = new Date()
-  d.setDate(d.getDate() - 1)
-  return fmt(d)
+  // « Hier » en heure de Paris (les snapshots sont datés en heure de Paris),
+  // indépendamment du fuseau de l'appareil — sinon décalage d'un jour possible.
+  const parisNow = new Date(new Date().toLocaleString('en-US', { timeZone: 'Europe/Paris' }))
+  parisNow.setDate(parisNow.getDate() - 1)
+  return fmt(parisNow)
 }
 
 function getMonthRange(ym: string): { from: string; to: string; prevFrom: string; prevTo: string; days: number } {
