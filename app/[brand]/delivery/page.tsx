@@ -3750,6 +3750,21 @@ function LivreurView() {
     return (
       <div className="w-full px-4 py-4 space-y-4" style={{ paddingBottom: 'calc(76px + env(safe-area-inset-bottom))' }}>
 
+        {/* En-tête livreur : nom + déconnexion */}
+        <div className="flex items-center justify-between gap-2">
+          <p className="text-sm font-semibold text-[#1a1a2e] truncate">{driverNameRef.current || 'Livreur'}</p>
+          <button
+            onClick={async () => {
+              const sb = createBrowserClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!)
+              try { await sb.auth.signOut({ scope: 'local' }) } catch { /* on déconnecte quand même */ }
+              window.location.href = '/login'
+            }}
+            className="shrink-0 inline-flex items-center text-xs font-medium text-[#6b6b63] px-3 py-1.5 rounded-full border border-[#e8e8e4] active:bg-[#f5f5f3]"
+          >
+            Déconnexion
+          </button>
+        </div>
+
         {/* Bandeau d'activation de la position (si non accordée / iOS) */}
         {geoNeedsEnable && (
           <button
