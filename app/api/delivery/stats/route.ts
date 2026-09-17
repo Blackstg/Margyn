@@ -326,7 +326,18 @@ export async function GET(req: NextRequest) {
 
       const delivered    = stopEvents.filter(s => s.status === 'delivered' || s.status === 'partial')
       const pendingStops = stopEvents.filter(s => s.status === 'pending')
-      const panels_delivered = delivered.reduce((s, e) => s + e.panels, 0)
+      // IMPORTANT : quand un mois est sélectionné, on ne compte QUE les panneaux
+      // réellement livrés CE mois-là. Sans ça, une tournée à cheval sur 2 mois
+      // (ex. « 31 août » terminée le 02/09 : 45 panneaux livrés en août + 49 en
+      // septembre) verrait ses 94 panneaux comptés en entier dans le mois où elle
+      // « déborde » → chiffres faux (ex. Enzo crédité en septembre de livraisons d'août).
+      const inSelectedMonth = (s: StopEvent) => {
+        if (!fromDate || !toDate) return true
+        if (!s.delivered_at) return false
+        return s.delivered_at >= `${fromDate}T00:00:00Z` && s.delivered_at < `${toDate}T00:00:00Z`
+      }
+      const deliveredInMonth = delivered.filter(inSelectedMonth)
+      const panels_delivered = deliveredInMonth.reduce((s, e) => s + e.panels, 0)
 
       const duration_ms =
         effStarted && effCompleted
@@ -343,8 +354,8 @@ export async function GET(req: NextRequest) {
         duration_ms,
         total_km:        tour.total_km ?? null,
         panels_delivered,
-        stops_delivered: stopEvents.filter(s => s.status === 'delivered').length,
-        stops_partial:   stopEvents.filter(s => s.status === 'partial').length,
+        stops_delivered: deliveredInMonth.filter(s => s.status === 'delivered').length,
+        stops_partial:   deliveredInMonth.filter(s => s.status === 'partial').length,
         stops_failed:    stopEvents.filter(s => s.status === 'failed').length,
         stops_pending:   pendingStops.length,
         stops_total:     stops.length,
