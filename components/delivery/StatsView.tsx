@@ -706,6 +706,17 @@ export default function StatsView() {
   const [loading, setLoading] = useState(true)
   const [month, setMonth]     = useState<string>('')
   const [tab, setTab]         = useState<'stats' | 'gps'>('stats')
+  // Liste des livreurs suivis en GPS : dynamique (tout compte livreur + noms de
+  // tournées) au lieu d'une liste figée → un nouveau livreur (Alexandre…) apparaît
+  // automatiquement. Repli sur la liste statique si l'API échoue.
+  const [gpsDrivers, setGpsDrivers] = useState<string[]>(GPS_DRIVERS)
+  useEffect(() => {
+    if (tab !== 'gps') return
+    fetch('/api/delivery/drivers', { cache: 'no-store' })
+      .then(r => r.json())
+      .then(d => { if (Array.isArray(d.drivers) && d.drivers.length) setGpsDrivers(d.drivers) })
+      .catch(() => { /* garde le repli statique */ })
+  }, [tab])
 
   // Default to current month
   useEffect(() => {
@@ -795,7 +806,7 @@ export default function StatsView() {
         {/* ── Onglet GPS ──────────────────────────────────────────────────── */}
         {tab === 'gps' && (
           <div className="space-y-4">
-            {GPS_DRIVERS.map(driver => (
+            {gpsDrivers.map(driver => (
               <div key={driver} className="bg-white border border-[#e8e8e4] rounded-[18px] p-5 shadow-sm">
                 <div className="flex items-center gap-3 mb-4">
                   <div className="w-9 h-9 rounded-[10px] bg-[#6366f1]/10 flex items-center justify-center">
