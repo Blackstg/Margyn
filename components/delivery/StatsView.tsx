@@ -98,6 +98,12 @@ function StopLine({ stop, showTime = true }: { stop: StopEvent; showTime?: boole
             </span>
           )}
         </div>
+        {/* Partiel : ce qui n'a PAS été livré */}
+        {stop.status === 'partial' && stop.missing && (
+          <div className="mt-0.5 text-[10px] font-medium" style={{ color: '#a16207' }}>
+            Non livré : {stop.missing}
+          </div>
+        )}
       </div>
     </div>
   )

@@ -38,6 +38,7 @@ export interface StopEvent {
   status:        string   // delivered | partial | failed | pending
   delivered_at:  string | null
   panels:        number
+  missing?:      string    // articles NON livrés (partiel), ex. "Tasseau ×2, Colle ×1"
 }
 
 export interface DayActivity {
@@ -132,7 +133,7 @@ export async function GET(req: NextRequest) {
         started_at, completed_at, total_km,
         delivery_stops(
           sequence, order_name, customer_name, city,
-          status, delivered_at, panel_count, panel_details
+          status, delivered_at, panel_count, panel_details, partial_delivered
         )
       `)
       .eq('brand', 'bowa')
@@ -206,6 +207,7 @@ export async function GET(req: NextRequest) {
         delivered_at:  string | null
         panel_count:   number
         panel_details?: { title?: string; qty?: number }[]
+        partial_delivered?: { title?: string; sku?: string; qty_ordered?: number; qty_delivered?: number }[]
       }[]
 
       // Sort stops by sequence
@@ -215,6 +217,14 @@ export async function GET(req: NextRequest) {
       const stopEvents: StopEvent[] = stops.map(s => {
         const details = s.panel_details ?? []
         const panels  = details.length > 0 ? computePanelCount(details) : (s.panel_count ?? 0)
+        // Partiel : liste ce qui N'A PAS été livré (qty_ordered − qty_delivered)
+        let missing: string | undefined
+        if (s.status === 'partial') {
+          const notDelivered = (s.partial_delivered ?? [])
+            .map(p => ({ title: p.title ?? p.sku ?? 'Article', qty: (p.qty_ordered ?? 0) - (p.qty_delivered ?? 0) }))
+            .filter(p => p.qty > 0)
+          if (notDelivered.length) missing = notDelivered.map(p => `${p.title} ×${p.qty}`).join(', ')
+        }
         return {
           sequence:      s.sequence ?? 0,
           order_name:    s.order_name,
@@ -223,6 +233,7 @@ export async function GET(req: NextRequest) {
           status:        s.status,
           delivered_at:  s.delivered_at ?? null,
           panels,
+          missing,
         }
       })
 
