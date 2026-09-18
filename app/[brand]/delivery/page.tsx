@@ -1445,7 +1445,20 @@ function PlanificateurView() {
             {(() => {
               const activeTours  = tours.filter(t => t.status !== 'completed' && t.status !== 'cancelled')
               const historyTours = tours.filter(t => t.status === 'completed' || t.status === 'cancelled')
-              const displayTours = showHistory ? historyTours : activeTours
+              const allDisplayTours = showHistory ? historyTours : activeTours
+              // Recherche : on n'affiche QUE les tournées qui contiennent la commande
+              // cherchée (et elles s'ouvrent automatiquement) → plus besoin de dérouler
+              // toutes les tournées pour retrouver où est un n° de commande.
+              const searchQ = tourSearch.trim().toLowerCase()
+              const stopMatchesSearch = (s: TourStop) =>
+                s.order_name.toLowerCase().includes(searchQ) ||
+                s.customer_name.toLowerCase().includes(searchQ) ||
+                s.city.toLowerCase().includes(searchQ) ||
+                (s.email ?? '').toLowerCase().includes(searchQ) ||
+                (s.zip ?? '').includes(searchQ)
+              const displayTours = searchQ
+                ? allDisplayTours.filter(t => t.stops.some(stopMatchesSearch))
+                : allDisplayTours
               // Calibration « minutes par arrêt » = rythme réel du livreur, mesuré
               // sur l'ÉCART entre deux livraisons consécutives des tournées TERMINÉES
               // (conduite + déchargement). On exclut les écarts < 3 min (arrêts
@@ -1474,12 +1487,15 @@ function PlanificateurView() {
                 <div className="text-center py-8 text-sm text-[#6b6b63]">Chargement...</div>
               ) : displayTours.length === 0 ? (
                 <div className="text-center py-8 text-sm text-[#6b6b63]">
-                  {showHistory ? 'Aucune tournée dans l\'historique' : 'Aucune tournée en cours'}
+                  {searchQ
+                    ? `Aucune commande « ${tourSearch.trim()} » dans les tournées ${showHistory ? 'de l\'historique' : 'en cours'}`
+                    : showHistory ? 'Aucune tournée dans l\'historique' : 'Aucune tournée en cours'}
                 </div>
               ) : (
                 displayTours.map((tour) => {
                   const isTarget = targetTourId === tour.id
-                  const isExpanded = expandedTours.has(tour.id)
+                  // En recherche, la tournée contenant la commande s'ouvre automatiquement.
+                  const isExpanded = searchQ ? true : expandedTours.has(tour.id)
                   const sortedStops = [...tour.stops].sort((a, b) => a.sequence - b.sequence)
                   const q = tourSearch.trim().toLowerCase()
                   const filteredStops = q
