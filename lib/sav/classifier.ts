@@ -274,9 +274,12 @@ export async function generateReply(
     console.log(`[SAV] findSimilarExamples — aucun exemple similaire trouvé pour "${subject.slice(0, 60)}"`)
   }
   const examplesBlock = similarExamples.length > 0
-    ? `\nExemples de réponses SAV Mōom similaires — utilise-les comme référence de style, de ton et de structure :\n\n${
+    ? `\nRÉPONSES PASSÉES DE NOTRE ÉQUIPE sur des cas TRÈS similaires (classées de la plus proche à la moins proche).\n`
+      + `Ce sont de VRAIES réponses validées : reproduis fidèlement leur ton, leurs formulations, leur structure et\n`
+      + `leurs décisions. Si l'Exemple 1 traite la même situation, calque ta réponse dessus (en adaptant les détails\n`
+      + `propres à ce client). Le but est que l'agent n'ait quasiment RIEN à modifier.\n\n${
         similarExamples.map((ex, i) =>
-          `[Exemple ${i + 1}]\nMessage client : ${ex.customer_message.slice(0, 400)}\nRéponse agent  : ${ex.agent_reply.slice(0, 600)}`
+          `[Exemple ${i + 1}${i === 0 ? ' — LE PLUS PROCHE' : ''}]\nMessage client : ${ex.customer_message.slice(0, 500)}\nNotre réponse  : ${ex.agent_reply.slice(0, 900)}`
         ).join('\n\n')
       }\n`
     : ''
@@ -416,7 +419,7 @@ ${priorHistory}
 ${previousTicketsBlock ? '\n' + previousTicketsBlock : ''}
 ${orderContext}
 ${catalogBlock}
-${examplesBlock ? 'Exemples de style de réponse Mōom (ton et structure de référence) :\n' + examplesBlock : ''}
+${examplesBlock}
 
 ━━━ SECTION 3 — RÈGLES OBLIGATOIRES ━━━
 ${rulesBlock || '(aucune règle spécifique — appliquer les bonnes pratiques SAV)'}
@@ -432,6 +435,7 @@ Contraintes strictes :
 - Ne PAS inventer d'informations absentes du contexte (numéro de suivi, délais, prix, etc.)
 - Si une information manque, dire "je vérifie et reviens vers vous" plutôt qu'inventer
 - Répondre directement à la demande du dernier message — pas à une demande précédente déjà traitée
+- PRIORITÉ ABSOLUE : si des « RÉPONSES PASSÉES » sont fournies et qu'une colle à la situation, RÉUTILISE ses formulations, son ton et sa décision — n'invente pas un style différent. L'agent doit pouvoir valider sans retoucher.
 - Ne pas utiliser de placeholders comme [NOM] ou [PRÉNOM]
 - Si le suivi est disponible dans les données commande, l'inclure directement
 - Longueur : 2 à 5 paragraphes selon la complexité de la demande
