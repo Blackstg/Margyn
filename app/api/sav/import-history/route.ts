@@ -9,14 +9,15 @@ import { importHistoryBatch } from '@/lib/sav/history'
 export const dynamic = 'force-dynamic'
 export const maxDuration = 60
 
-async function runBatch(batchSize: number) {
-  const result = await importHistoryBatch(batchSize)
+async function runBatch(batchSize: number, brand: 'moom' | 'bowa') {
+  const result = await importHistoryBatch(batchSize, brand)
   return NextResponse.json(result)
 }
 
 export async function GET(req: NextRequest) {
   const batch = parseInt(req.nextUrl.searchParams.get('batch') ?? '1', 10)
-  try { return await runBatch(batch) }
+  const brand = req.nextUrl.searchParams.get('brand') === 'bowa' ? 'bowa' : 'moom'
+  try { return await runBatch(batch, brand) }
   catch (err) {
     console.error('[SAV] importHistoryBatch error:', err)
     return NextResponse.json(
@@ -29,7 +30,8 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   const body = await req.json().catch(() => ({}))
   const batch = parseInt(body?.batch ?? '1', 10)
-  try { return await runBatch(batch) }
+  const brand = body?.brand === 'bowa' ? 'bowa' : 'moom'
+  try { return await runBatch(batch, brand) }
   catch (err) {
     console.error('[SAV] importHistoryBatch error:', err)
     return NextResponse.json(

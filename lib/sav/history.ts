@@ -76,13 +76,14 @@ export async function embedMissingExamples(limit = 200): Promise<{ embedded: num
   return { embedded, remaining: count ?? 0 }
 }
 
-async function saveHistoryBatch(examples: HistoryExample[]): Promise<void> {
+async function saveHistoryBatch(examples: HistoryExample[], brand = 'moom'): Promise<void> {
   if (examples.length === 0) return
   try {
     const sb = createAdminClient()
+    const rows = examples.map(e => ({ ...e, brand }))   // tag de marque
     const { error } = await sb
       .from('sav_history_examples')
-      .upsert(examples, { onConflict: 'ticket_id' })
+      .upsert(rows, { onConflict: 'ticket_id' })
     if (error) console.warn('[SAV] saveHistoryBatch error:', error.message)
   } catch (e) {
     console.warn('[SAV] saveHistoryBatch exception:', e)
@@ -91,32 +92,35 @@ async function saveHistoryBatch(examples: HistoryExample[]): Promise<void> {
 
 // ─── Cursor storage ───────────────────────────────────────────────────────────
 
-async function loadCursor(): Promise<string | null> {
+// Curseur d'import PAR MARQUE (Moom garde la clé historique 'zendesk_cursor').
+const cursorKey = (brand: string) => brand === 'moom' ? 'zendesk_cursor' : `zendesk_cursor_${brand}`
+
+async function loadCursor(brand = 'moom'): Promise<string | null> {
   try {
     const sb = createAdminClient()
     const { data } = await sb
       .from('sav_import_state')
       .select('value')
-      .eq('key', 'zendesk_cursor')
+      .eq('key', cursorKey(brand))
       .maybeSingle()
     return (data as { value: string } | null)?.value ?? null
   } catch { return null }
 }
 
-async function saveCursor(cursor: string | null): Promise<void> {
+async function saveCursor(cursor: string | null, brand = 'moom'): Promise<void> {
   try {
     const sb = createAdminClient()
     if (cursor === null) {
-      await sb.from('sav_import_state').delete().eq('key', 'zendesk_cursor')
+      await sb.from('sav_import_state').delete().eq('key', cursorKey(brand))
     } else {
-      await sb.from('sav_import_state').upsert({ key: 'zendesk_cursor', value: cursor }, { onConflict: 'key' })
+      await sb.from('sav_import_state').upsert({ key: cursorKey(brand), value: cursor }, { onConflict: 'key' })
     }
   } catch (e) { console.warn('[SAV] saveCursor error:', e) }
 }
 
 // ─── Incremental import ───────────────────────────────────────────────────────
 
-export async function importHistoryBatch(batchSize = 10): Promise<{
+export async function importHistoryBatch(batchSize = 10, brand: 'moom' | 'bowa' = 'moom'): Promise<{
   imported:           number
   total:              number
   done:               boolean
@@ -125,18 +129,18 @@ export async function importHistoryBatch(batchSize = 10): Promise<{
   oldest:             string | null
   newest:             string | null
 }> {
-  const cursor = await loadCursor()
+  const cursor = await loadCursor(brand)
 
   let newExamples: Awaited<ReturnType<typeof exportSolvedTickets>>['examples'] = []
   let nextCursor: string | null = cursor
 
   try {
-    const result = await exportSolvedTickets(batchSize, cursor)
+    const result = await exportSolvedTickets(batchSize, cursor, brand)
     newExamples = result.examples
     nextCursor  = result.nextCursor
 
-    await saveHistoryBatch(newExamples)
-    await saveCursor(nextCursor)
+    await saveHistoryBatch(newExamples, brand)
+    await saveCursor(nextCursor, brand)
     // Embarque les nouveaux exemples pour la recherche sémantique (best-effort).
     try { await embedMissingExamples(newExamples.length || 20) } catch { /* non bloquant */ }
   } catch (err) {
