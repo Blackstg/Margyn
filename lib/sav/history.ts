@@ -21,19 +21,20 @@ export interface HistoryExample {
 // Charge les exemples. `withEmbedding` récupère aussi le vecteur (plus lourd) pour
 // la recherche sémantique. Repli sur les colonnes de base si la migration
 // embedding/category n'a pas encore été appliquée.
-export async function loadHistory(withEmbedding = false): Promise<HistoryExample[]> {
+export async function loadHistory(withEmbedding = false, brand?: string): Promise<HistoryExample[]> {
   try {
     const sb = createAdminClient()
     const cols = withEmbedding
-      ? 'ticket_id, subject, customer_message, agent_reply, created_at, embedding'
-      : 'ticket_id, subject, customer_message, agent_reply, created_at'
-    const { data, error } = await sb
-      .from('sav_history_examples')
-      .select(cols)
-      .order('created_at', { ascending: true })
+      ? 'ticket_id, subject, customer_message, agent_reply, created_at, embedding, category, brand'
+      : 'ticket_id, subject, customer_message, agent_reply, created_at, brand'
+    let query = sb.from('sav_history_examples').select(cols).order('created_at', { ascending: true })
+    // Cloisonnement par marque : un ticket Bowa ne récupère QUE des réponses Bowa.
+    if (brand) query = query.eq('brand', brand)
+    const { data, error } = await query
     if (error) {
-      // colonnes embedding/category absentes → repli base
-      if (withEmbedding) return loadHistory(false)
+      // Colonnes embedding/category/brand pas encore migrées → repli progressif.
+      if (withEmbedding) return loadHistory(false, brand)
+      if (brand)         return loadHistory(false)
       console.warn('[SAV] loadHistory error:', error.message); return []
     }
     return (data ?? []) as unknown as HistoryExample[]
@@ -220,12 +221,13 @@ export async function findSimilarExamples(
   customerMessage: string,
   k = 5,
   category?:       string | null,
+  brand?:          string,
 ): Promise<HistoryExample[]> {
   // ── Voie sémantique ──
   if (embeddingProvider()) {
     try {
       const [examples, q] = await Promise.all([
-        loadHistory(true),
+        loadHistory(true, brand),
         embedOne(`${subject}\n\n${customerMessage}`.trim()),
       ])
       const withVec = examples.filter(e => Array.isArray(e.embedding) && e.embedding!.length > 0)
@@ -250,8 +252,8 @@ export async function findSimilarExamples(
     }
   }
 
-  // ── Repli Jaccard ──
-  const examples = await loadHistory()
+  // ── Repli Jaccard (toujours cloisonné par marque) ──
+  const examples = await loadHistory(false, brand)
   if (examples.length === 0) return []
   return jaccardRank(examples, subject, customerMessage, k)
 }

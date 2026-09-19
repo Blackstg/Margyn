@@ -260,9 +260,9 @@ export async function generateReply(
     ? `\nRègles obligatoires à respecter impérativement :\n${rules.map((r, i) => `IMPORTANT: ${i + 1}. ${r}`).join('\n')}\n`
     : ''
 
-  // Exemples de ton = historique Moom uniquement → on ne les injecte PAS pour Bowa
-  // (règles/ton différents ; Bowa démarre sur ses propres règles).
-  const similarExamples = brand === 'moom' ? await findSimilarExamples(subject, description, 5, category) : []
+  // RAG multi-marque : on récupère les réponses passées de LA MÊME marque
+  // (cloisonnement). Bowa ne pioche donc jamais dans les réponses Moom.
+  const similarExamples = await findSimilarExamples(subject, description, 5, category, brand)
   if (similarExamples.length > 0) {
     console.log(
       `[SAV] findSimilarExamples — ${similarExamples.length} exemple(s) trouvé(s) pour "${subject.slice(0, 60)}" :`,
