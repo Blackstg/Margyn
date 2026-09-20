@@ -242,11 +242,13 @@ function phaseFromEvent(label: string, code: string | null, country: string | nu
   // est du bruit et NE compte pas — seul « remis au transporteur local » (réel) compte.
   // "acheminement / agence (régionale) de destination / arrivé en France" = étapes
   // domestiques (destination) → « Au centre de tri », pas transit international.
-  if (destSide && /centre de tri|sort facility|arrived at hub|\bhub\b|départ du centre|ready for outbound|outbound|remis au transporteur local|cargo terminal|livraison|\btri\b|acheminement|agence|arriv[ée] en france/.test(L))
+  if (destSide && /centre de tri|sort facility|arrived at hub|\bhub\b|départ du centre|ready for outbound|outbound|remis au transporteur local|pris en charge|cargo terminal|livraison|\btri\b|acheminement|agence|arriv[ée] en france/.test(L))
     return PHASE_IDX.sorting
 
-  // Départ de l'entrepôt d'origine (Chine)
-  if (/centre de tri \((départ|origine)\)|origin facility|pris en charge/.test(L)) return PHASE_IDX.shipped
+  // Départ de l'entrepôt d'origine (Chine) — UNIQUEMENT côté origine. Un « pris en
+  // charge par le transporteur local » à Paris ne doit PLUS être classé « Colis
+  // expédié » (bug : statut de départ affiché alors que le colis est déjà en France).
+  if (!destSide && /centre de tri \((départ|origine)\)|origin facility|pris en charge/.test(L)) return PHASE_IDX.shipped
   if (/informations d’expédition|information received|préparation/.test(L)) return PHASE_IDX.prepared
   // Tout le reste du voyage = transit international
   if (c.startsWith('intransit') || c.startsWith('exception') || L.length > 0)  return PHASE_IDX.transit
