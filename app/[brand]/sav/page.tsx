@@ -1654,6 +1654,7 @@ interface QualiteMetrics {
   daily_timeline:    DailyEntry[]
   distinct_users:    string[]
   user_names:        Record<string, string>  // email → prénom
+  by_agent:          { email: string; name: string; active_ms: number; tickets: number; sessions: number }[]
   by_category: Record<string, { total: number; sent: number; escalated: number }>
 }
 
@@ -1816,6 +1817,39 @@ function QualiteDashboard() {
 
       {!loading && !error && metrics && (
         <>
+          {/* ── Temps de travail PAR AGENT (vue claire, tous les agents) ── */}
+          {metrics.by_agent && metrics.by_agent.length > 0 && (
+            <div className="rounded-2xl bg-white border border-[#e8e8e4] overflow-hidden">
+              <div className="px-5 py-3 border-b border-[#f0efec] flex items-center justify-between">
+                <p className="text-[11px] font-semibold uppercase tracking-[0.1em] text-[#6b6b63]">Temps de travail par agent</p>
+                <span className="text-[10px] text-[#9b9b93]">{isDay ? 'ce jour' : period === 'today' ? "aujourd'hui" : `${days} j`}</span>
+              </div>
+              <div className="divide-y divide-[#f5f5f3]">
+                {metrics.by_agent.map(a => (
+                  <button
+                    key={a.email}
+                    onClick={() => setSelectedUser(selectedUser === a.email ? '' : a.email)}
+                    className={`w-full flex items-center gap-3 px-5 py-3 text-left transition-colors ${selectedUser === a.email ? 'bg-[#f5f3ff]' : 'hover:bg-[#faf9f8]'}`}
+                  >
+                    <span className="w-7 h-7 rounded-full bg-[#eef2ff] text-[#4338ca] text-[11px] font-bold flex items-center justify-center shrink-0">
+                      {a.name.charAt(0).toUpperCase()}
+                    </span>
+                    <span className="flex-1 min-w-0">
+                      <span className="text-sm font-semibold text-[#1a1a2e]">{a.name}</span>
+                    </span>
+                    <span className="text-right">
+                      <span className="block text-base font-bold text-[#1a1a2e] tabular-nums">{a.active_ms > 0 ? fmtMs(a.active_ms) : '—'}</span>
+                      <span className="block text-[10px] text-[#9b9b93]">{a.tickets} ticket{a.tickets !== 1 ? 's' : ''} · {a.sessions} ouverture{a.sessions !== 1 ? 's' : ''}</span>
+                    </span>
+                  </button>
+                ))}
+              </div>
+              <div className="px-5 py-2 bg-[#faf9f8] text-[10px] text-[#9b9b93]">
+                Temps actif réel (basé sur l&apos;activité dans le SAV). Clique un agent pour filtrer le détail ci-dessous.
+              </div>
+            </div>
+          )}
+
           {/* ── Récap en tête : temps de travail + tickets (matin/après-midi) ── */}
           {(metrics.total > 0 || metrics.sessions_count > 0) && (() => {
             const who   = selectedUser ? (metrics.user_names[selectedUser] ?? selectedUser.split('@')[0]) : "l'équipe"

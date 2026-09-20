@@ -190,6 +190,29 @@ export async function GET(req: NextRequest) {
   }
   const active_ms = Object.values(beatsByUser).reduce((s, ts) => s + activeMsFromBeats(ts), 0)
 
+  // ── Temps de travail PAR AGENT (tous les agents, indépendant du filtre) ────
+  // Pour un tableau clair « combien chacun a travaillé sur la période » sans
+  // avoir à sélectionner chaque agent un par un.
+  const by_agent = (() => {
+    const map: Record<string, { beats: number[]; tickets: number; sessions: number }> = {}
+    const ensure = (e: string) => (map[e] ??= { beats: [], tickets: 0, sessions: 0 })
+    for (const r of allRows) {
+      const e = rowEmail(r); if (!e) continue
+      if (r.action === 'heartbeat') ensure(e).beats.push(new Date(r.created_at).getTime())
+      else if (r.action === 'session_start') ensure(e).sessions++
+      else if (r.action === 'sent' || r.action === 'escalated' || r.action === 'archived') ensure(e).tickets++
+    }
+    return Object.entries(map)
+      .map(([email, v]) => ({
+        email,
+        name:      user_names[email] ?? email.split('@')[0],
+        active_ms: activeMsFromBeats(v.beats),
+        tickets:   v.tickets,
+        sessions:  v.sessions,
+      }))
+      .sort((a, b) => b.active_ms - a.active_ms)
+  })()
+
   // ── Session metrics ───────────────────────────────────────────────────────
   const sessions_count = sessionStarts.length
   const visits_per_day = days > 0 ? Math.round((sessions_count / days) * 10) / 10 : 0
@@ -254,6 +277,7 @@ export async function GET(req: NextRequest) {
         active_hours, active_weekdays, daily_timeline: [],
         distinct_users,
         user_names,
+        by_agent,
         by_category: {},
       }
     })
@@ -322,6 +346,7 @@ export async function GET(req: NextRequest) {
       daily_timeline,
       distinct_users,
       user_names,
+      by_agent,
       by_category,
     }
   })
