@@ -34,6 +34,12 @@ export async function middleware(req: NextRequest) {
 
   let response = NextResponse.next({ request: { headers: req.headers } })
 
+  // Cookies de session (ré)écrits par Supabase quand le token est rafraîchi. On les
+  // MÉMORISE pour les réappliquer sur TOUTE réponse — y compris les redirections —
+  // sinon un refresh survenu pendant une requête qui redirige perd le nouveau token
+  // (l'ancien refresh token est déjà consommé) → déconnexion de tous les users.
+  let sessionCookies: { name: string; value: string; options?: Record<string, unknown> }[] = []
+
   const supabase = createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
@@ -42,6 +48,7 @@ export async function middleware(req: NextRequest) {
         getAll() { return req.cookies.getAll() },
         setAll(cookiesToSet) {
           cookiesToSet.forEach(({ name, value }) => req.cookies.set(name, value))
+          sessionCookies = cookiesToSet
           response = NextResponse.next({ request: req })
           cookiesToSet.forEach(({ name, value, options }) =>
             response.cookies.set(name, value, options)
@@ -50,6 +57,14 @@ export async function middleware(req: NextRequest) {
       },
     }
   )
+
+  // Redirection qui CONSERVE les cookies de session rafraîchis (essentiel : sans ça,
+  // toute redirection après un refresh de token déconnecte l'utilisateur).
+  const redirect = (url: URL) => {
+    const r = NextResponse.redirect(url)
+    for (const { name, value, options } of sessionCookies) r.cookies.set(name, value, options)
+    return r
+  }
 
   // Résilience panne Auth Supabase : getUser() appelle le service auth (réseau).
   // Si ce service est lent/HS, on ne veut PAS faire tomber tout le site en 504.
@@ -71,7 +86,7 @@ export async function middleware(req: NextRequest) {
 
   // ── Not authenticated ──────────────────────────────────────────────────────
   if (!user) {
-    if (!isLoginPage) return NextResponse.redirect(new URL('/login', req.url))
+    if (!isLoginPage) return redirect(new URL('/login', req.url))
     return response
   }
 
@@ -82,19 +97,19 @@ export async function middleware(req: NextRequest) {
   // ── Logistician: reconciliation only ──────────────────────────────────────
   if (role === 'logistician') {
     if (!pathname.startsWith('/reconciliation')) {
-      return NextResponse.redirect(new URL('/reconciliation', req.url))
+      return redirect(new URL('/reconciliation', req.url))
     }
     return response
   }
 
   // ── Authenticated on login page → redirect to home ────────────────────────
   if (isLoginPage) {
-    return NextResponse.redirect(new URL(`/${defaultBrand}/dashboard`, req.url))
+    return redirect(new URL(`/${defaultBrand}/dashboard`, req.url))
   }
 
   // ── Root → default brand dashboard ────────────────────────────────────────
   if (pathname === '/') {
-    return NextResponse.redirect(new URL(`/${defaultBrand}/dashboard`, req.url))
+    return redirect(new URL(`/${defaultBrand}/dashboard`, req.url))
   }
 
   // ── Reconciliation (stays without brand prefix) ───────────────────────────
@@ -110,7 +125,7 @@ export async function middleware(req: NextRequest) {
     const targetBrand = BRAND_LOCKED[legacyPage] ?? defaultBrand
     const effectiveBrand: Brand = (!brands || brands.includes(targetBrand)) ? targetBrand : defaultBrand
     const rest = pathname.slice(legacyPage.length + 1)
-    return NextResponse.redirect(new URL(`/${effectiveBrand}/${legacyPage}${rest ? '/' + rest : ''}`, req.url))
+    return redirect(new URL(`/${effectiveBrand}/${legacyPage}${rest ? '/' + rest : ''}`, req.url))
   }
 
   // ── Brand-prefixed routes: /[brand]/... ───────────────────────────────────
@@ -119,7 +134,7 @@ export async function middleware(req: NextRequest) {
 
   if (!urlBrand) {
     // Completely unknown path → redirect to default dashboard
-    return NextResponse.redirect(new URL(`/${defaultBrand}/dashboard`, req.url))
+    return redirect(new URL(`/${defaultBrand}/dashboard`, req.url))
   }
 
   const pageSeg = pathname.split('/')[2] ?? ''
@@ -127,7 +142,7 @@ export async function middleware(req: NextRequest) {
   // ── Role: delivery → only /bowa/delivery (full-screen driver app) ─────────
   if (role === 'delivery') {
     if (urlBrand !== 'bowa' || pageSeg !== 'delivery') {
-      return NextResponse.redirect(new URL(`/bowa/delivery`, req.url))
+      return redirect(new URL(`/bowa/delivery`, req.url))
     }
     return response
   }
@@ -138,27 +153,27 @@ export async function middleware(req: NextRequest) {
 
   // ── Access management (Accès) is owner-only ───────────────────────────────
   if (pageSeg === 'users' && !isOwner(role, brands)) {
-    return NextResponse.redirect(new URL(home, req.url))
+    return redirect(new URL(home, req.url))
   }
 
   // ── Feature gate: restricted roles only reach their allowed sections ──────
   if (feats !== 'all' && !feats.includes(pageSeg as FeatureKey)) {
-    return NextResponse.redirect(new URL(home, req.url))
+    return redirect(new URL(home, req.url))
   }
 
   // ── Brand access: the URL brand MUST be one the user has — applies to ALL
   //    users including admins (per-brand data is confidential) ──────────────
   if (!userBrands.includes(urlBrand)) {
-    return NextResponse.redirect(new URL(home, req.url))
+    return redirect(new URL(home, req.url))
   }
 
   // ── Brand-locked page on wrong brand → redirect to the correct brand ──────
   if (pageSeg && BRAND_LOCKED[pageSeg] && BRAND_LOCKED[pageSeg] !== urlBrand) {
     const correctBrand = BRAND_LOCKED[pageSeg]
     if (userBrands.includes(correctBrand)) {
-      return NextResponse.redirect(new URL(`/${correctBrand}/${pageSeg}`, req.url))
+      return redirect(new URL(`/${correctBrand}/${pageSeg}`, req.url))
     }
-    return NextResponse.redirect(new URL(home, req.url))
+    return redirect(new URL(home, req.url))
   }
 
   return response
