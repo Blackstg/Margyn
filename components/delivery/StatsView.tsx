@@ -733,11 +733,14 @@ export default function StatsView() {
   // tournées) au lieu d'une liste figée → un nouveau livreur (Alexandre…) apparaît
   // automatiquement. Repli sur la liste statique si l'API échoue.
   const [gpsDrivers, setGpsDrivers] = useState<string[]>(GPS_DRIVERS)
+  // Une seule carte GPS ouverte à la fois (chaque carte = un contexte Mapbox/WebGL ;
+  // en afficher 4 en même temps surchargeait la page et pouvait couper la session).
+  const [openDriver, setOpenDriver] = useState<string | null>(null)
   useEffect(() => {
     if (tab !== 'gps') return
     fetch('/api/delivery/drivers', { cache: 'no-store' })
       .then(r => r.json())
-      .then(d => { if (Array.isArray(d.drivers) && d.drivers.length) setGpsDrivers(d.drivers) })
+      .then(d => { if (Array.isArray(d.drivers) && d.drivers.length) { setGpsDrivers(d.drivers); setOpenDriver(prev => prev ?? d.drivers[0]) } })
       .catch(() => { /* garde le repli statique */ })
   }, [tab])
 
@@ -829,28 +832,34 @@ export default function StatsView() {
         {/* ── Onglet GPS ──────────────────────────────────────────────────── */}
         {tab === 'gps' && (
           <div className="space-y-4">
-            {gpsDrivers.map(driver => (
+            {gpsDrivers.map(driver => {
+              const isOpen = openDriver === driver
+              return (
               <div key={driver} className="bg-white border border-[#e8e8e4] rounded-[18px] p-5 shadow-sm">
-                <div className="flex items-center gap-3 mb-4">
-                  <div className="w-9 h-9 rounded-[10px] bg-[#6366f1]/10 flex items-center justify-center">
-                    <Navigation size={16} className="text-[#6366f1]" />
-                  </div>
-                  <div>
-                    <p className="font-bold text-[#1a1a2e]">{driver}</p>
-                    <p className="text-xs text-[#9b9b93]">Localisation en temps réel</p>
-                  </div>
+                <div className="flex items-center gap-3">
+                  <button onClick={() => setOpenDriver(isOpen ? null : driver)} className="flex items-center gap-3 flex-1 min-w-0 text-left">
+                    <div className="w-9 h-9 rounded-[10px] bg-[#6366f1]/10 flex items-center justify-center shrink-0">
+                      <Navigation size={16} className="text-[#6366f1]" />
+                    </div>
+                    <div className="min-w-0">
+                      <p className="font-bold text-[#1a1a2e]">{driver}</p>
+                      <p className="text-xs text-[#9b9b93]">{isOpen ? 'Localisation en temps réel' : 'Cliquer pour voir la position'}</p>
+                    </div>
+                    <ChevronRight size={16} className={`ml-1 text-[#9b9b93] transition-transform ${isOpen ? 'rotate-90' : ''}`} />
+                  </button>
                   <a
                     href="/delivery/tracking"
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="ml-auto text-[10px] font-semibold text-[#6366f1] bg-[#6366f1]/10 px-3 py-1.5 rounded-lg hover:bg-[#6366f1]/20 transition-colors"
+                    className="ml-auto text-[10px] font-semibold text-[#6366f1] bg-[#6366f1]/10 px-3 py-1.5 rounded-lg hover:bg-[#6366f1]/20 transition-colors shrink-0"
                   >
                     Lien téléphone →
                   </a>
                 </div>
-                <DriverLocationMap driverName={driver} />
+                {/* Carte montée UNIQUEMENT si ouverte → 1 seul contexte WebGL à la fois */}
+                {isOpen && <div className="mt-4"><DriverLocationMap driverName={driver} /></div>}
               </div>
-            ))}
+            )})}
           </div>
         )}
 
