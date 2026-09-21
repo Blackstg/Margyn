@@ -73,15 +73,47 @@ export async function middleware(req: NextRequest) {
   const withTimeout = <T>(p: Promise<T>, ms: number): Promise<T> =>
     Promise.race([p, new Promise<T>((_, reject) => setTimeout(() => reject(new Error('auth timeout')), ms))])
 
+  // Lecture du cookie de session Supabase SANS aucun appel réseau. Sert de repli
+  // quand le service Auth est HS : tant que le token local n'est pas expiré, on
+  // garde l'utilisateur connecté (rôle/marques lus dans le JWT) au lieu de le
+  // rediriger vers /login. Best-effort (pas de vérif de signature) : acceptable
+  // en mode dégradé pour un outil interne — la sécurité réelle reste côté RLS/API.
+  type LocalUser = Awaited<ReturnType<typeof supabase.auth.getUser>>['data']['user']
+  const readLocalSession = (): { user: LocalUser; exp: number } | null => {
+    const ref = (process.env.NEXT_PUBLIC_SUPABASE_URL || '').match(/^https:\/\/([^.]+)\./)?.[1]
+    if (!ref) return null
+    const base = `sb-${ref}-auth-token`
+    const all = req.cookies.getAll()
+    let raw = all.find(c => c.name === base)?.value ?? ''
+    if (!raw) {
+      raw = all
+        .filter(c => c.name.startsWith(base + '.'))
+        .sort((a, b) => Number(a.name.split('.').pop()) - Number(b.name.split('.').pop()))
+        .map(c => c.value)
+        .join('')
+    }
+    if (!raw) return null
+    try {
+      if (raw.startsWith('base64-')) raw = Buffer.from(raw.slice(7), 'base64').toString('utf8')
+      const sess = JSON.parse(raw)
+      let exp: number = sess.expires_at ?? 0
+      if (!exp && sess.access_token) {
+        const payload = JSON.parse(Buffer.from(sess.access_token.split('.')[1], 'base64').toString('utf8'))
+        exp = payload.exp ?? 0
+      }
+      return sess.user ? { user: sess.user as LocalUser, exp } : null
+    } catch { return null }
+  }
+
   let user: Awaited<ReturnType<typeof supabase.auth.getUser>>['data']['user'] = null
   try {
     const { data } = await withTimeout(supabase.auth.getUser(), 3000)
     user = data.user
   } catch {
-    try {
-      const { data } = await withTimeout(supabase.auth.getSession(), 1500)
-      user = data.session?.user ?? null
-    } catch { user = null }
+    // Panne Auth : on ne rappelle PAS le réseau (getSession rafraîchit et re-timeout).
+    // On fait confiance au cookie local tant que le token n'est pas expiré.
+    const local = readLocalSession()
+    user = local && local.exp * 1000 > Date.now() ? local.user : null
   }
 
   // ── Not authenticated ──────────────────────────────────────────────────────
