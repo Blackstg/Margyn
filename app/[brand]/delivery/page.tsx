@@ -3995,7 +3995,20 @@ function LivreurView() {
                 </div>
               )}
               <button
-                onClick={() => setScreen('loading')}
+                onClick={() => {
+                  setScreen('loading')
+                  // Début du chargement = ouverture de l'inventaire du camion. On
+                  // horodate started_at ICI (le vrai début du travail), une seule
+                  // fois — les stats mesurent alors depuis le chargement, pas depuis
+                  // « Démarrer ». (Ne touche pas au statut : reste planifiée.)
+                  if (tour && !tour.started_at && tour.status !== 'completed') {
+                    fetch(`/api/delivery/tours/${tour.id}`, {
+                      method: 'PATCH',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({ started_at: new Date().toISOString() }),
+                    }).then(() => fetchTours()).catch(() => {/* best-effort */})
+                  }
+                }}
                 disabled={tour.status === 'draft'}
                 className="w-full flex items-center justify-center gap-3 py-5 rounded-[16px] border border-white/25 text-white font-semibold text-lg active:bg-white/10 disabled:opacity-30 transition-colors"
               >
@@ -4010,12 +4023,15 @@ function LivreurView() {
                   const resumeIdx = sortedStops.findIndex(s => s.status !== 'delivered' && s.status !== 'failed')
                   setStopIdx(resumeIdx !== -1 ? resumeIdx : 0)
                   setScreen('tour')
-                  // Passe la tournée en "en cours" si elle ne l'est pas déjà
+                  // Passe la tournée en "en cours" si elle ne l'est pas déjà.
+                  // started_at n'est posé ICI que s'il ne l'a pas déjà été à
+                  // l'ouverture de l'inventaire (on ne veut PAS écraser le vrai
+                  // début du chargement par l'heure de départ).
                   if (tour.status !== 'in_progress') {
                     await fetch(`/api/delivery/tours/${tour.id}`, {
                       method: 'PATCH',
                       headers: { 'Content-Type': 'application/json' },
-                      body: JSON.stringify({ status: 'in_progress', started_at: new Date().toISOString() }),
+                      body: JSON.stringify({ status: 'in_progress', ...(tour.started_at ? {} : { started_at: new Date().toISOString() }) }),
                     }).catch(() => {/* best-effort */})
                     fetchTours()
                   }
