@@ -447,20 +447,24 @@ function DriverMonthCalendar({ driver, month }: { driver: DriverStats; month: st
     }
   }
 
-  // Heures de CHARGEMENT / départ (started_at → 1re livraison du jour de départ).
-  // C'est du travail (préparer + charger le camion + rejoindre le 1er client) mais
-  // invisible sur le calendrier qui ne montrait que les livraisons. On l'affiche en
-  // orange. Plafonné à 3h pour rester représentatif du chargement/départ.
+  // Heures de CHARGEMENT / départ, affichées en ORANGE le JOUR où le livreur a
+  // démarré la tournée (started_at = « Chargement / Départ »). Les tournées sont
+  // souvent multi-jours : le camion est chargé la veille des livraisons → on affiche
+  // le chargement sur le jour de départ, qu'il y ait des livraisons ce jour-là ou non.
+  // Par défaut 2h (préparation + chargement + départ) ; si la 1re livraison a lieu le
+  // MÊME jour peu après, on prend la vraie fenêtre (1–3h).
   const hourParis = (iso: string) => new Date(new Date(iso).toLocaleString('en-US', { timeZone: 'Europe/Paris' })).getHours()
   const loadMap = new Map<string, number>()   // date → heures de chargement
   for (const tour of driver.tours) {
     if (!tour.started_at) continue
     const startDay = toParisDayStr(tour.started_at)
-    const dayEntry = tour.days.find(dd => dd.date === startDay)
-    const firstDeliv = dayEntry?.deliveries[0]?.delivered_at
-    if (!firstDeliv) continue
-    const load = Math.min(Math.max(0, hourParis(firstDeliv) - hourParis(tour.started_at)), 3)
-    if (load > 0) loadMap.set(startDay, Math.max(loadMap.get(startDay) ?? 0, load))
+    let load = 2
+    const firstDeliv = tour.days.find(dd => dd.date === startDay)?.deliveries[0]?.delivered_at
+    if (firstDeliv) {
+      const gap = hourParis(firstDeliv) - hourParis(tour.started_at)
+      if (gap >= 1 && gap <= 4) load = gap    // chargement le matin puis livraisons l'après-midi
+    }
+    loadMap.set(startDay, Math.max(loadMap.get(startDay) ?? 0, Math.min(load, 3)))
   }
 
   // Summary counters: journée complète ≥7h, demi-journée 4-6h, quelques heures 1-3h
@@ -471,11 +475,10 @@ function DriverMonthCalendar({ driver, month }: { driver: DriverStats; month: st
     allMonthDays.push(day)
     if (day > today) continue
     const entry = deliveryMap.get(day)
-    if (entry) {
-      const rawWindow    = entry.lastHour - entry.firstHour
-      const minFromStops = entry.count * 0.75
-      const load         = loadMap.get(day) ?? 0   // chargement/départ (orange)
-      const h = Math.min(Math.max(rawWindow, minFromStops, 1) + load, 8)
+    const load  = loadMap.get(day) ?? 0   // chargement/départ (orange)
+    if (entry || load > 0) {
+      const deliv = entry ? Math.max(entry.lastHour - entry.firstHour, entry.count * 0.75, 1) : 0
+      const h = Math.min(deliv + load, 8)
       totalHours += h
       if (h >= 7)      fullWorkDays++   // journée complète
       else if (h >= 4) halfWorkDays++   // demi-journée
@@ -539,17 +542,17 @@ function DriverMonthCalendar({ driver, month }: { driver: DriverStats; month: st
           const isFuture    = day > today
           const entry      = deliveryMap.get(day)
           const count      = entry?.count ?? 0
-          const hasWork    = count > 0
+          const loadHours  = Math.round(loadMap.get(day) ?? 0)   // chargement (orange), indépendant des livraisons
+          const hasWork    = count > 0 || loadHours > 0
           const firstHour  = entry?.firstHour ?? 0
           const lastHour   = entry?.lastHour  ?? 0
           // Nb de barres vertes (1 barre = 1h, max 8)
           // Minimum : 45min/stop (trajet inclus) + 30min retour, au moins 1h si livraison
           const rawWindow   = lastHour - firstHour
           const minFromStops = count * 0.75  // 45min par stop
-          const deliveryHours = hasWork
+          const deliveryHours = count > 0
             ? Math.min(Math.round(Math.max(rawWindow, minFromStops, 1)), 8)
             : 0
-          const loadHours   = hasWork ? Math.round(loadMap.get(day) ?? 0) : 0   // chargement (orange)
           const hoursWorked = Math.min(loadHours + deliveryHours, 8)
           const isToday    = day === today
 
@@ -562,7 +565,9 @@ function DriverMonthCalendar({ driver, month }: { driver: DriverStats; month: st
           const label = isFuture
             ? shortDayFr(day)
             : hasWork
-              ? `${shortDayFr(day)} · ${hoursWorked}h de travail${loadHours > 0 ? ` (dont ${loadHours}h chargement)` : ''} · ${count} livraison${count > 1 ? 's' : ''}`
+              ? count > 0
+                ? `${shortDayFr(day)} · ${hoursWorked}h de travail${loadHours > 0 ? ` (dont ${loadHours}h chargement)` : ''} · ${count} livraison${count > 1 ? 's' : ''}`
+                : `${shortDayFr(day)} · ${loadHours}h chargement / préparation du camion`
               : `${shortDayFr(day)} · Repos`
 
           return (
@@ -605,8 +610,8 @@ function DriverMonthCalendar({ driver, month }: { driver: DriverStats; month: st
                     >
                       {d}
                     </span>
-                    {/* Badge nombre de stops en haut à droite */}
-                    {hasWork && (
+                    {/* Badge nombre de stops en haut à droite (pas sur un jour de chargement seul) */}
+                    {count > 0 && (
                       <span className="absolute top-[1px] right-[1px] w-[13px] h-[13px] rounded-full bg-white flex items-center justify-center text-[7px] font-bold leading-none text-[#15803d]">
                         {count}
                       </span>
