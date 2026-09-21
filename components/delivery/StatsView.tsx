@@ -447,6 +447,22 @@ function DriverMonthCalendar({ driver, month }: { driver: DriverStats; month: st
     }
   }
 
+  // Heures de CHARGEMENT / départ (started_at → 1re livraison du jour de départ).
+  // C'est du travail (préparer + charger le camion + rejoindre le 1er client) mais
+  // invisible sur le calendrier qui ne montrait que les livraisons. On l'affiche en
+  // orange. Plafonné à 3h pour rester représentatif du chargement/départ.
+  const hourParis = (iso: string) => new Date(new Date(iso).toLocaleString('en-US', { timeZone: 'Europe/Paris' })).getHours()
+  const loadMap = new Map<string, number>()   // date → heures de chargement
+  for (const tour of driver.tours) {
+    if (!tour.started_at) continue
+    const startDay = toParisDayStr(tour.started_at)
+    const dayEntry = tour.days.find(dd => dd.date === startDay)
+    const firstDeliv = dayEntry?.deliveries[0]?.delivered_at
+    if (!firstDeliv) continue
+    const load = Math.min(Math.max(0, hourParis(firstDeliv) - hourParis(tour.started_at)), 3)
+    if (load > 0) loadMap.set(startDay, Math.max(loadMap.get(startDay) ?? 0, load))
+  }
+
   // Summary counters: journée complète ≥7h, demi-journée 4-6h, quelques heures 1-3h
   let totalHours = 0, fullWorkDays = 0, halfWorkDays = 0, fewHoursDays = 0, idleDays = 0
   const allMonthDays: string[] = []
@@ -458,7 +474,8 @@ function DriverMonthCalendar({ driver, month }: { driver: DriverStats; month: st
     if (entry) {
       const rawWindow    = entry.lastHour - entry.firstHour
       const minFromStops = entry.count * 0.75
-      const h = Math.min(Math.max(rawWindow, minFromStops, 1), 8)
+      const load         = loadMap.get(day) ?? 0   // chargement/départ (orange)
+      const h = Math.min(Math.max(rawWindow, minFromStops, 1) + load, 8)
       totalHours += h
       if (h >= 7)      fullWorkDays++   // journée complète
       else if (h >= 4) halfWorkDays++   // demi-journée
@@ -529,20 +546,23 @@ function DriverMonthCalendar({ driver, month }: { driver: DriverStats; month: st
           // Minimum : 45min/stop (trajet inclus) + 30min retour, au moins 1h si livraison
           const rawWindow   = lastHour - firstHour
           const minFromStops = count * 0.75  // 45min par stop
-          const hoursWorked = hasWork
+          const deliveryHours = hasWork
             ? Math.min(Math.round(Math.max(rawWindow, minFromStops, 1)), 8)
             : 0
+          const loadHours   = hasWork ? Math.round(loadMap.get(day) ?? 0) : 0   // chargement (orange)
+          const hoursWorked = Math.min(loadHours + deliveryHours, 8)
           const isToday    = day === today
 
           // Couleur verte selon intensité (heures travaillées)
           const greenPalette = ['#bbf7d0', '#86efac', '#4ade80', '#22c55e', '#16a34a', '#15803d', '#166534', '#14532d']
-          const green = greenPalette[Math.max(0, hoursWorked - 1)]
+          const green = greenPalette[Math.max(0, deliveryHours - 1)]
+          const orange = '#f59e0b'   // heures de chargement / départ
           const textGreen = hoursWorked >= 5 ? '#fff' : '#14532d'
 
           const label = isFuture
             ? shortDayFr(day)
             : hasWork
-              ? `${shortDayFr(day)} · ${hoursWorked}h de travail · ${count} livraison${count > 1 ? 's' : ''}`
+              ? `${shortDayFr(day)} · ${hoursWorked}h de travail${loadHours > 0 ? ` (dont ${loadHours}h chargement)` : ''} · ${count} livraison${count > 1 ? 's' : ''}`
               : `${shortDayFr(day)} · Repos`
 
           return (
@@ -570,7 +590,10 @@ function DriverMonthCalendar({ driver, month }: { driver: DriverStats; month: st
                         key={i}
                         className="flex-1 w-full"
                         style={{
-                          background: i < hoursWorked ? green : '#fecaca',
+                          // Bas → haut : chargement (orange) puis livraisons (vert).
+                          background: i < loadHours ? orange
+                            : i < loadHours + deliveryHours ? green
+                            : '#fecaca',
                           borderTop: i > 0 ? '0.5px solid rgba(255,255,255,0.25)' : 'none',
                         }}
                       />
@@ -606,8 +629,8 @@ function DriverMonthCalendar({ driver, month }: { driver: DriverStats; month: st
       {/* Minimal legend */}
       <div className="flex items-center gap-2 mt-1.5 flex-wrap">
         {[
-          { color: '#16a34a', label: '8h (journée)' },
-          { color: '#4ade80', label: '4h (demi)' },
+          { color: '#f59e0b', label: 'Chargement' },
+          { color: '#16a34a', label: 'Livraisons' },
           { color: '#fecaca', label: 'Repos' },
         ].map(({ color, label }) => (
           <div key={label} className="flex items-center gap-1">
