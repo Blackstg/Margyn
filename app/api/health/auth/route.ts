@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import type { NextRequest } from 'next/server'
 
 export const dynamic = 'force-dynamic'
+export const maxDuration = 60
 
 // ─── Sonde de santé du service Auth Supabase ─────────────────────────────────
 // But : détecter en ~5 min quand le login/refresh de token est HS (comme la panne
@@ -76,12 +77,77 @@ async function sendAlert(probe: { status: number | string; ms: number }) {
   }).catch(() => {})
 }
 
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
+
+// Redémarre le projet via la Management API Supabase (relance GoTrue). Inerte
+// tant que SUPABASE_ACCESS_TOKEN (token sbp_…) n'est pas configuré.
+async function restartProject(): Promise<{ triggered: boolean; status?: number | string; detail?: string }> {
+  const token = process.env.SUPABASE_ACCESS_TOKEN
+  const ref = (process.env.NEXT_PUBLIC_SUPABASE_URL || '').match(/^https:\/\/([^.]+)\./)?.[1]
+  if (!token || !ref) return { triggered: false, detail: 'no-token' }
+  try {
+    const r = await fetch(`https://api.supabase.com/v1/projects/${ref}/restart`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+    })
+    return { triggered: true, status: r.status, detail: (await r.text()).slice(0, 200) }
+  } catch (e) {
+    return { triggered: true, status: 'error', detail: String(e).slice(0, 200) }
+  }
+}
+
+async function sendRestartNotice(res: { status?: number | string; detail?: string }) {
+  const key = process.env.RESEND_API_KEY
+  const to  = process.env.ALERT_EMAIL
+  if (!key || !to) return
+  const okRestart = typeof res.status === 'number' && res.status < 300
+  await fetch('https://api.resend.com/emails', {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      from: 'Steero Alerts <alerts@steero.co>',
+      to: [to],
+      subject: okRestart
+        ? '🔄 Steero — Auto-restart du projet Supabase déclenché'
+        : '⚠️ Steero — Auto-restart Supabase ÉCHOUÉ (à faire à la main)',
+      html: `<div style="font-family:sans-serif;max-width:560px">
+        <h2 style="color:${okRestart ? '#1a7f4b' : '#c0392b'}">${okRestart ? '🔄 Redémarrage automatique lancé' : '⚠️ Le redémarrage automatique a échoué'}</h2>
+        <p>Le service Auth était bloqué (2 vérifications de suite). ${okRestart
+          ? 'Le projet a été redémarré automatiquement — l\'Auth devrait revenir dans 1-2 min.'
+          : 'Merci de redémarrer le projet à la main (Settings → General → Restart project).'}</p>
+        <p style="color:#888;font-size:0.85rem">Réponse Management API : ${res.status} — ${res.detail ?? ''}</p>
+        <p style="font-size:0.85rem">${new Date().toISOString()}</p>
+      </div>`,
+    }),
+  }).catch(() => {})
+}
+
 async function handle(req: NextRequest) {
   const probe = await probeAuth()
-  if (!probe.ok && cronAuthorized(req)) await sendAlert(probe)
+  if (probe.ok) {
+    return NextResponse.json({ ok: true, service: 'supabase-auth', status: probe.status, ms: probe.ms, at: new Date().toISOString() })
+  }
+
+  // Auth semble down. Depuis un monitor public → on renvoie juste 503.
+  if (!cronAuthorized(req)) {
+    return NextResponse.json({ ok: false, service: 'supabase-auth', status: probe.status, ms: probe.ms, at: new Date().toISOString() }, { status: 503 })
+  }
+
+  // Chemin cron : double-vérification à 25 s pour ignorer les blips passagers.
+  await sleep(25_000)
+  const probe2 = await probeAuth()
+  if (probe2.ok) {
+    return NextResponse.json({ ok: true, recovered: true, at: new Date().toISOString() })
+  }
+
+  // Toujours down après 2 vérifs → alerte + auto-restart (si token configuré).
+  await sendAlert(probe2)
+  const restart = await restartProject()
+  if (restart.triggered) await sendRestartNotice(restart)
+
   return NextResponse.json(
-    { ok: probe.ok, service: 'supabase-auth', status: probe.status, ms: probe.ms, at: new Date().toISOString() },
-    { status: probe.ok ? 200 : 503 },
+    { ok: false, service: 'supabase-auth', status: probe2.status, ms: probe2.ms, autoRestart: restart, at: new Date().toISOString() },
+    { status: 503 },
   )
 }
 
