@@ -27,9 +27,9 @@ async function run() {
   const min = new Date(now - 48 * 3600_000).toISOString()  // envoyé il y a ≥ 48h
   const max = new Date(now - 72 * 3600_000).toISOString()  // … et ≤ 72h
 
-  const { data: stops, error } = await admin
+  const buildQuery = (cols: string) => admin
     .from('delivery_stops')
-    .select('id, customer_name, email, email_sent_at, delivery_tours!inner(planned_date, status, brand)')
+    .select(cols)
     .eq('delivery_tours.brand', 'bowa')
     .in('delivery_tours.status', ['draft', 'planned', 'in_progress'])
     .eq('status', 'pending')
@@ -37,9 +37,23 @@ async function run() {
     .not('email_sent_at', 'is', null)
     .lte('email_sent_at', min)
     .gte('email_sent_at', max)
+
+  // Repli si la colonne passage_date n'est pas encore déployée.
+  let stops: unknown[] | null = null
+  let error: { message?: string } | null = null
+  {
+    const res = await buildQuery('id, customer_name, email, email_sent_at, passage_date, delivery_tours!inner(planned_date, status, brand)')
+    stops = res.data as unknown[] | null
+    error = res.error
+  }
+  if (error && /passage_date/.test(error.message ?? '')) {
+    const res = await buildQuery('id, customer_name, email, email_sent_at, delivery_tours!inner(planned_date, status, brand)')
+    stops = res.data as unknown[] | null
+    error = res.error
+  }
   if (error) throw error
 
-  type StopRow = { id: string; customer_name: string; email: string; delivery_tours: { planned_date: string | null } | { planned_date: string | null }[] }
+  type StopRow = { id: string; customer_name: string; email: string; passage_date?: string | null; delivery_tours: { planned_date: string | null } | { planned_date: string | null }[] }
   const targets = ((stops ?? []) as unknown as StopRow[]).filter((s) => s.email)
   let sent = 0, errors = 0
   const apiKey = process.env.RESEND_API_KEY
@@ -48,7 +62,8 @@ async function run() {
     try {
       if (apiKey) {
         const t = Array.isArray(s.delivery_tours) ? s.delivery_tours[0] : s.delivery_tours
-        const html = buildReminderEmailHtml(firstNameOf(s.customer_name ?? ''), t?.planned_date ?? '', s.id)
+        const dateStr = s.passage_date || t?.planned_date || ''
+        const html = buildReminderEmailHtml(firstNameOf(s.customer_name ?? ''), dateStr, s.id, !!s.passage_date)
         const res = await fetch('https://api.resend.com/emails', {
           method: 'POST',
           headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },

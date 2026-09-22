@@ -370,11 +370,13 @@ function PlanificateurView() {
   }
 
   // Notifier les clients modal
-  type NotifStop = { id: string; customer_name: string; email: string; email_sent_at: string | null; client_availability?: 'confirmed' | 'unavailable' | null; status?: string }
+  type NotifStop = { id: string; customer_name: string; email: string; email_sent_at: string | null; client_availability?: 'confirmed' | 'unavailable' | null; status?: string; passage_date?: string | null }
   const [notifModal, setNotifModal] = useState<{ tourId: string; tourName: string; plannedDate: string; stops: NotifStop[] } | null>(null)
   const [notifSending, setNotifSending] = useState(false)
   const [notifResult, setNotifResult] = useState<{ sent: number; errors: number } | null>(null)
   const [notifTab, setNotifTab] = useState<'destinataires' | 'apercu'>('destinataires')
+  // Date de passage par client (tournées multi-jours) : { stopId: 'YYYY-MM-DD' }
+  const [passageDates, setPassageDates] = useState<Record<string, string>>({})
 
   function formatTourDateFr(dateStr: string): string {
     if (!dateStr) return ''
@@ -387,17 +389,28 @@ function PlanificateurView() {
     const data = await r.json()
     setNotifResult(null)
     setNotifTab('destinataires')
-    setNotifModal({ tourId, tourName, plannedDate, stops: data.stops ?? [] })
+    const stops: NotifStop[] = data.stops ?? []
+    // Chaque client démarre avec sa date de passage enregistrée, sinon la date de la tournée.
+    const seed: Record<string, string> = {}
+    for (const s of stops) seed[s.id] = s.passage_date || plannedDate || ''
+    setPassageDates(seed)
+    setNotifModal({ tourId, tourName, plannedDate, stops })
   }
 
   async function sendNotifEmails(opts: { force?: boolean; reminder?: boolean } = {}) {
     if (!notifModal) return
     setNotifSending(true)
     try {
+      // On n'envoie que les dates qui diffèrent de la date de tournée (les vraies
+      // dates par client) — inutile de tout persister.
+      const dates: Record<string, string> = {}
+      for (const [id, d] of Object.entries(passageDates)) {
+        if (d && d !== notifModal.plannedDate) dates[id] = d
+      }
       const r = await fetch(`/api/delivery/tours/${notifModal.tourId}/emails`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ force: opts.force ?? false, reminder: opts.reminder ?? false }),
+        body: JSON.stringify({ force: opts.force ?? false, reminder: opts.reminder ?? false, dates }),
       })
       const data = await r.json()
       setNotifResult(data)
@@ -409,6 +422,18 @@ function PlanificateurView() {
     } finally {
       setNotifSending(false)
     }
+  }
+
+  // Applique une date à ce client et à tous les suivants de la liste (dans l'ordre
+  // affiché) — pratique pour marquer « le jour 2 commence ici » en un clic.
+  function applyDateToFollowing(orderedIds: string[], fromId: string, date: string) {
+    const idx = orderedIds.indexOf(fromId)
+    if (idx < 0) return
+    setPassageDates((prev) => {
+      const next = { ...prev }
+      for (let i = idx; i < orderedIds.length; i++) next[orderedIds[i]] = date
+      return next
+    })
   }
 
   const fetchDeferredOrders = useCallback(async () => {
@@ -2093,6 +2118,10 @@ function PlanificateurView() {
       const stopsWithoutEmail = notifModal.stops.filter((s) => !s.email)
       const alreadyNotified = stopsWithEmail.filter((s) => s.email_sent_at)
       const pendingNotif = stopsWithEmail.filter((s) => !s.email_sent_at)
+      const pendingIds = pendingNotif.map((s) => s.id)
+      // Plusieurs dates distinctes = tournée multi-jours → on affiche les sélecteurs.
+      const distinctDates = new Set(pendingIds.map((id) => passageDates[id] || notifModal.plannedDate))
+      const isMultiDay = distinctDates.size > 1
       const allAlreadyNotified = pendingNotif.length === 0 && alreadyNotified.length > 0
       const notifDate = alreadyNotified.length > 0
         ? alreadyNotified.map((s) => s.email_sent_at!).sort().at(0)!
@@ -2154,13 +2183,16 @@ function PlanificateurView() {
               ) : notifTab === 'apercu' ? (
                 /* ── Aperçu email ── */
                 (() => {
-                  const previewFirst = (notifModal.stops[0]?.customer_name ?? 'Prénom').split(' ')[0]
-                  const previewDateStart = notifModal.plannedDate
-                    ? formatTourDateFr(notifModal.plannedDate)
+                  const previewStop = notifModal.stops.find((s) => s.email && !s.email_sent_at) ?? notifModal.stops[0]
+                  const previewFirst = (previewStop?.customer_name ?? 'Prénom').split(' ')[0]
+                  const previewChosen = (previewStop && passageDates[previewStop.id]) || notifModal.plannedDate
+                  const previewPrecise = !!previewChosen && previewChosen !== notifModal.plannedDate
+                  const previewDateStart = previewChosen
+                    ? formatTourDateFr(previewChosen)
                     : notifModal.tourName
-                  const previewDateEnd = notifModal.plannedDate
+                  const previewDateEnd = previewChosen
                     ? (() => {
-                        const end = new Date(notifModal.plannedDate + 'T00:00:00')
+                        const end = new Date(previewChosen + 'T00:00:00')
                         end.setDate(end.getDate() + 4)
                         return end.toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })
                       })()
@@ -2185,8 +2217,10 @@ function PlanificateurView() {
                       {/* Corps du mail */}
                       <div className="bg-white mx-3 my-3 rounded-[12px] px-5 py-5 text-sm text-[#1a1a2e] leading-relaxed shadow-sm">
                         <p className="mb-3">Bonjour <strong>{previewFirst}</strong>,</p>
-                        <p className="mb-3">Bonne nouvelle ! 🎉 Votre commande sera livrée cette semaine.<br/>
-                        Notre livreur commencera sa tournée le <strong>{previewDateStart}</strong> et passera chez vous dans les prochains jours (entre le {previewDateStart}{previewDateEnd ? ` et le ${previewDateEnd}` : ''}).</p>
+                        <p className="mb-3">Bonne nouvelle ! 🎉 Votre commande sera livrée prochainement.<br/>
+                        {previewPrecise
+                          ? <>Notre livreur passera chez vous le <strong>{previewDateStart}</strong>.</>
+                          : <>Notre livreur commencera sa tournée le <strong>{previewDateStart}</strong> et passera chez vous dans les prochains jours (entre le {previewDateStart}{previewDateEnd ? ` et le ${previewDateEnd}` : ''}).</>}</p>
                         <p className="mb-3">La livraison s&apos;effectuera au pied du camion 🚛. Nous vous demandons donc de faire le nécessaire pour être accompagné(e) d&apos;une autre personne afin de récupérer les panneaux en toute sécurité 🔧.</p>
                         <p className="mb-3">Pour garantir une livraison en toute fluidité, notre livreur vous appellera très probablement au fil de sa tournée, en fonction de l&apos;ordre des livraisons, afin de vérifier votre disponibilité. Vous serez joint(e) depuis le numéro suivant : <strong>06 17 85 85 18</strong>.</p>
                         <p className="mb-3">Si vous êtes indisponible, merci de nous en informer par retour de mail, afin que nous puissions reprogrammer votre livraison.</p>
@@ -2218,17 +2252,48 @@ function PlanificateurView() {
 
                   {pendingNotif.length > 0 && (
                     <>
-                      <p className="text-xs font-semibold text-[#6b6b63] uppercase tracking-wide mb-2">
-                        {pendingNotif.length} email{pendingNotif.length !== 1 ? 's' : ''} à envoyer
+                      <div className="flex items-center justify-between mb-2">
+                        <p className="text-xs font-semibold text-[#6b6b63] uppercase tracking-wide">
+                          {pendingNotif.length} email{pendingNotif.length !== 1 ? 's' : ''} à envoyer
+                        </p>
+                        {isMultiDay && (
+                          <span className="text-[10px] font-semibold text-[#0e7490] bg-[#ecfeff] border border-[#a5f3fc] rounded-full px-2 py-0.5">
+                            Tournée sur {distinctDates.size} jours
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-[11px] text-[#6b6b63] mb-2 leading-snug">
+                        Réglez la date de passage de chaque client (le mail annoncera ce jour précis).
+                        <br/>« ↓&nbsp;suivants » applique la date à ce client et à tous ceux d&apos;en dessous — pratique pour marquer le début du jour&nbsp;2.
                       </p>
                       <div className="space-y-1.5 mb-4">
                         {pendingNotif.map((s) => (
-                          <div key={s.id} className="flex items-center gap-2 text-sm">
-                            <span className="w-5 h-5 rounded-full bg-[#1a1a2e] text-white flex items-center justify-center shrink-0">
-                              <Mail size={10} />
-                            </span>
-                            <span className="font-medium text-[#1a1a2e] truncate">{s.customer_name}</span>
-                            <span className="text-[#6b6b63] text-xs truncate">{s.email}</span>
+                          <div key={s.id} className="rounded-[10px] border border-[#ececec] px-3 py-2">
+                            <div className="flex items-center gap-2 min-w-0">
+                              <span className="w-5 h-5 rounded-full bg-[#1a1a2e] text-white flex items-center justify-center shrink-0">
+                                <Mail size={10} />
+                              </span>
+                              <div className="min-w-0 flex-1">
+                                <div className="font-medium text-[#1a1a2e] truncate text-sm">{s.customer_name}</div>
+                                <div className="text-[#6b6b63] text-xs truncate">{s.email}</div>
+                              </div>
+                            </div>
+                            <div className="flex items-center gap-2 mt-2 pl-7">
+                              <input
+                                type="date"
+                                value={passageDates[s.id] ?? notifModal.plannedDate}
+                                onChange={(e) => setPassageDates((p) => ({ ...p, [s.id]: e.target.value }))}
+                                className="text-xs border border-[#e0e0e0] rounded-[8px] px-2 py-1 text-[#1a1a2e] bg-white focus:outline-none focus:ring-2 focus:ring-[#1a1a2e]/15"
+                              />
+                              <button
+                                type="button"
+                                onClick={() => applyDateToFollowing(pendingIds, s.id, passageDates[s.id] ?? notifModal.plannedDate)}
+                                title="Appliquer cette date à ce client et à tous les suivants"
+                                className="text-[11px] text-[#0e7490] hover:underline whitespace-nowrap"
+                              >
+                                ↓ suivants
+                              </button>
+                            </div>
                           </div>
                         ))}
                       </div>

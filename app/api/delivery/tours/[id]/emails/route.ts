@@ -25,11 +25,17 @@ function fmtDateLong(d: Date): string {
 
 const APP_URL = 'https://www.steero.io'
 
-function buildEmailHtml(firstName: string, startDateStr: string, stopId: string): string {
+function buildEmailHtml(firstName: string, startDateStr: string, stopId: string, precise = false): string {
   const start   = new Date(startDateStr + 'T00:00:00')
   const end     = addWorkingDays(startDateStr, 4)
   const startFr = fmtDateLong(start)
   const endFr   = fmtDateLong(end)
+
+  // Quand une date de passage précise est définie pour ce client (tournées de
+  // plusieurs jours), on annonce LE jour exact au lieu d'une fenêtre de 5 jours.
+  const dateLine = precise
+    ? `Notre livreur passera chez vous le <strong>${startFr}</strong>.`
+    : `Notre livreur commencera sa tournée le <strong>${startFr}</strong> et passera chez vous dans les prochains jours (entre le ${startFr} et le ${endFr}).`
 
   const confirmUrl     = `${APP_URL}/api/delivery/confirm?stop=${stopId}&action=confirmed`
   const unavailableUrl = `${APP_URL}/api/delivery/confirm?stop=${stopId}&action=unavailable`
@@ -68,8 +74,8 @@ function buildEmailHtml(firstName: string, startDateStr: string, stopId: string)
                 Bonjour <strong>${firstName}</strong>,
               </p>
               <p style="margin:0 0 16px;font-size:15px;color:#3a3a3a;line-height:1.6;">
-                Bonne nouvelle&nbsp;! 🎉 Votre commande sera livrée cette semaine.<br/>
-                Notre livreur commencera sa tournée le <strong>${startFr}</strong> et passera chez vous dans les prochains jours (entre le ${startFr} et le ${endFr}).
+                Bonne nouvelle&nbsp;! 🎉 Votre commande sera livrée prochainement.<br/>
+                ${dateLine}
               </p>
               <p style="margin:0 0 24px;font-size:15px;color:#3a3a3a;line-height:1.6;">
                 La livraison s'effectuera au pied du camion 🚛. Nous vous demandons donc de faire le nécessaire pour être accompagné(e) d'une autre personne afin de récupérer les panneaux en toute sécurité 🔧.
@@ -154,12 +160,26 @@ export async function GET(
   try {
     const admin = getAdmin()
 
-    const { data: stops, error } = await admin
+    const baseCols = 'id, customer_name, email, email_sent_at, client_availability, status'
+    const getStops = (cols: string) => admin
       .from('delivery_stops')
-      .select('id, customer_name, email, email_sent_at, client_availability, status')
+      .select(cols)
       .eq('tour_id', params.id)
       .order('sequence', { ascending: true })
 
+    let stops: unknown[] | null = null
+    let error: { message?: string } | null = null
+    {
+      const res = await getStops(`${baseCols}, passage_date`)
+      stops = res.data as unknown[] | null
+      error = res.error
+    }
+    // Repli si la colonne passage_date n'est pas encore déployée.
+    if (error && /passage_date/.test(error.message ?? '')) {
+      const res = await getStops(baseCols)
+      stops = res.data as unknown[] | null
+      error = res.error
+    }
     if (error) throw error
 
     return NextResponse.json({ stops: stops ?? [] })
@@ -180,6 +200,9 @@ export async function POST(
     const reminder = body?.reminder === true   // relance : uniquement les sans-réponse
     const minAgeHours = Number(body?.minAgeHours) || 0   // relance : mail envoyé il y a AU MOINS X h
     const maxAgeHours = Number(body?.maxAgeHours) || 0   // relance : … et au PLUS X h (fenêtre cron)
+    // Dates de passage par client { stopId: 'YYYY-MM-DD' } — pour les tournées de
+    // plusieurs jours : chaque client reçoit LA date où le livreur passe chez lui.
+    const dates: Record<string, string> = (body?.dates && typeof body.dates === 'object') ? body.dates : {}
 
     const admin = getAdmin()
 
@@ -192,35 +215,60 @@ export async function POST(
 
     if (tourError) throw tourError
 
-    // Fetch target stops
-    let query = admin
-      .from('delivery_stops')
-      .select('id, customer_name, email, email_sent_at, client_availability, status')
-      .eq('tour_id', params.id)
-
-    if (reminder) {
-      // Relance = déjà notifiés MAIS sans réponse (ni présent ni absent), encore à livrer.
-      query = query.not('email_sent_at', 'is', null).is('client_availability', null).eq('status', 'pending')
-      if (minAgeHours > 0) query = query.lte('email_sent_at', new Date(Date.now() - minAgeHours * 3600_000).toISOString())
-      if (maxAgeHours > 0) query = query.gte('email_sent_at', new Date(Date.now() - maxAgeHours * 3600_000).toISOString())
-    } else if (!force) {
-      query = query.is('email_sent_at', null)
+    // Persist per-client passage dates first (so they stick even outside sending).
+    for (const [stopId, d] of Object.entries(dates)) {
+      if (typeof d === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(d)) {
+        await admin.from('delivery_stops').update({ passage_date: d }).eq('id', stopId).eq('tour_id', params.id)
+      } else if (d === null || d === '') {
+        await admin.from('delivery_stops').update({ passage_date: null }).eq('id', stopId).eq('tour_id', params.id)
+      }
     }
 
-    const { data: stops, error: stopsError } = await query
+    // Fetch target stops (repli si la colonne passage_date n'est pas encore déployée).
+    const baseCols = 'id, customer_name, email, email_sent_at, client_availability, status'
+    const buildQuery = (cols: string) => {
+      let q = admin.from('delivery_stops').select(cols).eq('tour_id', params.id)
+      if (reminder) {
+        q = q.not('email_sent_at', 'is', null).is('client_availability', null).eq('status', 'pending')
+        if (minAgeHours > 0) q = q.lte('email_sent_at', new Date(Date.now() - minAgeHours * 3600_000).toISOString())
+        if (maxAgeHours > 0) q = q.gte('email_sent_at', new Date(Date.now() - maxAgeHours * 3600_000).toISOString())
+      } else if (!force) {
+        q = q.is('email_sent_at', null)
+      }
+      return q
+    }
+
+    type TargetStop = { id: string; customer_name: string | null; email: string | null; email_sent_at: string | null; client_availability: string | null; status: string | null; passage_date?: string | null }
+    let stops: TargetStop[] | null = null
+    let stopsError: { message?: string } | null = null
+    {
+      const res = await buildQuery(`${baseCols}, passage_date`)
+      stops = res.data as unknown as TargetStop[] | null
+      stopsError = res.error
+    }
+    if (stopsError && /passage_date/.test(stopsError.message ?? '')) {
+      const res = await buildQuery(baseCols)
+      stops = res.data as unknown as TargetStop[] | null
+      stopsError = res.error
+    }
     if (stopsError) throw stopsError
 
     const pendingStops = (stops ?? []).filter((s) => s.email)
-    const startDateStr = tour.planned_date ?? ''
+    const tourDateStr = tour.planned_date ?? ''
     let sent = 0
     let errors = 0
 
     for (const stop of pendingStops) {
       try {
+        // Date à annoncer : celle du client si définie (tournée multi-jours),
+        // sinon la date de la tournée. "precise" = jour exact vs fenêtre.
+        const stopDate = stop.passage_date || null
+        const startDateStr = stopDate || tourDateStr
+        const precise = !!stopDate
         if (process.env.RESEND_API_KEY) {
           const html = reminder
-            ? buildReminderEmailHtml(firstNameOf(stop.customer_name ?? ''), startDateStr, stop.id)
-            : buildEmailHtml(firstNameOf(stop.customer_name ?? ''), startDateStr, stop.id)
+            ? buildReminderEmailHtml(firstNameOf(stop.customer_name ?? ''), startDateStr, stop.id, precise)
+            : buildEmailHtml(firstNameOf(stop.customer_name ?? ''), startDateStr, stop.id, precise)
 
           const emailRes = await fetch('https://api.resend.com/emails', {
             method: 'POST',

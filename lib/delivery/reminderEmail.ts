@@ -17,11 +17,14 @@ function fmtDateLong(d: Date): string {
   return d.toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })
 }
 
-export function buildReminderEmailHtml(firstName: string, startDateStr: string, stopId: string): string {
+export function buildReminderEmailHtml(firstName: string, startDateStr: string, stopId: string, precise = false): string {
   const start   = new Date(startDateStr + 'T00:00:00')
   const end     = addWorkingDays(startDateStr, 4)
   const startFr = fmtDateLong(start)
   const endFr   = fmtDateLong(end)
+  const dateLine = precise
+    ? `votre livraison prévue le <strong>${startFr}</strong>`
+    : `votre livraison prévue entre le <strong>${startFr}</strong> et le <strong>${endFr}</strong>`
   const confirmUrl     = `${DELIVERY_APP_URL}/api/delivery/confirm?stop=${stopId}&action=confirmed`
   const unavailableUrl = `${DELIVERY_APP_URL}/api/delivery/confirm?stop=${stopId}&action=unavailable`
   return `<!DOCTYPE html><html lang="fr"><head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width, initial-scale=1.0"/></head>
@@ -33,7 +36,7 @@ export function buildReminderEmailHtml(firstName: string, startDateStr: string, 
         <p style="font-size:34px;margin:0 0 8px;text-align:center;">⏰</p>
         <h1 style="margin:0 0 20px;font-size:21px;font-weight:700;color:#1a1a2e;text-align:center;line-height:1.3;">Petit rappel pour votre livraison</h1>
         <p style="margin:0 0 16px;font-size:15px;color:#3a3a3a;line-height:1.6;">Bonjour <strong>${firstName}</strong>,</p>
-        <p style="margin:0 0 16px;font-size:15px;color:#3a3a3a;line-height:1.6;">Nous n'avons pas encore eu votre réponse concernant votre livraison prévue entre le <strong>${startFr}</strong> et le <strong>${endFr}</strong>. Pouvez-vous nous confirmer votre présence&nbsp;? Cela nous évite un déplacement pour rien 🙏.</p>
+        <p style="margin:0 0 16px;font-size:15px;color:#3a3a3a;line-height:1.6;">Nous n'avons pas encore eu votre réponse concernant ${dateLine}. Pouvez-vous nous confirmer votre présence&nbsp;? Cela nous évite un déplacement pour rien 🙏.</p>
         <table width="100%" cellpadding="0" cellspacing="0" style="background:#f8f4f1;border-radius:14px;padding:24px;margin-bottom:24px;"><tr><td align="center">
           <p style="margin:0 0 20px;font-size:15px;color:#3a3a3a;line-height:1.6;font-weight:600;">Serez-vous disponible pour réceptionner votre commande&nbsp;?</p>
           <table cellpadding="0" cellspacing="0"><tr>
