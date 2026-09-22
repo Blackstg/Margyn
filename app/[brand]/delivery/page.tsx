@@ -970,6 +970,7 @@ function PlanificateurView() {
                   lng: o.lng,
                   zone: o.zone as 'nord-est' | 'nord-ouest' | 'sud-est' | 'sud-ouest',
                   panel_count: o.panel_count,
+                  order_date: o.created_at,
                 }))}
                 selectedOrders={selectedOrders}
                 onToggle={toggleOrder}

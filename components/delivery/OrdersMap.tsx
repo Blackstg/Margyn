@@ -24,6 +24,7 @@ export interface MapOrder {
   lng?: number | null
   zone: Zone
   panel_count: number
+  order_date?: string | null
 }
 
 interface Props {
@@ -113,6 +114,20 @@ export default function OrdersMap({ orders, selectedOrders, onToggle, height = 4
           const isSelected = selectedOrders.has(order.order_name)
           const el = makeOrderMarker(order.zone, isSelected)
 
+          // Date de commande + ancienneté : plus une commande est ancienne, plus
+          // elle est urgente à livrer (client qui attend). Orange > 7 j, rouge > 14 j.
+          const dateHtml = (() => {
+            if (!order.order_date) return ''
+            const d = new Date(order.order_date)
+            if (isNaN(d.getTime())) return ''
+            const days = Math.floor((Date.now() - d.getTime()) / 86400000)
+            const dateStr = d.toLocaleDateString('fr-FR', { day: 'numeric', month: 'short', year: 'numeric' })
+            const ageStr = days <= 0 ? "aujourd'hui" : days === 1 ? 'hier' : `il y a ${days} jours`
+            const color = days > 14 ? '#c0392b' : days > 7 ? '#c2680a' : '#888'
+            const urgent = days > 14 ? ' ⚠️ urgent' : ''
+            return `<br><span style="color:${color};font-size:11px">📅 Commandé le ${dateStr} · ${ageStr}${urgent}</span>`
+          })()
+
           const marker = new mgl.Marker({ element: el })
             .setLngLat(coord)
             .setPopup(
@@ -121,7 +136,7 @@ export default function OrdersMap({ orders, selectedOrders, onToggle, height = 4
                   <strong>${order.customer_name}</strong><br>
                   <span style="font-family:ui-monospace,monospace;color:#888;font-size:11px">${order.order_name}</span><br>
                   <span style="color:#555">${order.zip ? order.zip + ' ' : ''}${order.city}</span><br>
-                  <span style="color:#1a7f4b;font-weight:600">${order.panel_count} panneau${order.panel_count !== 1 ? 'x' : ''}</span>
+                  <span style="color:#1a7f4b;font-weight:600">${order.panel_count} panneau${order.panel_count !== 1 ? 'x' : ''}</span>${dateHtml}
                 </div>`
               )
             )
