@@ -17,14 +17,18 @@ function fmtDateLong(d: Date): string {
   return d.toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })
 }
 
-export function buildReminderEmailHtml(firstName: string, startDateStr: string, stopId: string, precise = false): string {
+// windowDays : 0 = fenêtre large (X..X+4). 1 = jour exact. >=2 = "X à X+(w-1)".
+export function buildReminderEmailHtml(firstName: string, startDateStr: string, stopId: string, windowDays = 0): string {
   const start   = new Date(startDateStr + 'T00:00:00')
-  const end     = addWorkingDays(startDateStr, 4)
   const startFr = fmtDateLong(start)
-  const endFr   = fmtDateLong(end)
-  const dateLine = precise
-    ? `votre livraison prévue le <strong>${startFr}</strong>`
-    : `votre livraison prévue entre le <strong>${startFr}</strong> et le <strong>${endFr}</strong>`
+  let dateLine: string
+  if (windowDays === 1) {
+    dateLine = `votre livraison prévue le <strong>${startFr}</strong>`
+  } else {
+    const span = windowDays >= 2 ? windowDays - 1 : 4
+    const endFr = fmtDateLong(addWorkingDays(startDateStr, span))
+    dateLine = `votre livraison prévue entre le <strong>${startFr}</strong> et le <strong>${endFr}</strong>`
+  }
   const confirmUrl     = `${DELIVERY_APP_URL}/api/delivery/confirm?stop=${stopId}&action=confirmed`
   const unavailableUrl = `${DELIVERY_APP_URL}/api/delivery/confirm?stop=${stopId}&action=unavailable`
   return `<!DOCTYPE html><html lang="fr"><head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width, initial-scale=1.0"/></head>

@@ -377,6 +377,8 @@ function PlanificateurView() {
   const [notifTab, setNotifTab] = useState<'destinataires' | 'apercu'>('destinataires')
   // Date de passage par client (tournées multi-jours) : { stopId: 'YYYY-MM-DD' }
   const [passageDates, setPassageDates] = useState<Record<string, string>>({})
+  // Marge de la fenêtre annoncée dans le mail : 1 = jour exact, 2 = "X à X+1", 3 = "X à X+2".
+  const [notifWindowDays, setNotifWindowDays] = useState(2)
 
   function formatTourDateFr(dateStr: string): string {
     if (!dateStr) return ''
@@ -394,6 +396,7 @@ function PlanificateurView() {
     const seed: Record<string, string> = {}
     for (const s of stops) seed[s.id] = s.passage_date || plannedDate || ''
     setPassageDates(seed)
+    setNotifWindowDays(2)
     setNotifModal({ tourId, tourName, plannedDate, stops })
   }
 
@@ -410,7 +413,7 @@ function PlanificateurView() {
       const r = await fetch(`/api/delivery/tours/${notifModal.tourId}/emails`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ force: opts.force ?? false, reminder: opts.reminder ?? false, dates }),
+        body: JSON.stringify({ force: opts.force ?? false, reminder: opts.reminder ?? false, dates, windowDays: notifWindowDays }),
       })
       const data = await r.json()
       setNotifResult(data)
@@ -2190,10 +2193,12 @@ function PlanificateurView() {
                   const previewDateStart = previewChosen
                     ? formatTourDateFr(previewChosen)
                     : notifModal.tourName
+                  // Fin de fenêtre : marge choisie si date client, sinon +4 (fenêtre large).
+                  const previewSpan = previewPrecise ? notifWindowDays - 1 : 4
                   const previewDateEnd = previewChosen
                     ? (() => {
                         const end = new Date(previewChosen + 'T00:00:00')
-                        end.setDate(end.getDate() + 4)
+                        end.setDate(end.getDate() + previewSpan)
                         return end.toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })
                       })()
                     : null
@@ -2219,7 +2224,9 @@ function PlanificateurView() {
                         <p className="mb-3">Bonjour <strong>{previewFirst}</strong>,</p>
                         <p className="mb-3">Bonne nouvelle ! 🎉 Votre commande sera livrée prochainement.<br/>
                         {previewPrecise
-                          ? <>Notre livreur passera chez vous le <strong>{previewDateStart}</strong>.</>
+                          ? (notifWindowDays === 1
+                              ? <>Notre livreur passera chez vous le <strong>{previewDateStart}</strong>.</>
+                              : <>Notre livreur passera chez vous entre le <strong>{previewDateStart}</strong> et le <strong>{previewDateEnd}</strong>.</>)
                           : <>Notre livreur commencera sa tournée le <strong>{previewDateStart}</strong> et passera chez vous dans les prochains jours (entre le {previewDateStart}{previewDateEnd ? ` et le ${previewDateEnd}` : ''}).</>}</p>
                         <p className="mb-3">La livraison s&apos;effectuera au pied du camion 🚛. Nous vous demandons donc de faire le nécessaire pour être accompagné(e) d&apos;une autre personne afin de récupérer les panneaux en toute sécurité 🔧.</p>
                         <p className="mb-3">Pour garantir une livraison en toute fluidité, notre livreur vous appellera très probablement au fil de sa tournée, en fonction de l&apos;ordre des livraisons, afin de vérifier votre disponibilité. Vous serez joint(e) depuis le numéro suivant : <strong>06 17 85 85 18</strong>.</p>
@@ -2263,9 +2270,37 @@ function PlanificateurView() {
                         )}
                       </div>
                       <p className="text-[11px] text-[#6b6b63] mb-2 leading-snug">
-                        Réglez la date de passage de chaque client (le mail annoncera ce jour précis).
-                        <br/>« ↓&nbsp;suivants » applique la date à ce client et à tous ceux d&apos;en dessous — pratique pour marquer le début du jour&nbsp;2.
+                        Réglez la date de passage de chaque client. « ↓&nbsp;suivants » applique la date à ce client et à tous ceux d&apos;en dessous — pratique pour marquer le début du jour&nbsp;2.
                       </p>
+                      {/* Marge de la fenêtre annoncée dans le mail */}
+                      <div className="mb-3 rounded-[10px] bg-[#f8f8f6] border border-[#ececec] px-3 py-2.5">
+                        <p className="text-[11px] font-semibold text-[#1a1a2e] mb-1.5">Marge annoncée au client</p>
+                        <div className="flex gap-1.5">
+                          {[
+                            { d: 1, label: 'Jour exact' },
+                            { d: 2, label: '± 1 jour' },
+                            { d: 3, label: '± 2 jours' },
+                          ].map((opt) => (
+                            <button
+                              key={opt.d}
+                              type="button"
+                              onClick={() => setNotifWindowDays(opt.d)}
+                              className={`flex-1 text-[11px] font-medium rounded-[8px] px-2 py-1.5 border transition-colors ${
+                                notifWindowDays === opt.d
+                                  ? 'bg-[#1a1a2e] text-white border-[#1a1a2e]'
+                                  : 'bg-white text-[#6b6b63] border-[#e0e0e0] hover:border-[#1a1a2e]/30'
+                              }`}
+                            >
+                              {opt.label}
+                            </button>
+                          ))}
+                        </div>
+                        <p className="text-[10px] text-[#8a8a80] mt-1.5 leading-snug">
+                          {notifWindowDays === 1
+                            ? '« Notre livreur passera chez vous le mardi 24 septembre. »'
+                            : `« Notre livreur passera chez vous entre le mardi 24 et le ${notifWindowDays === 2 ? 'mercredi 25' : 'jeudi 26'} septembre. »`}
+                        </p>
+                      </div>
                       <div className="space-y-1.5 mb-4">
                         {pendingNotif.map((s) => (
                           <div key={s.id} className="rounded-[10px] border border-[#ececec] px-3 py-2">

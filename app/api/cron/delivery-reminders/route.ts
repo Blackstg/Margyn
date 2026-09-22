@@ -63,7 +63,8 @@ async function run() {
       if (apiKey) {
         const t = Array.isArray(s.delivery_tours) ? s.delivery_tours[0] : s.delivery_tours
         const dateStr = s.passage_date || t?.planned_date || ''
-        const html = buildReminderEmailHtml(firstNameOf(s.customer_name ?? ''), dateStr, s.id, !!s.passage_date)
+        // Fenêtre de 2 jours pour les clients à date réglée (marge de sécurité), sinon large.
+        const html = buildReminderEmailHtml(firstNameOf(s.customer_name ?? ''), dateStr, s.id, s.passage_date ? 2 : 0)
         const res = await fetch('https://api.resend.com/emails', {
           method: 'POST',
           headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },

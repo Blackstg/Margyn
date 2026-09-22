@@ -25,17 +25,24 @@ function fmtDateLong(d: Date): string {
 
 const APP_URL = 'https://www.steero.io'
 
-function buildEmailHtml(firstName: string, startDateStr: string, stopId: string, precise = false): string {
+// windowDays : 0 = pas de date client → fenêtre large "cette semaine" (X..X+4).
+//              1 = jour exact "le X". >=2 = fenêtre "entre le X et le X+(w-1)".
+function buildEmailHtml(firstName: string, startDateStr: string, stopId: string, windowDays = 0): string {
   const start   = new Date(startDateStr + 'T00:00:00')
-  const end     = addWorkingDays(startDateStr, 4)
   const startFr = fmtDateLong(start)
-  const endFr   = fmtDateLong(end)
 
-  // Quand une date de passage précise est définie pour ce client (tournées de
-  // plusieurs jours), on annonce LE jour exact au lieu d'une fenêtre de 5 jours.
-  const dateLine = precise
-    ? `Notre livreur passera chez vous le <strong>${startFr}</strong>.`
-    : `Notre livreur commencera sa tournée le <strong>${startFr}</strong> et passera chez vous dans les prochains jours (entre le ${startFr} et le ${endFr}).`
+  let dateLine: string
+  if (windowDays >= 1) {
+    if (windowDays === 1) {
+      dateLine = `Notre livreur passera chez vous le <strong>${startFr}</strong>.`
+    } else {
+      const endFr = fmtDateLong(addWorkingDays(startDateStr, windowDays - 1))
+      dateLine = `Notre livreur passera chez vous entre le <strong>${startFr}</strong> et le <strong>${endFr}</strong>.`
+    }
+  } else {
+    const endFr = fmtDateLong(addWorkingDays(startDateStr, 4))
+    dateLine = `Notre livreur commencera sa tournée le <strong>${startFr}</strong> et passera chez vous dans les prochains jours (entre le ${startFr} et le ${endFr}).`
+  }
 
   const confirmUrl     = `${APP_URL}/api/delivery/confirm?stop=${stopId}&action=confirmed`
   const unavailableUrl = `${APP_URL}/api/delivery/confirm?stop=${stopId}&action=unavailable`
@@ -203,6 +210,8 @@ export async function POST(
     // Dates de passage par client { stopId: 'YYYY-MM-DD' } — pour les tournées de
     // plusieurs jours : chaque client reçoit LA date où le livreur passe chez lui.
     const dates: Record<string, string> = (body?.dates && typeof body.dates === 'object') ? body.dates : {}
+    // Marge de la fenêtre annoncée (1 = jour exact, 2 = "X à X+1", etc.). Défaut 2.
+    const windowDays = Math.min(5, Math.max(1, Number(body?.windowDays) || 2))
 
     const admin = getAdmin()
 
@@ -261,14 +270,15 @@ export async function POST(
     for (const stop of pendingStops) {
       try {
         // Date à annoncer : celle du client si définie (tournée multi-jours),
-        // sinon la date de la tournée. "precise" = jour exact vs fenêtre.
+        // sinon la date de la tournée. windowDays s'applique aux dates client ;
+        // 0 = fenêtre large "cette semaine" pour les clients sans date réglée.
         const stopDate = stop.passage_date || null
         const startDateStr = stopDate || tourDateStr
-        const precise = !!stopDate
+        const wd = stopDate ? windowDays : 0
         if (process.env.RESEND_API_KEY) {
           const html = reminder
-            ? buildReminderEmailHtml(firstNameOf(stop.customer_name ?? ''), startDateStr, stop.id, precise)
-            : buildEmailHtml(firstNameOf(stop.customer_name ?? ''), startDateStr, stop.id, precise)
+            ? buildReminderEmailHtml(firstNameOf(stop.customer_name ?? ''), startDateStr, stop.id, wd)
+            : buildEmailHtml(firstNameOf(stop.customer_name ?? ''), startDateStr, stop.id, wd)
 
           const emailRes = await fetch('https://api.resend.com/emails', {
             method: 'POST',
