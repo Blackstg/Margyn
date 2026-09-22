@@ -2171,6 +2171,47 @@ function PlanificateurView() {
               </div>
             )}
 
+            {/* Marge annoncée — visible sur les DEUX onglets pour voir l'effet en direct sur l'aperçu */}
+            {!notifResult && pendingNotif.length > 0 && (
+              <div className="px-5 pt-3">
+                <div className="rounded-[10px] bg-[#f8f8f6] border border-[#ececec] px-3 py-2.5">
+                  <p className="text-[11px] font-semibold text-[#1a1a2e] mb-1.5">Marge annoncée au client</p>
+                  <div className="flex gap-1.5">
+                    {[
+                      { d: 2, label: '± 1 jour' },
+                      { d: 3, label: '± 2 jours' },
+                      { d: 4, label: '± 3 jours' },
+                      { d: 5, label: '± 4 jours' },
+                    ].map((opt) => (
+                      <button
+                        key={opt.d}
+                        type="button"
+                        onClick={() => setNotifWindowDays(opt.d)}
+                        className={`flex-1 text-[11px] font-medium rounded-[8px] px-1.5 py-1.5 border transition-colors ${
+                          notifWindowDays === opt.d
+                            ? 'bg-[#1a1a2e] text-white border-[#1a1a2e]'
+                            : 'bg-white text-[#6b6b63] border-[#e0e0e0] hover:border-[#1a1a2e]/30'
+                        }`}
+                      >
+                        {opt.label}
+                      </button>
+                    ))}
+                  </div>
+                  {(() => {
+                    const base = notifModal.plannedDate || '2026-09-22'
+                    const fmt = (d: Date) => d.toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' })
+                    const start = new Date(base + 'T00:00:00')
+                    const end = new Date(base + 'T00:00:00'); end.setDate(end.getDate() + (notifWindowDays - 1))
+                    return (
+                      <p className="text-[10px] text-[#8a8a80] mt-1.5 leading-snug">
+                        « Notre livreur passera chez vous entre le {fmt(start)} et le {fmt(end)}. »
+                      </p>
+                    )
+                  })()}
+                </div>
+              </div>
+            )}
+
             {/* Body */}
             <div className={`${notifTab === 'apercu' && !notifResult ? 'p-0' : 'px-5 py-4'} max-h-[65vh] overflow-y-auto`}>
               {notifResult ? (
@@ -2264,42 +2305,6 @@ function PlanificateurView() {
                       <p className="text-[11px] text-[#6b6b63] mb-2 leading-snug">
                         Réglez la date de passage de chaque client. « ↓&nbsp;suivants » applique la date à ce client et à tous ceux d&apos;en dessous — pratique pour marquer le début du jour&nbsp;2.
                       </p>
-                      {/* Marge de la fenêtre annoncée dans le mail */}
-                      <div className="mb-3 rounded-[10px] bg-[#f8f8f6] border border-[#ececec] px-3 py-2.5">
-                        <p className="text-[11px] font-semibold text-[#1a1a2e] mb-1.5">Marge annoncée au client</p>
-                        <div className="flex gap-1.5">
-                          {[
-                            { d: 2, label: '± 1 jour' },
-                            { d: 3, label: '± 2 jours' },
-                            { d: 4, label: '± 3 jours' },
-                            { d: 5, label: '± 4 jours' },
-                          ].map((opt) => (
-                            <button
-                              key={opt.d}
-                              type="button"
-                              onClick={() => setNotifWindowDays(opt.d)}
-                              className={`flex-1 text-[11px] font-medium rounded-[8px] px-1.5 py-1.5 border transition-colors ${
-                                notifWindowDays === opt.d
-                                  ? 'bg-[#1a1a2e] text-white border-[#1a1a2e]'
-                                  : 'bg-white text-[#6b6b63] border-[#e0e0e0] hover:border-[#1a1a2e]/30'
-                              }`}
-                            >
-                              {opt.label}
-                            </button>
-                          ))}
-                        </div>
-                        {(() => {
-                          const base = notifModal.plannedDate || '2026-09-22'
-                          const fmt = (d: Date) => d.toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' })
-                          const start = new Date(base + 'T00:00:00')
-                          const end = new Date(base + 'T00:00:00'); end.setDate(end.getDate() + (notifWindowDays - 1))
-                          return (
-                            <p className="text-[10px] text-[#8a8a80] mt-1.5 leading-snug">
-                              « Notre livreur passera chez vous entre le {fmt(start)} et le {fmt(end)}. »
-                            </p>
-                          )
-                        })()}
-                      </div>
                       <div className="space-y-1.5 mb-4">
                         {pendingNotif.map((s) => (
                           <div key={s.id} className="rounded-[10px] border border-[#ececec] px-3 py-2">
