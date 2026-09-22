@@ -40,16 +40,27 @@ export async function GET() {
   try {
     const admin = getAdmin()
 
-    const { data: tours, error } = await admin
-      .from('delivery_tours')
-      .select('*, delivery_stops(*)')
-      .eq('brand', 'bowa')
-      .order('planned_date', { ascending: false })
+    // Requête lourde (toutes les tournées + tous les arrêts). Sous charge/incident
+    // Supabase, PostgREST échoue par intermittence depuis Vercel → on RÉESSAIE
+    // plutôt que de renvoyer une liste vide (qui faisait croire "plus de tournées").
+    let tours: { delivery_stops?: unknown[] }[] | null = null
+    let error: { message?: string } | null = null
+    for (let attempt = 0; attempt < 4; attempt++) {
+      const res = await admin
+        .from('delivery_tours')
+        .select('*, delivery_stops(*)')
+        .eq('brand', 'bowa')
+        .order('planned_date', { ascending: false })
+      tours = res.data as { delivery_stops?: unknown[] }[] | null
+      error = res.error
+      if (!error && tours) break
+      await new Promise((r) => setTimeout(r, 200 * (attempt + 1)))
+    }
 
     if (error) throw error
 
     const result = (tours ?? []).map((tour) => {
-      const stops = tour.delivery_stops ?? []
+      const stops = (tour.delivery_stops ?? []) as { panel_count: number; panel_details?: { title?: string; qty?: number }[] }[]
       const total_panels = stops.reduce(
         (sum: number, s: { panel_count: number; panel_details?: { title?: string; qty?: number }[] }) =>
           sum + computePanelCount(s),
@@ -66,7 +77,8 @@ export async function GET() {
     return NextResponse.json({ tours: result })
   } catch (err) {
     console.error('[delivery/tours GET]', err)
-    return NextResponse.json({ tours: [], error: String(err) }, { status: 500 })
+    const msg = err instanceof Error ? err.message : (err && typeof err === 'object' ? JSON.stringify(err) : String(err))
+    return NextResponse.json({ tours: [], error: msg }, { status: 500 })
   }
 }
 
