@@ -2277,15 +2277,16 @@ function PlanificateurView() {
                         <p className="text-[11px] font-semibold text-[#1a1a2e] mb-1.5">Marge annoncée au client</p>
                         <div className="flex gap-1.5">
                           {[
-                            { d: 1, label: 'Jour exact' },
                             { d: 2, label: '± 1 jour' },
                             { d: 3, label: '± 2 jours' },
+                            { d: 4, label: '± 3 jours' },
+                            { d: 5, label: '± 4 jours' },
                           ].map((opt) => (
                             <button
                               key={opt.d}
                               type="button"
                               onClick={() => setNotifWindowDays(opt.d)}
-                              className={`flex-1 text-[11px] font-medium rounded-[8px] px-2 py-1.5 border transition-colors ${
+                              className={`flex-1 text-[11px] font-medium rounded-[8px] px-1.5 py-1.5 border transition-colors ${
                                 notifWindowDays === opt.d
                                   ? 'bg-[#1a1a2e] text-white border-[#1a1a2e]'
                                   : 'bg-white text-[#6b6b63] border-[#e0e0e0] hover:border-[#1a1a2e]/30'
@@ -2295,11 +2296,17 @@ function PlanificateurView() {
                             </button>
                           ))}
                         </div>
-                        <p className="text-[10px] text-[#8a8a80] mt-1.5 leading-snug">
-                          {notifWindowDays === 1
-                            ? '« Notre livreur passera chez vous le mardi 24 septembre. »'
-                            : `« Notre livreur passera chez vous entre le mardi 24 et le ${notifWindowDays === 2 ? 'mercredi 25' : 'jeudi 26'} septembre. »`}
-                        </p>
+                        {(() => {
+                          const base = notifModal.plannedDate || '2026-09-22'
+                          const fmt = (d: Date) => d.toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' })
+                          const start = new Date(base + 'T00:00:00')
+                          const end = new Date(base + 'T00:00:00'); end.setDate(end.getDate() + (notifWindowDays - 1))
+                          return (
+                            <p className="text-[10px] text-[#8a8a80] mt-1.5 leading-snug">
+                              « Notre livreur passera chez vous entre le {fmt(start)} et le {fmt(end)}. »
+                            </p>
+                          )
+                        })()}
                       </div>
                       <div className="space-y-1.5 mb-4">
                         {pendingNotif.map((s) => (
