@@ -13,9 +13,16 @@ function firstNameOf(fullName: string): string {
   return fullName?.split(' ')[0] ?? fullName ?? ''
 }
 
+// Ajoute N jours OUVRÉS (on ne livre pas le samedi/dimanche) : chaque week-end
+// est sauté dans le décompte, et le résultat tombe toujours un jour de semaine.
 function addWorkingDays(dateStr: string, days: number): Date {
   const result = new Date(dateStr + 'T00:00:00')
-  result.setDate(result.getDate() + days)
+  let added = 0
+  while (added < days) {
+    result.setDate(result.getDate() + 1)
+    const dow = result.getDay()
+    if (dow !== 0 && dow !== 6) added++
+  }
   return result
 }
 

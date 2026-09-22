@@ -125,6 +125,19 @@ function formatDate(dateStr: string): string {
   return d.toLocaleDateString('fr-FR', { weekday: 'short', day: 'numeric', month: 'short' })
 }
 
+// Fin de fenêtre de livraison : ajoute N jours OUVRÉS (pas de livraison le
+// samedi/dimanche) à partir d'une date 'YYYY-MM-DD'. Retourne un objet Date.
+function endBusinessDate(dateStr: string, days: number): Date {
+  const d = new Date(dateStr + 'T00:00:00')
+  let added = 0
+  while (added < days) {
+    d.setDate(d.getDate() + 1)
+    const dow = d.getDay()
+    if (dow !== 0 && dow !== 6) added++
+  }
+  return d
+}
+
 function formatDuration(ms: number): string {
   if (ms <= 0) return '—'
   const totalMin = Math.round(ms / 60000)
@@ -2201,7 +2214,7 @@ function PlanificateurView() {
                     const base = notifModal.plannedDate || '2026-09-22'
                     const fmt = (d: Date) => d.toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' })
                     const start = new Date(base + 'T00:00:00')
-                    const end = new Date(base + 'T00:00:00'); end.setDate(end.getDate() + (notifWindowDays - 1))
+                    const end = endBusinessDate(base, notifWindowDays - 1)
                     return (
                       <p className="text-[10px] text-[#8a8a80] mt-1.5 leading-snug">
                         « Notre livreur passera chez vous entre le {fmt(start)} et le {fmt(end)}. »
@@ -2233,11 +2246,8 @@ function PlanificateurView() {
                   // La fenêtre annoncée suit TOUJOURS la marge choisie (± N jours).
                   const previewDateStart = previewChosen ? formatTourDateFr(previewChosen) : notifModal.tourName
                   const previewDateEnd = previewChosen
-                    ? (() => {
-                        const end = new Date(previewChosen + 'T00:00:00')
-                        end.setDate(end.getDate() + (notifWindowDays - 1))
-                        return end.toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })
-                      })()
+                    ? endBusinessDate(previewChosen, notifWindowDays - 1)
+                        .toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })
                     : null
                   return (
                     <div className="bg-[#f5f5f3]">
