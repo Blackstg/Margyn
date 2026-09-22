@@ -125,7 +125,7 @@ async function sendRestartNotice(res: { status?: number | string; detail?: strin
 async function handle(req: NextRequest) {
   const probe = await probeAuth()
   if (probe.ok) {
-    return NextResponse.json({ ok: true, service: 'supabase-auth', status: probe.status, ms: probe.ms, at: new Date().toISOString() })
+    return NextResponse.json({ ok: true, service: 'supabase-auth', status: probe.status, ms: probe.ms, autoRestartArmed: !!process.env.SUPABASE_ACCESS_TOKEN, at: new Date().toISOString() })
   }
 
   // Auth semble down. Depuis un monitor public → on renvoie juste 503.
