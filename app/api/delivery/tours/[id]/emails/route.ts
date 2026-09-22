@@ -270,11 +270,11 @@ export async function POST(
     for (const stop of pendingStops) {
       try {
         // Date à annoncer : celle du client si définie (tournée multi-jours),
-        // sinon la date de la tournée. windowDays s'applique aux dates client ;
-        // 0 = fenêtre large "cette semaine" pour les clients sans date réglée.
+        // sinon la date de la tournée. La marge (windowDays) pilote TOUJOURS la
+        // largeur de la fenêtre annoncée → le mail correspond à l'aperçu.
         const stopDate = stop.passage_date || null
         const startDateStr = stopDate || tourDateStr
-        const wd = stopDate ? windowDays : 0
+        const wd = startDateStr ? windowDays : 0
         if (process.env.RESEND_API_KEY) {
           const html = reminder
             ? buildReminderEmailHtml(firstNameOf(stop.customer_name ?? ''), startDateStr, stop.id, wd)

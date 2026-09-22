@@ -2189,16 +2189,12 @@ function PlanificateurView() {
                   const previewStop = notifModal.stops.find((s) => s.email && !s.email_sent_at) ?? notifModal.stops[0]
                   const previewFirst = (previewStop?.customer_name ?? 'Prénom').split(' ')[0]
                   const previewChosen = (previewStop && passageDates[previewStop.id]) || notifModal.plannedDate
-                  const previewPrecise = !!previewChosen && previewChosen !== notifModal.plannedDate
-                  const previewDateStart = previewChosen
-                    ? formatTourDateFr(previewChosen)
-                    : notifModal.tourName
-                  // Fin de fenêtre : marge choisie si date client, sinon +4 (fenêtre large).
-                  const previewSpan = previewPrecise ? notifWindowDays - 1 : 4
+                  // La fenêtre annoncée suit TOUJOURS la marge choisie (± N jours).
+                  const previewDateStart = previewChosen ? formatTourDateFr(previewChosen) : notifModal.tourName
                   const previewDateEnd = previewChosen
                     ? (() => {
                         const end = new Date(previewChosen + 'T00:00:00')
-                        end.setDate(end.getDate() + previewSpan)
+                        end.setDate(end.getDate() + (notifWindowDays - 1))
                         return end.toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })
                       })()
                     : null
@@ -2223,11 +2219,7 @@ function PlanificateurView() {
                       <div className="bg-white mx-3 my-3 rounded-[12px] px-5 py-5 text-sm text-[#1a1a2e] leading-relaxed shadow-sm">
                         <p className="mb-3">Bonjour <strong>{previewFirst}</strong>,</p>
                         <p className="mb-3">Bonne nouvelle ! 🎉 Votre commande sera livrée prochainement.<br/>
-                        {previewPrecise
-                          ? (notifWindowDays === 1
-                              ? <>Notre livreur passera chez vous le <strong>{previewDateStart}</strong>.</>
-                              : <>Notre livreur passera chez vous entre le <strong>{previewDateStart}</strong> et le <strong>{previewDateEnd}</strong>.</>)
-                          : <>Notre livreur commencera sa tournée le <strong>{previewDateStart}</strong> et passera chez vous dans les prochains jours (entre le {previewDateStart}{previewDateEnd ? ` et le ${previewDateEnd}` : ''}).</>}</p>
+                        Notre livreur passera chez vous entre le <strong>{previewDateStart}</strong>{previewDateEnd ? <> et le <strong>{previewDateEnd}</strong></> : null}.</p>
                         <p className="mb-3">La livraison s&apos;effectuera au pied du camion 🚛. Nous vous demandons donc de faire le nécessaire pour être accompagné(e) d&apos;une autre personne afin de récupérer les panneaux en toute sécurité 🔧.</p>
                         <p className="mb-3">Pour garantir une livraison en toute fluidité, notre livreur vous appellera très probablement au fil de sa tournée, en fonction de l&apos;ordre des livraisons, afin de vérifier votre disponibilité. Vous serez joint(e) depuis le numéro suivant : <strong>06 17 85 85 18</strong>.</p>
                         <p className="mb-3">Si vous êtes indisponible, merci de nous en informer par retour de mail, afin que nous puissions reprogrammer votre livraison.</p>
