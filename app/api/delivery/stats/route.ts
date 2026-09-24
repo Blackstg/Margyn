@@ -28,6 +28,15 @@ function computePanelCount(details: { title?: string; qty?: number }[]): number 
     .reduce((sum, d) => sum + panelSlots(d.title ?? '', d.qty ?? 0), 0)
 }
 
+// Feuille de pierre (Stonepanel) : livrée par camion mais comptée à part des
+// panneaux (ne prend pas de place camion). Comptée en stats sur une ligne dédiée.
+const isStonepanel = (title: string) => /stonepanel|feuille\s*de\s*pierre/i.test(title)
+function computeStoneCount(details: { title?: string; qty?: number }[]): number {
+  return details
+    .filter(d => isStonepanel(d.title ?? ''))
+    .reduce((sum, d) => sum + (d.qty ?? 0), 0)
+}
+
 // ── Types ─────────────────────────────────────────────────────────────────────
 
 export interface StopEvent {
@@ -38,6 +47,7 @@ export interface StopEvent {
   status:        string   // delivered | partial | failed | pending
   delivered_at:  string | null
   panels:        number
+  stones:        number    // feuilles de pierre (comptées à part, hors capacité camion)
   missing?:      string    // articles NON livrés (partiel), ex. "Tasseau ×2, Colle ×1"
   time_suspect?: boolean   // horodatage douteux : vitesse impossible depuis l'arrêt précédent (marquage a posteriori)
 }
@@ -57,6 +67,7 @@ export interface TourStat {
   duration_ms:     number | null
   total_km:        number | null
   panels_delivered: number
+  stones_delivered: number
   stops_delivered: number
   stops_partial:   number
   stops_failed:    number
@@ -79,6 +90,7 @@ export interface DriverStats {
   completed_tours:     number
   active_tours:        number
   total_panels:        number
+  total_stones:        number
   total_km:            number | null
   total_duration_ms:   number | null
   avg_duration_ms:     number | null
@@ -220,6 +232,7 @@ export async function GET(req: NextRequest) {
       const stopEvents: StopEvent[] = stops.map(s => {
         const details = s.panel_details ?? []
         const panels  = details.length > 0 ? computePanelCount(details) : (s.panel_count ?? 0)
+        const stones  = computeStoneCount(details)
         // Partiel : liste ce qui N'A PAS été livré (qty_ordered − qty_delivered).
         // On ajoute la VARIANTE (couleur/taille), récupérée dans panel_details via le
         // SKU, sinon deux variantes du même produit s'affichent à l'identique.
@@ -245,6 +258,7 @@ export async function GET(req: NextRequest) {
           status:        s.status,
           delivered_at:  s.delivered_at ?? null,
           panels,
+          stones,
           missing,
         }
       })
@@ -338,6 +352,7 @@ export async function GET(req: NextRequest) {
       }
       const deliveredInMonth = delivered.filter(inSelectedMonth)
       const panels_delivered = deliveredInMonth.reduce((s, e) => s + e.panels, 0)
+      const stones_delivered = deliveredInMonth.reduce((s, e) => s + (e.stones ?? 0), 0)
 
       const duration_ms =
         effStarted && effCompleted
@@ -354,6 +369,7 @@ export async function GET(req: NextRequest) {
         duration_ms,
         total_km:        tour.total_km ?? null,
         panels_delivered,
+        stones_delivered,
         stops_delivered: deliveredInMonth.filter(s => s.status === 'delivered').length,
         stops_partial:   deliveredInMonth.filter(s => s.status === 'partial').length,
         stops_failed:    stopEvents.filter(s => s.status === 'failed').length,
@@ -376,6 +392,7 @@ export async function GET(req: NextRequest) {
       .map(([driver_name, driverTours]) => {
         const completed = driverTours.filter(t => t.status === 'completed')
         const total_panels   = driverTours.reduce((s, t) => s + t.panels_delivered, 0)
+        const total_stones   = driverTours.reduce((s, t) => s + (t.stones_delivered ?? 0), 0)
         const kmValues       = completed.filter(t => t.total_km != null).map(t => t.total_km!)
         const total_km       = kmValues.length > 0 ? Math.round(kmValues.reduce((a, b) => a + b, 0)) : null
         const durValues      = completed.filter(t => t.duration_ms != null).map(t => t.duration_ms!)
@@ -389,6 +406,7 @@ export async function GET(req: NextRequest) {
           completed_tours:     completed.length,
           active_tours:        driverTours.filter(t => t.status === 'in_progress').length,
           total_panels,
+          total_stones,
           total_km,
           total_duration_ms,
           avg_duration_ms,

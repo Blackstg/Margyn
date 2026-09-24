@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import dynamic from 'next/dynamic'
-import { BarChart2, TrendingUp, Clock, Route, Package, ChevronDown, ChevronRight, AlertTriangle, Calendar, MapPin, Navigation } from 'lucide-react'
+import { BarChart2, TrendingUp, Clock, Route, Package, Layers, ChevronDown, ChevronRight, AlertTriangle, Calendar, MapPin, Navigation } from 'lucide-react'
 import type { StatsResponse, DriverStats, TourStat, DayActivity, StopEvent } from '@/app/api/delivery/stats/route'
 
 const DriverLocationMap = dynamic(() => import('./DriverLocationMap'), { ssr: false })
@@ -101,6 +101,11 @@ function StopLine({ stop, showTime = true }: { stop: StopEvent; showTime?: boole
           {stop.panels > 0 && (
             <span className="text-[10px] font-medium" style={{ color }}>
               {stop.panels} panneau{stop.panels > 1 ? 'x' : ''}
+            </span>
+          )}
+          {stop.stones > 0 && (
+            <span className="text-[10px] font-medium text-[#8a6d3b]">
+              {stop.stones} feuille{stop.stones > 1 ? 's' : ''} de pierre
             </span>
           )}
         </div>
@@ -301,6 +306,7 @@ function TourRow({ tour }: { tour: TourStat }) {
         <div className="flex items-center gap-4 shrink-0 text-right">
           <div className="hidden sm:block">
             <p className="text-xs font-bold text-[#1a1a2e]">{tour.panels_delivered} panneaux</p>
+            {tour.stones_delivered > 0 && <p className="text-[10px] text-[#6b6b63]">+ {tour.stones_delivered} feuille{tour.stones_delivered > 1 ? 's' : ''} de pierre</p>}
             <p className="text-[10px] text-[#9b9b93]">{tour.stops_delivered + tour.stops_partial}/{tour.stops_total} stops</p>
           </div>
           {!isActive && (
@@ -370,6 +376,7 @@ function TourRow({ tour }: { tour: TourStat }) {
           {/* Mobile summary */}
           <div className="sm:hidden flex flex-wrap gap-3 text-sm">
             <span><span className="font-semibold">{tour.panels_delivered}</span> panneaux livrés</span>
+            {tour.stones_delivered > 0 && <span><span className="font-semibold">{tour.stones_delivered}</span> feuilles de pierre</span>}
             {!isActive && <span><span className="font-semibold">{fmtDuration(tour.duration_ms)}</span></span>}
             {tour.total_km != null && <span><span className="font-semibold">{tour.total_km} km</span></span>}
           </div>
@@ -689,6 +696,14 @@ function DriverCard({ driver, defaultOpen, month }: { driver: DriverStats; defau
             value={String(driver.total_panels)}
             sub={driver.completed_tours > 0 ? `~${driver.avg_panels_per_tour}/tournée` : undefined}
           />
+          {driver.total_stones > 0 && (
+            <StatBadge
+              icon={<Layers size={16} />}
+              label="Feuilles de pierre"
+              value={String(driver.total_stones)}
+              sub="hors capacité camion"
+            />
+          )}
           <StatBadge
             icon={<Clock size={16} />}
             label="Durée totale"
