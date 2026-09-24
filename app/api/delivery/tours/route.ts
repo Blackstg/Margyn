@@ -60,12 +60,12 @@ export async function GET() {
     if (error) throw error
 
     const result = (tours ?? []).map((tour) => {
-      const stops = (tour.delivery_stops ?? []) as { panel_count: number; panel_details?: { title?: string; qty?: number }[] }[]
-      const total_panels = stops.reduce(
-        (sum: number, s: { panel_count: number; panel_details?: { title?: string; qty?: number }[] }) =>
-          sum + computePanelCount(s),
-        0
-      )
+      const rawStops = (tour.delivery_stops ?? []) as { panel_count: number; panel_details?: { title?: string; qty?: number }[] }[]
+      // On RECALCULE le panel_count de chaque arrêt (exclut la feuille de pierre et
+      // applique les slots extpanel/akupanel60) pour que la CARTE — qui somme les
+      // panel_count par arrêt — affiche le même total que la LISTE (total_panels).
+      const stops = rawStops.map((s) => ({ ...s, panel_count: computePanelCount(s) }))
+      const total_panels = stops.reduce((sum: number, s) => sum + s.panel_count, 0)
       return {
         ...tour,
         stops,

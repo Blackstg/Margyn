@@ -70,10 +70,11 @@ const isNonGoods = (title: string) => isSample(title) || isTip(title)
 // Only actual advertising panels count toward the 100-slot tour capacity.
 // Colles, accessories and other consumables are in panel_details for the
 // loading list but must not inflate the panel_count.
-// Stonepanel ("Stonepanel™ | Feuille de pierre") is a delivery panel too, but its
-// title says "Stonepanel" not "panneau" — match it explicitly so it counts toward
-// the tour capacity instead of being shipped via La Poste.
-const isPanel    = (title: string) => /panneau|stonepanel/i.test(title)
+const isPanel    = (title: string) => /panneau/i.test(title)
+// Stonepanel ("Stonepanel™ | Feuille de pierre") : livré par CAMION (jamais La
+// Poste), MAIS ne prend pas de place dans le camion → ne compte PAS dans les 100
+// panneaux de capacité. Compté à part dans les stats.
+const isStonepanel = (title: string) => /stonepanel|feuille\s*de\s*pierre/i.test(title)
 // Accessoires LONGS/encombrants (profilés ~240 cm) : PAS de panneau, mais ne
 // peuvent PAS partir par La Poste → doivent être livrés par le camion (tournée).
 // Ex. « Akupanel | Tasseau de finition », « Extpanel | Tasseau d'angle ».
@@ -300,7 +301,7 @@ export async function GET() {
     // panneau ou un accessoire LONG (tasseau…). Un reliquat de simple colle/vis ne
     // doit pas ressortir des mois plus tard (ex. #10264 juin : seule la colle non
     // livrée alors que la commande est expédiée sur Shopify).
-    const needsTruck = (title: string) => isPanel(title) || isBulkyAccessory(title)
+    const needsTruck = (title: string) => isPanel(title) || isBulkyAccessory(title) || isStonepanel(title)
     const replanNeedsTruck = new Set<string>()
     for (const s of (failedStops ?? []) as { order_name: string; panel_details?: { title?: string }[] }[]) {
       if ((s.panel_details ?? []).some((p) => needsTruck(p.title ?? ''))) replanNeedsTruck.add(s.order_name)
@@ -491,7 +492,7 @@ export async function GET() {
         is_leroy,
         // La Poste = 0 panneau ET aucun accessoire encombrant (tasseau/profilé…).
         // Un tasseau seul (ex. reliquat #10573) doit rester en tournée, pas La Poste.
-        is_accessory_only: panel_count === 0 && !panel_details.some((p) => isBulkyAccessory(p.title)),
+        is_accessory_only: panel_count === 0 && !panel_details.some((p) => isBulkyAccessory(p.title) || isStonepanel(p.title)),
         needs_replan:      replanOrderNames.has(order.name),
         address1:          addr?.address1 ?? '',
         address2:          addr?.address2 ?? '',
