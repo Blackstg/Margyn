@@ -106,14 +106,28 @@ export async function middleware(req: NextRequest) {
   }
 
   let user: Awaited<ReturnType<typeof supabase.auth.getUser>>['data']['user'] = null
-  try {
-    const { data } = await withTimeout(supabase.auth.getUser(), 3000)
-    user = data.user
-  } catch {
-    // Panne Auth : on ne rappelle PAS le réseau (getSession rafraîchit et re-timeout).
-    // On fait confiance au cookie local tant que le token n'est pas expiré.
-    const local = readLocalSession()
-    user = local && local.exp * 1000 > Date.now() ? local.user : null
+  const local = readLocalSession()
+  const now = Date.now()
+
+  if (local?.user && local.exp * 1000 > now + 60_000) {
+    // Token local encore valide (>60 s de marge) → on lui fait confiance SANS appel
+    // réseau. C'est le cas de l'immense majorité des requêtes : ça rend le site
+    // insensible à la lenteur/aux pannes du service Auth Supabase (plus de
+    // déconnexions quand l'Auth met >3 s à répondre pendant un incident). Le
+    // rafraîchissement du token est assuré côté navigateur par le client Supabase.
+    // La sécurité réelle reste côté RLS/API — le middleware n'est qu'un aiguillage.
+    user = local.user
+  } else {
+    // Token absent, bientôt expiré ou expiré → on tente un refresh via getUser
+    // (appel réseau qui réécrit les cookies), avec repli sur le cookie local s'il
+    // reste valide, sinon on déconnecte. Timeout généreux : mieux vaut attendre
+    // que d'éjecter un utilisateur quand l'Auth est lente.
+    try {
+      const { data } = await withTimeout(supabase.auth.getUser(), 6000)
+      user = data.user
+    } catch {
+      user = local && local.exp * 1000 > now ? local.user : null
+    }
   }
 
   // ── Not authenticated ──────────────────────────────────────────────────────
