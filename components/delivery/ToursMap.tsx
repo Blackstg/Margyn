@@ -155,6 +155,9 @@ export default function ToursMap({ tours, height = 480, onMoveStop, orderDates }
   const mapRef       = useRef<mapboxgl.Map | null>(null)
   const markersRef   = useRef<mapboxgl.Marker[]>([])
   const [status, setStatus] = useState<'loading' | 'ready' | 'empty'>('loading')
+  // Tournées masquées sur la carte (afficher/masquer via la légende).
+  const [hidden, setHidden] = useState<Set<string>>(new Set())
+  const hiddenKey = [...hidden].sort().join(',')
 
   // Build a stable key from the tours content
   const toursKey = tours.map(t => `${t.id}:${t.stops.map(s => s.id).join(',')}`).join('|')
@@ -208,12 +211,16 @@ export default function ToursMap({ tours, height = 480, onMoveStop, orderDates }
 
       await Promise.all(
         activeTours.flatMap((tour, tourIdx) =>
-          tour.stops.map(async (stop) => {
-            if (cancelled) return
-            const coord = await geocode(stop, token)
-            if (!coord || cancelled) return
-            allResults.push({ stop, tour, tourIdx, coord })
-          })
+          // tourIdx (donc la couleur) reste stable ; on saute juste les tournées
+          // masquées → pas de marqueur pour elles, sans décaler les couleurs.
+          hidden.has(tour.id)
+            ? []
+            : tour.stops.map(async (stop) => {
+                if (cancelled) return
+                const coord = await geocode(stop, token)
+                if (!coord || cancelled) return
+                allResults.push({ stop, tour, tourIdx, coord })
+              })
         )
       )
 
@@ -340,6 +347,10 @@ export default function ToursMap({ tours, height = 480, onMoveStop, orderDates }
       if (hasAny) {
         map.fitBounds(bounds, { padding: 60, maxZoom: 12, duration: 800 })
         setStatus('ready')
+      } else if (hidden.size > 0 && activeTours.length > 0) {
+        // Tout est masqué : on garde la légende (status ready) pour pouvoir
+        // réafficher une tournée, au lieu de tomber sur l'écran vide.
+        setStatus('ready')
       } else {
         setStatus('empty')
       }
@@ -354,7 +365,7 @@ export default function ToursMap({ tours, height = 480, onMoveStop, orderDates }
     }
   // orderDatesCount : rebuild quand les dates de commande arrivent (async)
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [toursKey, orderDatesCount])
+  }, [toursKey, orderDatesCount, hiddenKey])
 
   // Cleanup map on unmount
   useEffect(() => {
@@ -385,22 +396,49 @@ export default function ToursMap({ tours, height = 480, onMoveStop, orderDates }
         </div>
       )}
 
-      {/* Legend */}
+      {/* Legend — clic sur une tournée pour l'afficher / la masquer sur la carte */}
       {status === 'ready' && activeTours.length > 0 && (
         <div
-          className="absolute top-3 right-3 bg-white rounded-[10px] shadow-md px-3 py-2 space-y-1.5 max-h-56 overflow-y-auto"
-          style={{ minWidth: 140, maxWidth: 220 }}
+          className="absolute top-3 right-3 bg-white rounded-[10px] shadow-md px-2.5 py-2 space-y-1 max-h-64 overflow-y-auto"
+          style={{ minWidth: 150, maxWidth: 230 }}
         >
+          <div className="flex items-center justify-between gap-2 px-0.5 pb-1 border-b border-[#f0f0ee]">
+            <span className="text-[9px] font-semibold uppercase tracking-wide text-[#9b9b93]">Tournées (clic = afficher/masquer)</span>
+            {hidden.size > 0 && (
+              <button
+                type="button"
+                onClick={() => setHidden(new Set())}
+                className="text-[9px] font-semibold text-[#0e7490] hover:underline shrink-0"
+              >
+                Tout afficher
+              </button>
+            )}
+          </div>
           {activeTours.map((tour, i) => {
             const panels = tour.stops.reduce((n, s) => n + (s.panel_count ?? 0), 0)
+            const isHidden = hidden.has(tour.id)
             return (
-              <div key={tour.id} className="flex items-center gap-2">
-                <div className="w-3 h-3 rounded-full shrink-0" style={{ background: tourColor(i) }} />
-                <div className="min-w-0">
-                  <p className="text-[11px] font-semibold text-[#1a1a2e] truncate leading-tight">{tour.name}</p>
+              <button
+                key={tour.id}
+                type="button"
+                onClick={() => setHidden(prev => {
+                  const n = new Set(prev)
+                  if (n.has(tour.id)) n.delete(tour.id); else n.add(tour.id)
+                  return n
+                })}
+                title={isHidden ? 'Afficher cette tournée' : 'Masquer cette tournée'}
+                className={`flex items-center gap-2 w-full text-left rounded-md px-0.5 py-0.5 hover:bg-[#f6f6f4] transition-colors ${isHidden ? 'opacity-45' : ''}`}
+              >
+                <div
+                  className="w-3 h-3 rounded-full shrink-0"
+                  style={{ background: isHidden ? 'transparent' : tourColor(i), border: `2px solid ${tourColor(i)}` }}
+                />
+                <div className="min-w-0 flex-1">
+                  <p className={`text-[11px] font-semibold truncate leading-tight ${isHidden ? 'line-through text-[#9b9b93]' : 'text-[#1a1a2e]'}`}>{tour.name}</p>
                   <p className="text-[10px] text-[#9b9b93] leading-tight">{tour.stops.length} stops · {panels} panneau{panels !== 1 ? 'x' : ''}</p>
                 </div>
-              </div>
+                <span className="text-[11px] shrink-0 leading-none">{isHidden ? '🚫' : '👁️'}</span>
+              </button>
             )
           })}
         </div>
