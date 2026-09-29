@@ -856,7 +856,9 @@ async function fetchAnnualData(brand: Brand, year: number): Promise<MonthPoint[]
     const d     = byMonth.get(month) ?? { ca: 0, gross_profit: 0, order_count: 0, marketing: 0 }
     const fixed = fixedTemplate
 
-    // Bowa: total_sales is TTC → convert to HT (× 5/6)
+    // Bowa: total_sales is TTC. On garde le HT pour les CALCULS de marge (fees,
+    // marge nette), mais le CA AFFICHÉ dans le graph reste TTC — comme le KPI du
+    // haut — pour ne pas dérouter (sinon 70k TTC en haut ≠ 58k HT dans le graph).
     const tva          = brand === 'bowa' ? Math.round(d.ca / 6) : 0
     const caHT         = d.ca - tva
     const grossProfitHT = d.gross_profit - tva
@@ -870,7 +872,7 @@ async function fetchAnnualData(brand: Brand, year: number): Promise<MonthPoint[]
     const transaction_fees = Math.round(caHT * feeRate)
     const net_margin = grossProfitHT - d.marketing - fulfillment - transaction_fees - fixed.app - fixed.other
     const isFuture = year > currentYear || (year === currentYear && month > currentMonth)
-    return { month, label: LABELS[i], ca: caHT, net_margin: Math.round(net_margin), isFuture, ca_prev: 0, net_margin_prev: 0 }
+    return { month, label: LABELS[i], ca: d.ca, net_margin: Math.round(net_margin), isFuture, ca_prev: 0, net_margin_prev: 0 }
   })
 }
 
