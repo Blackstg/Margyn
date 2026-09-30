@@ -14,7 +14,8 @@ export async function PATCH(
 ) {
   try {
     const body = await req.json()
-    const { name, zone, driver_name, planned_date, status, started_at, completed_at, total_km } = body as {
+    const { name, zone, driver_name, planned_date, status, started_at, completed_at, total_km,
+            cost_fuel, cost_toll, cost_hotel, cost_meal } = body as {
       name?: string
       zone?: string
       driver_name?: string
@@ -23,6 +24,10 @@ export async function PATCH(
       started_at?: string
       completed_at?: string
       total_km?: number
+      cost_fuel?: number | null
+      cost_toll?: number | null
+      cost_hotel?: number | null
+      cost_meal?: number | null
     }
 
     const updates: Record<string, unknown> = { updated_at: new Date().toISOString() }
@@ -34,6 +39,11 @@ export async function PATCH(
     if (started_at !== undefined) updates.started_at = started_at
     if (completed_at !== undefined) updates.completed_at = completed_at
     if (total_km !== undefined) updates.total_km = total_km
+    // Frais de tournée (coût de revient logistique). null = effacé.
+    if (cost_fuel  !== undefined) updates.cost_fuel  = cost_fuel
+    if (cost_toll  !== undefined) updates.cost_toll  = cost_toll
+    if (cost_hotel !== undefined) updates.cost_hotel = cost_hotel
+    if (cost_meal  !== undefined) updates.cost_meal  = cost_meal
 
     const admin = getAdmin()
     const { data, error } = await admin

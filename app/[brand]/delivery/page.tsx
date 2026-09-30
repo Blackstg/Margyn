@@ -115,6 +115,10 @@ interface Tour {
   started_at?: string | null
   completed_at?: string | null
   total_km?: number | null
+  cost_fuel?: number | null
+  cost_toll?: number | null
+  cost_hotel?: number | null
+  cost_meal?: number | null
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -379,6 +383,36 @@ function PlanificateurView() {
       await fetchTours()
     } finally {
       setSyncingStopId(null)
+    }
+  }
+
+  // ── Modale Frais de tournée (coût de revient : essence/péage/hôtel/resto) ──
+  const [fraisModal, setFraisModal] = useState<{ tourId: string; tourName: string; fuel: string; toll: string; hotel: string; meal: string } | null>(null)
+  const [fraisSaving, setFraisSaving] = useState(false)
+  function openFraisModal(t: Tour) {
+    setFraisModal({
+      tourId: t.id,
+      tourName: t.name,
+      fuel:  t.cost_fuel  != null ? String(t.cost_fuel)  : '',
+      toll:  t.cost_toll  != null ? String(t.cost_toll)  : '',
+      hotel: t.cost_hotel != null ? String(t.cost_hotel) : '',
+      meal:  t.cost_meal  != null ? String(t.cost_meal)  : '',
+    })
+  }
+  async function saveFrais() {
+    if (!fraisModal) return
+    setFraisSaving(true)
+    try {
+      const num = (s: string) => { const n = parseFloat(s.replace(',', '.')); return s.trim() === '' ? null : (isNaN(n) ? null : n) }
+      await fetch(`/api/delivery/tours/${fraisModal.tourId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ cost_fuel: num(fraisModal.fuel), cost_toll: num(fraisModal.toll), cost_hotel: num(fraisModal.hotel), cost_meal: num(fraisModal.meal) }),
+      })
+      await fetchTours()
+      setFraisModal(null)
+    } finally {
+      setFraisSaving(false)
     }
   }
 
@@ -1842,6 +1876,18 @@ function PlanificateurView() {
                                 )}
                               </button>
                             )}
+                            {(() => {
+                              const frais = (tour.cost_fuel ?? 0) + (tour.cost_toll ?? 0) + (tour.cost_hotel ?? 0) + (tour.cost_meal ?? 0)
+                              return (
+                                <button
+                                  onClick={(e) => { e.stopPropagation(); openFraisModal(tour) }}
+                                  className={`flex items-center gap-1 px-3 py-1 text-xs rounded-[8px] border transition-colors ${frais > 0 ? 'bg-[#fffbeb] text-[#b45309] border-[#fde68a] hover:bg-[#fef3c7]' : 'bg-white text-[#6b6b63] border-[#e0e0e0] hover:border-[#1a1a2e]/30'}`}
+                                  title="Frais de la tournée (coût de revient)"
+                                >
+                                  💶 {frais > 0 ? `Frais : ${Math.round(frais)} €` : 'Frais'}
+                                </button>
+                              )
+                            })()}
                             <button
                               onClick={(e) => { e.stopPropagation(); handleDeleteTour(tour.id) }}
                               className="flex items-center gap-1 px-3 py-1 text-xs rounded-[8px] bg-[#fef2f2] text-[#c7293a] hover:bg-[#fee2e2]"
@@ -2128,6 +2174,60 @@ function PlanificateurView() {
         </div>
       </div>
     )}
+
+    {/* ── Modale Frais de tournée ── */}
+    {fraisModal && (() => {
+      const num = (s: string) => { const n = parseFloat(s.replace(',', '.')); return isNaN(n) ? 0 : n }
+      const total = num(fraisModal.fuel) + num(fraisModal.toll) + num(fraisModal.hotel) + num(fraisModal.meal)
+      const fields: { key: 'fuel' | 'toll' | 'hotel' | 'meal'; label: string; icon: string }[] = [
+        { key: 'fuel',  label: 'Essence / carburant', icon: '⛽' },
+        { key: 'toll',  label: 'Péage',               icon: '🛣️' },
+        { key: 'hotel', label: 'Hôtel',               icon: '🏨' },
+        { key: 'meal',  label: 'Restauration',        icon: '🍽️' },
+      ]
+      return (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm" onClick={() => { if (!fraisSaving) setFraisModal(null) }}>
+          <div className="bg-white rounded-[20px] shadow-2xl w-full max-w-sm mx-4 overflow-hidden" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between px-5 py-4 border-b border-[#ebebeb]">
+              <div>
+                <h3 className="font-bold text-[#1a1a2e]">Frais de la tournée</h3>
+                <p className="text-xs text-[#6b6b63] mt-0.5">{fraisModal.tourName}</p>
+              </div>
+              {!fraisSaving && <button onClick={() => setFraisModal(null)} className="text-[#6b6b63] hover:text-[#1a1a2e]"><X size={18} /></button>}
+            </div>
+            <div className="px-5 py-4 space-y-3">
+              {fields.map(f => (
+                <div key={f.key} className="flex items-center gap-3">
+                  <label className="flex items-center gap-2 text-sm text-[#1a1a2e] flex-1">
+                    <span>{f.icon}</span>{f.label}
+                  </label>
+                  <div className="relative">
+                    <input
+                      type="number" inputMode="decimal" min="0" step="0.01" placeholder="0"
+                      value={fraisModal[f.key]}
+                      onChange={(e) => setFraisModal(m => m ? { ...m, [f.key]: e.target.value } : m)}
+                      className="w-24 pl-2 pr-6 py-1.5 rounded-[8px] border border-[#e0e0e0] text-sm text-right focus:outline-none focus:ring-2 focus:ring-[#1a1a2e]/15"
+                    />
+                    <span className="absolute right-2 top-1/2 -translate-y-1/2 text-xs text-[#9b9b93]">€</span>
+                  </div>
+                </div>
+              ))}
+              <div className="flex items-center justify-between pt-2 border-t border-[#f0f0ee]">
+                <span className="text-sm font-semibold text-[#1a1a2e]">Total frais</span>
+                <span className="text-sm font-bold text-[#b45309]">{Math.round(total)} €</span>
+              </div>
+              <p className="text-[10px] text-[#9b9b93] leading-snug">Le salaire du chauffeur se règle dans Stats (par chauffeur). Ces frais + salaire donnent le coût/commande et coût/panneau du mois.</p>
+            </div>
+            <div className="px-5 py-4 border-t border-[#ebebeb] flex gap-2 justify-end">
+              <button onClick={() => setFraisModal(null)} disabled={fraisSaving} className="px-4 py-2 rounded-[10px] text-sm text-[#6b6b63] hover:text-[#1a1a2e] disabled:opacity-40">Annuler</button>
+              <button onClick={saveFrais} disabled={fraisSaving} className="px-4 py-2 rounded-[10px] bg-[#1a1a2e] text-white text-sm font-medium disabled:opacity-40">
+                {fraisSaving ? 'Enregistrement…' : 'Enregistrer'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )
+    })()}
 
     {/* ── Modale Notifier les clients ── */}
     {notifModal && (() => {

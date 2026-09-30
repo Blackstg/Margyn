@@ -308,6 +308,7 @@ function TourRow({ tour }: { tour: TourStat }) {
             <p className="text-xs font-bold text-[#1a1a2e]">{tour.panels_delivered} panneaux</p>
             {tour.stones_delivered > 0 && <p className="text-[10px] text-[#6b6b63]">+ {tour.stones_delivered} feuille{tour.stones_delivered > 1 ? 's' : ''} de pierre</p>}
             <p className="text-[10px] text-[#9b9b93]">{tour.stops_delivered + tour.stops_partial}/{tour.stops_total} stops</p>
+            {tour.tour_cost > 0 && <p className="text-[10px] text-[#b45309] font-medium">{Math.round(tour.tour_cost)} € frais</p>}
           </div>
           {!isActive && (
             <div className="hidden sm:block">
@@ -379,6 +380,7 @@ function TourRow({ tour }: { tour: TourStat }) {
             {tour.stones_delivered > 0 && <span><span className="font-semibold">{tour.stones_delivered}</span> feuilles de pierre</span>}
             {!isActive && <span><span className="font-semibold">{fmtDuration(tour.duration_ms)}</span></span>}
             {tour.total_km != null && <span><span className="font-semibold">{tour.total_km} km</span></span>}
+            {tour.tour_cost > 0 && <span className="text-[#b45309]"><span className="font-semibold">{Math.round(tour.tour_cost)} €</span> frais</span>}
           </div>
 
           {/* Activity calendar */}
@@ -655,9 +657,28 @@ function DriverMonthCalendar({ driver, month }: { driver: DriverStats; month: st
   )
 }
 
-function DriverCard({ driver, defaultOpen, month }: { driver: DriverStats; defaultOpen?: boolean; month: string }) {
+function DriverCard({ driver, defaultOpen, month, onRefresh }: { driver: DriverStats; defaultOpen?: boolean; month: string; onRefresh?: () => void }) {
   const [open, setOpen] = useState(defaultOpen ?? false)
   const hasActiveTours = driver.active_tours > 0
+
+  // Édition du salaire mensuel (récurrent) du chauffeur.
+  const [salaryInput, setSalaryInput] = useState<string>(driver.monthly_salary ? String(driver.monthly_salary) : '')
+  const [savingSalary, setSavingSalary] = useState(false)
+  useEffect(() => { setSalaryInput(driver.monthly_salary ? String(driver.monthly_salary) : '') }, [driver.monthly_salary])
+  async function saveSalary() {
+    const val = parseFloat(salaryInput.replace(',', '.')) || 0
+    if (val === (driver.monthly_salary ?? 0)) return
+    setSavingSalary(true)
+    try {
+      await fetch('/api/delivery/driver-salaries', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ brand: 'bowa', driver_name: driver.driver_name, monthly_salary: val }),
+      })
+      onRefresh?.()
+    } finally { setSavingSalary(false) }
+  }
+  const eur = (n: number) => `${Math.round(n).toLocaleString('fr-FR')} €`
 
   return (
     <div className="bg-white border border-[#e8e8e4] rounded-[18px] overflow-hidden shadow-sm">
@@ -727,6 +748,54 @@ function DriverCard({ driver, defaultOpen, month }: { driver: DriverStats; defau
         <div className="flex-1 min-w-0">
           <DriverMonthCalendar driver={driver} month={month} />
         </div>
+      </div>
+
+      {/* Coût de revient logistique (salaire + frais tournées → coût/commande & /panneau) */}
+      <div className="mx-5 mb-4 rounded-[12px] border border-[#ececec] bg-[#fafaf8] px-4 py-3">
+        <div className="flex items-center justify-between mb-2">
+          <p className="text-[10px] font-semibold uppercase tracking-[0.08em] text-[#9b9b93]">Coût de revient du mois</p>
+          <label className="flex items-center gap-1.5 text-[11px] text-[#6b6b63]">
+            Salaire mensuel
+            <span className="relative">
+              <input
+                type="number" inputMode="decimal" min="0" step="1" placeholder="0"
+                value={salaryInput}
+                onChange={e => setSalaryInput(e.target.value)}
+                onBlur={saveSalary}
+                onKeyDown={e => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur() }}
+                className="w-20 pl-2 pr-5 py-1 rounded-[7px] border border-[#e0e0e0] text-xs text-right bg-white focus:outline-none focus:ring-2 focus:ring-[#1a1a2e]/15"
+              />
+              <span className="absolute right-1.5 top-1/2 -translate-y-1/2 text-[10px] text-[#9b9b93]">€</span>
+            </span>
+            {savingSalary && <span className="text-[10px] text-[#9b9b93]">…</span>}
+          </label>
+        </div>
+        {driver.monthly_cost > 0 ? (
+          <div className="grid grid-cols-4 gap-2 text-center">
+            <div className="rounded-[8px] bg-white border border-[#ececec] py-1.5">
+              <p className="text-[9px] text-[#9b9b93] uppercase tracking-wide">Coût total</p>
+              <p className="text-sm font-bold text-[#1a1a2e]">{eur(driver.monthly_cost)}</p>
+              <p className="text-[9px] text-[#b0b0a8]">{eur(driver.monthly_salary)} sal. + {eur(driver.tour_expenses)} frais</p>
+            </div>
+            <div className="rounded-[8px] bg-white border border-[#ececec] py-1.5">
+              <p className="text-[9px] text-[#9b9b93] uppercase tracking-wide">Coût / commande</p>
+              <p className="text-sm font-bold text-[#0e7490]">{driver.cost_per_order != null ? eur(driver.cost_per_order) : '—'}</p>
+              <p className="text-[9px] text-[#b0b0a8]">{driver.orders_delivered} commandes</p>
+            </div>
+            <div className="rounded-[8px] bg-white border border-[#ececec] py-1.5">
+              <p className="text-[9px] text-[#9b9b93] uppercase tracking-wide">Coût / panneau</p>
+              <p className="text-sm font-bold text-[#0e7490]">{driver.cost_per_panel != null ? eur(driver.cost_per_panel) : '—'}</p>
+              <p className="text-[9px] text-[#b0b0a8]">{driver.total_panels} panneaux</p>
+            </div>
+            <div className="rounded-[8px] bg-white border border-[#ececec] py-1.5">
+              <p className="text-[9px] text-[#9b9b93] uppercase tracking-wide">Frais tournées</p>
+              <p className="text-sm font-bold text-[#b45309]">{eur(driver.tour_expenses)}</p>
+              <p className="text-[9px] text-[#b0b0a8]">essence+péage+hôtel+resto</p>
+            </div>
+          </div>
+        ) : (
+          <p className="text-[11px] text-[#9b9b93]">Renseigne le salaire ci-dessus et les frais de chaque tournée (bouton « Frais » dans le planificateur) pour obtenir le coût/commande et le coût/panneau.</p>
+        )}
       </div>
 
       {/* Tour list */}
@@ -943,7 +1012,7 @@ export default function StatsView() {
 
             {/* One card per driver */}
             {data.drivers.map((driver) => (
-              <DriverCard key={driver.driver_name} driver={driver} month={month} defaultOpen />
+              <DriverCard key={driver.driver_name} driver={driver} month={month} defaultOpen onRefresh={() => load(month)} />
             ))}
           </>
         )}

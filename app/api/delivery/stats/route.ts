@@ -66,6 +66,7 @@ export interface TourStat {
   completed_at:    string | null
   duration_ms:     number | null
   total_km:        number | null
+  tour_cost:       number   // frais réels de la tournée (essence+péage+hôtel+resto)
   panels_delivered: number
   stones_delivered: number
   stops_delivered: number
@@ -91,6 +92,13 @@ export interface DriverStats {
   active_tours:        number
   total_panels:        number
   total_stones:        number
+  // Coût de revient logistique du mois (salaire + frais tournées) — 0 si non configuré.
+  monthly_salary:      number
+  tour_expenses:       number
+  monthly_cost:        number
+  orders_delivered:    number
+  cost_per_order:      number | null
+  cost_per_panel:      number | null
   total_km:            number | null
   total_duration_ms:   number | null
   avg_duration_ms:     number | null
@@ -182,6 +190,33 @@ export async function GET(req: NextRequest) {
     ])
 
     if (error) throw error
+
+    // ── Coût de revient : frais par tournée + salaire mensuel par chauffeur ──────
+    // Tolérant : si les colonnes/la table ne sont pas encore déployées (migration
+    // 020 non passée), les coûts valent 0 et la feature reste inactive.
+    const tourCost = new Map<string, number>()
+    {
+      const { data: costRows, error: costErr } = await admin
+        .from('delivery_tours')
+        .select('id, cost_fuel, cost_toll, cost_hotel, cost_meal')
+        .eq('brand', 'bowa')
+      if (!costErr) {
+        for (const c of costRows ?? []) {
+          const total = (c.cost_fuel ?? 0) + (c.cost_toll ?? 0) + (c.cost_hotel ?? 0) + (c.cost_meal ?? 0)
+          if (total) tourCost.set(c.id as string, total)
+        }
+      }
+    }
+    const salaryByDriver = new Map<string, number>()
+    {
+      const { data: salRows, error: salErr } = await admin
+        .from('driver_salaries')
+        .select('driver_name, monthly_salary')
+        .eq('brand', 'bowa')
+      if (!salErr) {
+        for (const s of salRows ?? []) salaryByDriver.set(normalizeName(String(s.driver_name ?? '')), Number(s.monthly_salary) || 0)
+      }
+    }
 
     // Client-side filter: keep only tours that overlap the selected month.
     // A tour overlaps if: planned/started/completed date is in range,
@@ -368,6 +403,7 @@ export async function GET(req: NextRequest) {
         completed_at:    effCompleted,
         duration_ms,
         total_km:        tour.total_km ?? null,
+        tour_cost:       tourCost.get(tour.id as string) ?? 0,
         panels_delivered,
         stones_delivered,
         stops_delivered: deliveredInMonth.filter(s => s.status === 'delivered').length,
@@ -399,6 +435,14 @@ export async function GET(req: NextRequest) {
         const total_duration_ms = durValues.length > 0 ? durValues.reduce((a, b) => a + b, 0) : null
         const avg_duration_ms   = durValues.length > 0 ? Math.round(total_duration_ms! / durValues.length) : null
 
+        // Coût de revient : salaire mensuel du chauffeur + frais réels de ses tournées.
+        const tour_expenses    = driverTours.reduce((s, t) => s + (t.tour_cost ?? 0), 0)
+        const monthly_salary   = salaryByDriver.get(driver_name) ?? 0
+        const monthly_cost     = monthly_salary + tour_expenses
+        const orders_delivered = driverTours.reduce((s, t) => s + t.stops_delivered + t.stops_partial, 0)
+        const cost_per_order   = monthly_cost > 0 && orders_delivered > 0 ? Math.round(monthly_cost / orders_delivered) : null
+        const cost_per_panel   = monthly_cost > 0 && total_panels > 0 ? Math.round(monthly_cost / total_panels) : null
+
         return {
           driver_name,
           tours: driverTours,
@@ -407,6 +451,12 @@ export async function GET(req: NextRequest) {
           active_tours:        driverTours.filter(t => t.status === 'in_progress').length,
           total_panels,
           total_stones,
+          monthly_salary,
+          tour_expenses,
+          monthly_cost,
+          orders_delivered,
+          cost_per_order,
+          cost_per_panel,
           total_km,
           total_duration_ms,
           avg_duration_ms,
