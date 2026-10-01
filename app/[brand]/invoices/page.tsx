@@ -970,9 +970,6 @@ function ContestationView({ rate, months, onPickMonth }: { rate: number; months:
         <th>Commande</th><th>Zone</th><th>Type</th><th style="text-align:right">Art.</th><th style="text-align:right">Poids</th>
         <th style="text-align:right">Facturé</th><th style="text-align:right">Juste</th><th style="text-align:right">Habituel</th><th style="text-align:right">À récupérer</th>
       </tr>`
-    const trend = data.history && data.history.prevPerKg.length
-      ? `<p>Coût médian <b>$/kg</b> : ${data.history.currentPerKg.toFixed(2)} ce mois-ci, contre ${data.history.prevPerKg.map(p => `${p.perKg.toFixed(2)} (${p.month})`).join(', ')} les mois précédents.</p>`
-      : ''
     const total = data.contest.strongTotal + data.contest.chTotal
     const html = `<!doctype html><html lang="fr"><head><meta charset="utf-8"><title>Contestation ${esc(data.month)}</title>
       <style>
@@ -985,7 +982,6 @@ function ContestationView({ rate, months, onPickMonth }: { rate: number; months:
       <button onclick="window.print()" style="padding:8px 16px;margin-bottom:12px;cursor:pointer">🖨️ Imprimer / Enregistrer en PDF</button>
       <h1>Contestation facture logistique — Mōom</h1>
       <p class="muted">Mois facturé : <b>${esc(data.month)}</b> · ${data.counts.orders} commandes auditées · taux 1 USD = ${data.usdEur} EUR</p>
-      <p>Bonjour,<br/>Après audit de la facture, voici les commandes dont le coût facturé dépasse le tarif juste (recalculé au poids réel, au pays et au nombre d'articles). ${trend} Merci de régulariser ou de justifier ligne par ligne.</p>
       <h2>À régulariser (FR / UE / DOM — sans douane) — total ${fmt(data.contest.strongTotal)}</h2>
       <table>${head}${rows(data.contest.strong) || '<tr><td colspan="9" class="muted">Aucune</td></tr>'}</table>
       <h2>Suisse — à justifier (douane) — total ${fmt(data.contest.chTotal)}</h2>
