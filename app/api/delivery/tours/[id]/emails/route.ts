@@ -173,8 +173,6 @@ function buildDelayEmailHtml(firstName: string, newStartStr: string, stopId: str
   const windowLine = endFr
     ? `Notre livreur passera désormais chez vous <strong>entre le ${startFr} et le ${endFr}</strong>.`
     : `Notre livreur passera désormais chez vous <strong>le ${startFr}</strong>.`
-  const confirmUrl     = `${APP_URL}/api/delivery/confirm?stop=${stopId}&action=confirmed`
-  const unavailableUrl = `${APP_URL}/api/delivery/confirm?stop=${stopId}&action=unavailable`
   return `<!DOCTYPE html><html lang="fr"><head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width, initial-scale=1.0"/></head>
 <body style="margin:0;padding:0;background:#f1ebe7;font-family:'Helvetica Neue',Helvetica,Arial,sans-serif;">
   <table width="100%" cellpadding="0" cellspacing="0" style="background:#f1ebe7;padding:32px 16px;"><tr><td align="center">
@@ -187,13 +185,6 @@ function buildDelayEmailHtml(firstName: string, newStartStr: string, stopId: str
         <p style="margin:0 0 16px;font-size:15px;color:#3a3a3a;line-height:1.6;">En raison d'un léger retard sur notre tournée, votre livraison est décalée de <strong>${delayDays} jour${delayDays > 1 ? 's' : ''}</strong>. Toutes nos excuses pour la gêne occasionnée 🙏.</p>
         <p style="margin:0 0 16px;font-size:15px;color:#3a3a3a;line-height:1.6;">${windowLine}</p>
         <p style="margin:0 0 24px;font-size:15px;color:#3a3a3a;line-height:1.6;">La livraison s'effectue au pied du camion 🚛 — merci de prévoir une personne pour vous aider à réceptionner les panneaux 🔧. Notre livreur vous appellera avant de passer, depuis le <strong>06 17 85 85 18</strong>.</p>
-        <table width="100%" cellpadding="0" cellspacing="0" style="background:#f8f4f1;border-radius:14px;padding:24px;margin-bottom:24px;"><tr><td align="center">
-          <p style="margin:0 0 20px;font-size:15px;color:#3a3a3a;line-height:1.6;font-weight:600;">Serez-vous disponible sur cette nouvelle période&nbsp;?</p>
-          <table cellpadding="0" cellspacing="0"><tr>
-            <td style="padding-right:10px;"><a href="${confirmUrl}" target="_blank" style="display:inline-block;background:#1a7f4b;color:#ffffff;font-size:14px;font-weight:700;text-decoration:none;padding:13px 24px;border-radius:50px;">✅ Oui, je serai présent(e)</a></td>
-            <td><a href="${unavailableUrl}" target="_blank" style="display:inline-block;background:#ffffff;color:#c2410c;font-size:14px;font-weight:700;text-decoration:none;padding:12px 24px;border-radius:50px;border:2px solid #fed7aa;">❌ Je ne serai pas disponible</a></td>
-          </tr></table>
-        </td></tr></table>
         <p style="margin:0 0 4px;font-size:14px;color:#3a3a3a;line-height:1.6;">Merci de votre compréhension ☀️</p>
         <p style="margin:0 0 16px;font-size:14px;color:#3a3a3a;line-height:1.6;">Cordialement,<br/><strong>Léa</strong><br/><span style="color:#6b6b63;">Service client</span></p>
         <p style="margin:0;font-size:12px;color:#9ca3af;line-height:1.6;">Pour toute question, écrivez-nous à <a href="mailto:lea@bowa-concept.com" style="color:#6b6b63;text-decoration:none;">lea@bowa-concept.com</a></p>
