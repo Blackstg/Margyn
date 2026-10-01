@@ -229,6 +229,20 @@ async function fetchMoomFulfillment(
   to: string,
   orderCount: number,
 ): Promise<{ fulfillment: number; note?: string }> {
+  // Rapprochement PRÉCIS par n° de commande : on attribue aux commandes VENDUES
+  // sur la période leur coût réel facturé (retrouvé par n° dans n'importe quelle
+  // facture), au lieu de diviser un total facturé par le nb de ventes du mois
+  // (le mois facturé ≠ le mois vendu → coût/livraison faussé).
+  try {
+    const r = await fetch(`/api/margins/fulfillment?brand=moom&from=${from}&to=${to}`)
+    if (r.ok) {
+      const d = await r.json() as { fulfillment?: number; matched?: number; note?: string }
+      if (typeof d.fulfillment === 'number' && d.fulfillment >= 0 && (d.matched ?? 0) > 0) {
+        return { fulfillment: d.fulfillment, note: d.note }
+      }
+    }
+  } catch { /* repli sur l'estimation ci-dessous */ }
+
   const periodMonth = from.slice(0, 7)
 
   const prevMonthStr = (ym: string) => {
