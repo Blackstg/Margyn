@@ -166,6 +166,43 @@ function buildEmailHtml(firstName: string, startDateStr: string, stopId: string,
 </html>`
 }
 
+// Mail de RETARD : on a pris 1-2 j de retard, on annonce la nouvelle fenêtre de passage.
+function buildDelayEmailHtml(firstName: string, newStartStr: string, stopId: string, windowDays: number, delayDays: number): string {
+  const startFr = fmtDateLong(new Date(newStartStr + 'T00:00:00'))
+  const endFr   = windowDays >= 2 ? fmtDateLong(addWorkingDays(newStartStr, windowDays - 1)) : ''
+  const windowLine = endFr
+    ? `Notre livreur passera désormais chez vous <strong>entre le ${startFr} et le ${endFr}</strong>.`
+    : `Notre livreur passera désormais chez vous <strong>le ${startFr}</strong>.`
+  const confirmUrl     = `${APP_URL}/api/delivery/confirm?stop=${stopId}&action=confirmed`
+  const unavailableUrl = `${APP_URL}/api/delivery/confirm?stop=${stopId}&action=unavailable`
+  return `<!DOCTYPE html><html lang="fr"><head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width, initial-scale=1.0"/></head>
+<body style="margin:0;padding:0;background:#f1ebe7;font-family:'Helvetica Neue',Helvetica,Arial,sans-serif;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="background:#f1ebe7;padding:32px 16px;"><tr><td align="center">
+    <table width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;">
+      <tr><td align="center" style="padding-bottom:24px;"><img src="https://bowa-concept.com/cdn/shop/files/logo.png?v=1693451719" alt="Bowa Concept" width="140" style="display:block;height:auto;"/></td></tr>
+      <tr><td style="background:#ffffff;border-radius:20px;padding:36px 40px 28px;box-shadow:0 4px 24px rgba(0,0,0,0.06);">
+        <p style="font-size:34px;margin:0 0 8px;text-align:center;">🚚</p>
+        <h1 style="margin:0 0 20px;font-size:21px;font-weight:700;color:#1a1a2e;text-align:center;line-height:1.3;">Petit décalage sur votre livraison</h1>
+        <p style="margin:0 0 16px;font-size:15px;color:#3a3a3a;line-height:1.6;">Bonjour <strong>${firstName}</strong>,</p>
+        <p style="margin:0 0 16px;font-size:15px;color:#3a3a3a;line-height:1.6;">En raison d'un léger retard sur notre tournée, votre livraison est décalée de <strong>${delayDays} jour${delayDays > 1 ? 's' : ''}</strong>. Toutes nos excuses pour la gêne occasionnée 🙏.</p>
+        <p style="margin:0 0 16px;font-size:15px;color:#3a3a3a;line-height:1.6;">${windowLine}</p>
+        <p style="margin:0 0 24px;font-size:15px;color:#3a3a3a;line-height:1.6;">La livraison s'effectue au pied du camion 🚛 — merci de prévoir une personne pour vous aider à réceptionner les panneaux 🔧. Notre livreur vous appellera avant de passer, depuis le <strong>06 17 85 85 18</strong>.</p>
+        <table width="100%" cellpadding="0" cellspacing="0" style="background:#f8f4f1;border-radius:14px;padding:24px;margin-bottom:24px;"><tr><td align="center">
+          <p style="margin:0 0 20px;font-size:15px;color:#3a3a3a;line-height:1.6;font-weight:600;">Serez-vous disponible sur cette nouvelle période&nbsp;?</p>
+          <table cellpadding="0" cellspacing="0"><tr>
+            <td style="padding-right:10px;"><a href="${confirmUrl}" target="_blank" style="display:inline-block;background:#1a7f4b;color:#ffffff;font-size:14px;font-weight:700;text-decoration:none;padding:13px 24px;border-radius:50px;">✅ Oui, je serai présent(e)</a></td>
+            <td><a href="${unavailableUrl}" target="_blank" style="display:inline-block;background:#ffffff;color:#c2410c;font-size:14px;font-weight:700;text-decoration:none;padding:12px 24px;border-radius:50px;border:2px solid #fed7aa;">❌ Je ne serai pas disponible</a></td>
+          </tr></table>
+        </td></tr></table>
+        <p style="margin:0 0 4px;font-size:14px;color:#3a3a3a;line-height:1.6;">Merci de votre compréhension ☀️</p>
+        <p style="margin:0 0 16px;font-size:14px;color:#3a3a3a;line-height:1.6;">Cordialement,<br/><strong>Léa</strong><br/><span style="color:#6b6b63;">Service client</span></p>
+        <p style="margin:0;font-size:12px;color:#9ca3af;line-height:1.6;">Pour toute question, écrivez-nous à <a href="mailto:lea@bowa-concept.com" style="color:#6b6b63;text-decoration:none;">lea@bowa-concept.com</a></p>
+      </td></tr>
+    </table>
+  </td></tr></table>
+</body></html>`
+}
+
 // GET — returns list of stops (with/without email) for preview in modal
 export async function GET(
   _req: NextRequest,
@@ -212,6 +249,8 @@ export async function POST(
     const body = await req.json().catch(() => ({}))
     const force    = body?.force === true      // force re-send even if already notified
     const reminder = body?.reminder === true   // relance : uniquement les sans-réponse
+    const delay    = body?.delay === true      // retard : décale la date et prévient TOUS les clients
+    const delayDays = Math.min(3, Math.max(1, Number(body?.delayDays) || 1))
     const minAgeHours = Number(body?.minAgeHours) || 0   // relance : mail envoyé il y a AU MOINS X h
     const maxAgeHours = Number(body?.maxAgeHours) || 0   // relance : … et au PLUS X h (fenêtre cron)
     // Dates de passage par client { stopId: 'YYYY-MM-DD' } — pour les tournées de
@@ -244,7 +283,10 @@ export async function POST(
     const baseCols = 'id, customer_name, email, email_sent_at, client_availability, status'
     const buildQuery = (cols: string) => {
       let q = admin.from('delivery_stops').select(cols).eq('tour_id', params.id)
-      if (reminder) {
+      if (delay) {
+        // Retard : on prévient TOUS les clients encore à livrer (quel que soit l'état de notif).
+        q = q.eq('status', 'pending')
+      } else if (reminder) {
         q = q.not('email_sent_at', 'is', null).is('client_availability', null).eq('status', 'pending')
         if (minAgeHours > 0) q = q.lte('email_sent_at', new Date(Date.now() - minAgeHours * 3600_000).toISOString())
         if (maxAgeHours > 0) q = q.gte('email_sent_at', new Date(Date.now() - maxAgeHours * 3600_000).toISOString())
@@ -282,10 +324,14 @@ export async function POST(
         const stopDate = stop.passage_date || null
         const startDateStr = stopDate || tourDateStr
         const wd = startDateStr ? windowDays : 0
+        // Retard : nouvelle date = date prévue + delayDays jours ouvrés.
+        const newStartStr = delay && startDateStr ? addWorkingDays(startDateStr, delayDays).toISOString().slice(0, 10) : startDateStr
         if (process.env.RESEND_API_KEY) {
-          const html = reminder
-            ? buildReminderEmailHtml(firstNameOf(stop.customer_name ?? ''), startDateStr, stop.id, wd)
-            : buildEmailHtml(firstNameOf(stop.customer_name ?? ''), startDateStr, stop.id, wd)
+          const html = delay
+            ? buildDelayEmailHtml(firstNameOf(stop.customer_name ?? ''), newStartStr, stop.id, windowDays, delayDays)
+            : reminder
+              ? buildReminderEmailHtml(firstNameOf(stop.customer_name ?? ''), startDateStr, stop.id, wd)
+              : buildEmailHtml(firstNameOf(stop.customer_name ?? ''), startDateStr, stop.id, wd)
 
           const emailRes = await fetch('https://api.resend.com/emails', {
             method: 'POST',
@@ -297,7 +343,7 @@ export async function POST(
               from: 'Léa – Bowa Concept <notifications@notifications.bowa-concept.com>',
               to: stop.email,
               reply_to: 'lea@bowa-concept.com',
-              subject: reminder ? 'BOWA CONCEPT : RAPPEL LIVRAISON — confirmez votre présence' : 'BOWA CONCEPT : LIVRAISON',
+              subject: delay ? 'BOWA CONCEPT : LIVRAISON DÉCALÉE' : reminder ? 'BOWA CONCEPT : RAPPEL LIVRAISON — confirmez votre présence' : 'BOWA CONCEPT : LIVRAISON',
               html,
             }),
           })
@@ -308,8 +354,13 @@ export async function POST(
           }
         }
 
-        // En relance, on garde le email_sent_at d'origine (1re notification).
-        if (!reminder) {
+        if (delay) {
+          // Décale la date de passage du client (best-effort si la colonne existe).
+          if (newStartStr && newStartStr !== startDateStr) {
+            await admin.from('delivery_stops').update({ passage_date: newStartStr }).eq('id', stop.id)
+          }
+        } else if (!reminder) {
+          // En relance, on garde le email_sent_at d'origine (1re notification).
           await admin
             .from('delivery_stops')
             .update({ email_sent_at: new Date().toISOString() })

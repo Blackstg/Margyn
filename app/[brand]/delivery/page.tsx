@@ -474,6 +474,30 @@ function PlanificateurView() {
     }
   }
 
+  // Prévenir d'un retard : décale la date de passage de +delayDays et envoie un
+  // mail d'excuse à TOUS les clients encore à livrer de la tournée.
+  async function sendDelayEmails(delayDays: number) {
+    if (!notifModal) return
+    const nbClients = notifModal.stops.filter((s) => s.email && s.status === 'pending').length
+    if (!confirm(`Prévenir ${nbClients} client(s) d'un retard de ${delayDays} jour${delayDays > 1 ? 's' : ''} ? Leur date de passage sera décalée d'autant.`)) return
+    setNotifSending(true)
+    try {
+      const r = await fetch(`/api/delivery/tours/${notifModal.tourId}/emails`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ delay: true, delayDays, windowDays: notifWindowDays }),
+      })
+      const data = await r.json()
+      setNotifResult(data)
+      await fetchTours()
+      const r2 = await fetch(`/api/delivery/tours/${notifModal.tourId}/emails`)
+      const data2 = await r2.json()
+      setNotifModal((prev) => prev ? { ...prev, stops: data2.stops ?? [] } : null)
+    } finally {
+      setNotifSending(false)
+    }
+  }
+
   // Applique une date à ce client et à tous les suivants de la liste (dans l'ordre
   // affiché) — pratique pour marquer « le jour 2 commence ici » en un clic.
   function applyDateToFollowing(orderedIds: string[], fromId: string, date: string) {
@@ -2322,6 +2346,29 @@ function PlanificateurView() {
                       </p>
                     )
                   })()}
+                </div>
+              </div>
+            )}
+
+            {/* Prévenir d'un retard */}
+            {!notifResult && stopsWithEmail.length > 0 && (
+              <div className="px-5 pt-3">
+                <div className="rounded-[10px] bg-[#fff7ed] border border-[#fed7aa] px-3 py-2.5">
+                  <p className="text-[11px] font-semibold text-[#9a3412] mb-1">🚚 Prévenir d&apos;un retard</p>
+                  <p className="text-[10px] text-[#b45309] mb-2 leading-snug">Envoie un mail d&apos;excuse à tous les clients encore à livrer et décale leur date de passage d&apos;autant (jours ouvrés).</p>
+                  <div className="flex gap-1.5">
+                    {[1, 2].map((dd) => (
+                      <button
+                        key={dd}
+                        type="button"
+                        onClick={() => sendDelayEmails(dd)}
+                        disabled={notifSending}
+                        className="flex-1 text-[11px] font-semibold rounded-[8px] px-2 py-1.5 border border-[#fdba74] bg-white text-[#9a3412] hover:bg-[#fff1e6] disabled:opacity-40"
+                      >
+                        Retard de {dd} jour{dd > 1 ? 's' : ''}
+                      </button>
+                    ))}
+                  </div>
                 </div>
               </div>
             )}
