@@ -53,19 +53,31 @@ export async function GET(req: NextRequest) {
     .eq('brand', brand)
   const realEurByName = new Map<string, number>()
   const rateCache = new Map<string, number>()
+  // Par mois de facture : total EUR + nb de commandes → coût réel moyen/commande.
+  const monthAgg = new Map<string, { eur: number; count: number }>()
   for (const s of (sums ?? []) as { month: string; invoice_rows?: InvoiceRow[] | null }[]) {
     let rate = rateCache.get(s.month)
     if (rate == null) { rate = await eurRate(s.month); rateCache.set(s.month, rate) }
+    const agg = monthAgg.get(s.month) ?? { eur: 0, count: 0 }
     for (const r of s.invoice_rows ?? []) {
       const k = norm(r.order_name)
       if (!k) continue
-      realEurByName.set(k, (realEurByName.get(k) ?? 0) + (Number(r.total_price) || 0) * rate)
+      const eur = (Number(r.total_price) || 0) * rate
+      realEurByName.set(k, (realEurByName.get(k) ?? 0) + eur)
+      agg.eur += eur; agg.count++
     }
+    monthAgg.set(s.month, agg)
   }
 
-  // Tarif moyen (repli pour commandes pas encore facturées), en EUR.
+  // Repli pour les commandes pas encore facturées : coût RÉEL moyen/commande de la
+  // facture la plus récente (= "prix du mois dernier"), et NON un tarif figé. On
+  // garde le tarif paramétré en ultime secours (aucune facture du tout).
   const { data: bs } = await admin.from('brand_settings').select('shipping_cost_per_order').eq('brand', brand).maybeSingle()
   const flat = Number(bs?.shipping_cost_per_order) || 0
+  const latestInvMonth = [...monthAgg.keys()].sort().at(-1)
+  const latestAgg = latestInvMonth ? monthAgg.get(latestInvMonth)! : null
+  const recentCpo = latestAgg && latestAgg.count > 0 ? latestAgg.eur / latestAgg.count : 0
+  const fallbackCpo = recentCpo > 0 ? recentCpo : flat
 
   // 2. Commandes VENDUES sur la période (order_id distincts) — paginé.
   const orderIds = new Set<string>()
@@ -98,22 +110,28 @@ export async function GET(req: NextRequest) {
     }
   } catch { /* best-effort */ }
 
-  // 4. Somme : coût réel si la commande est facturée (par n°), sinon tarif moyen.
-  let total = 0, matched = 0, flatUsed = 0
+  // 4. Somme : coût réel si la commande est facturée (par n°), sinon coût réel
+  //    moyen/commande de la dernière facture (fallbackCpo).
+  let total = 0, matched = 0, estimated = 0
   for (const oid of orderIds) {
     const name = idToName.get(oid)
     const real = name ? realEurByName.get(norm(name)) : undefined
     if (real != null) { total += real; matched++ }
-    else { total += flat; flatUsed++ }
+    else { total += fallbackCpo; estimated++ }
   }
 
   const orders = orderIds.size
   if (orders === 0) return NextResponse.json({ fulfillment: -1, matched: 0, orders: 0 })
 
+  const latestLabel = latestInvMonth
+    ? new Date(Number(latestInvMonth.slice(0, 4)), Number(latestInvMonth.slice(5, 7)) - 1, 15)
+        .toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' })
+    : ''
+  const estLabel = recentCpo > 0 ? `coût réel moyen ${latestLabel}` : 'tarif moyen'
   const note = matched === 0
-    ? 'Tarif moyen (aucune facture rapprochée)'
+    ? `Estimé — ${estLabel} (${Math.round(fallbackCpo)} €/cmd, aucune facture rapprochée)`
     : `Réel — ${matched}/${orders} commandes rapprochées par n°` +
-      (flatUsed > 0 ? ` (${flatUsed} au tarif moyen, pas encore facturées)` : '')
+      (estimated > 0 ? ` (${estimated} au ${estLabel} ${Math.round(fallbackCpo)} €/cmd, pas encore facturées)` : '')
 
-  return NextResponse.json({ fulfillment: Math.round(total), matched, orders, flat_used: flatUsed, note })
+  return NextResponse.json({ fulfillment: Math.round(total), matched, orders, estimated, cpo_fallback: Math.round(fallbackCpo), note })
 }

@@ -236,8 +236,10 @@ async function fetchMoomFulfillment(
   try {
     const r = await fetch(`/api/margins/fulfillment?brand=moom&from=${from}&to=${to}`)
     if (r.ok) {
-      const d = await r.json() as { fulfillment?: number; matched?: number; note?: string }
-      if (typeof d.fulfillment === 'number' && d.fulfillment >= 0 && (d.matched ?? 0) > 0) {
+      const d = await r.json() as { fulfillment?: number; matched?: number; orders?: number; note?: string }
+      // On l'utilise dès qu'il y a des ventes : même sans facture rapprochée, le
+      // repli est le coût réel moyen/commande de la dernière facture (pas un tarif figé).
+      if (typeof d.fulfillment === 'number' && d.fulfillment >= 0 && (d.orders ?? 0) > 0) {
         return { fulfillment: d.fulfillment, note: d.note }
       }
     }
