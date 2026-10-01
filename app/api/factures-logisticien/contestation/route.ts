@@ -182,6 +182,18 @@ export async function GET(req: NextRequest) {
   }
   const weightModel = (kg: number) => intercept + slope * kg
 
+  // DEBUG : vérifier que le $/kg médian est une vraie valeur (pas un artefact de poids par défaut)
+  const _medPk = median(perKg)
+  const _atMed = wt.filter(d => Math.abs(d.ship / (d.weight_g / 1000) - _medPk) < 0.0001)
+  const _wCount = new Map<number, number>()
+  for (const d of wt) _wCount.set(d.weight_g, (_wCount.get(d.weight_g) ?? 0) + 1)
+  const _debug = {
+    medianPerKg: _medPk,
+    ordersAtMedianRatio: _atMed.length,
+    sample: _atMed.slice(0, 4).map(d => ({ order: d.order, ship: d.ship, weight_g: d.weight_g, items: d.items })),
+    topWeights: [..._wCount.entries()].sort((a, b) => b[1] - a[1]).slice(0, 6),
+  }
+
   // ── Segments (zone × taille) ────────────────────────────────────────────────
   const segMap: Record<string, JoinedRow[]> = {}
   for (const d of data) {
@@ -269,5 +281,6 @@ export async function GET(req: NextRequest) {
       prevPerKg: perKgByMonth,            // [{month, perKg}] des 2 mois précédents
       profiles: histShipByProfile,        // { "UE|4": {median, n}, ... } médiane ship historique
     },
+    _debug,
   })
 }
