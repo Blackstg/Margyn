@@ -1100,16 +1100,20 @@ function ContestationView({ rate, months, onPickMonth }: { rate: number; months:
         <>
           {/* Barre : export PDF + tendance $/kg vs mois précédents */}
           <div className="flex items-center justify-between gap-3 flex-wrap">
-            <div className="text-xs text-[#6b6b63]">
-              {data.history && data.history.prevPerKg.length > 0 ? (
-                <span>
-                  Coût médian <b className="text-[#1a1a2e]">${data.history.currentPerKg.toFixed(2)}/kg</b> ce mois-ci
-                  {' · '}précédents : {data.history.prevPerKg.map(p => `$${p.perKg.toFixed(2)} (${p.month})`).join(', ')}
-                  {data.history.prevPerKg[0] && data.history.currentPerKg > data.history.prevPerKg[0].perKg * 1.1 && (
-                    <span className="ml-1 font-bold text-[#c7293a]">↑ hausse</span>
-                  )}
-                </span>
-              ) : <span>Comparaison historique indisponible (pas de facture les mois précédents).</span>}
+            <div className="text-xs text-[#6b6b63] max-w-[70%]">
+              {data.history && data.history.prevPerKg.length > 0 ? (() => {
+                const prev = data.history.prevPerKg[0]?.perKg ?? 0
+                const up = prev > 0 && data.history.currentPerKg > prev * 1.1
+                return (
+                  <span>
+                    Tarif médian <b className="text-[#1a1a2e]">${data.history.currentPerKg.toFixed(2)}/kg</b> ce mois-ci
+                    {' · '}précédents : {data.history.prevPerKg.map(p => `$${p.perKg.toFixed(2)} (${p.month})`).join(', ')}.
+                    {up
+                      ? <span className="ml-1 font-bold text-[#c7293a]">↑ hausse générale du tarif au kg.</span>
+                      : <span className="ml-1 text-[#2f9e44]">Tarif au kg stable → les surcoûts ci-dessous sont des commandes facturées <b>bien au-dessus</b> du tarif normal (voir colonne « Habituel »).</span>}
+                  </span>
+                )
+              })() : <span>Comparaison historique indisponible (pas de facture les mois précédents).</span>}
             </div>
             <button
               onClick={exportPdf}
