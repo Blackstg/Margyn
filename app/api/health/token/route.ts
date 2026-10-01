@@ -24,7 +24,7 @@ async function sendTokenDeadAlert(status: number | string) {
     method: 'POST',
     headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      from: 'Steero Alerts <alerts@steero.co>',
+      from: 'Steero Alerts <notifications@notifications.bowa-concept.com>',
       to: [to],
       subject: '⚠️ Steero — AUTO-RESTART HORS SERVICE (token Supabase invalide)',
       html: `<div style="font-family:sans-serif;max-width:560px">

@@ -18,7 +18,26 @@ function cronAuthorized(req: NextRequest): boolean {
   const secret = process.env.CRON_SECRET
   if (!secret) return false
   const token = (req.headers.get('authorization') ?? '').replace(/^Bearer\s+/i, '')
-  return token === secret
+  if (token === secret) return true
+  // Monitor externe (ex. UptimeRobot) : il peut déclencher l'auto-restart via ?key=
+  return req.nextUrl.searchParams.get('key') === secret
+}
+
+// Journal de battement : chaque exécution écrit une ligne (ops_cron_heartbeat) →
+// on peut VÉRIFIER que le cron tourne (et quand il a redémarré). Écrit quand la base
+// est UP ; si elle est down, l'insert échoue (ignoré) et c'est l'email d'alerte qui trace.
+async function logHeartbeat(source: string, authOk: boolean, action: string) {
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY
+  if (!url || !key) return
+  try {
+    await fetch(`${url}/rest/v1/ops_cron_heartbeat`, {
+      method: 'POST',
+      headers: { apikey: key, Authorization: `Bearer ${key}`, 'Content-Type': 'application/json', Prefer: 'return=minimal' },
+      body: JSON.stringify({ source, auth_ok: authOk, action }),
+      signal: AbortSignal.timeout(5000),
+    })
+  } catch { /* base down ou erreur → ignoré (l'alerte email couvre ce cas) */ }
 }
 
 async function probeAuth(): Promise<{ ok: boolean; status: number | string; ms: number }> {
@@ -51,7 +70,7 @@ async function sendAlert(probe: { status: number | string; ms: number }) {
     method: 'POST',
     headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      from: 'Steero Alerts <alerts@steero.co>',
+      from: 'Steero Alerts <notifications@notifications.bowa-concept.com>',
       to: [to],
       subject: '🔴 Steero — Service Auth Supabase INJOIGNABLE (connexions bloquées)',
       html: `
@@ -105,7 +124,7 @@ async function sendRestartNotice(res: { status?: number | string; detail?: strin
     method: 'POST',
     headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      from: 'Steero Alerts <alerts@steero.co>',
+      from: 'Steero Alerts <notifications@notifications.bowa-concept.com>',
       to: [to],
       subject: okRestart
         ? '🔄 Steero — Auto-restart du projet Supabase déclenché'
@@ -123,20 +142,23 @@ async function sendRestartNotice(res: { status?: number | string; detail?: strin
 }
 
 async function handle(req: NextRequest) {
+  const isCron = cronAuthorized(req)
   const probe = await probeAuth()
   if (probe.ok) {
+    await logHeartbeat(isCron ? 'cron' : 'public', true, 'ok')
     return NextResponse.json({ ok: true, service: 'supabase-auth', status: probe.status, ms: probe.ms, autoRestartArmed: !!process.env.SUPABASE_ACCESS_TOKEN, at: new Date().toISOString() })
   }
 
-  // Auth semble down. Depuis un monitor public → on renvoie juste 503.
-  if (!cronAuthorized(req)) {
+  // Auth semble down. Depuis un monitor public (non autorisé) → on renvoie juste 503.
+  if (!isCron) {
     return NextResponse.json({ ok: false, service: 'supabase-auth', status: probe.status, ms: probe.ms, at: new Date().toISOString() }, { status: 503 })
   }
 
-  // Chemin cron : double-vérification à 25 s pour ignorer les blips passagers.
+  // Chemin autorisé (cron/monitor) : double-vérification à 25 s pour ignorer les blips.
   await sleep(25_000)
   const probe2 = await probeAuth()
   if (probe2.ok) {
+    await logHeartbeat('cron', true, 'recovered-blip')
     return NextResponse.json({ ok: true, recovered: true, at: new Date().toISOString() })
   }
 
@@ -144,6 +166,7 @@ async function handle(req: NextRequest) {
   await sendAlert(probe2)
   const restart = await restartProject()
   if (restart.triggered) await sendRestartNotice(restart)
+  await logHeartbeat('cron', false, restart.triggered ? `restart:${restart.status}` : 'restart-skip')
 
   return NextResponse.json(
     { ok: false, service: 'supabase-auth', status: probe2.status, ms: probe2.ms, autoRestart: restart, at: new Date().toISOString() },
