@@ -909,7 +909,7 @@ Historique FW : ${history.map(h => `${h.month}: ${h.fw_count} FW ($${h.fw_total?
 
 // ─── Onglet Contestation (audit live poids/pays/coût juste) ───────────────────
 
-interface ContestItem { order: string; zone: string; cc: string; type: 'shipping' | 'service'; items: number; kg: number; billed: number; fair: number; delta: number }
+interface ContestItem { order: string; zone: string; cc: string; type: 'shipping' | 'service'; items: number; kg: number; billed: number; fair: number; delta: number; hist: number | null; histN: number; histDelta: number | null }
 interface Segment { zone: string; size: string; n: number; ship: number; serv: number; total: number; client: number; loss: number; weight: number }
 interface ContestData {
   month: string
@@ -922,6 +922,11 @@ interface ContestData {
   margin: { zone: string; n: number; clientMed: number; costMed: number; absorbed: number }[]
   frFree: number
   frTot: number
+  history?: {
+    currentPerKg: number
+    prevPerKg: { month: string; perKg: number }[]
+    profiles: Record<string, { median: number; n: number }>
+  }
 }
 
 const ZONE_LABEL: Record<string, string> = { FR: 'France', UE: 'UE hors FR', CH: 'Suisse', DOM: 'DOM-TOM', X: 'Autre' }
@@ -945,6 +950,53 @@ function ContestationView({ rate, months, onPickMonth }: { rate: number; months:
   const fmt = (n: number) => `$${n.toFixed(2)}`
   const sortedMonths = [...months].sort().reverse()
 
+  // Export PDF : construit un rapport imprimable (→ « Enregistrer en PDF ») à envoyer au logisticien.
+  function exportPdf() {
+    if (!data) return
+    const esc = (s: string) => String(s).replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]!))
+    const rows = (items: ContestItem[]) => items.map(c => `
+      <tr>
+        <td>${esc(c.order)}</td>
+        <td>${ZONE_LABEL[c.zone] ?? c.zone}</td>
+        <td>${c.type}</td>
+        <td style="text-align:right">${c.items}</td>
+        <td style="text-align:right">${c.kg > 0 ? c.kg.toFixed(1) + ' kg' : '—'}</td>
+        <td style="text-align:right">${fmt(c.billed)}</td>
+        <td style="text-align:right">${fmt(c.fair)}</td>
+        <td style="text-align:right">${c.hist != null ? fmt(c.hist) + (c.histDelta != null && c.histDelta >= 3 ? ` (↑+${c.histDelta.toFixed(0)})` : '') : '—'}</td>
+        <td style="text-align:right;color:#c7293a;font-weight:700">+${c.delta.toFixed(2)}</td>
+      </tr>`).join('')
+    const head = `<tr style="background:#f3f3f1">
+        <th>Commande</th><th>Zone</th><th>Type</th><th style="text-align:right">Art.</th><th style="text-align:right">Poids</th>
+        <th style="text-align:right">Facturé</th><th style="text-align:right">Juste</th><th style="text-align:right">Habituel</th><th style="text-align:right">À récupérer</th>
+      </tr>`
+    const trend = data.history && data.history.prevPerKg.length
+      ? `<p>Coût médian <b>$/kg</b> : ${data.history.currentPerKg.toFixed(2)} ce mois-ci, contre ${data.history.prevPerKg.map(p => `${p.perKg.toFixed(2)} (${p.month})`).join(', ')} les mois précédents.</p>`
+      : ''
+    const total = data.contest.strongTotal + data.contest.chTotal
+    const html = `<!doctype html><html lang="fr"><head><meta charset="utf-8"><title>Contestation ${esc(data.month)}</title>
+      <style>
+        body{font-family:Arial,Helvetica,sans-serif;color:#1a1a2e;max-width:900px;margin:24px auto;padding:0 16px;font-size:12px}
+        h1{font-size:18px;margin:0 0 4px} h2{font-size:14px;margin:20px 0 6px}
+        table{width:100%;border-collapse:collapse;margin-bottom:8px} th,td{border:1px solid #e3e1dd;padding:4px 6px;font-size:11px}
+        .muted{color:#6b6b63} .tot{font-weight:700;color:#c7293a}
+        @media print{button{display:none}}
+      </style></head><body>
+      <button onclick="window.print()" style="padding:8px 16px;margin-bottom:12px;cursor:pointer">🖨️ Imprimer / Enregistrer en PDF</button>
+      <h1>Contestation facture logistique — Mōom</h1>
+      <p class="muted">Mois facturé : <b>${esc(data.month)}</b> · ${data.counts.orders} commandes auditées · taux 1 USD = ${data.usdEur} EUR</p>
+      <p>Bonjour,<br/>Après audit de la facture, voici les commandes dont le coût facturé dépasse le tarif juste (recalculé au poids réel, au pays et au nombre d'articles). ${trend} Merci de régulariser ou de justifier ligne par ligne.</p>
+      <h2>À régulariser (FR / UE / DOM — sans douane) — total ${fmt(data.contest.strongTotal)}</h2>
+      <table>${head}${rows(data.contest.strong) || '<tr><td colspan="9" class="muted">Aucune</td></tr>'}</table>
+      <h2>Suisse — à justifier (douane) — total ${fmt(data.contest.chTotal)}</h2>
+      <table>${head}${rows(data.contest.ch) || '<tr><td colspan="9" class="muted">Aucune</td></tr>'}</table>
+      <p class="tot">Total à récupérer : ${fmt(total)}</p>
+      <p class="muted" style="margin-top:16px;font-size:10px">« Habituel » = prix médian facturé par le logisticien pour le même profil (zone × nombre d'articles) sur les 2 mois précédents. ↑ = augmentation par rapport à l'historique.</p>
+      </body></html>`
+    const w = window.open('', '_blank')
+    if (w) { w.document.write(html); w.document.close() }
+  }
+
   function Table({ title, items, total, muted }: { title: string; items: ContestItem[]; total: number; muted?: boolean }) {
     return (
       <div className={`rounded-[16px] border p-4 ${muted ? 'bg-[#faf9f7] border-[#e8e4e0]' : 'bg-white border-[#f3d6d9] shadow-[0_2px_12px_rgba(0,0,0,0.05)]'}`}>
@@ -966,6 +1018,7 @@ function ContestationView({ rate, months, onPickMonth }: { rate: number; months:
                   <th className="py-1.5 px-2 font-medium text-right">Poids</th>
                   <th className="py-1.5 px-2 font-medium text-right">Facturé</th>
                   <th className="py-1.5 px-2 font-medium text-right">Juste</th>
+                  <th className="py-1.5 px-2 font-medium text-right">Habituel*</th>
                   <th className="py-1.5 pl-2 font-medium text-right">Δ récup.</th>
                 </tr>
               </thead>
@@ -983,6 +1036,16 @@ function ContestationView({ rate, months, onPickMonth }: { rate: number; months:
                     <td className="py-1.5 px-2 text-right text-[#6b6b63]">{c.kg > 0 ? `${c.kg.toFixed(1)}kg` : '—'}</td>
                     <td className="py-1.5 px-2 text-right font-medium text-[#1a1a2e]">{fmt(c.billed)}</td>
                     <td className="py-1.5 px-2 text-right text-[#9b9b93]">{fmt(c.fair)}</td>
+                    <td className="py-1.5 px-2 text-right">
+                      {c.hist != null ? (
+                        <span title={`Médiane facturée pour ce profil (${ZONE_LABEL[c.zone] ?? c.zone}, ${c.items} art.) sur les 2 mois précédents · ${c.histN} cmd`}>
+                          <span className="text-[#6b6b63]">{fmt(c.hist)}</span>
+                          {c.histDelta != null && c.histDelta >= 3 && (
+                            <span className="ml-1 text-[10px] font-bold text-[#c7293a]">↑+{c.histDelta.toFixed(0)}</span>
+                          )}
+                        </span>
+                      ) : <span className="text-[#cfcfca]">—</span>}
+                    </td>
                     <td className="py-1.5 pl-2 text-right font-bold text-[#c7293a]">+{c.delta.toFixed(2)}</td>
                   </tr>
                 ))}
@@ -1035,6 +1098,27 @@ function ContestationView({ rate, months, onPickMonth }: { rate: number; months:
 
       {data && !loading && (
         <>
+          {/* Barre : export PDF + tendance $/kg vs mois précédents */}
+          <div className="flex items-center justify-between gap-3 flex-wrap">
+            <div className="text-xs text-[#6b6b63]">
+              {data.history && data.history.prevPerKg.length > 0 ? (
+                <span>
+                  Coût médian <b className="text-[#1a1a2e]">${data.history.currentPerKg.toFixed(2)}/kg</b> ce mois-ci
+                  {' · '}précédents : {data.history.prevPerKg.map(p => `$${p.perKg.toFixed(2)} (${p.month})`).join(', ')}
+                  {data.history.prevPerKg[0] && data.history.currentPerKg > data.history.prevPerKg[0].perKg * 1.1 && (
+                    <span className="ml-1 font-bold text-[#c7293a]">↑ hausse</span>
+                  )}
+                </span>
+              ) : <span>Comparaison historique indisponible (pas de facture les mois précédents).</span>}
+            </div>
+            <button
+              onClick={exportPdf}
+              className="flex items-center gap-1.5 px-3 py-2 rounded-[10px] bg-[#1a1a2e] text-white text-xs font-medium hover:bg-[#2a2a4e]"
+            >
+              📄 Export PDF (à envoyer au logisticien)
+            </button>
+          </div>
+
           {/* Verdict argument logisticien */}
           <div className="grid grid-cols-2 gap-4">
             <div className="bg-white rounded-[16px] shadow-[0_2px_12px_rgba(0,0,0,0.06)] p-5">

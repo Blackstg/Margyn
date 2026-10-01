@@ -88,23 +88,18 @@ interface JoinedRow {
   weight_g: number; items: number; cc: string; zone: Zone; cust_ship_usd: number
 }
 
-export async function GET(req: NextRequest) {
-  const month = req.nextUrl.searchParams.get('month')
-  if (!month) return NextResponse.json({ error: 'month requis' }, { status: 400 })
-  // 1 USD = usdEur EUR  → EUR→USD = /usdEur. Défaut 0.92 (non stocké par commande).
-  const usdEur = parseFloat(req.nextUrl.searchParams.get('rate') ?? '0.92') || 0.92
-  const EUR_TO_USD = 1 / usdEur
-
-  const admin = getAdmin()
+// Join facture ↔ Shopify (poids/articles/pays) pour un mois donné. Réutilisé pour
+// le mois courant ET les mois précédents (comparaison historique des prix).
+async function buildJoined(
+  admin: ReturnType<typeof getAdmin>, month: string, EUR_TO_USD: number,
+): Promise<{ data: JoinedRow[]; noMatch: number; noWeight: number }> {
   const { data: summary } = await admin
     .from('logistician_invoice_summaries')
     .select('invoice_rows')
-    .eq('brand', 'moom').eq('month', month).single()
-
+    .eq('brand', 'moom').eq('month', month).maybeSingle()
   const rawRows = (summary?.invoice_rows ?? []) as Array<{ order_name: string; shipping_price: number; service_price: number; total_price: number; isFW?: boolean }>
-  if (!rawRows.length) return NextResponse.json({ error: 'Aucune facture stockée pour ce mois' }, { status: 404 })
+  if (!rawRows.length) return { data: [], noMatch: 0, noWeight: 0 }
 
-  // Aggregate billed per order (non-FW), summing multi-line orders.
   const billed: Record<string, { ship: number; serv: number; total: number }> = {}
   for (const r of rawRows) {
     if (r.isFW) continue
@@ -116,8 +111,6 @@ export async function GET(req: NextRequest) {
   }
 
   const shop = await fetchMonthShopify(month)
-
-  // Join
   const data: JoinedRow[] = []
   let noMatch = 0, noWeight = 0
   for (const [order, b] of Object.entries(billed)) {
@@ -129,6 +122,43 @@ export async function GET(req: NextRequest) {
       zone: zoneOf(s.cc), cust_ship_usd: (s.cust_ship_eur || 0) * EUR_TO_USD,
     })
   }
+  return { data, noMatch, noWeight }
+}
+
+function prevMonthOf(ym: string): string {
+  const [y, m] = ym.split('-').map(Number)
+  return m === 1 ? `${y - 1}-12` : `${y}-${String(m - 1).padStart(2, '0')}`
+}
+
+export async function GET(req: NextRequest) {
+  const month = req.nextUrl.searchParams.get('month')
+  if (!month) return NextResponse.json({ error: 'month requis' }, { status: 400 })
+  // 1 USD = usdEur EUR  → EUR→USD = /usdEur. Défaut 0.92 (non stocké par commande).
+  const usdEur = parseFloat(req.nextUrl.searchParams.get('rate') ?? '0.92') || 0.92
+  const EUR_TO_USD = 1 / usdEur
+
+  const admin = getAdmin()
+  const { data, noMatch, noWeight } = await buildJoined(admin, month, EUR_TO_USD)
+  if (!data.length) return NextResponse.json({ error: 'Aucune facture stockée pour ce mois' }, { status: 404 })
+
+  // ── Historique : 2 mois précédents, pour détecter les hausses de prix ─────────
+  // Médiane du prix d'expédition par profil (zone × taille) + $/kg médian par mois.
+  const histByProfile = new Map<string, number[]>()
+  const perKgByMonth: { month: string; perKg: number }[] = []
+  for (let mm = prevMonthOf(month), i = 0; i < 2; mm = prevMonthOf(mm), i++) {
+    const prev = await buildJoined(admin, mm, EUR_TO_USD)
+    if (!prev.data.length) continue
+    for (const d of prev.data) {
+      if (d.zone === 'X' || !(d.ship > 0)) continue
+      const key = `${d.zone}|${sizeKey(d.items)}`
+      ;(histByProfile.get(key) ?? histByProfile.set(key, []).get(key)!).push(d.ship)
+    }
+    const pk = prev.data.filter(d => d.weight_g > 0 && d.ship > 0).map(d => d.ship / (d.weight_g / 1000))
+    if (pk.length) perKgByMonth.push({ month: mm, perKg: median(pk) })
+  }
+  const histShipByProfile: Record<string, { median: number; n: number }> = {}
+  for (const [k, arr] of histByProfile) histShipByProfile[k] = { median: median(arr), n: arr.length }
+  const histProfile = (zone: Zone, items: number) => histShipByProfile[`${zone}|${sizeKey(items)}`] ?? null
 
   // ── Régression shipping ~ poids (kg) ────────────────────────────────────────
   const wt = data.filter(d => d.weight_g > 0 && d.ship > 0)
@@ -179,18 +209,19 @@ export async function GET(req: NextRequest) {
 
   // ── Contestation par commande (recalcul sur TOUTES les commandes) ────────────
   const segMedianShip = (zone: Zone, items: number) => segShip[`${zone}|${sizeKey(items)}`] ?? median(data.filter(d => d.zone === zone).map(d => d.ship))
-  const contest: Array<{ order: string; zone: Zone; cc: string; type: 'shipping' | 'service'; items: number; kg: number; billed: number; fair: number; delta: number }> = []
+  const contest: Array<{ order: string; zone: Zone; cc: string; type: 'shipping' | 'service'; items: number; kg: number; billed: number; fair: number; delta: number; hist: number | null; histN: number; histDelta: number | null }> = []
   for (const d of data) {
     if (d.zone === 'X') continue
     const kg = d.weight_g / 1000
+    const h = histProfile(d.zone, d.items)   // prix médian historique pour ce profil (zone×taille)
     // Shipping
     const fairShip = Math.max(segMedianShip(d.zone, d.items), kg > 0 ? weightModel(kg) : 0)
     const dShip = d.ship - fairShip
-    if (dShip >= 8) contest.push({ order: d.order, zone: d.zone, cc: d.cc, type: 'shipping', items: d.items, kg, billed: d.ship, fair: fairShip, delta: dShip })
+    if (dShip >= 8) contest.push({ order: d.order, zone: d.zone, cc: d.cc, type: 'shipping', items: d.items, kg, billed: d.ship, fair: fairShip, delta: dShip, hist: h?.median ?? null, histN: h?.n ?? 0, histDelta: h ? d.ship - h.median : null })
     // Service (juste = min 4$, ou modèle articles 1 + 0.47/art.)
     const fairServ = Math.min(4, 1 + 0.47 * d.items)
     const dServ = d.serv - fairServ
-    if (dServ >= 3) contest.push({ order: d.order, zone: d.zone, cc: d.cc, type: 'service', items: d.items, kg, billed: d.serv, fair: fairServ, delta: dServ })
+    if (dServ >= 3) contest.push({ order: d.order, zone: d.zone, cc: d.cc, type: 'service', items: d.items, kg, billed: d.serv, fair: fairServ, delta: dServ, hist: null, histN: 0, histDelta: null })
   }
   contest.sort((a, b) => b.delta - a.delta)
   const strong = contest.filter(c => c.zone !== 'CH')
@@ -232,5 +263,11 @@ export async function GET(req: NextRequest) {
     segments,
     contest: { strong, ch, strongTotal: sum(strong), chTotal: sum(ch) },
     margin, frFree, frTot,
+    // Comparaison historique : $/kg médian du mois vs mois précédents + médiane par profil.
+    history: {
+      currentPerKg: regression.perKgMedian,
+      prevPerKg: perKgByMonth,            // [{month, perKg}] des 2 mois précédents
+      profiles: histShipByProfile,        // { "UE|4": {median, n}, ... } médiane ship historique
+    },
   })
 }
