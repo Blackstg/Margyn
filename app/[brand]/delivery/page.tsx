@@ -142,6 +142,18 @@ function endBusinessDate(dateStr: string, days: number): Date {
   return d
 }
 
+// La tournée appartient-elle au livreur `myName` ? Gère les tournées à 2 chauffeurs
+// ("Alexandre & Terence") et la normalisation. False si pas de nom fiable (email) →
+// on retombe alors sur le comportement global (ne casse pas les comptes sans nom).
+function driverMatches(driverName: string | null | undefined, myName: string): boolean {
+  if (!myName || myName.includes('@')) return false
+  const me = normalizeDriverName(myName).toLowerCase()
+  return String(driverName ?? '')
+    .split(/\s*[&,]\s*/)
+    .map((s) => normalizeDriverName(s.trim()).toLowerCase())
+    .includes(me)
+}
+
 function formatDuration(ms: number): string {
   if (ms <= 0) return '—'
   const totalMin = Math.round(ms / 60000)
@@ -3299,30 +3311,45 @@ function LivreurView() {
       const today = new Date().toISOString().slice(0, 10)
       const all: Tour[] = (data.tours ?? []).filter((t: Tour) => t.status !== 'cancelled')
       setTours(all)
+
+      // Nom du livreur connecté → pour lui montrer SA tournée (plusieurs livreurs
+      // actifs : sinon tout le monde tombait sur la tournée in_progress d'un autre).
+      let myName = driverNameRef.current
+      if (!myName || myName.includes('@')) {
+        try {
+          const sb = createBrowserClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!)
+          const { data: ud } = await sb.auth.getUser()
+          myName = (ud.user?.user_metadata?.full_name ?? ud.user?.user_metadata?.name ?? '') as string
+        } catch { /* ignore */ }
+      }
+      const hasName = !!myName && !myName.includes('@')
+      // belongs : la tournée est celle du livreur. Si pas de nom fiable → tout
+      // "appartient" (comportement global d'avant, pour ne pas casser les comptes sans nom).
+      const belongs = (t: Tour) => !hasName || driverMatches(t.driver_name, myName)
+
       let selected: Tour | undefined
       setSelectedTourId(prev => {
-        // On NE garde PAS une tournée terminée comme tournée sélectionnée du
-        // livreur : sinon après « Terminer », elle reste affichée avec le bouton
-        // « Démarrer/Continuer » actif → un tap la ressuscite (started_at posé
-        // après completed_at → durée négative « 4 min », tournée coincée).
+        // On NE garde PAS une tournée terminée (ni celle d'un AUTRE livreur) comme
+        // tournée sélectionnée : sinon après « Terminer » un tap la ressuscite, et
+        // un livreur restait coincé sur la tournée d'un collègue.
         const keptTour = prev ? all.find((t) => t.id === prev) : undefined
-        const kept = (keptTour && keptTour.status !== 'completed') ? prev : (() => {
+        const kept = (keptTour && keptTour.status !== 'completed' && belongs(keptTour)) ? prev : (() => {
           const active = all.filter((t: Tour) => t.status !== 'completed')
-          // 1. a tour already underway
-          const inProgress = active.find((t: Tour) => t.status === 'in_progress')
+          const mine = active.filter(belongs)
+          const pool = mine.length > 0 ? mine : active   // ses tournées, sinon toutes
+          // 1. une tournée déjà en cours (parmi les siennes)
+          const inProgress = pool.find((t: Tour) => t.status === 'in_progress')
           if (inProgress) return inProgress.id
-          // 2. the current/overdue tour: most recent one due today or earlier and
-          //    NOT finished. An unfinished tour must not disappear just because its
-          //    planned date passed (what made Khalid "lose" his tour the next day).
-          const dueNow = active
+          // 2. la tournée due aujourd'hui ou en retard, non terminée
+          const dueNow = pool
             .filter((t: Tour) => t.planned_date && t.planned_date <= today)
             .sort((a: Tour, b: Tour) => b.planned_date.localeCompare(a.planned_date))[0]
           if (dueNow) return dueNow.id
-          // 3. otherwise the soonest upcoming tour
-          const upcoming = active
+          // 3. sinon la prochaine à venir
+          const upcoming = pool
             .filter((t: Tour) => t.planned_date && t.planned_date > today)
             .sort((a: Tour, b: Tour) => a.planned_date.localeCompare(b.planned_date))[0]
-          return upcoming?.id ?? all[0]?.id ?? prev
+          return upcoming?.id ?? pool[0]?.id ?? all[0]?.id ?? prev
         })()
         selected = all.find(t => t.id === (returnCurrentId ?? kept))
         return kept
