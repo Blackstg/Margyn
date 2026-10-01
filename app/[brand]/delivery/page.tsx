@@ -3309,11 +3309,11 @@ function LivreurView() {
       const r = await fetch('/api/delivery/tours', { cache: 'no-store' })
       const data = await r.json()
       const today = new Date().toISOString().slice(0, 10)
-      const all: Tour[] = (data.tours ?? []).filter((t: Tour) => t.status !== 'cancelled')
-      setTours(all)
+      const everything: Tour[] = (data.tours ?? []).filter((t: Tour) => t.status !== 'cancelled')
 
-      // Nom du livreur connecté → pour lui montrer SA tournée (plusieurs livreurs
-      // actifs : sinon tout le monde tombait sur la tournée in_progress d'un autre).
+      // Nom du livreur connecté → il ne voit QUE ses tournées (celles où son nom
+      // est dans driver_name, gère les tournées à 2 chauffeurs). Repli : si pas de
+      // nom fiable (compte sans full_name), on garde toutes les tournées.
       let myName = driverNameRef.current
       if (!myName || myName.includes('@')) {
         try {
@@ -3323,33 +3323,29 @@ function LivreurView() {
         } catch { /* ignore */ }
       }
       const hasName = !!myName && !myName.includes('@')
-      // belongs : la tournée est celle du livreur. Si pas de nom fiable → tout
-      // "appartient" (comportement global d'avant, pour ne pas casser les comptes sans nom).
-      const belongs = (t: Tour) => !hasName || driverMatches(t.driver_name, myName)
+      const all: Tour[] = hasName ? everything.filter((t) => driverMatches(t.driver_name, myName)) : everything
+      setTours(all)
 
       let selected: Tour | undefined
       setSelectedTourId(prev => {
-        // On NE garde PAS une tournée terminée (ni celle d'un AUTRE livreur) comme
-        // tournée sélectionnée : sinon après « Terminer » un tap la ressuscite, et
-        // un livreur restait coincé sur la tournée d'un collègue.
+        // On NE garde PAS une tournée terminée comme tournée sélectionnée (sinon après
+        // « Terminer » un tap la ressuscite). `all` ne contient déjà que SES tournées.
         const keptTour = prev ? all.find((t) => t.id === prev) : undefined
-        const kept = (keptTour && keptTour.status !== 'completed' && belongs(keptTour)) ? prev : (() => {
+        const kept = (keptTour && keptTour.status !== 'completed') ? prev : (() => {
           const active = all.filter((t: Tour) => t.status !== 'completed')
-          const mine = active.filter(belongs)
-          const pool = mine.length > 0 ? mine : active   // ses tournées, sinon toutes
-          // 1. une tournée déjà en cours (parmi les siennes)
-          const inProgress = pool.find((t: Tour) => t.status === 'in_progress')
+          // 1. une tournée déjà en cours
+          const inProgress = active.find((t: Tour) => t.status === 'in_progress')
           if (inProgress) return inProgress.id
           // 2. la tournée due aujourd'hui ou en retard, non terminée
-          const dueNow = pool
+          const dueNow = active
             .filter((t: Tour) => t.planned_date && t.planned_date <= today)
             .sort((a: Tour, b: Tour) => b.planned_date.localeCompare(a.planned_date))[0]
           if (dueNow) return dueNow.id
           // 3. sinon la prochaine à venir
-          const upcoming = pool
+          const upcoming = active
             .filter((t: Tour) => t.planned_date && t.planned_date > today)
             .sort((a: Tour, b: Tour) => a.planned_date.localeCompare(b.planned_date))[0]
-          return upcoming?.id ?? pool[0]?.id ?? all[0]?.id ?? prev
+          return upcoming?.id ?? all[0]?.id ?? prev
         })()
         selected = all.find(t => t.id === (returnCurrentId ?? kept))
         return kept
