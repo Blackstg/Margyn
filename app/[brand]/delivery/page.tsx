@@ -2286,7 +2286,7 @@ function PlanificateurView() {
           onClick={() => { if (!notifSending) setNotifModal(null) }}
         >
           <div
-            className="bg-white rounded-[20px] shadow-2xl w-full max-w-md mx-4 overflow-hidden"
+            className="bg-white rounded-[20px] shadow-2xl w-full max-w-md mx-4 overflow-hidden flex flex-col max-h-[92vh]"
             onClick={(e) => e.stopPropagation()}
           >
             {/* Header */}
@@ -2386,7 +2386,7 @@ function PlanificateurView() {
             )}
 
             {/* Body */}
-            <div className={`${notifTab === 'apercu' && !notifResult ? 'p-0' : 'px-5 py-4'} max-h-[65vh] overflow-y-auto`}>
+            <div className={`${notifTab === 'apercu' && !notifResult ? 'p-0' : 'px-5 py-4'} flex-1 min-h-0 overflow-y-auto`}>
               {notifResult ? (
                 <div className="px-5 py-4 text-center py-4 space-y-2">
                   <div className="text-3xl">{notifResult.errors === 0 ? '✅' : '⚠️'}</div>
@@ -2533,7 +2533,7 @@ function PlanificateurView() {
             </div>
 
             {/* Footer */}
-            <div className="px-5 py-4 border-t border-[#ebebeb] flex gap-2 justify-end">
+            <div className="px-5 py-4 border-t border-[#ebebeb] flex gap-2 justify-end shrink-0">
               {notifResult ? (
                 <button
                   onClick={() => setNotifModal(null)}
