@@ -716,7 +716,9 @@ export default function BrandTrackingPage({ params }: { params: { brand: string 
       return
     }
 
-    // No URL params — try to restore last session
+    // No URL params — restore last session MAIS on re-interroge pour un statut frais.
+    // (Sinon on réaffichait l'ancien résultat mis en cache → le suivi semblait figé
+    // sur « en préparation » alors que le colis avait avancé côté transporteur.)
     try {
       const raw = sessionStorage.getItem(SESSION_KEY(brand))
       if (raw) {
@@ -725,7 +727,8 @@ export default function BrandTrackingPage({ params }: { params: { brand: string 
         }
         setEmail(se)
         setOrderName(so)
-        setResult(sr)
+        setResult(sr)          // affichage immédiat (évite un écran vide)
+        if (se && so) doFetch(se, so)   // …puis rafraîchit en arrière-plan
       }
     } catch { /* ignore */ }
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -738,10 +741,14 @@ export default function BrandTrackingPage({ params }: { params: { brand: string 
   const currentEvent = timeline.find(e => e.status === 'current')
     ?? [...timeline].reverse().find(e => e.status === 'done')
 
-  async function doFetch(em: string, on: string) {
-    setLoading(true)
-    setError(null)
-    setResult(null)
+  async function doFetch(em: string, on: string, silent = false) {
+    // silent = rafraîchissement en arrière-plan : on ne vide pas l'écran ni n'affiche
+    // le spinner (et on garde l'ancien résultat si le réseau échoue).
+    if (!silent) {
+      setLoading(true)
+      setError(null)
+      setResult(null)
+    }
     try {
       const res  = await fetch(`/api/tracking/${brand}`, {
         method:  'POST',
@@ -750,7 +757,7 @@ export default function BrandTrackingPage({ params }: { params: { brand: string 
       })
       const data = await res.json() as TrackingResult & { error?: string }
       if (!res.ok || data.error) {
-        setError(data.error ?? 'Commande introuvable.')
+        if (!silent) setError(data.error ?? 'Commande introuvable.')   // silent → on garde l'ancien
       } else {
         setResult(data)
         // Persist session
@@ -764,9 +771,9 @@ export default function BrandTrackingPage({ params }: { params: { brand: string 
         } catch { /* ignore */ }
       }
     } catch {
-      setError('Erreur réseau. Veuillez réessayer.')
+      if (!silent) setError('Erreur réseau. Veuillez réessayer.')
     } finally {
-      setLoading(false)
+      if (!silent) setLoading(false)
     }
   }
 
