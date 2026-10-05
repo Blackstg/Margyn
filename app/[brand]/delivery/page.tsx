@@ -510,6 +510,46 @@ function PlanificateurView() {
     }
   }
 
+  // ── Modale « Diviser la tournée » (répartir les arrêts restants sur N chauffeurs) ──
+  type SplitStop = { id: string; city: string; customer_name: string; sequence: number }
+  const [splitModal, setSplitModal] = useState<{ tourId: string; tourName: string; pending: SplitStop[] } | null>(null)
+  const [splitN, setSplitN] = useState(3)
+  const [splitDrivers, setSplitDrivers] = useState<string[]>([])
+  const [splitSaving, setSplitSaving] = useState(false)
+  function openSplitModal(tour: Tour) {
+    const pending = tour.stops
+      .filter((s) => s.status !== 'delivered' && s.status !== 'failed')
+      .sort((a, b) => a.sequence - b.sequence)
+      .map((s) => ({ id: s.id, city: s.city, customer_name: s.customer_name, sequence: s.sequence }))
+    setSplitN(3)
+    setSplitDrivers(['', '', ''])
+    setSplitModal({ tourId: tour.id, tourName: tour.name, pending })
+  }
+  // Découpe les arrêts restants en N groupes CONTIGUS (préserve l'ordre géographique).
+  function splitGroups(pending: SplitStop[], n: number): SplitStop[][] {
+    const groups: SplitStop[][] = Array.from({ length: n }, () => [])
+    const per = Math.ceil(pending.length / n)
+    pending.forEach((s, i) => { groups[Math.min(n - 1, Math.floor(i / per))].push(s) })
+    return groups
+  }
+  async function saveSplit() {
+    if (!splitModal) return
+    const groups = splitGroups(splitModal.pending, splitN)
+    if (splitDrivers.slice(0, splitN).some((d) => !d.trim())) { alert('Choisis un chauffeur pour chaque tournée.'); return }
+    setSplitSaving(true)
+    try {
+      const parts = groups.map((g, i) => ({ driver_name: splitDrivers[i], stop_ids: g.map((s) => s.id) })).filter((p) => p.stop_ids.length > 0)
+      const r = await fetch(`/api/delivery/tours/${splitModal.tourId}/split`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ parts }),
+      })
+      const data = await r.json()
+      if (data.error) { alert('Erreur : ' + data.error); return }
+      await fetchTours()
+      setSplitModal(null)
+    } finally { setSplitSaving(false) }
+  }
+
   // Applique une date à ce client et à tous les suivants de la liste (dans l'ordre
   // affiché) — pratique pour marquer « le jour 2 commence ici » en un clic.
   function applyDateToFollowing(orderedIds: string[], fromId: string, date: string) {
@@ -1924,6 +1964,16 @@ function PlanificateurView() {
                                 </button>
                               )
                             })()}
+                            {tour.status !== 'completed' && tour.status !== 'cancelled' &&
+                             tour.stops.filter((s) => s.status !== 'delivered' && s.status !== 'failed').length >= 2 && (
+                              <button
+                                onClick={(e) => { e.stopPropagation(); openSplitModal(tour) }}
+                                className="flex items-center gap-1 px-3 py-1 text-xs rounded-[8px] bg-[#eef2ff] text-[#4338ca] border border-[#c7d2fe] hover:bg-[#e0e7ff]"
+                                title="Répartir les arrêts restants sur plusieurs chauffeurs (ex. camion en panne)"
+                              >
+                                ✂️ Diviser
+                              </button>
+                            )}
                             <button
                               onClick={(e) => { e.stopPropagation(); handleDeleteTour(tour.id) }}
                               className="flex items-center gap-1 px-3 py-1 text-xs rounded-[8px] bg-[#fef2f2] text-[#c7293a] hover:bg-[#fee2e2]"
@@ -2210,6 +2260,54 @@ function PlanificateurView() {
         </div>
       </div>
     )}
+
+    {/* ── Modale Diviser la tournée ── */}
+    {splitModal && (() => {
+      const groups = splitGroups(splitModal.pending, splitN)
+      const driverOpts = [...new Set(drivers.map((d) => normalizeDriverName(d)).filter(Boolean))]
+      return (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm" onClick={() => { if (!splitSaving) setSplitModal(null) }}>
+          <div className="bg-white rounded-[20px] shadow-2xl w-full max-w-lg mx-4 overflow-hidden flex flex-col max-h-[92vh]" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between px-5 py-4 border-b border-[#ebebeb] shrink-0">
+              <div>
+                <h3 className="font-bold text-[#1a1a2e]">✂️ Diviser la tournée</h3>
+                <p className="text-xs text-[#6b6b63] mt-0.5">{splitModal.tourName} · {splitModal.pending.length} arrêts restants</p>
+              </div>
+              {!splitSaving && <button onClick={() => setSplitModal(null)} className="text-[#6b6b63] hover:text-[#1a1a2e]"><X size={18} /></button>}
+            </div>
+            <div className="px-5 py-4 flex-1 min-h-0 overflow-y-auto space-y-3">
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-semibold text-[#6b6b63]">Nombre de tournées :</span>
+                {[2, 3, 4].map((n) => (
+                  <button key={n} type="button" onClick={() => { setSplitN(n); setSplitDrivers((prev) => Array.from({ length: n }, (_, i) => prev[i] ?? '')) }}
+                    className={`px-3 py-1 rounded-[8px] text-sm font-medium border ${splitN === n ? 'bg-[#1a1a2e] text-white border-[#1a1a2e]' : 'bg-white text-[#6b6b63] border-[#e0e0e0]'}`}>{n}</button>
+                ))}
+              </div>
+              <p className="text-[11px] text-[#9b9b93] leading-snug">Les arrêts restants sont coupés en {splitN} groupes géographiques contigus (l'ordre du trajet est conservé). Chaque groupe devient une nouvelle tournée assignée au chauffeur choisi. Les arrêts déjà livrés restent sur la tournée d'origine.</p>
+              {groups.map((g, i) => (
+                <div key={i} className="rounded-[12px] border border-[#ececec] bg-[#fafaf8] px-3 py-2.5">
+                  <div className="flex items-center justify-between gap-2 mb-1.5">
+                    <span className="text-xs font-bold text-[#4338ca]">Relais {i + 1} · {g.length} arrêt{g.length > 1 ? 's' : ''}</span>
+                    <select value={splitDrivers[i] ?? ''} onChange={(e) => setSplitDrivers((prev) => { const n = [...prev]; n[i] = e.target.value; return n })}
+                      className="text-xs border border-[#e0e0e0] rounded-[8px] px-2 py-1 bg-white">
+                      <option value="">— chauffeur —</option>
+                      {driverOpts.map((d) => <option key={d} value={d}>{d}</option>)}
+                    </select>
+                  </div>
+                  <p className="text-[11px] text-[#6b6b63] leading-snug">{g.map((s) => s.city).join(' → ') || '—'}</p>
+                </div>
+              ))}
+            </div>
+            <div className="px-5 py-4 border-t border-[#ebebeb] flex gap-2 justify-end shrink-0">
+              <button onClick={() => setSplitModal(null)} disabled={splitSaving} className="px-4 py-2 rounded-[10px] text-sm text-[#6b6b63] hover:text-[#1a1a2e] disabled:opacity-40">Annuler</button>
+              <button onClick={saveSplit} disabled={splitSaving} className="px-4 py-2 rounded-[10px] bg-[#4338ca] text-white text-sm font-medium disabled:opacity-40">
+                {splitSaving ? 'Division…' : `Créer ${splitN} tournées`}
+              </button>
+            </div>
+          </div>
+        </div>
+      )
+    })()}
 
     {/* ── Modale Frais de tournée ── */}
     {fraisModal && (() => {
