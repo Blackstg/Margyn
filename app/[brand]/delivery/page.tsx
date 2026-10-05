@@ -2283,7 +2283,7 @@ function PlanificateurView() {
                     className={`px-3 py-1 rounded-[8px] text-sm font-medium border ${splitN === n ? 'bg-[#1a1a2e] text-white border-[#1a1a2e]' : 'bg-white text-[#6b6b63] border-[#e0e0e0]'}`}>{n}</button>
                 ))}
               </div>
-              <p className="text-[11px] text-[#9b9b93] leading-snug">Les arrêts restants sont coupés en {splitN} groupes géographiques contigus (l'ordre du trajet est conservé). Chaque groupe devient une nouvelle tournée assignée au chauffeur choisi. Les arrêts déjà livrés restent sur la tournée d'origine.</p>
+              <p className="text-[11px] text-[#9b9b93] leading-snug">Les arrêts restants sont coupés en {splitN} groupes géographiques contigus (l&apos;ordre du trajet est conservé). Chaque groupe devient une nouvelle tournée assignée au chauffeur choisi. Les arrêts déjà livrés restent sur la tournée d&apos;origine.</p>
               {groups.map((g, i) => (
                 <div key={i} className="rounded-[12px] border border-[#ececec] bg-[#fafaf8] px-3 py-2.5">
                   <div className="flex items-center justify-between gap-2 mb-1.5">
