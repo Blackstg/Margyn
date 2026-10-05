@@ -511,7 +511,7 @@ function PlanificateurView() {
   }
 
   // ── Modale « Diviser la tournée » (répartir les arrêts restants sur N chauffeurs) ──
-  type SplitStop = { id: string; city: string; customer_name: string; sequence: number }
+  type SplitStop = { id: string; city: string; customer_name: string; sequence: number; lat: number | null; lng: number | null }
   const [splitModal, setSplitModal] = useState<{ tourId: string; tourName: string; pending: SplitStop[]; baseDriver: string } | null>(null)
   const [splitN, setSplitN] = useState(3)
   const [splitDrivers, setSplitDrivers] = useState<string[]>([])
@@ -520,7 +520,7 @@ function PlanificateurView() {
     const pending = tour.stops
       .filter((s) => s.status !== 'delivered' && s.status !== 'failed')
       .sort((a, b) => a.sequence - b.sequence)
-      .map((s) => ({ id: s.id, city: s.city, customer_name: s.customer_name, sequence: s.sequence }))
+      .map((s) => ({ id: s.id, city: s.city, customer_name: s.customer_name, sequence: s.sequence, lat: s.lat ?? null, lng: s.lng ?? null }))
     // Chauffeurs de relais pré-remplis d'après le chauffeur d'origine (ex. Terence
     // → « Terence 1/2/3 »). Librement modifiables (peuvent être des chauffeurs fictifs).
     const base = (tour.driver_name ?? '').split(/\s*[&,]\s*/)[0].trim() || 'Relais'
@@ -528,11 +528,38 @@ function PlanificateurView() {
     setSplitDrivers([`${base} 1`, `${base} 2`, `${base} 3`])
     setSplitModal({ tourId: tour.id, tourName: tour.name, pending, baseDriver: base })
   }
-  // Découpe les arrêts restants en N groupes CONTIGUS (préserve l'ordre géographique).
+  // Découpe les arrêts restants (dans l'ordre du trajet) en N groupes "smart" :
+  // on vise des groupes équilibrés, MAIS on cale chaque coupure sur le plus gros
+  // saut de distance proche de la frontière → on ne coupe pas un cluster de points
+  // voisins (ex. Bergerac/Lembras restent ensemble) et on évite un groupe minuscule.
   function splitGroups(pending: SplitStop[], n: number): SplitStop[][] {
-    const groups: SplitStop[][] = Array.from({ length: n }, () => [])
-    const per = Math.ceil(pending.length / n)
-    pending.forEach((s, i) => { groups[Math.min(n - 1, Math.floor(i / per))].push(s) })
+    const m = pending.length
+    if (m <= n) return Array.from({ length: n }, (_, i) => (pending[i] ? [pending[i]] : []))
+    const gapAt = (i: number) => {
+      const a = pending[i], b = pending[i + 1]
+      if (a.lat == null || a.lng == null || b.lat == null || b.lng == null) return -1
+      return haversineKm([a.lng, a.lat], [b.lng, b.lat])
+    }
+    const anyCoords = pending.some((s) => s.lat != null && s.lng != null)
+    const W = Math.max(1, Math.round(m / n / 3))   // marge de décalage autour de l'équilibre
+    const cuts: number[] = []
+    for (let k = 1; k < n; k++) {
+      const ideal = Math.round((k * m) / n) - 1    // coupure "équilibrée"
+      if (!anyCoords) { cuts.push(ideal); continue }
+      let best = ideal, bestD = -1
+      for (let i = Math.max(0, ideal - W); i <= Math.min(m - 2, ideal + W); i++) {
+        if (cuts.includes(i)) continue
+        const d = gapAt(i)
+        if (d > bestD) { bestD = d; best = i }   // plus gros saut dans la fenêtre
+      }
+      cuts.push(best)
+    }
+    const cutSet = new Set(cuts)
+    const groups: SplitStop[][] = []
+    let cur: SplitStop[] = []
+    pending.forEach((s, i) => { cur.push(s); if (cutSet.has(i) && groups.length < n - 1) { groups.push(cur); cur = [] } })
+    groups.push(cur)
+    while (groups.length < n) groups.push([])
     return groups
   }
   async function saveSplit() {
