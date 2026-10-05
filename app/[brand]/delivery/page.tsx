@@ -512,7 +512,7 @@ function PlanificateurView() {
 
   // ── Modale « Diviser la tournée » (répartir les arrêts restants sur N chauffeurs) ──
   type SplitStop = { id: string; city: string; customer_name: string; sequence: number }
-  const [splitModal, setSplitModal] = useState<{ tourId: string; tourName: string; pending: SplitStop[] } | null>(null)
+  const [splitModal, setSplitModal] = useState<{ tourId: string; tourName: string; pending: SplitStop[]; baseDriver: string } | null>(null)
   const [splitN, setSplitN] = useState(3)
   const [splitDrivers, setSplitDrivers] = useState<string[]>([])
   const [splitSaving, setSplitSaving] = useState(false)
@@ -521,9 +521,12 @@ function PlanificateurView() {
       .filter((s) => s.status !== 'delivered' && s.status !== 'failed')
       .sort((a, b) => a.sequence - b.sequence)
       .map((s) => ({ id: s.id, city: s.city, customer_name: s.customer_name, sequence: s.sequence }))
+    // Chauffeurs de relais pré-remplis d'après le chauffeur d'origine (ex. Terence
+    // → « Terence 1/2/3 »). Librement modifiables (peuvent être des chauffeurs fictifs).
+    const base = (tour.driver_name ?? '').split(/\s*[&,]\s*/)[0].trim() || 'Relais'
     setSplitN(3)
-    setSplitDrivers(['', '', ''])
-    setSplitModal({ tourId: tour.id, tourName: tour.name, pending })
+    setSplitDrivers([`${base} 1`, `${base} 2`, `${base} 3`])
+    setSplitModal({ tourId: tour.id, tourName: tour.name, pending, baseDriver: base })
   }
   // Découpe les arrêts restants en N groupes CONTIGUS (préserve l'ordre géographique).
   function splitGroups(pending: SplitStop[], n: number): SplitStop[][] {
@@ -2279,7 +2282,7 @@ function PlanificateurView() {
               <div className="flex items-center gap-2">
                 <span className="text-xs font-semibold text-[#6b6b63]">Nombre de tournées :</span>
                 {[2, 3, 4].map((n) => (
-                  <button key={n} type="button" onClick={() => { setSplitN(n); setSplitDrivers((prev) => Array.from({ length: n }, (_, i) => prev[i] ?? '')) }}
+                  <button key={n} type="button" onClick={() => { setSplitN(n); setSplitDrivers((prev) => Array.from({ length: n }, (_, i) => prev[i] || `${splitModal.baseDriver} ${i + 1}`)) }}
                     className={`px-3 py-1 rounded-[8px] text-sm font-medium border ${splitN === n ? 'bg-[#1a1a2e] text-white border-[#1a1a2e]' : 'bg-white text-[#6b6b63] border-[#e0e0e0]'}`}>{n}</button>
                 ))}
               </div>
@@ -2288,15 +2291,16 @@ function PlanificateurView() {
                 <div key={i} className="rounded-[12px] border border-[#ececec] bg-[#fafaf8] px-3 py-2.5">
                   <div className="flex items-center justify-between gap-2 mb-1.5">
                     <span className="text-xs font-bold text-[#4338ca]">Relais {i + 1} · {g.length} arrêt{g.length > 1 ? 's' : ''}</span>
-                    <select value={splitDrivers[i] ?? ''} onChange={(e) => setSplitDrivers((prev) => { const n = [...prev]; n[i] = e.target.value; return n })}
-                      className="text-xs border border-[#e0e0e0] rounded-[8px] px-2 py-1 bg-white">
-                      <option value="">— chauffeur —</option>
-                      {driverOpts.map((d) => <option key={d} value={d}>{d}</option>)}
-                    </select>
+                    <input type="text" list="split-driver-suggestions" value={splitDrivers[i] ?? ''} placeholder="Nom du chauffeur"
+                      onChange={(e) => setSplitDrivers((prev) => { const n = [...prev]; n[i] = e.target.value; return n })}
+                      className="text-xs border border-[#e0e0e0] rounded-[8px] px-2 py-1 bg-white w-40 focus:outline-none focus:ring-2 focus:ring-[#4338ca]/20" />
                   </div>
                   <p className="text-[11px] text-[#6b6b63] leading-snug">{g.map((s) => s.city).join(' → ') || '—'}</p>
                 </div>
               ))}
+              <datalist id="split-driver-suggestions">
+                {driverOpts.map((d) => <option key={d} value={d} />)}
+              </datalist>
             </div>
             <div className="px-5 py-4 border-t border-[#ebebeb] flex gap-2 justify-end shrink-0">
               <button onClick={() => setSplitModal(null)} disabled={splitSaving} className="px-4 py-2 rounded-[10px] text-sm text-[#6b6b63] hover:text-[#1a1a2e] disabled:opacity-40">Annuler</button>
