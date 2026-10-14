@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect, useRef } from 'react'
+import { useUrlState } from '@/lib/useUrlState'
 import { read, utils } from 'xlsx'
 import { Upload, TrendingUp, Sparkles, AlertTriangle, CheckCircle, Clock, Loader2, Scale, Gavel } from 'lucide-react'
 
@@ -236,7 +237,7 @@ export default function FacturesLogisticienPage() {
   const [saved, setSaved]                   = useState(false)
   const [parseError, setParseError]         = useState('')
   const [usdEurRate, setUsdEurRate]         = useState(0.92)
-  const [view, setView]                     = useState<'facture' | 'contestation'>('facture')
+  const [view, setView]                     = useUrlState<'facture' | 'contestation'>('view', 'facture')
 
   // Taux USD→EUR live (frankfurter.app, gratuit sans clé)
   useEffect(() => {

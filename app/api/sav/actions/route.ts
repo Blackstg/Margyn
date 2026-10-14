@@ -115,7 +115,7 @@ export async function GET(req: NextRequest) {
     if (!data || data.length < PAGE) break
   }
 
-  const allRows = acc as {
+  const rawRows = acc as {
     action: string
     was_modified: boolean | null
     category: string | null
@@ -129,11 +129,25 @@ export async function GET(req: NextRequest) {
   // lignes de session (start ET end), l'email était stocké dans `category`.
   // NB : pour une action ticket, `category` = catégorie du ticket (jamais un
   // email) → le test `includes('@')` ne matche pas par erreur.
-  function rowEmail(r: typeof allRows[0]): string | null {
+  function rowEmail(r: typeof rawRows[0]): string | null {
     if (r.user_email && r.user_email.includes('@')) return r.user_email
     if (r.category && r.category.includes('@')) return r.category
     return null
   }
+
+  // Comptes qui ouvrent le SAV pour SUPERVISER (admin) mais ne traitent pas de
+  // tickets : on les exclut des stats « agents » pour ne pas gonfler le temps de
+  // travail / les ouvertures de l'équipe avec de la simple consultation.
+  // Surchargeable via SAV_STATS_EXCLUDE (emails séparés par des virgules).
+  const EXCLUDED_AGENTS = new Set(
+    ['g.yaker@blackstg.com', ...(process.env.SAV_STATS_EXCLUDE ?? '').split(',')]
+      .map(e => e.trim().toLowerCase())
+      .filter(Boolean)
+  )
+  const allRows = rawRows.filter(r => {
+    const e = rowEmail(r)
+    return !e || !EXCLUDED_AGENTS.has(e.toLowerCase())
+  })
 
   // Liste des agents (emails) vus sur la période
   const distinct_users = [...new Set(
@@ -194,21 +208,37 @@ export async function GET(req: NextRequest) {
   // Pour un tableau clair « combien chacun a travaillé sur la période » sans
   // avoir à sélectionner chaque agent un par un.
   const by_agent = (() => {
-    const map: Record<string, { beats: number[]; tickets: number; sessions: number }> = {}
-    const ensure = (e: string) => (map[e] ??= { beats: [], tickets: 0, sessions: 0 })
+    const map: Record<string, { beats: number[]; tickets: number; sessions: number; timed: number[]; sent: number; escalated: number; archived: number }> = {}
+    const ensure = (e: string) => (map[e] ??= { beats: [], tickets: 0, sessions: 0, timed: [], sent: 0, escalated: 0, archived: 0 })
     for (const r of allRows) {
       const e = rowEmail(r); if (!e) continue
       if (r.action === 'heartbeat') ensure(e).beats.push(new Date(r.created_at).getTime())
       else if (r.action === 'session_start') ensure(e).sessions++
-      else if (r.action === 'sent' || r.action === 'escalated' || r.action === 'archived') ensure(e).tickets++
+      else if (r.action === 'sent' || r.action === 'escalated' || r.action === 'archived') {
+        const a = ensure(e); a.tickets++
+        if (r.action === 'sent') a.sent++
+        else if (r.action === 'escalated') a.escalated++
+        else a.archived++
+        if (r.time_to_action_ms !== null) a.timed.push(r.time_to_action_ms)
+      }
     }
     return Object.entries(map)
       .map(([email, v]) => ({
         email,
-        name:      user_names[email] ?? email.split('@')[0],
-        active_ms: activeMsFromBeats(v.beats),
-        tickets:   v.tickets,
-        sessions:  v.sessions,
+        name:        user_names[email] ?? email.split('@')[0],
+        active_ms:   activeMsFromBeats(v.beats),
+        tickets:     v.tickets,
+        sessions:    v.sessions,
+        // Détail du type de traitement (répondu / escaladé / archivé) pour
+        // lever l'ambiguïté « 12 tickets » = 12 réponses ? ou 12 archivages ?
+        sent:        v.sent,
+        escalated:   v.escalated,
+        archived:    v.archived,
+        // Temps moyen par ticket PAR agent — pour l'afficher directement dans la
+        // carte sans avoir à sélectionner l'agent (clic).
+        avg_time_ms: v.timed.length > 0
+          ? Math.round(v.timed.reduce((a, b) => a + b, 0) / v.timed.length)
+          : null,
       }))
       .sort((a, b) => b.active_ms - a.active_ms)
   })()
@@ -341,6 +371,7 @@ export async function GET(req: NextRequest) {
       visits_per_day,
       avg_session_ms,
       total_session_ms,
+      active_ms,           // ← était oublié ici (présent seulement quand 0 ticket)
       active_hours,
       active_weekdays,
       daily_timeline,

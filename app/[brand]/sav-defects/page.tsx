@@ -3,6 +3,7 @@
 export const dynamic = 'force-dynamic'
 
 import { useState, useEffect, useCallback, useRef } from 'react'
+import { useUrlState } from '@/lib/useUrlState'
 import { Plus, AlertTriangle, Clock, PackageX, X, Image as ImageIcon, Search, FileText, Truck, RotateCcw, Trash2, Check, Layers, Printer, CheckCircle2, Maximize2, ArrowRightCircle, Link2 } from 'lucide-react'
 import { createBrowserClient } from '@supabase/auth-helpers-nextjs'
 import { isAdminRole } from '@/lib/access'
@@ -133,7 +134,7 @@ export default function SavDefectsPage() {
   const [stats, setStats]   = useState<Stats | null>(null)
   const [loading, setLoading] = useState(true)
   const [month, setMonth]   = useState(() => monthOptions()[0].value)
-  const [typeFilter, setTypeFilter] = useState<'all' | 'defaut_fournisseur' | 'erreur_envoi' | 'livraison_incomplete'>('all')
+  const [typeFilter, setTypeFilter] = useUrlState<'all' | 'defaut_fournisseur' | 'erreur_envoi' | 'livraison_incomplete'>('type', 'all')
   const [showForm, setShowForm] = useState(false)
   const [lightbox, setLightbox] = useState<string | null>(null)
   const [activeBatch, setActiveBatch] = useState<Batch | null>(null)

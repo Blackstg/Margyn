@@ -544,8 +544,18 @@ export async function GET() {
       return { ...order, panel_details: resolvedDetails, preorder_ready: ready }
     })
 
-    console.log(`[delivery/orders] Returning ${orders.length} orders (${orders.filter(o => o.is_preorder).length} preorders)`)
-    return NextResponse.json({ orders })
+    // Commandes masquées manuellement (ex. déjà traitées hors Steero mais encore
+    // « open » côté Shopify) — on les retire de « à planifier ».
+    let visibleOrders = orders
+    try {
+      const norm = (n: string) => String(n ?? '').replace(/^#/, '').trim()
+      const { data: hidden } = await admin.from('delivery_hidden_orders').select('order_name').eq('brand', 'bowa')
+      const hiddenSet = new Set((hidden ?? []).map((h) => norm(h.order_name as string)))
+      if (hiddenSet.size > 0) visibleOrders = orders.filter((o) => !hiddenSet.has(norm(o.order_name)))
+    } catch { /* table absente → on n'exclut rien */ }
+
+    console.log(`[delivery/orders] Returning ${visibleOrders.length} orders (${visibleOrders.filter(o => o.is_preorder).length} preorders)`)
+    return NextResponse.json({ orders: visibleOrders })
 
   } catch (err) {
     console.error('[delivery/orders]', err)

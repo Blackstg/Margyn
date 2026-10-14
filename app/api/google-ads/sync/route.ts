@@ -39,14 +39,20 @@ function fmtDate(d: Date): string {
 
 // ─── Cron entry-point (GET) ───────────────────────────────────────────────────
 
-// Vercel cron jobs send GET requests — sync the last 48 h (yesterday + today)
+// Vercel cron jobs send GET requests.
+// On RE-TIRE une fenêtre glissante de 30 jours (pas seulement hier) : les
+// conversions Google sont rattachées à la date du CLIC et mûrissent pendant
+// des jours/semaines après coup (un clic du 1er qui convertit le 5 vient
+// gonfler la valeur du 1er). Comme l'upsert est onConflict (date,platform,brand),
+// chaque passage écrase l'ancien snapshot par la valeur mûrie → le ROAS Steero
+// converge vers celui de l'UI Google au lieu de rester figé sous-évalué.
 export async function GET(req: NextRequest) {
-  const today      = new Date()
-  const twoDaysAgo = new Date(today)
-  twoDaysAgo.setDate(twoDaysAgo.getDate() - 1)
+  const today    = new Date()
+  const backfill = new Date(today)
+  backfill.setDate(backfill.getDate() - 30)
 
   const url = new URL(req.url)
-  url.searchParams.set('from', fmtDate(twoDaysAgo))
+  url.searchParams.set('from', fmtDate(backfill))
   url.searchParams.set('to',   fmtDate(today))
 
   return POST(new NextRequest(url, { headers: req.headers }))

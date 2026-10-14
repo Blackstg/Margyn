@@ -1029,6 +1029,9 @@ export default function SettingsPage() {
   const [varRows, setVarRows]               = useState<CostRow[]>(rowsFromDefaults(DEFAULT_BOWA_VARIABLE))
   const [varSave, setVarSave]               = useState<SaveState>('idle')
   const [varLoading, setVarLoading]         = useState(false)
+  // Import des charges variables depuis la feuille Google Sheets publiée.
+  const [sheetImport, setSheetImport]       = useState<'idle' | 'loading' | 'done' | 'error'>('idle')
+  const [sheetMsg, setSheetMsg]             = useState<string>('')
 
   // ── Monthly supplementary CA (bowa only) ─────────────────────────────────
   const [suppRows, setSuppRows]             = useState<CostRow[]>(rowsFromDefaults(DEFAULT_SUPPLEMENTARY))
@@ -1183,6 +1186,32 @@ export default function SettingsPage() {
     } catch {
       setFixedSave((prev) => ({ ...prev, [key]: 'error' }))
       setTimeout(() => setFixedSave((prev) => ({ ...prev, [key]: 'idle' })), 3000)
+    }
+  }
+
+  // ─── Import des charges variables depuis Google Sheets ────────────────────
+  // Remplit les lignes du mois sélectionné depuis la feuille publiée. On NE
+  // sauvegarde pas automatiquement : l'utilisateur vérifie puis clique Enregistrer.
+
+  async function importVarFromSheet() {
+    setSheetImport('loading'); setSheetMsg('')
+    try {
+      const ym = selectedMonth.slice(0, 7)   // 'YYYY-MM'
+      const r = await fetch(`/api/margins/fulfillment-import?brand=bowa&month=${ym}`)
+      const d = await r.json()
+      if (!r.ok || d.error) throw new Error(d.error || `HTTP ${r.status}`)
+      if (!d.found || !Array.isArray(d.rows) || d.rows.length === 0) {
+        setSheetImport('error')
+        setSheetMsg(d.error || "Aucune donnée pour ce mois dans la feuille.")
+        return
+      }
+      setVarRows(d.rows.map((x: { label: string; amount: number }) => ({ id: uid(), label: x.label, amount: String(x.amount) })))
+      setSheetImport('done')
+      const total = Math.round(d.total ?? 0).toLocaleString('fr-FR')
+      setSheetMsg(`${d.rows.length} postes importés · total ${total} €${d.yearMismatch ? " ⚠️ l'année de la feuille diffère du mois choisi" : ''} — vérifie puis Enregistre.`)
+    } catch (e) {
+      setSheetImport('error')
+      setSheetMsg(e instanceof Error ? e.message : 'Erreur')
     }
   }
 
@@ -1354,6 +1383,27 @@ export default function SettingsPage() {
                   </div>
 
                   <div className="space-y-4">
+
+                    {/* Import Google Sheets — remplit les charges variables du mois */}
+                    <div className="rounded-[12px] bg-[#eef6ff] border border-[#cfe3ff] px-4 py-3">
+                      <div className="flex items-center justify-between gap-3 flex-wrap">
+                        <div>
+                          <p className="text-[12px] font-semibold text-[#1e4a7a]">📄 Synchronisé depuis Google Sheets</p>
+                          <p className="text-[11px] text-[#4a6fa5] mt-0.5">Le fulfillment Bowa reflète automatiquement la feuille « Coût du transport » (mis à jour chaque jour). Bouton ci-contre pour forcer le mois affiché dans le tableau et le vérifier.</p>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={importVarFromSheet}
+                          disabled={sheetImport === 'loading'}
+                          className="text-[12px] font-semibold rounded-[8px] px-3 py-2 bg-[#1e66c4] text-white hover:bg-[#1a56a8] disabled:opacity-40 whitespace-nowrap"
+                        >
+                          {sheetImport === 'loading' ? 'Import…' : 'Importer le mois'}
+                        </button>
+                      </div>
+                      {sheetMsg && (
+                        <p className={`text-[11px] mt-2 ${sheetImport === 'error' ? 'text-[#c7293a]' : 'text-[#1a7f4b]'}`}>{sheetMsg}</p>
+                      )}
+                    </div>
 
                     {/* Charges variables */}
                     <VariableSection

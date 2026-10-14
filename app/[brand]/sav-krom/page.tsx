@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
+import { useUrlState } from '@/lib/useUrlState'
 import { createBrowserClient } from '@supabase/auth-helpers-nextjs'
 import {
   RefreshCw, Send, Archive, Inbox, CheckCheck,
@@ -638,7 +639,7 @@ export default function SavKromPage() {
   const [listError, setListError]       = useState<string | null>(null)
   const [doneStatuses, setDoneStatuses] = useState<Record<string, 'sent' | 'archived'>>({})
   const [drafts, setDrafts]             = useState<Record<string, string>>({})
-  const [tab, setTab]                   = useState<'pending' | 'done'>('pending')
+  const [tab, setTab]                   = useUrlState<'pending' | 'done'>('tab', 'pending')
   const [showRules, setShowRules]       = useState(false)
   const [search, setSearch]             = useState('')
   const [catFilter, setCatFilter]       = useState<KromCategory | 'all'>('all')

@@ -47,11 +47,24 @@ export async function POST(req: NextRequest) {
   pFrom.setDate(pFrom.getDate() - 30)
   const pinterestParams = `from=${fmtDate(pFrom)}&to=${fmtDate(today)}${brandParam}`
 
-  const [meta, shopify, google, pinterest] = await Promise.allSettled([
+  // Google Ads a le même effet de maturation : une conversion est rattachée à la
+  // date du CLIC et peut arriver des jours après (fenêtre d'attribution). Avec une
+  // fenêtre J-2, les jours J-3→J-30 restaient figés sur leur snapshot précoce et
+  // sous-estimés → ROAS Steero bien plus bas que l'UI Google. On resync 30 jours
+  // pour que chaque upsert écrase l'ancienne valeur par la valeur mûrie.
+  const googleParams = `from=${fmtDate(pFrom)}&to=${fmtDate(today)}${brandParam}`
+
+  // Fulfillment Bowa : miroir de la feuille Google Sheets « Coût du transport »
+  // (salaire livreur, leasing, dépôts, carburant…). Synchro à chaque passage pour
+  // refléter les mises à jour de la feuille sans action manuelle.
+  const fulfillmentBrand = !brand || brand === 'bowa' ? 'bowa' : brand
+
+  const [meta, shopify, google, pinterest, fulfillment] = await Promise.allSettled([
     fetch(`${base}/api/meta/sync?${params}`,          { method: 'POST', headers }),
     fetch(`${base}/api/shopify/sync?${params}`,       { method: 'POST', headers }),
-    fetch(`${base}/api/google-ads/sync?${params}`,    { method: 'POST', headers }),
+    fetch(`${base}/api/google-ads/sync?${googleParams}`, { method: 'POST', headers }),
     fetch(`${base}/api/pinterest/sync?${pinterestParams}`, { method: 'POST', headers }),
+    fetch(`${base}/api/margins/fulfillment-sync?brand=${fulfillmentBrand}`, { method: 'POST', headers }),
   ])
 
   const parse = async (r: PromiseSettledResult<Response>) => {
@@ -65,10 +78,11 @@ export async function POST(req: NextRequest) {
   }
 
   const results = {
-    meta:      await parse(meta),
-    shopify:   await parse(shopify),
-    google:    await parse(google),
-    pinterest: await parse(pinterest),
+    meta:        await parse(meta),
+    shopify:     await parse(shopify),
+    google:      await parse(google),
+    pinterest:   await parse(pinterest),
+    fulfillment: await parse(fulfillment),
   }
 
   const ok = results.meta.ok && results.shopify.ok && results.google.ok && results.pinterest.ok

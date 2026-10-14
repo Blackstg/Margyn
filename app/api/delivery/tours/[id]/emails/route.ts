@@ -13,6 +13,26 @@ function firstNameOf(fullName: string): string {
   return fullName?.split(' ')[0] ?? fullName ?? ''
 }
 
+// Téléphone du chauffeur assigné à la tournée : on le lit sur SON compte
+// (user_metadata.phone), en matchant full_name == driver_name. Null si inconnu
+// → le mail n'affiche alors AUCUN numéro (plutôt qu'un ancien numéro erroné).
+const normName = (s: string) => (s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').trim()
+async function resolveDriverPhone(admin: ReturnType<typeof getAdmin>, driverName?: string | null): Promise<string | null> {
+  const target = normName(driverName ?? '')
+  if (!target) return null
+  try {
+    const { data } = await admin.auth.admin.listUsers({ perPage: 1000 })
+    for (const u of data?.users ?? []) {
+      const m = (u.user_metadata ?? {}) as { full_name?: string; name?: string; phone?: string; phone_number?: string }
+      if (normName(m.full_name || m.name || '') === target) {
+        const phone = String(m.phone || m.phone_number || '').trim()
+        return phone || null
+      }
+    }
+  } catch { /* liste indisponible → pas de numéro */ }
+  return null
+}
+
 // Ajoute N jours OUVRÉS (on ne livre pas le samedi/dimanche) : chaque week-end
 // est sauté dans le décompte, et le résultat tombe toujours un jour de semaine.
 function addWorkingDays(dateStr: string, days: number): Date {
@@ -34,7 +54,15 @@ const APP_URL = 'https://www.steero.io'
 
 // windowDays : 0 = pas de date client → fenêtre large "cette semaine" (X..X+4).
 //              1 = jour exact "le X". >=2 = fenêtre "entre le X et le X+(w-1)".
-function buildEmailHtml(firstName: string, startDateStr: string, stopId: string, windowDays = 0): string {
+// Ligne « le livreur vous appellera » : avec le numéro du chauffeur assigné si on
+// le connaît, sinon sans numéro (JAMAIS un ancien numéro codé en dur).
+function callLine(phone: string | null): string {
+  return phone
+    ? `Notre livreur vous appellera avant de passer, depuis le numéro suivant&nbsp;: <strong>${phone}</strong>.`
+    : `Notre livreur vous appellera avant de passer.`
+}
+
+function buildEmailHtml(firstName: string, startDateStr: string, stopId: string, windowDays = 0, phone: string | null = null): string {
   const start   = new Date(startDateStr + 'T00:00:00')
   const startFr = fmtDateLong(start)
 
@@ -95,7 +123,7 @@ function buildEmailHtml(firstName: string, startDateStr: string, stopId: string,
                 La livraison s'effectuera au pied du camion 🚛. Nous vous demandons donc de faire le nécessaire pour être accompagné(e) d'une autre personne afin de récupérer les panneaux en toute sécurité 🔧.
               </p>
               <p style="margin:0 0 28px;font-size:15px;color:#3a3a3a;line-height:1.6;">
-                Notre livreur vous appellera avant de passer, depuis le numéro suivant&nbsp;: <strong>06 17 85 85 18</strong>.
+                ${callLine(phone)}
               </p>
 
               <!-- Availability CTA -->
@@ -166,13 +194,24 @@ function buildEmailHtml(firstName: string, startDateStr: string, stopId: string,
 </html>`
 }
 
-// Mail de RETARD : on a pris 1-2 j de retard, on annonce la nouvelle fenêtre de passage.
-function buildDelayEmailHtml(firstName: string, newStartStr: string, stopId: string, windowDays: number, delayDays: number): string {
+// Mail de RETARD. Deux modes :
+//  - mode « jours » (fromMode=false) : « votre livraison est décalée de N jours »,
+//    et on annonce une fenêtre [start ; start+marge].
+//  - mode « à partir de » (fromMode=true) : on reprend les livraisons à partir d'une
+//    date, sans promettre LE jour exact (le livreur appelle avant de passer).
+function buildDelayEmailHtml(firstName: string, newStartStr: string, stopId: string, windowDays: number, delayDays: number, fromMode = false, phone: string | null = null): string {
   const startFr = fmtDateLong(new Date(newStartStr + 'T00:00:00'))
   const endFr   = windowDays >= 2 ? fmtDateLong(addWorkingDays(newStartStr, windowDays - 1)) : ''
-  const windowLine = endFr
-    ? `Notre livreur passera désormais chez vous <strong>entre le ${startFr} et le ${endFr}</strong>.`
-    : `Notre livreur passera désormais chez vous <strong>le ${startFr}</strong>.`
+  const introLine = fromMode
+    ? `Suite à un contretemps sur notre tournée, nous reprenons les livraisons <strong>à partir du ${startFr}</strong>. Toutes nos excuses pour la gêne occasionnée 🙏.`
+    : `En raison d'un léger retard sur notre tournée, votre livraison est décalée de <strong>${delayDays} jour${delayDays > 1 ? 's' : ''}</strong>. Toutes nos excuses pour la gêne occasionnée 🙏.`
+  const windowLine = fromMode
+    ? (endFr
+        ? `Notre livreur passera chez vous <strong>à partir du ${startFr}</strong> (au plus tard vers le ${endFr}) — il vous appellera pour convenir du moment.`
+        : `Notre livreur passera chez vous <strong>à partir du ${startFr}</strong> — il vous appellera pour convenir du moment.`)
+    : (endFr
+        ? `Notre livreur passera désormais chez vous <strong>entre le ${startFr} et le ${endFr}</strong>.`
+        : `Notre livreur passera désormais chez vous <strong>le ${startFr}</strong>.`)
   return `<!DOCTYPE html><html lang="fr"><head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width, initial-scale=1.0"/></head>
 <body style="margin:0;padding:0;background:#f1ebe7;font-family:'Helvetica Neue',Helvetica,Arial,sans-serif;">
   <table width="100%" cellpadding="0" cellspacing="0" style="background:#f1ebe7;padding:32px 16px;"><tr><td align="center">
@@ -182,9 +221,9 @@ function buildDelayEmailHtml(firstName: string, newStartStr: string, stopId: str
         <p style="font-size:34px;margin:0 0 8px;text-align:center;">🚚</p>
         <h1 style="margin:0 0 20px;font-size:21px;font-weight:700;color:#1a1a2e;text-align:center;line-height:1.3;">Petit décalage sur votre livraison</h1>
         <p style="margin:0 0 16px;font-size:15px;color:#3a3a3a;line-height:1.6;">Bonjour <strong>${firstName}</strong>,</p>
-        <p style="margin:0 0 16px;font-size:15px;color:#3a3a3a;line-height:1.6;">En raison d'un léger retard sur notre tournée, votre livraison est décalée de <strong>${delayDays} jour${delayDays > 1 ? 's' : ''}</strong>. Toutes nos excuses pour la gêne occasionnée 🙏.</p>
+        <p style="margin:0 0 16px;font-size:15px;color:#3a3a3a;line-height:1.6;">${introLine}</p>
         <p style="margin:0 0 16px;font-size:15px;color:#3a3a3a;line-height:1.6;">${windowLine}</p>
-        <p style="margin:0 0 24px;font-size:15px;color:#3a3a3a;line-height:1.6;">La livraison s'effectue au pied du camion 🚛 — merci de prévoir une personne pour vous aider à réceptionner les panneaux 🔧. Notre livreur vous appellera avant de passer, depuis le <strong>06 17 85 85 18</strong>.</p>
+        <p style="margin:0 0 24px;font-size:15px;color:#3a3a3a;line-height:1.6;">La livraison s'effectue au pied du camion 🚛 — merci de prévoir une personne pour vous aider à réceptionner les panneaux 🔧. ${callLine(phone)}</p>
         <p style="margin:0 0 4px;font-size:14px;color:#3a3a3a;line-height:1.6;">Merci de votre compréhension ☀️</p>
         <p style="margin:0 0 16px;font-size:14px;color:#3a3a3a;line-height:1.6;">Cordialement,<br/><strong>Léa</strong><br/><span style="color:#6b6b63;">Service client</span></p>
         <p style="margin:0;font-size:12px;color:#9ca3af;line-height:1.6;">Pour toute question, écrivez-nous à <a href="mailto:lea@bowa-concept.com" style="color:#6b6b63;text-decoration:none;">lea@bowa-concept.com</a></p>
@@ -224,6 +263,31 @@ export async function GET(
     }
     if (error) throw error
 
+    // Aperçu du mail de RETARD : renvoie le HTML réel (même fonction que l'envoi)
+    // pour qu'on soit sûr de ce qu'on envoie. ?preview=delay&delayDays=N&windowDays=M
+    const preview = _req.nextUrl.searchParams.get('preview')
+    if (preview === 'delay') {
+      const delayDays  = Math.min(30, Math.max(1, Number(_req.nextUrl.searchParams.get('delayDays'))  || 1))
+      const windowDays = Math.min(5,  Math.max(1, Number(_req.nextUrl.searchParams.get('windowDays')) || 4))
+      const fromParam  = _req.nextUrl.searchParams.get('fromDate') ?? ''   // mode « à partir de »
+      const fromMode   = /^\d{4}-\d{2}-\d{2}$/.test(fromParam)
+      type St = { id: string; customer_name: string | null; email: string | null; status: string | null; passage_date?: string | null }
+      const list = (stops ?? []) as St[]
+      // Client représentatif : 1er « à livrer » avec email, sinon le 1er arrêt.
+      const sample = list.find((s) => s.email && s.status === 'pending') ?? list[0]
+      const { data: tour } = await admin
+        .from('delivery_tours').select('planned_date, driver_name').eq('id', params.id).single()
+      const baseDate   = sample?.passage_date || (tour as { planned_date?: string } | null)?.planned_date
+                         || new Date().toISOString().slice(0, 10)
+      const newStartStr = fromMode ? fromParam : addWorkingDays(baseDate, delayDays).toISOString().slice(0, 10)
+      const driverPhone = await resolveDriverPhone(admin, (tour as { driver_name?: string } | null)?.driver_name)
+      const html = buildDelayEmailHtml(
+        firstNameOf(sample?.customer_name ?? 'Prénom'),
+        newStartStr, sample?.id ?? '', windowDays, delayDays, fromMode, driverPhone,
+      )
+      return NextResponse.json({ html, newStartDate: newStartStr })
+    }
+
     return NextResponse.json({ stops: stops ?? [] })
   } catch (err) {
     console.error('[delivery/tours/:id/emails GET]', err)
@@ -241,7 +305,10 @@ export async function POST(
     const force    = body?.force === true      // force re-send even if already notified
     const reminder = body?.reminder === true   // relance : uniquement les sans-réponse
     const delay    = body?.delay === true      // retard : décale la date et prévient TOUS les clients
-    const delayDays = Math.min(3, Math.max(1, Number(body?.delayDays) || 1))
+    const delayDays = Math.min(30, Math.max(1, Number(body?.delayDays) || 1))
+    // Mode « à partir de » : une date précise de reprise (sinon mode « +N jours »).
+    const fromDateRaw = typeof body?.fromDate === 'string' ? body.fromDate : ''
+    const fromMode = delay && /^\d{4}-\d{2}-\d{2}$/.test(fromDateRaw)
     const minAgeHours = Number(body?.minAgeHours) || 0   // relance : mail envoyé il y a AU MOINS X h
     const maxAgeHours = Number(body?.maxAgeHours) || 0   // relance : … et au PLUS X h (fenêtre cron)
     // Dates de passage par client { stopId: 'YYYY-MM-DD' } — pour les tournées de
@@ -255,11 +322,14 @@ export async function POST(
     // Fetch tour info for the date
     const { data: tour, error: tourError } = await admin
       .from('delivery_tours')
-      .select('planned_date, name')
+      .select('planned_date, name, driver_name')
       .eq('id', params.id)
       .single()
 
     if (tourError) throw tourError
+
+    // Téléphone du chauffeur assigné (pour le mettre dans les mails clients).
+    const driverPhone = await resolveDriverPhone(admin, (tour as { driver_name?: string } | null)?.driver_name)
 
     // Persist per-client passage dates first (so they stick even outside sending).
     for (const [stopId, d] of Object.entries(dates)) {
@@ -315,14 +385,17 @@ export async function POST(
         const stopDate = stop.passage_date || null
         const startDateStr = stopDate || tourDateStr
         const wd = startDateStr ? windowDays : 0
-        // Retard : nouvelle date = date prévue + delayDays jours ouvrés.
-        const newStartStr = delay && startDateStr ? addWorkingDays(startDateStr, delayDays).toISOString().slice(0, 10) : startDateStr
+        // Retard : soit une date de reprise précise (mode « à partir de »), soit
+        // date prévue + delayDays jours ouvrés (mode « +N jours »).
+        const newStartStr = delay
+          ? (fromMode ? fromDateRaw : (startDateStr ? addWorkingDays(startDateStr, delayDays).toISOString().slice(0, 10) : startDateStr))
+          : startDateStr
         if (process.env.RESEND_API_KEY) {
           const html = delay
-            ? buildDelayEmailHtml(firstNameOf(stop.customer_name ?? ''), newStartStr, stop.id, windowDays, delayDays)
+            ? buildDelayEmailHtml(firstNameOf(stop.customer_name ?? ''), newStartStr, stop.id, windowDays, delayDays, fromMode, driverPhone)
             : reminder
               ? buildReminderEmailHtml(firstNameOf(stop.customer_name ?? ''), startDateStr, stop.id, wd)
-              : buildEmailHtml(firstNameOf(stop.customer_name ?? ''), startDateStr, stop.id, wd)
+              : buildEmailHtml(firstNameOf(stop.customer_name ?? ''), startDateStr, stop.id, wd, driverPhone)
 
           const emailRes = await fetch('https://api.resend.com/emails', {
             method: 'POST',

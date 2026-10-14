@@ -172,9 +172,12 @@ function isSageFemme(subject: string, description: string): boolean {
 
 // Destinataire du transfert partenariat, PAR MARQUE. `null` = pas de transfert
 // auto (on ne route surtout PAS vers la boîte d'une autre marque).
+// Transfert auto des demandes de partenariat DÉSACTIVÉ (à la demande) : les
+// partenariats sont désormais traités MANUELLEMENT dans le SAV. Pour réactiver
+// une marque, remettre son destinataire : { from, to, label }.
 const PARTNERSHIP_ROUTING: Record<SavBrand, { from: string; to: string; label: string } | null> = {
-  moom: { from: 'Mōom SAV <sav@moom-paris.co>', to: 'pauline@moom-paris.co', label: 'Mōom' },
-  bowa: { from: 'Bowa SAV <notifications@notifications.bowa-concept.com>', to: 'clemence@bowa-concept.com', label: 'Bowa' },
+  moom: null, // anciennement → pauline@moom-paris.co
+  bowa: null, // anciennement → clemence@bowa-concept.com
 }
 
 // Tag Zendesk d'idempotence : une fois le transfert fait, on ne le refait pas
@@ -372,15 +375,14 @@ export async function processOneTicket(
   // since partnership tickets don't need a Claude draft.
   let partnershipEmailSent: boolean | undefined
 
-  if (cls.category === 'partenariat') {
-    if (isSageFemme(subject, description)) {
-      console.log(`[SAV] #${ticketId} partenariat sage-femme — pas de transfert Pauline`)
-    } else {
-      partnershipEmailSent = await sendPartnershipEmail(brand, ticketId, subject, description, email).catch((err) => {
-        console.error(`[SAV] #${ticketId} partnership email error:`, err)
-        return false
-      })
-    }
+  // Transfert auto désactivé si aucun destinataire n'est configuré pour la marque
+  // (PARTNERSHIP_ROUTING = null). On ne touche alors PAS à partnershipEmailSent
+  // (reste undefined) pour ne pas afficher le badge « échoué » dans le SAV.
+  if (cls.category === 'partenariat' && PARTNERSHIP_ROUTING[brand] && !isSageFemme(subject, description)) {
+    partnershipEmailSent = await sendPartnershipEmail(brand, ticketId, subject, description, email).catch((err) => {
+      console.error(`[SAV] #${ticketId} partnership email error:`, err)
+      return false
+    })
   }
 
   // If the ticket requires a human decision, skip reply generation entirely.

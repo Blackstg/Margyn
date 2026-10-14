@@ -3,6 +3,7 @@
 export const dynamic = 'force-dynamic'
 
 import { useState, useEffect, useCallback, useMemo, Fragment } from 'react'
+import { useUrlState } from '@/lib/useUrlState'
 import { useSearchParams, useRouter, usePathname } from 'next/navigation'
 import { createBrowserClient } from '@supabase/auth-helpers-nextjs'
 import { ChevronRight, Percent, AlertTriangle } from 'lucide-react'
@@ -72,11 +73,11 @@ export default function MarginsPage({ params }: { params: { brand: string } }) {
   const [rows, setRows]       = useState<ProductRow[]>([])
   const [loading, setLoading] = useState(true)
   const [sort, setSort]       = useState<SortKey>('margin')
-  const [view, setView]       = useState<'total' | 'unit'>('unit')  // 'unit' = prix par article
+  const [view, setView]       = useUrlState<'total' | 'unit'>('view', 'unit')  // 'unit' = prix par article
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
   const [shipPerOrder, setShipPerOrder] = useState(0)
   const [realCov, setRealCov] = useState<{ matched: number; orders: number } | null>(null)
-  const [basis, setBasis] = useState<'contribution' | 'loaded'>('contribution')
+  const [basis, setBasis] = useUrlState<'contribution' | 'loaded'>('basis', 'contribution')
   // Charges hors produit/livraison (pub + frais fixes + frais transaction), au niveau période.
   const [overhead, setOverhead] = useState<{ marketing: number; fixed: number; fees: number; total: number } | null>(null)
   const [partial, setPartial] = useState(false)  // période non clôturée (mois courant / fenêtre glissante)

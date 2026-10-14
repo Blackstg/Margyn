@@ -7,6 +7,7 @@ import {
   Inbox, CheckCheck, ChevronDown, ChevronUp, Search,
   Settings, Trash2, Plus, X, Download, RotateCcw, Paperclip, ArrowRight, Forward,
 } from 'lucide-react'
+import { useUrlState } from '@/lib/useUrlState'
 
 // ─── Marque courante (Moom ou Bowa) ─────────────────────────────────────────
 // Le SAV est partagé entre Moom et Bowa (chacun son Zendesk). La marque est
@@ -990,6 +991,11 @@ function ReplyPanel({ ticket, draft, solved, onDraftChange, onSolvedChange, onSe
   const [attachments, setAttachments]     = useState<AttachmentState[]>([])
   const [uploading, setUploading]         = useState(false)
   const fileInputRef                      = useRef<HTMLInputElement>(null)
+  // Chrono « ouverture du ticket → envoi » : réinitialisé à chaque ticket
+  // sélectionné. Sert à alimenter time_to_action_ms (temps moyen par ticket),
+  // qui était toujours null car le client ne l'envoyait jamais.
+  const openedAtRef                       = useRef<number>(Date.now())
+  useEffect(() => { openedAtRef.current = Date.now() }, [ticket.ticket_id])
   const [showForward, setShowForward]     = useState(false)
   const [forwardTo, setForwardTo]         = useState('')
   const [forwardNote, setForwardNote]     = useState('')
@@ -1081,7 +1087,7 @@ function ReplyPanel({ ticket, draft, solved, onDraftChange, onSolvedChange, onSe
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         // was_modified est transmis pour que le LOG serveur (attribution fiable) l'enregistre.
-        body: JSON.stringify({ ticket_id: ticket.ticket_id, reply_body: draft, solved, action, category: ticket.category, uploads, was_modified: wasModified }),
+        body: JSON.stringify({ ticket_id: ticket.ticket_id, reply_body: draft, solved, action, category: ticket.category, uploads, was_modified: wasModified, time_to_action_ms: Math.max(0, Date.now() - openedAtRef.current) }),
       })
       if (!res.ok) { const d = await savJson<{ error?: string }>(res, 'L\'envoi'); throw new Error(d.error ?? `HTTP ${res.status}`) }
       setAttachments([])
@@ -1654,7 +1660,7 @@ interface QualiteMetrics {
   daily_timeline:    DailyEntry[]
   distinct_users:    string[]
   user_names:        Record<string, string>  // email → prénom
-  by_agent:          { email: string; name: string; active_ms: number; tickets: number; sessions: number }[]
+  by_agent:          { email: string; name: string; active_ms: number; tickets: number; sessions: number; sent: number; escalated: number; archived: number; avg_time_ms: number | null }[]
   by_category: Record<string, { total: number; sent: number; escalated: number }>
 }
 
@@ -1731,7 +1737,7 @@ function QualiteDashboard() {
             {([['today', "Aujourd'hui"], [7, '7j'], [30, '30j']] as const).map(([val, label]) => (
               <button
                 key={val}
-                onClick={() => setPeriod(val)}
+                onClick={() => { setSelectedUser(''); setPeriod(val) }}
                 className={`px-3 py-1.5 rounded-lg text-[11px] font-semibold transition-colors ${
                   period === val
                     ? 'bg-[#1a1a2e] text-white'
@@ -1743,7 +1749,7 @@ function QualiteDashboard() {
             ))}
             {/* Hier */}
             <button
-              onClick={() => { setDayValue(parisDay(-1)); setPeriod('day') }}
+              onClick={() => { setSelectedUser(''); setDayValue(parisDay(-1)); setPeriod('day') }}
               className={`px-3 py-1.5 rounded-lg text-[11px] font-semibold transition-colors ${
                 isDay && dayValue === parisDay(-1)
                   ? 'bg-[#1a1a2e] text-white'
@@ -1757,7 +1763,7 @@ function QualiteDashboard() {
               type="date"
               max={parisDay(0)}
               value={period === 'day' ? dayValue : ''}
-              onChange={e => { if (e.target.value) { setDayValue(e.target.value); setPeriod('day') } }}
+              onChange={e => { if (e.target.value) { setSelectedUser(''); setDayValue(e.target.value); setPeriod('day') } }}
               className={`px-2 py-1.5 rounded-lg text-[11px] font-semibold border outline-none transition-colors ${
                 isDay
                   ? 'bg-[#1a1a2e] text-white border-[#1a1a2e]'
@@ -1839,7 +1845,20 @@ function QualiteDashboard() {
                     </span>
                     <span className="text-right">
                       <span className="block text-base font-bold text-[#1a1a2e] tabular-nums">{a.active_ms > 0 ? fmtMs(a.active_ms) : '—'}</span>
-                      <span className="block text-[10px] text-[#9b9b93]">{a.tickets} ticket{a.tickets !== 1 ? 's' : ''} · {a.sessions} ouverture{a.sessions !== 1 ? 's' : ''}</span>
+                      <span className="block text-[10px] text-[#9b9b93]">
+                        {a.tickets} ticket{a.tickets !== 1 ? 's' : ''}
+                        {a.tickets > 0 && (
+                          <> (
+                            {[
+                              a.sent > 0 ? `${a.sent} répondu${a.sent !== 1 ? 's' : ''}` : null,
+                              a.escalated > 0 ? `${a.escalated} escaladé${a.escalated !== 1 ? 's' : ''}` : null,
+                              a.archived > 0 ? `${a.archived} archivé${a.archived !== 1 ? 's' : ''}` : null,
+                            ].filter(Boolean).join(' · ')}
+                          )</>
+                        )}
+                        {' '}· {a.sessions} ouverture{a.sessions !== 1 ? 's' : ''}
+                        {a.avg_time_ms !== null && <> · ~{fmtMs(a.avg_time_ms)}/ticket</>}
+                      </span>
                     </span>
                   </button>
                 ))}
@@ -1887,8 +1906,25 @@ function QualiteDashboard() {
           {metrics.total === 0 && metrics.sessions_count === 0 ? (
             <div className="flex flex-col items-center justify-center gap-3 py-16 text-center">
               <p className="text-3xl">📊</p>
-              <p className="text-sm font-semibold text-[#1a1a2e]">Pas encore de données</p>
-              <p className="text-xs text-[#9b9b93] max-w-xs">Les métriques s&apos;accumuleront au fur et à mesure que l&apos;équipe traite des tickets.</p>
+              {selectedUser ? (
+                <>
+                  <p className="text-sm font-semibold text-[#1a1a2e]">
+                    Aucune activité pour {metrics.user_names[selectedUser] ?? selectedUser.split('@')[0]} sur cette période
+                  </p>
+                  <p className="text-xs text-[#9b9b93] max-w-xs">Cet agent n&apos;a ni traité de ticket ni ouvert le SAV sur la période sélectionnée.</p>
+                  <button
+                    onClick={() => setSelectedUser('')}
+                    className="mt-1 px-3 py-1.5 rounded-lg text-[11px] font-semibold bg-[#1a1a2e] text-white"
+                  >
+                    Voir toute l&apos;équipe
+                  </button>
+                </>
+              ) : (
+                <>
+                  <p className="text-sm font-semibold text-[#1a1a2e]">Pas encore de données</p>
+                  <p className="text-xs text-[#9b9b93] max-w-xs">Les métriques s&apos;accumuleront au fur et à mesure que l&apos;équipe traite des tickets.</p>
+                </>
+              )}
             </div>
           ) : metrics.total === 0 ? (
             <div className="rounded-2xl bg-[#fafaf9] border border-[#e8e8e4] px-5 py-6 text-center">
@@ -2185,7 +2221,7 @@ export default function SavPage() {
   const [doneStatuses, setDoneStatuses]     = useState<Record<number, { action: 'sent' | 'escalated' | 'archived'; doneAt: string }>>({})
   const [drafts, setDrafts]                 = useState<Record<number, string>>({})
   const [solvedMap, setSolvedMap]           = useState<Record<number, boolean>>({})
-  const [tab, setTab]                       = useState<'pending' | 'done' | 'qualite'>('pending')
+  const [tab, setTab]                       = useUrlState<'pending' | 'done' | 'qualite'>('tab', 'pending')
   const [showRules, setShowRules]           = useState(false)
   const [importing, setImporting]           = useState(false)
   const [importMsg, setImportMsg]           = useState<string | null>(null)

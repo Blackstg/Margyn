@@ -3,6 +3,7 @@
 export const dynamic = 'force-dynamic'
 
 import { useState, useEffect, useCallback, useRef, useMemo, Suspense } from 'react'
+import { useUrlState } from '@/lib/useUrlState'
 import nextDynamic from 'next/dynamic'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { createBrowserClient } from '@supabase/auth-helpers-nextjs'
@@ -122,6 +123,15 @@ interface Tour {
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
+
+// Extpanel : vendu à l'unité sur Shopify mais conditionné par 4 (1 paquet = 4 panneaux).
+// Le badge « panneaux » de Steero compte en PAQUETS (emplacements camion), d'où la
+// confusion. On affiche la conversion dans le détail pour le chauffeur.
+const EXT_PACK = 4
+function extPanelPacks(title: string, qty: number): number | null {
+  if (/extpanel/i.test(title) && /panneau/i.test(title)) return Math.ceil(qty / EXT_PACK)
+  return null
+}
 
 function formatDate(dateStr: string): string {
   if (!dateStr) return ''
@@ -380,8 +390,8 @@ function PlanificateurView() {
   const [deferredOrders, setDeferredOrders] = useState<Map<string, { deferred_until: string | null; note: string | null }>>(new Map())
   const [deferPopover, setDeferPopover] = useState<{ orderName: string; date: string; note: string } | null>(null)
   const [showDeferredSection, setShowDeferredSection] = useState(false)
-  const [ordersViewMode, setOrdersViewMode] = useState<'list' | 'map'>('list')
-  const [toursViewMode, setToursViewMode] = useState<'list' | 'map'>('list')
+  const [ordersViewMode, setOrdersViewMode] = useUrlState<'list' | 'map'>('ordersView', 'list')
+  const [toursViewMode, setToursViewMode] = useUrlState<'list' | 'map'>('toursView', 'list')
   const [syncingStopId, setSyncingStopId] = useState<string | null>(null)
   // Date de commande Shopify par shopify_order_id (chargée à l'ouverture de la carte)
   const [orderDates, setOrderDates] = useState<Record<string, string>>({})
@@ -438,6 +448,28 @@ function PlanificateurView() {
   const [passageDates, setPassageDates] = useState<Record<string, string>>({})
   // Marge de la fenêtre annoncée dans le mail : 1 = jour exact, 2 = "X à X+1", 3 = "X à X+2".
   const [notifWindowDays, setNotifWindowDays] = useState(2)
+  // Prévenir d'un retard : mode « +N jours » OU « à partir d'une date » + aperçu réel
+  const [delayDays, setDelayDays] = useState(1)
+  const [delayMode, setDelayMode] = useState<'days' | 'from'>('days')
+  const [delayFromDate, setDelayFromDate] = useState('')
+  const [delayPreviewHtml, setDelayPreviewHtml] = useState<string | null>(null)
+  const [delayPreviewLoading, setDelayPreviewLoading] = useState(false)
+  function delayQuery(): string {
+    return delayMode === 'from' && /^\d{4}-\d{2}-\d{2}$/.test(delayFromDate)
+      ? `fromDate=${delayFromDate}`
+      : `delayDays=${delayDays}`
+  }
+  async function loadDelayPreview() {
+    if (!notifModal) return
+    setDelayPreviewLoading(true)
+    try {
+      const r = await fetch(`/api/delivery/tours/${notifModal.tourId}/emails?preview=delay&${delayQuery()}&windowDays=${notifWindowDays}`)
+      const d = await r.json()
+      setDelayPreviewHtml(d.html ?? null)
+    } finally {
+      setDelayPreviewLoading(false)
+    }
+  }
 
   function formatTourDateFr(dateStr: string): string {
     if (!dateStr) return ''
@@ -456,6 +488,10 @@ function PlanificateurView() {
     for (const s of stops) seed[s.id] = s.passage_date || plannedDate || ''
     setPassageDates(seed)
     setNotifWindowDays(2)
+    setDelayDays(1)
+    setDelayMode('days')
+    setDelayFromDate('')
+    setDelayPreviewHtml(null)
     setNotifModal({ tourId, tourName, plannedDate, stops })
   }
 
@@ -488,18 +524,26 @@ function PlanificateurView() {
 
   // Prévenir d'un retard : décale la date de passage de +delayDays et envoie un
   // mail d'excuse à TOUS les clients encore à livrer de la tournée.
-  async function sendDelayEmails(delayDays: number) {
+  async function sendDelayEmails() {
     if (!notifModal) return
+    const isFrom = delayMode === 'from'
+    if (isFrom && !/^\d{4}-\d{2}-\d{2}$/.test(delayFromDate)) { alert('Choisis une date de reprise.'); return }
     const nbClients = notifModal.stops.filter((s) => s.email && s.status === 'pending').length
-    if (!confirm(`Prévenir ${nbClients} client(s) d'un retard de ${delayDays} jour${delayDays > 1 ? 's' : ''} ? Leur date de passage sera décalée d'autant.`)) return
+    const quoi = isFrom
+      ? `à partir du ${new Date(delayFromDate + 'T12:00:00').toLocaleDateString('fr-FR', { day: 'numeric', month: 'long' })}`
+      : `de ${delayDays} jour${delayDays > 1 ? 's' : ''}`
+    if (!confirm(`Prévenir ${nbClients} client(s) d'un retard ${quoi} ? Leur date de passage sera mise à jour.`)) return
     setNotifSending(true)
     try {
       const r = await fetch(`/api/delivery/tours/${notifModal.tourId}/emails`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ delay: true, delayDays, windowDays: notifWindowDays }),
+        body: JSON.stringify(isFrom
+          ? { delay: true, fromDate: delayFromDate, windowDays: notifWindowDays }
+          : { delay: true, delayDays, windowDays: notifWindowDays }),
       })
       const data = await r.json()
+      setDelayPreviewHtml(null)
       setNotifResult(data)
       await fetchTours()
       const r2 = await fetch(`/api/delivery/tours/${notifModal.tourId}/emails`)
@@ -1019,7 +1063,7 @@ function PlanificateurView() {
                   </button>
                 )}
                 <button
-                  onClick={() => setOrdersViewMode(m => m === 'list' ? 'map' : 'list')}
+                  onClick={() => setOrdersViewMode(ordersViewMode === 'list' ? 'map' : 'list')}
                   className={`flex items-center gap-1.5 px-3 py-1.5 rounded-[10px] text-xs font-medium transition-colors ${
                     ordersViewMode === 'map'
                       ? 'bg-[#1a1a2e] text-white'
@@ -1230,6 +1274,7 @@ function PlanificateurView() {
                                 <span className="text-[#6b6b63] truncate">{item.title}</span>
                                 {item.variant_title && <span className="text-[#1a1a2e] font-medium shrink-0">· {item.variant_title}</span>}
                                 <span className="font-semibold text-[#1a1a2e] shrink-0">×{item.qty}</span>
+                                {(() => { const p = extPanelPacks(item.title, item.qty); return p ? <span className="text-[9px] font-semibold text-[#9a3412] bg-[#fff7ed] px-1 py-0.5 rounded shrink-0">{p} paquet{p > 1 ? 's' : ''} de {EXT_PACK}</span> : null })()}
                               </div>
                             ))}
                           </div>
@@ -1277,6 +1322,7 @@ function PlanificateurView() {
                                 <span className="text-[#6b6b63] truncate">{item.title}</span>
                                 {item.variant_title && <span className="text-[#1a1a2e] font-medium shrink-0">· {item.variant_title}</span>}
                                 <span className="font-semibold text-[#1a1a2e] shrink-0">×{item.qty}</span>
+                                {(() => { const p = extPanelPacks(item.title, item.qty); return p ? <span className="text-[9px] font-semibold text-[#9a3412] bg-[#fff7ed] px-1 py-0.5 rounded shrink-0">{p} paquet{p > 1 ? 's' : ''} de {EXT_PACK}</span> : null })()}
                               </div>
                             ))}
                           </div>
@@ -1444,7 +1490,7 @@ function PlanificateurView() {
               <div className="flex items-center gap-1.5">
                 {!showHistory && (
                   <button
-                    onClick={() => setToursViewMode(m => m === 'list' ? 'map' : 'list')}
+                    onClick={() => setToursViewMode(toursViewMode === 'list' ? 'map' : 'list')}
                     className={`flex items-center gap-1.5 px-3 py-1.5 rounded-[10px] text-xs font-medium transition-colors ${
                       toursViewMode === 'map'
                         ? 'bg-[#6366f1] text-white'
@@ -2042,6 +2088,7 @@ function PlanificateurView() {
                                               <span className="truncate">{item.title}</span>
                                               {item.variant_title && <span className="shrink-0 font-medium text-[#1a1a2e]">· {item.variant_title}</span>}
                                               <span className="shrink-0 font-semibold text-[#1a1a2e]">×{item.qty}</span>
+                                              {(() => { const p = extPanelPacks(item.title, item.qty); return p ? <span className="shrink-0 text-[9px] font-semibold text-[#9a3412] bg-[#fff7ed] px-1 rounded">{p} paquet{p > 1 ? 's' : ''} de {EXT_PACK}</span> : null })()}
                                             </div>
                                           ))}
                                         </div>
@@ -2496,20 +2543,66 @@ function PlanificateurView() {
               <div className="px-5 pt-3">
                 <div className="rounded-[10px] bg-[#fff7ed] border border-[#fed7aa] px-3 py-2.5">
                   <p className="text-[11px] font-semibold text-[#9a3412] mb-1">🚚 Prévenir d&apos;un retard</p>
-                  <p className="text-[10px] text-[#b45309] mb-2 leading-snug">Envoie un mail d&apos;excuse à tous les clients encore à livrer et décale leur date de passage d&apos;autant (jours ouvrés).</p>
-                  <div className="flex gap-1.5">
-                    {[1, 2].map((dd) => (
+                  <p className="text-[10px] text-[#b45309] mb-2 leading-snug">Envoie un mail d&apos;excuse à tous les clients encore à livrer et met à jour leur date de passage.</p>
+                  {/* Choix du mode : +N jours OU à partir d'une date */}
+                  <div className="flex gap-1 mb-2">
+                    {([['days', '+ N jours'], ['from', 'À partir d’une date']] as const).map(([m, lbl]) => (
                       <button
-                        key={dd}
+                        key={m}
                         type="button"
-                        onClick={() => sendDelayEmails(dd)}
-                        disabled={notifSending}
-                        className="flex-1 text-[11px] font-semibold rounded-[8px] px-2 py-1.5 border border-[#fdba74] bg-white text-[#9a3412] hover:bg-[#fff1e6] disabled:opacity-40"
-                      >
-                        Retard de {dd} jour{dd > 1 ? 's' : ''}
-                      </button>
+                        onClick={() => { setDelayMode(m); setDelayPreviewHtml(null) }}
+                        className={`text-[10px] font-semibold rounded-[7px] px-2.5 py-1 border ${delayMode === m ? 'bg-[#9a3412] text-white border-[#9a3412]' : 'bg-white text-[#9a3412] border-[#fdba74]'}`}
+                      >{lbl}</button>
                     ))}
                   </div>
+                  <div className="flex items-end gap-2 mb-2">
+                    {delayMode === 'days' ? (
+                      <label className="flex flex-col gap-0.5">
+                        <span className="text-[10px] font-semibold text-[#9a3412]">Jours de retard (ouvrés)</span>
+                        <input
+                          type="number" min={1} max={30} value={delayDays}
+                          onChange={(e) => { setDelayDays(Math.min(30, Math.max(1, Math.round(Number(e.target.value) || 1)))); setDelayPreviewHtml(null) }}
+                          className="w-20 text-[13px] font-semibold rounded-[8px] px-2 py-1.5 border border-[#fdba74] bg-white text-[#9a3412] outline-none focus:ring-2 focus:ring-[#fdba74]"
+                        />
+                      </label>
+                    ) : (
+                      <label className="flex flex-col gap-0.5">
+                        <span className="text-[10px] font-semibold text-[#9a3412]">Reprise à partir du</span>
+                        <input
+                          type="date"
+                          value={delayFromDate}
+                          onChange={(e) => { setDelayFromDate(e.target.value); setDelayPreviewHtml(null) }}
+                          className="text-[13px] font-semibold rounded-[8px] px-2 py-1.5 border border-[#fdba74] bg-white text-[#9a3412] outline-none focus:ring-2 focus:ring-[#fdba74]"
+                        />
+                      </label>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => loadDelayPreview()}
+                      disabled={delayPreviewLoading}
+                      className="text-[11px] font-semibold rounded-[8px] px-3 py-1.5 border border-[#fdba74] bg-white text-[#9a3412] hover:bg-[#fff1e6] disabled:opacity-40"
+                    >
+                      {delayPreviewLoading ? 'Chargement…' : '👁 Aperçu du mail'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => sendDelayEmails()}
+                      disabled={notifSending}
+                      className="flex-1 text-[11px] font-semibold rounded-[8px] px-2 py-1.5 bg-[#ea580c] text-white hover:bg-[#c2410c] disabled:opacity-40"
+                    >
+                      {notifSending ? 'Envoi…' : delayMode === 'from' ? 'Envoyer (reprise à cette date)' : `Envoyer le retard de ${delayDays} j`}
+                    </button>
+                  </div>
+                  {/* Aperçu réel du mail de retard (HTML généré par le serveur) */}
+                  {delayPreviewHtml && (
+                    <div className="rounded-[8px] overflow-hidden border border-[#fed7aa] bg-white">
+                      <div className="flex items-center justify-between px-2 py-1 bg-[#fff1e6] border-b border-[#fed7aa]">
+                        <span className="text-[10px] font-semibold text-[#9a3412]">Aperçu — ce qui sera envoyé</span>
+                        <button type="button" onClick={() => setDelayPreviewHtml(null)} className="text-[10px] text-[#b45309] hover:text-[#9a3412]">Fermer ✕</button>
+                      </div>
+                      <iframe title="Aperçu mail retard" srcDoc={delayPreviewHtml} className="w-full h-[360px] bg-white" />
+                    </div>
+                  )}
                 </div>
               </div>
             )}
@@ -4988,6 +5081,7 @@ function LivreurView() {
                             )}
                             <span className="text-[#1a1a2e] truncate">{item.title}</span>
                             {item.variant_title && <span className="text-[#6b6b63] font-medium shrink-0">· {item.variant_title}</span>}
+                            {(() => { const p = extPanelPacks(item.title, item.qty); return p ? <span className="shrink-0 text-[9px] font-semibold text-[#9a3412] bg-[#fff7ed] px-1 rounded">{p} paq. de {EXT_PACK}</span> : null })()}
                           </div>
                         ))}
                       </div>
@@ -5183,8 +5277,9 @@ function LivreurView() {
                       <td className="px-4 py-2.5 text-[#1a1a2e]">
                         {row.title}
                         {row.variant_title && <span className="text-xs text-[#6b6b63] ml-1">· {row.variant_title}</span>}
+                        {(() => { const p = extPanelPacks(row.title, row.qty); return p ? <span className="ml-1.5 text-[10px] font-semibold text-[#9a3412] bg-[#fff7ed] px-1 py-0.5 rounded">{p} paquet{p > 1 ? 's' : ''} de {EXT_PACK}</span> : null })()}
                       </td>
-                      <td className="px-4 py-2.5 text-right font-bold text-[#1a1a2e]">{row.qty}</td>
+                      <td className="px-4 py-2.5 text-right font-bold text-[#1a1a2e]">{(() => { const p = extPanelPacks(row.title, row.qty); return p ? <>{p} <span className="text-[10px] font-normal text-[#9a3412]">paq.</span></> : row.qty })()}</td>
                     </tr>
                   ))}
                   <tr className="bg-[#f8f8f6]">
@@ -5269,11 +5364,12 @@ function LivreurView() {
                             <div className={`font-medium text-sm leading-tight ${checked ? 'line-through text-[#6b6b63]' : 'text-[#1a1a2e]'}`}>
                               {item.title}
                             </div>
+                            {(() => { const p = extPanelPacks(item.title, item.qty); return p ? <div className="mt-0.5 inline-block text-[11px] font-bold text-[#9a3412] bg-[#fff7ed] border border-[#fed7aa] px-1.5 py-0.5 rounded">📦 {p} paquet{p > 1 ? 's' : ''} de {EXT_PACK} (= {item.qty})</div> : null })()}
                           </div>
                           <div className={`shrink-0 w-12 h-12 rounded-[12px] flex items-center justify-center font-bold text-xl transition-all ${
                             checked ? 'bg-[#1a7f4b] text-white' : 'bg-[#1a1a2e] text-white'
                           }`}>
-                            {item.qty}
+                            {(() => { const p = extPanelPacks(item.title, item.qty); return p ? p : item.qty })()}
                           </div>
                         </div>
                       )
@@ -5600,9 +5696,10 @@ function LivreurView() {
                         <div className="font-mono text-xs text-[#6b6b63]">{item.sku?.trim() || item.variant_title}</div>
                       )}
                       <div className="font-medium text-[#1a1a2e] text-sm leading-tight">{item.title}</div>
+                      {(() => { const p = extPanelPacks(item.title, item.qty); return p ? <div className="mt-0.5 inline-block text-xs font-bold text-[#9a3412] bg-[#fff7ed] border border-[#fed7aa] px-1.5 py-0.5 rounded">📦 {p} paquet{p > 1 ? 's' : ''} de {EXT_PACK} (= {item.qty} panneaux)</div> : null })()}
                     </div>
                     <div className="w-10 h-10 rounded-[10px] bg-[#1a1a2e] text-white flex items-center justify-center font-bold text-lg shrink-0">
-                      {item.qty}
+                      {(() => { const p = extPanelPacks(item.title, item.qty); return p ? p : item.qty })()}
                     </div>
                   </div>
                 ))}

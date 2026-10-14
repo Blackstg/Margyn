@@ -4,7 +4,7 @@ import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
 import {
   LayoutDashboard, BarChart2, PackageOpen, Settings, LogOut,
-  Boxes, FileText, Tag, Truck, Headphones, ChevronLeft, ChevronRight, ChevronDown, Sparkles, Receipt, PackageX, Users, Percent, Ticket,
+  Boxes, FileText, Tag, Truck, Headphones, ChevronLeft, ChevronRight, ChevronDown, Sparkles, Receipt, PackageX, Users, Percent, Ticket, Coins,
 } from 'lucide-react'
 import { createBrowserClient } from '@supabase/auth-helpers-nextjs'
 import { useState, useEffect } from 'react'
@@ -53,6 +53,7 @@ const NAV_SECTIONS: { label: string; items: NavItem[] }[] = [
       { key: 'reorder',   icon: PackageOpen, label: 'Réappro',      brandLock: null   },
       { key: 'billing',   icon: Receipt,      label: 'Facturation clients', brandLock: null   },
       { key: 'delivery',  icon: Truck,        label: 'Delivery',    brandLock: 'bowa' },
+      { key: 'delivery-costs', icon: Coins,   label: 'Coûts livraison', brandLock: 'bowa' },
       { key: 'stock',     icon: Boxes,        label: 'Stock',       brandLock: 'moom' },
       { key: 'invoices',  icon: FileText,     label: 'Coûts logisticien', brandLock: 'moom' },
       { key: 'products',  icon: Tag,          label: 'Produits',    brandLock: 'moom' },
@@ -77,7 +78,7 @@ const NAV_SECTIONS: { label: string; items: NavItem[] }[] = [
 
 // Pages the brand-selector can jump to when switching brands
 const BRAND_PAGES: Record<string, string[]> = {
-  bowa: ['dashboard', 'campaigns', 'creatives', 'margins', 'settings', 'reorder', 'billing', 'delivery', 'sav'],
+  bowa: ['dashboard', 'campaigns', 'creatives', 'margins', 'settings', 'reorder', 'billing', 'delivery', 'delivery-costs', 'sav'],
   moom: ['dashboard', 'campaigns', 'creatives', 'margins', 'settings', 'reorder', 'billing', 'invoices', 'stock', 'products', 'ventes-privees', 'sav', 'sav-defects'],
   krom: ['dashboard', 'campaigns', 'creatives', 'margins', 'settings', 'reorder', 'billing', 'sav-krom'],
 }
