@@ -2,19 +2,27 @@
 // Moom : SHOPIFY_MOOM_SHOP / SHOPIFY_MOOM_ACCESS_TOKEN
 // Bowa : SHOPIFY_BOWA_SHOP / SHOPIFY_BOWA_ACCESS_TOKEN
 import type { SavBrand } from './zendesk'
+import { getIntegration, cfgStr } from '@/lib/tenant/integrations'
 
-function shopCreds(brand: SavBrand) {
-  if (brand === 'bowa') return { shop: process.env.SHOPIFY_BOWA_SHOP, token: process.env.SHOPIFY_BOWA_ACCESS_TOKEN }
-  return { shop: process.env.SHOPIFY_MOOM_SHOP, token: process.env.SHOPIFY_MOOM_ACCESS_TOKEN }
-}
-
-function base(brand: SavBrand) {
-  return `https://${shopCreds(brand).shop}/admin/api/2024-01`
-}
-
-function authHeaders(brand: SavBrand): Record<string, string> {
+// Credentials Shopify SAV : d'abord tenant_integrations (base), sinon env (fallback
+// non-cassant tant que les secrets ne sont pas migrés en base).
+async function shopCreds(brand: SavBrand): Promise<{ shop: string | undefined; token: string | undefined }> {
+  const integ = await getIntegration(brand, 'shopify')
+  const envShop  = brand === 'bowa' ? process.env.SHOPIFY_BOWA_SHOP : process.env.SHOPIFY_MOOM_SHOP
+  const envToken = brand === 'bowa' ? process.env.SHOPIFY_BOWA_ACCESS_TOKEN : process.env.SHOPIFY_MOOM_ACCESS_TOKEN
   return {
-    'X-Shopify-Access-Token': shopCreds(brand).token!,
+    shop:  cfgStr(integ, 'shop') ?? envShop,
+    token: integ?.secret ?? envToken,
+  }
+}
+
+function baseUrl(shop: string | undefined) {
+  return `https://${shop}/admin/api/2024-01`
+}
+
+function authHeadersFor(token: string | undefined): Record<string, string> {
+  return {
+    'X-Shopify-Access-Token': token!,
     'Content-Type': 'application/json',
   }
 }
@@ -64,10 +72,11 @@ export interface CatalogProduct {
 
 export async function searchCatalog(query: string, brand: SavBrand = 'moom'): Promise<CatalogProduct[]> {
   if (!query.trim()) return []
+  const { shop, token } = await shopCreds(brand)
   // Shopify title search does partial matching — send the first 100 chars
-  const url = `${base(brand)}/products.json?title=${encodeURIComponent(query.slice(0, 100))}&limit=5&fields=id,title,variants`
+  const url = `${baseUrl(shop)}/products.json?title=${encodeURIComponent(query.slice(0, 100))}&limit=5&fields=id,title,variants`
   try {
-    const res = await fetch(url, { headers: authHeaders(brand), cache: 'no-store' })
+    const res = await fetch(url, { headers: authHeadersFor(token), cache: 'no-store' })
     if (!res.ok) {
       console.warn(`[Shopify/SAV] searchCatalog "${query}" — ${res.status}`)
       return []
@@ -129,9 +138,10 @@ export async function getMostRecentOrder(
   messageBody?: string,
   brand: SavBrand = 'moom',
 ): Promise<MoomOrder | null> {
+  const { shop, token } = await shopCreds(brand)
   // ── Tentative 1 : recherche par email ──────────────────────────────────────
-  const url1 = `${base(brand)}/orders.json?email=${encodeURIComponent(email)}&status=any&limit=1&fields=${ORDER_FIELDS}`
-  const res1 = await fetch(url1, { headers: authHeaders(brand), cache: 'no-store' })
+  const url1 = `${baseUrl(shop)}/orders.json?email=${encodeURIComponent(email)}&status=any&limit=1&fields=${ORDER_FIELDS}`
+  const res1 = await fetch(url1, { headers: authHeadersFor(token), cache: 'no-store' })
   if (!res1.ok) throw new Error(`[Shopify/SAV] getMostRecentOrder ${res1.status}: ${await res1.text()}`)
 
   const data1 = await res1.json() as { orders: ShopifyOrder[] }
@@ -150,8 +160,8 @@ export async function getMostRecentOrder(
 
   console.log(`[Shopify/SAV] Email introuvable — tentative par numéro de commande #${orderNum}`)
 
-  const url2 = `${base(brand)}/orders.json?name=${encodeURIComponent(`#${orderNum}`)}&status=any&limit=1&fields=${ORDER_FIELDS}`
-  const res2 = await fetch(url2, { headers: authHeaders(brand), cache: 'no-store' })
+  const url2 = `${baseUrl(shop)}/orders.json?name=${encodeURIComponent(`#${orderNum}`)}&status=any&limit=1&fields=${ORDER_FIELDS}`
+  const res2 = await fetch(url2, { headers: authHeadersFor(token), cache: 'no-store' })
   if (!res2.ok) {
     console.warn(`[Shopify/SAV] Recherche par numéro — ${res2.status}`)
     return null
@@ -186,8 +196,9 @@ export async function getMostRecentOrder(
 export async function getOrderByNumber(orderNum: string, brand: SavBrand = 'moom'): Promise<MoomOrder | null> {
   const n = orderNum.replace(/^#/, '').trim()
   if (!/^\d+$/.test(n)) return null
-  const url = `${base(brand)}/orders.json?name=${encodeURIComponent(`#${n}`)}&status=any&limit=1&fields=${ORDER_FIELDS}`
-  const res = await fetch(url, { headers: authHeaders(brand), cache: 'no-store' }).catch(() => null)
+  const { shop, token } = await shopCreds(brand)
+  const url = `${baseUrl(shop)}/orders.json?name=${encodeURIComponent(`#${n}`)}&status=any&limit=1&fields=${ORDER_FIELDS}`
+  const res = await fetch(url, { headers: authHeadersFor(token), cache: 'no-store' }).catch(() => null)
   if (!res || !res.ok) return null
   const data = await res.json() as { orders?: ShopifyOrder[] }
   return data.orders && data.orders.length > 0 ? formatOrder(data.orders[0]) : null
