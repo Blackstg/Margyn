@@ -9,29 +9,12 @@ import {
   aggregateProductSales,
   type ShopifyConfig,
 } from '@/lib/shopify'
+import { shopifyCreds } from '@/lib/tenant/integrations'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 300
 
-// ─── Store configs ────────────────────────────────────────────────────────────
-
-const STORES: Record<string, ShopifyConfig> = {
-  moom: {
-    shop: process.env.SHOPIFY_MOOM_SHOP!,
-    accessToken: process.env.SHOPIFY_MOOM_ACCESS_TOKEN!,
-    brand: 'moom',
-  },
-  bowa: {
-    shop: process.env.SHOPIFY_BOWA_SHOP!,
-    accessToken: process.env.SHOPIFY_BOWA_ACCESS_TOKEN!,
-    brand: 'bowa',
-  },
-  krom: {
-    shop: process.env.SHOPIFY_KROM_SHOP!,
-    accessToken: process.env.SHOPIFY_KROM_ACCESS_TOKEN!,
-    brand: 'krom',
-  },
-}
+const KNOWN_BRANDS = ['bowa', 'moom', 'krom']
 
 function getSupabase() {
   return createClient(
@@ -69,8 +52,10 @@ export async function GET(req: NextRequest) {
   const from  = searchParams.get('from')  ?? '2026-01-01'
   const to    = searchParams.get('to')    ?? new Date().toISOString().slice(0, 10)
 
-  const store = STORES[brand]
-  if (!store) return NextResponse.json({ error: 'Unknown brand' }, { status: 400 })
+  if (!KNOWN_BRANDS.includes(brand)) return NextResponse.json({ error: 'Unknown brand' }, { status: 400 })
+  const creds = await shopifyCreds(brand)
+  if (!creds.shop || !creds.token) return NextResponse.json({ error: 'Unknown brand' }, { status: 400 })
+  const store: ShopifyConfig = { shop: creds.shop, accessToken: creds.token, brand }
 
   const supabase = getSupabase()
 

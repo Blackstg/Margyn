@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
+import { shopifyCreds } from '@/lib/tenant/integrations'
 
 export const maxDuration = 60
 import {
@@ -23,23 +24,16 @@ function getSupabase() {
 
 // ─── Store configs ────────────────────────────────────────────────────────────
 
-const STORES: ShopifyConfig[] = [
-  {
-    shop: process.env.SHOPIFY_BOWA_SHOP!,
-    accessToken: process.env.SHOPIFY_BOWA_ACCESS_TOKEN!,
-    brand: 'bowa',
-  },
-  {
-    shop: process.env.SHOPIFY_MOOM_SHOP!,
-    accessToken: process.env.SHOPIFY_MOOM_ACCESS_TOKEN!,
-    brand: 'moom',
-  },
-  {
-    shop: process.env.SHOPIFY_KROM_SHOP!,
-    accessToken: process.env.SHOPIFY_KROM_ACCESS_TOKEN!,
-    brand: 'krom',
-  },
-]
+const BRANDS = ['bowa', 'moom', 'krom']
+
+// Construit les configs Shopify depuis tenant_integrations (DB-first + fallback env).
+async function buildStores(brands: string[]): Promise<ShopifyConfig[]> {
+  const list = await Promise.all(brands.map(async (brand) => {
+    const c = await shopifyCreds(brand)
+    return c.shop && c.token ? { shop: c.shop, accessToken: c.token, brand } as ShopifyConfig : null
+  }))
+  return list.filter((s): s is ShopifyConfig => s !== null)
+}
 
 // ─── Auth guard ───────────────────────────────────────────────────────────────
 
@@ -81,7 +75,7 @@ export async function POST(req: NextRequest) {
   const dateTo      = searchParams.get('to')   ?? searchParams.get('date') ?? fmtDate(yesterday)
   const brandFilter = searchParams.get('brand') // optional: 'bowa' | 'moom'
 
-  const stores  = brandFilter ? STORES.filter((s) => s.brand === brandFilter) : STORES
+  const stores  = await buildStores(brandFilter ? [brandFilter] : BRANDS)
   const supabase = getSupabase()
   const results: Record<string, { snapshots: number; products: number; product_sales?: number; error?: string }> = {}
 

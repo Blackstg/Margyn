@@ -82,3 +82,15 @@ export function cfgStr(integ: TenantIntegration | null, key: string): string | u
   const val = integ?.config?.[key]
   return typeof val === 'string' && val ? val : undefined
 }
+
+// Credentials Shopify d'un tenant : DB (config.shop + secret) sinon env
+// SHOPIFY_<BRAND>_SHOP / SHOPIFY_<BRAND>_ACCESS_TOKEN. Partagé par toutes les
+// routes Shopify (facture, sync, backfill…).
+export async function shopifyCreds(tenant: string): Promise<{ shop?: string; token?: string }> {
+  const integ = await getIntegration(tenant, 'shopify')
+  const U = tenant.toUpperCase()
+  return {
+    shop:  cfgStr(integ, 'shop') ?? process.env[`SHOPIFY_${U}_SHOP`],
+    token: integ?.secret         ?? process.env[`SHOPIFY_${U}_ACCESS_TOKEN`],
+  }
+}
