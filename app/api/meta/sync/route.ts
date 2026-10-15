@@ -9,26 +9,19 @@ import {
   aggregateMetaAdSpends,
   type MetaAdsConfig,
 } from '@/lib/meta'
+import { metaCreds } from '@/lib/tenant/integrations'
 
-// ─── Store configs ────────────────────────────────────────────────────────────
+// ─── Store configs (DB-first + fallback env) ─────────────────────────────────
 
-const STORES: MetaAdsConfig[] = [
-  {
-    adAccountId: process.env.META_BOWA_AD_ACCOUNT_ID!,
-    accessToken: process.env.META_BOWA_ACCESS_TOKEN!,
-    brand: 'bowa',
-  },
-  {
-    adAccountId: process.env.META_MOOM_AD_ACCOUNT_ID!,
-    accessToken: process.env.META_MOOM_ACCESS_TOKEN!,
-    brand: 'moom',
-  },
-  {
-    adAccountId: process.env.META_KROM_AD_ACCOUNT_ID!,
-    accessToken: process.env.META_KROM_ACCESS_TOKEN!,
-    brand: 'krom',
-  },
-]
+const BRANDS = ['bowa', 'moom', 'krom']
+
+async function buildStores(brands: string[]): Promise<MetaAdsConfig[]> {
+  const list = await Promise.all(brands.map(async (brand) => {
+    const c = await metaCreds(brand)
+    return c.token && c.adAccount ? { adAccountId: c.adAccount, accessToken: c.token, brand } as MetaAdsConfig : null
+  }))
+  return list.filter((s): s is MetaAdsConfig => s !== null)
+}
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -79,9 +72,7 @@ export async function POST(req: NextRequest) {
   const dateTo = searchParams.get('to') ?? searchParams.get('date') ?? fmtDate(yesterday)
   const brandFilter = searchParams.get('brand') // optional: 'bowa' | 'moom'
 
-  const stores = brandFilter
-    ? STORES.filter((s) => s.brand === brandFilter)
-    : STORES
+  const stores = await buildStores(brandFilter ? [brandFilter] : BRANDS)
 
   const supabase = getSupabase()
   const results: Record<string, {

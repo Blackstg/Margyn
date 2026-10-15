@@ -10,13 +10,20 @@ import {
   aggregateAdSpends,
   type GoogleAdsConfig,
 } from '@/lib/google-ads'
+import { googleAdsCustomerId } from '@/lib/tenant/integrations'
 
 // ─── Store configs ────────────────────────────────────────────────────────────
 
-const STORES: GoogleAdsConfig[] = [
-  { customerId: process.env.GOOGLE_ADS_BOWA_CUSTOMER_ID!, brand: 'bowa' },
-  { customerId: process.env.GOOGLE_ADS_MOOM_CUSTOMER_ID!, brand: 'moom' },
-]
+const BRANDS = ['bowa', 'moom']
+
+// customer_id depuis tenant_integrations (DB-first + fallback env). OAuth global en env.
+async function buildStores(brands: string[]): Promise<GoogleAdsConfig[]> {
+  const list = await Promise.all(brands.map(async (brand) => {
+    const customerId = await googleAdsCustomerId(brand)
+    return customerId ? { customerId, brand } as GoogleAdsConfig : null
+  }))
+  return list.filter((s): s is GoogleAdsConfig => s !== null)
+}
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -73,9 +80,7 @@ export async function POST(req: NextRequest) {
   const dateTo = searchParams.get('to') ?? searchParams.get('date') ?? fmtDate(yesterday)
   const brandFilter = searchParams.get('brand') // optional: 'bowa' | 'moom'
 
-  const stores = brandFilter
-    ? STORES.filter((s) => s.brand === brandFilter)
-    : STORES
+  const stores = await buildStores(brandFilter ? [brandFilter] : BRANDS)
 
   // Get access token once — shared across both stores
   let accessToken: string

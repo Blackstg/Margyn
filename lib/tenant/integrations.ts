@@ -94,3 +94,27 @@ export async function shopifyCreds(tenant: string): Promise<{ shop?: string; tok
     token: integ?.secret         ?? process.env[`SHOPIFY_${U}_ACCESS_TOKEN`],
   }
 }
+
+// Meta Ads : token (secret) + ad_account (config). Fallback env META_<BRAND>_*.
+export async function metaCreds(tenant: string): Promise<{ token?: string; adAccount?: string }> {
+  const integ = await getIntegration(tenant, 'meta')
+  const U = tenant.toUpperCase()
+  return {
+    token:     integ?.secret               ?? process.env[`META_${U}_ACCESS_TOKEN`],
+    adAccount: cfgStr(integ, 'ad_account_id') ?? process.env[`META_${U}_AD_ACCOUNT_ID`],
+  }
+}
+
+// Google Ads : seulement customer_id (identifiant, non-secret ; OAuth global en env).
+export async function googleAdsCustomerId(tenant: string): Promise<string | undefined> {
+  const integ = await getIntegration(tenant, 'google_ads')
+  const U = tenant.toUpperCase()
+  return cfgStr(integ, 'customer_id') ?? process.env[`GOOGLE_ADS_${U}_CUSTOMER_ID`]
+}
+
+// Pinterest : ad_account_id (config). Le token d'accès vit déjà dans api_tokens (OAuth).
+export async function pinterestAdAccountId(tenant: string): Promise<string | undefined> {
+  const integ = await getIntegration(tenant, 'pinterest')
+  const U = tenant.toUpperCase()
+  return cfgStr(integ, 'ad_account_id') ?? process.env[`PINTEREST_AD_ACCOUNT_ID_${U}`]
+}

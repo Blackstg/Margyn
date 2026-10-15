@@ -12,13 +12,20 @@ import {
   type PinterestConfig,
 } from '@/lib/pinterest'
 import { checkAndRefreshToken } from '@/lib/pinterest-auth'
+import { pinterestAdAccountId } from '@/lib/tenant/integrations'
 
 // ─── Store configs (no access token — fetched at runtime from Supabase) ───────
+// ad_account_id depuis tenant_integrations (DB-first + fallback env).
 
-const STORES: Omit<PinterestConfig, 'accessToken'>[] = [
-  { adAccountId: process.env.PINTEREST_AD_ACCOUNT_ID_BOWA!, brand: 'bowa' },
-  { adAccountId: process.env.PINTEREST_AD_ACCOUNT_ID_MOOM!, brand: 'moom' },
-]
+const BRANDS = ['bowa', 'moom']
+
+async function buildStores(brands: string[]): Promise<Omit<PinterestConfig, 'accessToken'>[]> {
+  const list = await Promise.all(brands.map(async (brand) => {
+    const adAccountId = await pinterestAdAccountId(brand)
+    return adAccountId ? { adAccountId, brand } : null
+  }))
+  return list.filter((s): s is Omit<PinterestConfig, 'accessToken'> => s !== null)
+}
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -72,9 +79,7 @@ export async function POST(req: NextRequest) {
   const dateTo   = searchParams.get('to')   ?? searchParams.get('date') ?? fmtDate(yesterday)
   const brandFilter = searchParams.get('brand')
 
-  const stores = brandFilter
-    ? STORES.filter((s) => s.brand === brandFilter)
-    : STORES
+  const stores = await buildStores(brandFilter ? [brandFilter] : BRANDS)
 
   const supabase = getSupabase()
   const results: Record<string, {

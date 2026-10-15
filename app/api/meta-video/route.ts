@@ -1,17 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { metaCreds } from '@/lib/tenant/integrations'
 export const dynamic = 'force-dynamic'
-
-const TOKENS: Record<string, string | undefined> = {
-  bowa: process.env.META_BOWA_ACCESS_TOKEN,
-  moom: process.env.META_MOOM_ACCESS_TOKEN,
-  krom: process.env.META_KROM_ACCESS_TOKEN,
-}
-
-const AD_ACCOUNTS: Record<string, string | undefined> = {
-  bowa: process.env.META_BOWA_AD_ACCOUNT_ID,
-  moom: process.env.META_MOOM_AD_ACCOUNT_ID,
-  krom: process.env.META_KROM_AD_ACCOUNT_ID,
-}
 
 export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url)
@@ -20,8 +9,7 @@ export async function GET(req: NextRequest) {
 
   if (!videoId) return NextResponse.json({ error: 'Missing video_id' }, { status: 400 })
 
-  const token     = TOKENS[brand]
-  const adAccount = AD_ACCOUNTS[brand]
+  const { token, adAccount } = await metaCreds(brand)
   if (!token || !adAccount) return NextResponse.json({ error: 'No config for brand' }, { status: 400 })
 
   try {
