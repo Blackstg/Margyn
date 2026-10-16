@@ -118,3 +118,10 @@ export async function pinterestAdAccountId(tenant: string): Promise<string | und
   const U = tenant.toUpperCase()
   return cfgStr(integ, 'ad_account_id') ?? process.env[`PINTEREST_AD_ACCOUNT_ID_${U}`]
 }
+
+// Resend : adresse d'expéditeur du tenant (config `from` par défaut, ou une autre
+// clé ex. `delivery_from`). Pas de secret (la clé API Resend reste globale).
+export async function resendFrom(tenant: string, key = 'from'): Promise<string | undefined> {
+  const integ = await getIntegration(tenant, 'resend')
+  return cfgStr(integ, key)
+}

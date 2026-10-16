@@ -5,6 +5,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { savBrandFromRequest } from '@/lib/sav/brand'
 import { getTicketComments, addInternalNote, type SavBrand } from '@/lib/sav/zendesk'
+import { resendFrom } from '@/lib/tenant/integrations'
 
 export const dynamic = 'force-dynamic'
 
@@ -67,8 +68,9 @@ export async function POST(req: NextRequest) {
     moom: 'Mōom SAV <sav@moom-paris.co>',
     bowa: 'Bowa SAV <notifications@notifications.bowa-concept.com>',
   }
+  const from = (await resendFrom(brand)) ?? fromByBrand[brand] ?? fromByBrand.moom
   const payload: Record<string, unknown> = {
-    from:    fromByBrand[brand] ?? fromByBrand.moom,
+    from,
     to,
     subject: `[SAV ${brandLabel}] Transfert — ${subject}`,
     html,

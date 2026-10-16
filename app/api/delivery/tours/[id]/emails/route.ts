@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 import { buildReminderEmailHtml } from '@/lib/delivery/reminderEmail'
+import { resendFrom } from '@/lib/tenant/integrations'
 
 function getAdmin() {
   return createClient(
@@ -330,6 +331,8 @@ export async function POST(
 
     // Téléphone du chauffeur assigné (pour le mettre dans les mails clients).
     const driverPhone = await resolveDriverPhone(admin, (tour as { driver_name?: string } | null)?.driver_name)
+    // Expéditeur des mails livraison : config tenant (resend.delivery_from) sinon défaut.
+    const deliveryFrom = (await resendFrom('bowa', 'delivery_from')) ?? 'Léa – Bowa Concept <notifications@notifications.bowa-concept.com>'
 
     // Persist per-client passage dates first (so they stick even outside sending).
     for (const [stopId, d] of Object.entries(dates)) {
@@ -404,7 +407,7 @@ export async function POST(
               'Content-Type': 'application/json',
             },
             body: JSON.stringify({
-              from: 'Léa – Bowa Concept <notifications@notifications.bowa-concept.com>',
+              from: deliveryFrom,
               to: stop.email,
               reply_to: 'lea@bowa-concept.com',
               subject: delay ? 'BOWA CONCEPT : LIVRAISON DÉCALÉE' : reminder ? 'BOWA CONCEPT : RAPPEL LIVRAISON — confirmez votre présence' : 'BOWA CONCEPT : LIVRAISON',
