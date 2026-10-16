@@ -440,7 +440,7 @@ function PlanificateurView() {
 
   // Notifier les clients modal
   type NotifStop = { id: string; customer_name: string; email: string; email_sent_at: string | null; client_availability?: 'confirmed' | 'unavailable' | null; status?: string; passage_date?: string | null }
-  const [notifModal, setNotifModal] = useState<{ tourId: string; tourName: string; plannedDate: string; stops: NotifStop[] } | null>(null)
+  const [notifModal, setNotifModal] = useState<{ tourId: string; tourName: string; plannedDate: string; stops: NotifStop[]; driverPhone?: string | null } | null>(null)
   const [notifSending, setNotifSending] = useState(false)
   const [notifResult, setNotifResult] = useState<{ sent: number; errors: number } | null>(null)
   const [notifTab, setNotifTab] = useState<'destinataires' | 'apercu'>('destinataires')
@@ -492,7 +492,7 @@ function PlanificateurView() {
     setDelayMode('days')
     setDelayFromDate('')
     setDelayPreviewHtml(null)
-    setNotifModal({ tourId, tourName, plannedDate, stops })
+    setNotifModal({ tourId, tourName, plannedDate, stops, driverPhone: data.driverPhone ?? null })
   }
 
   async function sendNotifEmails(opts: { force?: boolean; reminder?: boolean } = {}) {
@@ -2654,7 +2654,7 @@ function PlanificateurView() {
                         <p className="mb-3">Bonne nouvelle ! 🎉 Votre commande sera livrée prochainement.<br/>
                         Notre livreur passera chez vous entre le <strong>{previewDateStart}</strong>{previewDateEnd ? <> et le <strong>{previewDateEnd}</strong></> : null}.</p>
                         <p className="mb-3">La livraison s&apos;effectuera au pied du camion 🚛. Nous vous demandons donc de faire le nécessaire pour être accompagné(e) d&apos;une autre personne afin de récupérer les panneaux en toute sécurité 🔧.</p>
-                        <p className="mb-3">Pour garantir une livraison en toute fluidité, notre livreur vous appellera très probablement au fil de sa tournée, en fonction de l&apos;ordre des livraisons, afin de vérifier votre disponibilité. Vous serez joint(e) depuis le numéro suivant : <strong>06 17 85 85 18</strong>.</p>
+                        <p className="mb-3">Pour garantir une livraison en toute fluidité, notre livreur vous appellera très probablement au fil de sa tournée, en fonction de l&apos;ordre des livraisons, afin de vérifier votre disponibilité.{notifModal.driverPhone ? <> Vous serez joint(e) depuis le numéro suivant : <strong>{notifModal.driverPhone}</strong>.</> : null}</p>
                         <p className="mb-3">Si vous êtes indisponible, merci de nous en informer par retour de mail, afin que nous puissions reprogrammer votre livraison.</p>
                         <p className="mb-4">Nous nous réjouissons de finaliser votre livraison très prochainement ☀️.</p>
                         <p className="text-[#6b6b63] text-xs border-t border-[#f0f0f0] pt-3">

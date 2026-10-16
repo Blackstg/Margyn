@@ -289,7 +289,12 @@ export async function GET(
       return NextResponse.json({ html, newStartDate: newStartStr })
     }
 
-    return NextResponse.json({ stops: stops ?? [] })
+    // Téléphone du chauffeur assigné (pour que l'aperçu du mail affiche le bon numéro).
+    const { data: tourRow } = await admin
+      .from('delivery_tours').select('driver_name').eq('id', params.id).single()
+    const driverPhone = await resolveDriverPhone(admin, (tourRow as { driver_name?: string } | null)?.driver_name)
+
+    return NextResponse.json({ stops: stops ?? [], driverPhone })
   } catch (err) {
     console.error('[delivery/tours/:id/emails GET]', err)
     return NextResponse.json({ error: String(err) }, { status: 500 })
