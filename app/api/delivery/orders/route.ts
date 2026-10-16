@@ -78,7 +78,7 @@ const isStonepanel = (title: string) => /stonepanel|feuille\s*de\s*pierre/i.test
 // Accessoires LONGS/encombrants (profilés ~240 cm) : PAS de panneau, mais ne
 // peuvent PAS partir par La Poste → doivent être livrés par le camion (tournée).
 // Ex. « Akupanel | Tasseau de finition », « Extpanel | Tasseau d'angle ».
-const isBulkyAccessory = (title: string) => /tasseau|profil[ée]?s?\b|baguette|plinthe|corniche|liteau|lambourde/i.test(title)
+const isBulkyAccessory = (title: string) => /tasseau|profil[ée]?s?\b|baguette|plinthe|corniche|liteau|lambourde|angle/i.test(title)
 // Exterior panels: packaged 4/box → ceil(qty/4) slots
 const isExtPanel = (title: string) => /extpanel|ext[_\s-]?panel/i.test(title)
 // Akupanel 60 (60×60 cm): 2 panels = 1 slot → ceil(qty/2) slots
