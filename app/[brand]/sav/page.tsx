@@ -36,6 +36,29 @@ function savBrandLabel(): string {
   return savBrand() === 'bowa' ? 'Bowa' : 'Mōom Paris'
 }
 
+// Degré de modification entre le brouillon IA et le texte envoyé (0 = identique,
+// 1 = entièrement réécrit). Levenshtein normalisé, borné en longueur pour rester
+// rapide. Sert à distinguer « une retouche » d'une « réécriture complète ».
+function modificationRatio(aiDraft: string, sent: string): number {
+  const a = (aiDraft || '').trim(), b = (sent || '').trim()
+  if (a === b) return 0
+  if (!a || !b) return 1
+  const CAP = 4000
+  const x = a.length > CAP ? a.slice(0, CAP) : a
+  const y = b.length > CAP ? b.slice(0, CAP) : b
+  const n = y.length
+  let prev = Array.from({ length: n + 1 }, (_, j) => j)
+  for (let i = 1; i <= x.length; i++) {
+    const cur = [i]
+    for (let j = 1; j <= n; j++) {
+      const cost = x[i - 1] === y[j - 1] ? 0 : 1
+      cur[j] = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + cost)
+    }
+    prev = cur
+  }
+  return Math.min(1, prev[n] / Math.max(x.length, y.length))
+}
+
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 type TicketCategory =
@@ -1083,11 +1106,12 @@ function ReplyPanel({ ticket, draft, solved, onDraftChange, onSolvedChange, onSe
     try {
       const uploads = attachments.map(a => a.token)
       const wasModified = draft.trim() !== ticket.draft_reply.trim()
+      const modRatio = modificationRatio(ticket.draft_reply, draft)
       const res = await savFetch('/api/sav/send', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         // was_modified est transmis pour que le LOG serveur (attribution fiable) l'enregistre.
-        body: JSON.stringify({ ticket_id: ticket.ticket_id, reply_body: draft, solved, action, category: ticket.category, uploads, was_modified: wasModified, time_to_action_ms: Math.max(0, Date.now() - openedAtRef.current) }),
+        body: JSON.stringify({ ticket_id: ticket.ticket_id, reply_body: draft, solved, action, category: ticket.category, uploads, was_modified: wasModified, modification_ratio: modRatio, time_to_action_ms: Math.max(0, Date.now() - openedAtRef.current) }),
       })
       if (!res.ok) { const d = await savJson<{ error?: string }>(res, 'L\'envoi'); throw new Error(d.error ?? `HTTP ${res.status}`) }
       setAttachments([])
@@ -1650,6 +1674,8 @@ interface QualiteMetrics {
   tickets_afternoon: number
   avg_time_ms:       number | null
   modification_rate: number | null
+  avg_modification_ratio: number | null
+  modification_breakdown: { measured: number; identical: number; minor: number; moderate: number; rewrite: number } | null
   sessions_count:    number
   visits_per_day:    number
   avg_session_ms:    number | null
@@ -1952,13 +1978,29 @@ function QualiteDashboard() {
                   <p className="text-[10px] text-[#9b9b93] mt-0.5">par ouverture de l&apos;app</p>
                 </div>
 
-                {/* Ligne 2 — brouillons & visites */}
+                {/* Ligne 2 — ampleur de modification des brouillons IA */}
                 <div className="rounded-2xl bg-[#f8f7f5] border border-[#e8e8e4] px-5 py-4">
-                  <p className="text-[10px] font-semibold uppercase tracking-[0.1em] text-[#aeb0c9]">Brouillons modifiés</p>
+                  <p className="text-[10px] font-semibold uppercase tracking-[0.1em] text-[#aeb0c9]">Modification des brouillons IA</p>
                   <p className="text-3xl font-bold text-[#1a1a2e] mt-1">
-                    {metrics.modification_rate !== null ? `${metrics.modification_rate}%` : '—'}
+                    {metrics.avg_modification_ratio !== null ? `${metrics.avg_modification_ratio}%` : '—'}
                   </p>
-                  <p className="text-[10px] text-[#9b9b93] mt-0.5">des réponses envoyées retouchées</p>
+                  <p className="text-[10px] text-[#9b9b93] mt-0.5">
+                    {metrics.avg_modification_ratio !== null
+                      ? 'du texte changé en moyenne'
+                      : (metrics.modification_rate !== null ? `${metrics.modification_rate}% retouchés (ampleur en cours de mesure)` : '—')}
+                  </p>
+                  {metrics.modification_breakdown && (() => {
+                    const b = metrics.modification_breakdown
+                    const p = (n: number) => b.measured > 0 ? Math.round((n / b.measured) * 100) : 0
+                    return (
+                      <div className="mt-2 space-y-0.5 text-[10px] text-[#6b6b63] leading-snug">
+                        <div>🟢 Quasi tel quel : <b>{p(b.identical + b.minor)}%</b> <span className="text-[#9b9b93]">(retouche ≤15%)</span></div>
+                        <div>🟡 Modéré : <b>{p(b.moderate)}%</b> <span className="text-[#9b9b93]">(15–40%)</span></div>
+                        <div>🔴 Réécriture : <b>{p(b.rewrite)}%</b> <span className="text-[#9b9b93]">(&gt;40%)</span></div>
+                        <div className="text-[#9b9b93] pt-0.5">sur {b.measured} envoi{b.measured !== 1 ? 's' : ''} mesuré{b.measured !== 1 ? 's' : ''}</div>
+                      </div>
+                    )
+                  })()}
                 </div>
 
                 <div className="rounded-2xl bg-[#f8f7f5] border border-[#e8e8e4] px-5 py-4">

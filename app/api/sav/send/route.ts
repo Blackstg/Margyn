@@ -125,6 +125,7 @@ export async function POST(req: NextRequest) {
         action:            savAction,
         category:          category ?? null,
         was_modified:      savAction === 'sent' ? ((body as { was_modified?: boolean }).was_modified ?? null) : null,
+        modification_ratio: savAction === 'sent' ? ((body as { modification_ratio?: number }).modification_ratio ?? null) : null,
         time_to_action_ms: (body as { time_to_action_ms?: number }).time_to_action_ms ?? null,
         user_email:        agentEmail || null,
       })

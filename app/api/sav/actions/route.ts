@@ -94,7 +94,7 @@ export async function GET(req: NextRequest) {
   // PostgREST plafonne à 1000 lignes/requête. Avec les battements (1 / 2 min /
   // agent), 7j ou 30j dépassent largement 1000 → on pagine pour tout récupérer.
   const brand = savBrandFromRequest(req)
-  const COLS  = 'action,was_modified,category,confidence,time_to_action_ms,created_at,user_email'
+  const COLS  = 'action,was_modified,modification_ratio,category,confidence,time_to_action_ms,created_at,user_email'
   const PAGE  = 1000
   const MAX   = 100_000  // garde-fou
   const acc: Record<string, unknown>[] = []
@@ -118,6 +118,7 @@ export async function GET(req: NextRequest) {
   const rawRows = acc as {
     action: string
     was_modified: boolean | null
+    modification_ratio: number | null
     category: string | null
     confidence: number | null
     time_to_action_ms: number | null
@@ -303,6 +304,8 @@ export async function GET(req: NextRequest) {
         tickets_morning: 0, tickets_afternoon: 0,
         avg_time_ms: null,
         modification_rate: null,
+        avg_modification_ratio: null,
+        modification_breakdown: null,
         sessions_count, visits_per_day, avg_session_ms, total_session_ms, active_ms,
         active_hours, active_weekdays, daily_timeline: [],
         distinct_users,
@@ -331,6 +334,20 @@ export async function GET(req: NextRequest) {
   const modification_rate = sent.length > 0
     ? Math.round((sent.filter(r => r.was_modified === true).length / sent.length) * 100)
     : null
+
+  // Degré de modification (ampleur réelle) : moyenne + répartition retouche/modéré/
+  // réécriture. Sur les envois qui ont une mesure (capturée depuis le correctif).
+  const ratios = sent.map(r => r.modification_ratio).filter((v): v is number => typeof v === 'number')
+  const avg_modification_ratio = ratios.length > 0
+    ? Math.round((ratios.reduce((a, b) => a + b, 0) / ratios.length) * 100)
+    : null
+  const modification_breakdown = ratios.length > 0 ? {
+    measured:  ratios.length,
+    identical: ratios.filter(r => r <= 0.02).length,   // quasi copié-collé
+    minor:     ratios.filter(r => r > 0.02 && r <= 0.15).length,  // retouche (un mot, formule)
+    moderate:  ratios.filter(r => r > 0.15 && r <= 0.40).length,  // modéré
+    rewrite:   ratios.filter(r => r > 0.40).length,    // réécriture
+  } : null
 
   // Count tickets per day
   for (const r of rows) {
@@ -367,6 +384,8 @@ export async function GET(req: NextRequest) {
       tickets_afternoon,
       avg_time_ms,
       modification_rate,
+      avg_modification_ratio,
+      modification_breakdown,
       sessions_count,
       visits_per_day,
       avg_session_ms,
