@@ -234,6 +234,35 @@ function buildDelayEmailHtml(firstName: string, newStartStr: string, stopId: str
 </body></html>`
 }
 
+// Mail de RELANCE ABSENCE : le client a répondu « absent ». On accuse réception,
+// on insiste gentiment (prochain passage dans ~3 semaines) et on rouvre 3 options.
+function buildAbsenceFollowupEmailHtml(firstName: string, stopId: string): string {
+  const url = (a: string) => `${APP_URL}/api/delivery/confirm?stop=${stopId}&action=${a}`
+  const btn = (href: string, bg: string, color: string, border: string, label: string) =>
+    `<a href="${href}" target="_blank" style="display:block;background:${bg};color:${color};font-size:15px;font-weight:700;text-decoration:none;padding:14px 20px;border-radius:12px;border:${border};text-align:center;margin-bottom:10px;">${label}</a>`
+  return `<!DOCTYPE html><html lang="fr"><head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width, initial-scale=1.0"/></head>
+<body style="margin:0;padding:0;background:#f1ebe7;font-family:'Helvetica Neue',Helvetica,Arial,sans-serif;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="background:#f1ebe7;padding:32px 16px;"><tr><td align="center">
+    <table width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;">
+      <tr><td align="center" style="padding-bottom:24px;"><img src="https://bowa-concept.com/cdn/shop/files/logo.png?v=1693451719" alt="Bowa Concept" width="140" style="display:block;height:auto;"/></td></tr>
+      <tr><td style="background:#ffffff;border-radius:20px;padding:36px 40px 28px;box-shadow:0 4px 24px rgba(0,0,0,0.06);">
+        <p style="font-size:34px;margin:0 0 8px;text-align:center;">📦</p>
+        <h1 style="margin:0 0 20px;font-size:21px;font-weight:700;color:#1a1a2e;text-align:center;line-height:1.3;">On aimerait éviter de vous faire attendre</h1>
+        <p style="margin:0 0 16px;font-size:15px;color:#3a3a3a;line-height:1.6;">Bonjour <strong>${firstName}</strong>,</p>
+        <p style="margin:0 0 16px;font-size:15px;color:#3a3a3a;line-height:1.6;">Nous avons bien noté votre <strong>indisponibilité</strong> pour cette tournée — merci de nous avoir prévenus. 🙏</p>
+        <p style="margin:0 0 20px;font-size:15px;color:#3a3a3a;line-height:1.6;">Petit souci : notre prochain passage dans votre région n'aura lieu que <strong>dans environ 3 semaines</strong>. Pour vous livrer plus vite, on se permet d'insister 😊 — <strong>y aurait-il une autre option ?</strong> (le dépôt dans votre jardin, chez un voisin, un proche, sur votre lieu de travail…)</p>
+        <table width="100%" cellpadding="0" cellspacing="0" style="margin:0 0 8px;"><tr><td>
+          ${btn(url('confirmed'), '#1a7f4b', '#ffffff', 'none', '✅ Finalement, je serai présent(e)')}
+          ${btn(url('alternative'), '#1a1a2e', '#ffffff', 'none', '📦 Livrez-moi ailleurs (je vous précise où)')}
+          ${btn(url('postponed'), '#ffffff', '#6b6b63', '2px solid #e8e8e4', '📅 Aucune option — livrez au prochain passage')}
+        </td></tr></table>
+        <p style="margin:16px 0 0;font-size:13px;color:#9ca3af;line-height:1.6;">Si vous choisissez « Livrez-moi ailleurs », répondez à ce mail avec l'adresse/l'option exacte. Une question ? <a href="mailto:lea@bowa-concept.com" style="color:#6b6b63;">lea@bowa-concept.com</a></p>
+      </td></tr>
+    </table>
+  </td></tr></table>
+</body></html>`
+}
+
 // GET — returns list of stops (with/without email) for preview in modal
 export async function GET(
   _req: NextRequest,
@@ -310,6 +339,7 @@ export async function POST(
     const body = await req.json().catch(() => ({}))
     const force    = body?.force === true      // force re-send even if already notified
     const reminder = body?.reminder === true   // relance : uniquement les sans-réponse
+    const absence  = body?.absence === true    // relance ABSENTS : ont répondu « indisponible »
     const delay    = body?.delay === true      // retard : décale la date et prévient TOUS les clients
     const delayDays = Math.min(30, Math.max(1, Number(body?.delayDays) || 1))
     // Mode « à partir de » : une date précise de reprise (sinon mode « +N jours »).
@@ -355,6 +385,10 @@ export async function POST(
       if (delay) {
         // Retard : on prévient TOUS les clients encore à livrer (quel que soit l'état de notif).
         q = q.eq('status', 'pending')
+      } else if (absence) {
+        // Relance absents : ceux qui ont répondu « indisponible », encore à livrer,
+        // pas déjà relancés.
+        q = q.eq('status', 'pending').eq('client_availability', 'unavailable').is('absence_followup_at', null)
       } else if (reminder) {
         q = q.not('email_sent_at', 'is', null).is('client_availability', null).eq('status', 'pending')
         if (minAgeHours > 0) q = q.lte('email_sent_at', new Date(Date.now() - minAgeHours * 3600_000).toISOString())
@@ -401,6 +435,8 @@ export async function POST(
         if (process.env.RESEND_API_KEY) {
           const html = delay
             ? buildDelayEmailHtml(firstNameOf(stop.customer_name ?? ''), newStartStr, stop.id, windowDays, delayDays, fromMode, driverPhone)
+            : absence
+              ? buildAbsenceFollowupEmailHtml(firstNameOf(stop.customer_name ?? ''), stop.id)
             : reminder
               ? buildReminderEmailHtml(firstNameOf(stop.customer_name ?? ''), startDateStr, stop.id, wd)
               : buildEmailHtml(firstNameOf(stop.customer_name ?? ''), startDateStr, stop.id, wd, driverPhone)
@@ -415,7 +451,7 @@ export async function POST(
               from: deliveryFrom,
               to: stop.email,
               reply_to: 'lea@bowa-concept.com',
-              subject: delay ? 'BOWA CONCEPT : LIVRAISON DÉCALÉE' : reminder ? 'BOWA CONCEPT : RAPPEL LIVRAISON — confirmez votre présence' : 'BOWA CONCEPT : LIVRAISON',
+              subject: delay ? 'BOWA CONCEPT : LIVRAISON DÉCALÉE' : absence ? 'BOWA CONCEPT : une solution pour votre livraison ?' : reminder ? 'BOWA CONCEPT : RAPPEL LIVRAISON — confirmez votre présence' : 'BOWA CONCEPT : LIVRAISON',
               html,
             }),
           })
@@ -431,6 +467,9 @@ export async function POST(
           if (newStartStr && newStartStr !== startDateStr) {
             await admin.from('delivery_stops').update({ passage_date: newStartStr }).eq('id', stop.id)
           }
+        } else if (absence) {
+          // Marque la relance envoyée (évite de re-relancer).
+          await admin.from('delivery_stops').update({ absence_followup_at: new Date().toISOString() }).eq('id', stop.id)
         } else if (!reminder) {
           // En relance, on garde le email_sent_at d'origine (1re notification).
           await admin

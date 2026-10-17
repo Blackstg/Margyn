@@ -1,5 +1,7 @@
-// GET /api/delivery/confirm?stop=<id>&action=confirmed|unavailable
-// Called when a customer clicks a button in the tour notification email.
+// GET /api/delivery/confirm?stop=<id>&action=confirmed|unavailable|alternative|postponed
+// Clic d'un bouton dans le mail de notif OU la relance absence.
+//   alternative = « livrez-moi ailleurs » (jardin/voisin/proche/travail…)
+//   postponed   = « aucune option, au prochain passage (~3 sem.) »
 
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
@@ -18,7 +20,8 @@ export async function GET(req: NextRequest) {
   const stopId = searchParams.get('stop')?.trim()
   const action = searchParams.get('action')?.trim()
 
-  if (!stopId || !['confirmed', 'unavailable'].includes(action ?? '')) {
+  const VALID = ['confirmed', 'unavailable', 'alternative', 'postponed']
+  if (!stopId || !VALID.includes(action ?? '')) {
     return new NextResponse('Lien invalide.', { status: 400, headers: { 'Content-Type': 'text/plain' } })
   }
 
@@ -30,34 +33,33 @@ export async function GET(req: NextRequest) {
 
   if (error) {
     console.error('[delivery/confirm]', error)
-    return new NextResponse(buildPage(false, null), { status: 500, headers: { 'Content-Type': 'text/html; charset=utf-8' } })
+    return new NextResponse(buildPage(null), { status: 500, headers: { 'Content-Type': 'text/html; charset=utf-8' } })
   }
 
-  const isConfirmed = action === 'confirmed'
-  return new NextResponse(buildPage(true, isConfirmed), {
+  return new NextResponse(buildPage(action as string), {
     status: 200,
     headers: { 'Content-Type': 'text/html; charset=utf-8' },
   })
 }
 
-function buildPage(ok: boolean, confirmed: boolean | null): string {
-  if (!ok) {
-    return page('Erreur', '⚠️', 'Une erreur est survenue', 'Veuillez réessayer ou contacter notre équipe à <a href="mailto:lea@bowa-concept.com" style="color:#1a1a2e;">lea@bowa-concept.com</a>.')
+function buildPage(action: string | null): string {
+  switch (action) {
+    case 'confirmed':
+      return page('Présence confirmée', '✅', 'Parfait, nous en prenons note !',
+        'Votre présence est confirmée. Notre livreur passera chez vous et vous contactera avant de se déplacer.')
+    case 'alternative':
+      return page('Livraison alternative', '📦', 'Super, on s\'organise !',
+        'Répondez simplement à ce mail en nous précisant l\'option qui vous arrange (le jardin, un voisin, un proche, votre travail…) et notre livreur s\'en occupe lors de son passage.')
+    case 'postponed':
+      return page('Report au prochain passage', '📅', 'C\'est noté !',
+        'Nous reprogrammons votre livraison lors de notre prochain passage dans votre région (sous ~3 semaines). Nous vous préviendrons par mail à ce moment-là.')
+    case 'unavailable':
+      return page('Absence enregistrée', '📅', 'Bien reçu !',
+        'Nous avons noté votre absence. Nous reviendrons vers vous pour convenir d\'une solution.')
+    default:
+      return page('Erreur', '⚠️', 'Une erreur est survenue',
+        'Veuillez réessayer ou contacter notre équipe à <a href="mailto:lea@bowa-concept.com" style="color:#1a1a2e;">lea@bowa-concept.com</a>.')
   }
-  if (confirmed) {
-    return page(
-      'Présence confirmée',
-      '✅',
-      'Parfait, nous en prenons note !',
-      'Votre présence est confirmée. Notre livreur passera chez vous cette semaine et vous contactera avant de se déplacer.'
-    )
-  }
-  return page(
-    'Livraison reportée',
-    '📅',
-    'Pas de problème !',
-    'Nous allons reprogrammer votre livraison. Notre équipe vous contactera prochainement pour convenir d\'une nouvelle date.'
-  )
 }
 
 function page(title: string, icon: string, heading: string, body: string): string {

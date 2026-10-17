@@ -522,6 +522,31 @@ function PlanificateurView() {
     }
   }
 
+  // Relance des clients ABSENTS (ont répondu « indisponible ») : on insiste avec
+  // d'autres options (jardin, voisin, proche, travail…) + boutons présent/ailleurs/report.
+  async function sendAbsenceFollowup() {
+    if (!notifModal) return
+    const nb = notifModal.stops.filter((s) => s.email && s.status === 'pending' && s.client_availability === 'unavailable').length
+    if (nb === 0) return
+    if (!confirm(`Relancer ${nb} client(s) absent(s) avec des options de livraison alternatives ?`)) return
+    setNotifSending(true)
+    try {
+      const r = await fetch(`/api/delivery/tours/${notifModal.tourId}/emails`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ absence: true }),
+      })
+      const data = await r.json()
+      setNotifResult(data)
+      await fetchTours()
+      const r2 = await fetch(`/api/delivery/tours/${notifModal.tourId}/emails`)
+      const data2 = await r2.json()
+      setNotifModal((prev) => prev ? { ...prev, stops: data2.stops ?? [] } : null)
+    } finally {
+      setNotifSending(false)
+    }
+  }
+
   // Prévenir d'un retard : décale la date de passage de +delayDays et envoie un
   // mail d'excuse à TOUS les clients encore à livrer de la tournée.
   async function sendDelayEmails() {
@@ -2537,6 +2562,32 @@ function PlanificateurView() {
                 </div>
               </div>
             )}
+
+            {/* Relancer les clients absents */}
+            {!notifResult && (() => {
+              const absents = notifModal.stops.filter((s) => s.email && s.status === 'pending' && s.client_availability === 'unavailable')
+              if (absents.length === 0) return null
+              return (
+                <div className="px-5 pt-3">
+                  <div className="rounded-[10px] bg-[#eff6ff] border border-[#bfdbfe] px-3 py-2.5">
+                    <div className="flex items-center justify-between gap-3 flex-wrap">
+                      <div>
+                        <p className="text-[11px] font-semibold text-[#1e40af] mb-0.5">🙋 Relancer les absents ({absents.length})</p>
+                        <p className="text-[10px] text-[#3b6fd4] leading-snug">Propose une livraison alternative (jardin, voisin, proche, travail…) + boutons présent / ailleurs / au prochain passage.</p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={sendAbsenceFollowup}
+                        disabled={notifSending}
+                        className="text-[11px] font-semibold rounded-[8px] px-3 py-2 bg-[#1e66c4] text-white hover:bg-[#1a56a8] disabled:opacity-40 whitespace-nowrap"
+                      >
+                        {notifSending ? 'Envoi…' : `Relancer ${absents.length} absent${absents.length > 1 ? 's' : ''}`}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )
+            })()}
 
             {/* Prévenir d'un retard */}
             {!notifResult && stopsWithEmail.length > 0 && (
