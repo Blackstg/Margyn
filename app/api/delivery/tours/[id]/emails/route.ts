@@ -250,7 +250,7 @@ function buildAbsenceFollowupEmailHtml(firstName: string, stopId: string): strin
         <h1 style="margin:0 0 20px;font-size:21px;font-weight:700;color:#1a1a2e;text-align:center;line-height:1.3;">On aimerait éviter de vous faire attendre</h1>
         <p style="margin:0 0 16px;font-size:15px;color:#3a3a3a;line-height:1.6;">Bonjour <strong>${firstName}</strong>,</p>
         <p style="margin:0 0 16px;font-size:15px;color:#3a3a3a;line-height:1.6;">Nous avons bien noté votre <strong>indisponibilité</strong> pour cette tournée — merci de nous avoir prévenus. 🙏</p>
-        <p style="margin:0 0 20px;font-size:15px;color:#3a3a3a;line-height:1.6;">Petit souci : notre prochain passage dans votre région n'aura lieu que <strong>dans environ 3 semaines</strong>. Pour vous livrer plus vite, on se permet d'insister 😊 — <strong>y aurait-il une autre option ?</strong> (le dépôt dans votre jardin, chez un voisin, un proche, sur votre lieu de travail…)</p>
+        <p style="margin:0 0 20px;font-size:15px;color:#3a3a3a;line-height:1.6;">Petit souci : notre prochain passage dans votre région n'aura lieu que <strong>dans environ 3 semaines</strong>. Pour vous livrer plus vite, on se permet d'insister 😊 — <strong>y aurait-il une autre option ?</strong> (le déposer dans votre jardin, chez un voisin, un proche, sur votre lieu de travail…). On est preneur de toute option permettant de vous livrer 🙂</p>
         <table width="100%" cellpadding="0" cellspacing="0" style="margin:0 0 8px;"><tr><td>
           ${btn(url('confirmed'), '#1a7f4b', '#ffffff', 'none', '✅ Finalement, je serai présent(e)')}
           ${btn(url('alternative'), '#1a1a2e', '#ffffff', 'none', '📦 Livrez-moi ailleurs (je vous précise où)')}
