@@ -361,14 +361,25 @@ export async function GET(req: NextRequest) {
     .sort(([a], [b]) => a.localeCompare(b))
     .map(([date, v]) => ({ date, ...v }))
 
-  // Breakdown by category
-  const by_category: Record<string, { total: number; sent: number; escalated: number }> = {}
+  // Breakdown by category (+ ampleur de modification moyenne par catégorie, sur les
+  // envois mesurés → dit quelles catégories sont automatisables en premier).
+  const by_category: Record<string, { total: number; sent: number; escalated: number; mod_ratios: number[]; avg_modification_ratio: number | null; measured: number }> = {}
   for (const r of rows) {
     const cat = r.category ?? 'autre'
-    if (!by_category[cat]) by_category[cat] = { total: 0, sent: 0, escalated: 0 }
+    if (!by_category[cat]) by_category[cat] = { total: 0, sent: 0, escalated: 0, mod_ratios: [], avg_modification_ratio: null, measured: 0 }
     by_category[cat].total++
-    if (r.action === 'sent') by_category[cat].sent++
+    if (r.action === 'sent') {
+      by_category[cat].sent++
+      if (typeof r.modification_ratio === 'number') by_category[cat].mod_ratios.push(r.modification_ratio)
+    }
     if (r.action === 'escalated') by_category[cat].escalated++
+  }
+  for (const c of Object.values(by_category)) {
+    c.measured = c.mod_ratios.length
+    c.avg_modification_ratio = c.mod_ratios.length > 0
+      ? Math.round((c.mod_ratios.reduce((a, b) => a + b, 0) / c.mod_ratios.length) * 100)
+      : null
+    delete (c as { mod_ratios?: number[] }).mod_ratios
   }
 
   return NextResponse.json({

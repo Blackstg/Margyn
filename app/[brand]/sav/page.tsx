@@ -1687,7 +1687,7 @@ interface QualiteMetrics {
   distinct_users:    string[]
   user_names:        Record<string, string>  // email → prénom
   by_agent:          { email: string; name: string; active_ms: number; tickets: number; sessions: number; sent: number; escalated: number; archived: number; avg_time_ms: number | null }[]
-  by_category: Record<string, { total: number; sent: number; escalated: number }>
+  by_category: Record<string, { total: number; sent: number; escalated: number; avg_modification_ratio: number | null; measured: number }>
 }
 
 const CAT_LABELS_FR: Record<string, string> = {
@@ -2225,6 +2225,11 @@ function QualiteDashboard() {
                             <span>{stats.total} tickets</span>
                             <span className="text-[#1a7f4b]">{stats.sent} envoyés</span>
                             {stats.escalated > 0 && <span className="text-[#b45309]">{stats.escalated} escaladés</span>}
+                            {stats.avg_modification_ratio !== null && (() => {
+                              const r = stats.avg_modification_ratio
+                              const cls = r <= 15 ? 'bg-[#f0fdf4] text-[#1a7f4b]' : r <= 40 ? 'bg-[#fff7ed] text-[#b45309]' : 'bg-[#fef2f2] text-[#c7293a]'
+                              return <span className={`px-1.5 py-0.5 rounded-full font-semibold ${cls}`} title={`Ampleur moyenne de modification du brouillon IA (sur ${stats.measured} envoi${stats.measured !== 1 ? 's' : ''} mesuré${stats.measured !== 1 ? 's' : ''})`}>✎ {r}% modifié</span>
+                            })()}
                           </div>
                         </div>
                     ))}
