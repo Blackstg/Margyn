@@ -318,6 +318,16 @@ export async function GET(
       return NextResponse.json({ html, newStartDate: newStartStr })
     }
 
+    // Aperçu du mail de RELANCE ABSENCE.
+    if (preview === 'absence') {
+      type St = { id: string; customer_name: string | null; email: string | null; status: string | null; client_availability?: string | null }
+      const list = (stops ?? []) as St[]
+      const sample = list.find((s) => s.email && s.client_availability === 'unavailable')
+                   ?? list.find((s) => s.email && s.status === 'pending') ?? list[0]
+      const html = buildAbsenceFollowupEmailHtml(firstNameOf(sample?.customer_name ?? 'Prénom'), sample?.id ?? '')
+      return NextResponse.json({ html })
+    }
+
     // Téléphone du chauffeur assigné (pour que l'aperçu du mail affiche le bon numéro).
     const { data: tourRow } = await admin
       .from('delivery_tours').select('driver_name').eq('id', params.id).single()

@@ -471,6 +471,21 @@ function PlanificateurView() {
     }
   }
 
+  // Aperçu du mail de relance absence (HTML réel généré par le serveur)
+  const [absencePreviewHtml, setAbsencePreviewHtml] = useState<string | null>(null)
+  const [absencePreviewLoading, setAbsencePreviewLoading] = useState(false)
+  async function loadAbsencePreview() {
+    if (!notifModal) return
+    setAbsencePreviewLoading(true)
+    try {
+      const r = await fetch(`/api/delivery/tours/${notifModal.tourId}/emails?preview=absence`)
+      const d = await r.json()
+      setAbsencePreviewHtml(d.html ?? null)
+    } finally {
+      setAbsencePreviewLoading(false)
+    }
+  }
+
   function formatTourDateFr(dateStr: string): string {
     if (!dateStr) return ''
     const d = new Date(dateStr + 'T00:00:00')
@@ -492,6 +507,7 @@ function PlanificateurView() {
     setDelayMode('days')
     setDelayFromDate('')
     setDelayPreviewHtml(null)
+    setAbsencePreviewHtml(null)
     setNotifModal({ tourId, tourName, plannedDate, stops, driverPhone: data.driverPhone ?? null })
   }
 
@@ -2575,15 +2591,34 @@ function PlanificateurView() {
                         <p className="text-[11px] font-semibold text-[#1e40af] mb-0.5">🙋 Relancer les absents ({absents.length})</p>
                         <p className="text-[10px] text-[#3b6fd4] leading-snug">Propose une livraison alternative (jardin, voisin, proche, travail…) + boutons présent / ailleurs / au prochain passage.</p>
                       </div>
-                      <button
-                        type="button"
-                        onClick={sendAbsenceFollowup}
-                        disabled={notifSending}
-                        className="text-[11px] font-semibold rounded-[8px] px-3 py-2 bg-[#1e66c4] text-white hover:bg-[#1a56a8] disabled:opacity-40 whitespace-nowrap"
-                      >
-                        {notifSending ? 'Envoi…' : `Relancer ${absents.length} absent${absents.length > 1 ? 's' : ''}`}
-                      </button>
+                      <div className="flex items-center gap-1.5">
+                        <button
+                          type="button"
+                          onClick={loadAbsencePreview}
+                          disabled={absencePreviewLoading}
+                          className="text-[11px] font-semibold rounded-[8px] px-3 py-2 border border-[#bfdbfe] bg-white text-[#1e40af] hover:bg-[#eff6ff] disabled:opacity-40 whitespace-nowrap"
+                        >
+                          {absencePreviewLoading ? 'Chargement…' : '👁 Aperçu'}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={sendAbsenceFollowup}
+                          disabled={notifSending}
+                          className="text-[11px] font-semibold rounded-[8px] px-3 py-2 bg-[#1e66c4] text-white hover:bg-[#1a56a8] disabled:opacity-40 whitespace-nowrap"
+                        >
+                          {notifSending ? 'Envoi…' : `Relancer ${absents.length} absent${absents.length > 1 ? 's' : ''}`}
+                        </button>
+                      </div>
                     </div>
+                    {absencePreviewHtml && (
+                      <div className="mt-2 rounded-[8px] overflow-hidden border border-[#bfdbfe] bg-white">
+                        <div className="flex items-center justify-between px-2 py-1 bg-[#eff6ff] border-b border-[#bfdbfe]">
+                          <span className="text-[10px] font-semibold text-[#1e40af]">Aperçu — ce qui sera envoyé</span>
+                          <button type="button" onClick={() => setAbsencePreviewHtml(null)} className="text-[10px] text-[#3b6fd4] hover:text-[#1e40af]">Fermer ✕</button>
+                        </div>
+                        <iframe title="Aperçu relance absence" srcDoc={absencePreviewHtml} className="w-full h-[360px] bg-white" />
+                      </div>
+                    )}
                   </div>
                 </div>
               )
