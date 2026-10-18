@@ -18,7 +18,7 @@ export default function LoginPage() {
 
   // Identifiant = email OU téléphone. Un numéro FR (06…/07…) est converti en E.164
   // (+336…/+337…) pour le login par téléphone (Supabase phone+password).
-  function toCreds(id: string, pwd: string): { password: string; email?: string; phone?: string } {
+  function toCreds(id: string, pwd: string): { email: string; password: string } | { phone: string; password: string } {
     const v = id.trim()
     if (v.includes('@')) return { email: v, password: pwd }
     let d = v.replace(/[\s.\-()]/g, '')
