@@ -900,6 +900,32 @@ async function fetchExclusions(brand: Brand): Promise<string[]> {
   return (data ?? []).map((r) => r.product_title)
 }
 
+// ─── Cache & préférence (stale-while-revalidate, à la React Query) ──────────────
+// On garde en mémoire la dernière réponse par (marque, période) : au retour sur
+// le dashboard on réaffiche instantanément, puis on rafraîchit en arrière-plan.
+type DashSnapshot = {
+  snapshot: SnapshotData | null; current: KpiData | null; previous: KpiData | null
+  spendBreakdown: SpendByPlatform[]; roas: { points: RoasPoint[]; activePlatforms: string[] }
+  bestSellers: BestSeller[]; inventory: InventoryItem[]; exclusions: string[]
+  sparklines: SparklineData; stockVal: StockValuation | null
+}
+const dashCache = new Map<string, DashSnapshot>()
+const dashKey = (brand: Brand, period: Period, month: string | null) =>
+  `${brand}|${month ?? period}`
+
+// Dernière période/mois choisie par marque — survit à la navigation entre onglets.
+function loadDashPref(brand: Brand): { period?: Period; month?: string | null } {
+  if (typeof window === 'undefined') return {}
+  try {
+    const raw = window.localStorage.getItem(`steero:dash:${brand}`)
+    return raw ? JSON.parse(raw) : {}
+  } catch { return {} }
+}
+function saveDashPref(brand: Brand, period: Period, month: string | null) {
+  if (typeof window === 'undefined') return
+  try { window.localStorage.setItem(`steero:dash:${brand}`, JSON.stringify({ period, month })) } catch { /* quota */ }
+}
+
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 export default function Page() {
@@ -950,13 +976,29 @@ function DashboardPage() {
   function setPeriod(p: Period) {
     setPeriodState(p)
     setSelectedMonthState(null)
+    saveDashPref(brand, p, null)
     router.replace(`${pathname}?${buildParams(brand, p, null).toString()}`)
   }
 
   function setMonth(m: string | null) {
     setSelectedMonthState(m)
+    saveDashPref(brand, period, m)
     router.replace(`${pathname}?${buildParams(brand, period, m).toString()}`)
   }
+
+  // Au montage : si l'URL ne précise pas la période, on restaure la dernière
+  // choisie (localStorage) au lieu de retomber sur « 7 jours ». L'URL reste
+  // prioritaire (liens partageables). Un seul passage, par marque.
+  const prefRestored = useRef(false)
+  useEffect(() => {
+    if (prefRestored.current) return
+    prefRestored.current = true
+    if (searchParams.get('period') || searchParams.get('month')) return
+    const pref = loadDashPref(brand)
+    if (pref.month) { setMonth(pref.month) }
+    else if (pref.period && pref.period !== '7j') { setPeriod(pref.period) }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   const [snapshot, setSnapshot]                   = useState<SnapshotData | null>(null)
   const [current, setCurrent]                     = useState<KpiData | null>(null)
@@ -979,8 +1021,29 @@ function DashboardPage() {
   const [refreshingStock, setRefreshingStock]     = useState(false)
   const yesterday = getYesterday()
 
+  const applyData = useCallback((d: DashSnapshot) => {
+    setSnapshot(d.snapshot)
+    setCurrent(d.current)
+    setPrevious(d.previous)
+    setSpendBreakdown(d.spendBreakdown)
+    setRoasData(d.roas.points)
+    setRoasActivePlatforms(d.roas.activePlatforms)
+    setBestSellers(d.bestSellers)
+    setInventory(d.inventory)
+    setExclusions(d.exclusions)
+    setSparklines(d.sparklines)
+    setStockVal(d.stockVal)
+  }, [])
+
   const load = useCallback(async () => {
-    setLoading(true)
+    // Stale-while-revalidate : si on a déjà les données de cette (marque, période)
+    // en cache, on les réaffiche tout de suite (pas de spinner) et on rafraîchit
+    // en arrière-plan. Sinon, premier chargement → spinner.
+    const key = dashKey(brand, period, selectedMonth)
+    const cached = dashCache.get(key)
+    if (cached) { applyData(cached); setLoading(false) }
+    else setLoading(true)
+
     const { from, to, prevFrom, prevTo, days } = selectedMonth
       ? getMonthRange(selectedMonth)
       : getRange(period)
@@ -997,19 +1060,15 @@ function DashboardPage() {
       fetchSparklines(brand, from, to),
       fetchStockValuation(brand, inProd),
     ])
-    setSnapshot(snap)
-    setCurrent(curr)
-    setPrevious(prev)
-    setSpendBreakdown(breakdown)
-    setRoasData(roas.points)
-    setRoasActivePlatforms(roas.activePlatforms)
-    setBestSellers(sellers)
-    setInventory(inv)
-    setExclusions(excl)
-    setSparklines(sparks)
-    setStockVal(stock)
+    const data: DashSnapshot = {
+      snapshot: snap, current: curr, previous: prev, spendBreakdown: breakdown,
+      roas, bestSellers: sellers, inventory: inv, exclusions: excl,
+      sparklines: sparks, stockVal: stock,
+    }
+    dashCache.set(key, data)
+    applyData(data)
     setLoading(false)
-  }, [brand, period, selectedMonth, yesterday])
+  }, [brand, period, selectedMonth, yesterday, applyData])
 
   // Rafraîchir le stock à la demande : relance la synchro Shopify puis recharge.
   const refreshStock = useCallback(async () => {
