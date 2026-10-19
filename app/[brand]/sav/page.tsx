@@ -2401,6 +2401,14 @@ export default function SavPage() {
       })
       const ticket = await savJson<ProcessedTicket & { error?: string }>(res, 'La génération de réponse')
       if (!res.ok) { console.error('[SAV] /api/sav/process failed:', ticket.error); return }
+      // Signature par agent : le brouillon contient le marqueur {{PRÉNOM}} (ex. intro
+      // « Je suis {{PRÉNOM}} »). On le remplace par le prénom de l'agent connecté, des
+      // DEUX côtés (brouillon éditable ET baseline draft_reply pour l'ampleur de modif)
+      // en mutant draft_reply avant de le stocker → la métrique reste cohérente.
+      const myFirst = (myName.trim().split(/\s+/)[0] ?? '')
+      if (myFirst && ticket.draft_reply) {
+        ticket.draft_reply = ticket.draft_reply.replace(/\{\{\s*PR[ÉE]NOM\s*\}\}/gi, myFirst)
+      }
       setProcessedCache(prev => ({ ...prev, [raw.ticket_id]: ticket }))
       setDrafts(prev => { if (raw.ticket_id in prev) return prev; return { ...prev, [raw.ticket_id]: ticket.draft_reply } })
       setSolvedMap(prev => { if (raw.ticket_id in prev) return prev; return { ...prev, [raw.ticket_id]: ticket.solved } })

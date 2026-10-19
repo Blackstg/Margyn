@@ -10,6 +10,7 @@ import { sendValidatedReply, markTicketProcessed } from '@/lib/sav/orchestrator'
 import type { ReplyAction } from '@/lib/sav/classifier'
 import { getBonRetourToken } from '@/lib/sav/bon-retour'
 import { savBrandFromRequest } from '@/lib/sav/brand'
+import { personalizeReply } from '@/lib/sav/signature'
 
 export const dynamic = 'force-dynamic'
 
@@ -95,6 +96,11 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'reply_body is required for auto_reply action' }, { status: 400 })
   }
 
+  // Signature par agent : on réécrit la signature du corps avec le PRÉNOM de l'agent
+  // authentifié (et on remplace une auto-présentation « Je suis X »). Comme il n'y a
+  // qu'une identité Zendesk, c'est ce qui permet au client de voir qui lui répond.
+  const finalBody = action === 'auto_reply' ? personalizeReply(reply_body, agent, brand) : reply_body
+
   try {
     // Joindre le bon de retour PDF (spécifique Moom) pour les tickets retour/remb.
     const allUploads = [...uploads]
@@ -109,7 +115,7 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    await sendValidatedReply(ticket_id, reply_body, solved ?? false, action, allUploads, brand)
+    await sendValidatedReply(ticket_id, finalBody, solved ?? false, action, allUploads, brand)
     // Persist so this ticket is excluded from future fetches
     await markTicketProcessed(ticket_id, action === 'escalate' ? 'escalated' : 'sent', brand)
 
