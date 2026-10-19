@@ -8,7 +8,7 @@ import {
   Settings, Trash2, Plus, X, Download, RotateCcw, Paperclip, ArrowRight, Forward,
 } from 'lucide-react'
 import { useUrlState } from '@/lib/useUrlState'
-import { signatureName } from '@/lib/sav/signature'
+import { signatureFirstName } from '@/lib/sav/signature'
 
 // ─── Marque courante (Moom ou Bowa) ─────────────────────────────────────────
 // Le SAV est partagé entre Moom et Bowa (chacun son Zendesk). La marque est
@@ -2406,7 +2406,7 @@ export default function SavPage() {
       // « Je suis {{PRÉNOM}} »). On le remplace par le prénom de l'agent connecté, des
       // DEUX côtés (brouillon éditable ET baseline draft_reply pour l'ampleur de modif)
       // en mutant draft_reply avant de le stocker → la métrique reste cohérente.
-      const myFirst = signatureName(myName)
+      const myFirst = signatureFirstName(myName, savBrand())
       if (myFirst && ticket.draft_reply) {
         ticket.draft_reply = ticket.draft_reply.replace(/\{\{\s*PR[ÉE]NOM\s*\}\}/gi, myFirst)
       }

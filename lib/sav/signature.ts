@@ -1,19 +1,26 @@
 // Signature par agent (option gratuite, sans siège Zendesk supplémentaire).
 //
-// Contexte : il n'y a qu'UNE identité Zendesk par marque, donc toutes les réponses
-// partaient sous le même persona (« Je suis Jade… » + « Jade Mayet / Customer
-// service »), imposé par les règles SAV. On personnalise désormais avec le PRÉNOM de
-// l'agent authentifié. Les brouillons utilisent le marqueur {{PRÉNOM}} (remplacé à
-// l'affichage ET à l'envoi). Ici, à l'ENVOI, on :
-//  1) remplace {{PRÉNOM}} (et l'ancien persona « Je suis Jade ») par le vrai prénom ;
+// Contexte : il n'y a qu'UNE identité Zendesk par marque. On personnalise la
+// signature avec le nom PUBLIC choisi pour chaque agent, qui peut dépendre de la
+// MARQUE (ex. Satiana signe « Jade Mayet » sur Moom et « Marine Vayet » sur Bowa).
+// L'attribution interne (verrou anti-double-réponse, stats Qualité) reste sur le
+// full_name réel (Satiana, Lary…). Les brouillons utilisent le marqueur {{PRÉNOM}}
+// (remplacé à l'affichage ET à l'envoi). À l'ENVOI, on :
+//  1) remplace {{PRÉNOM}} (et l'ancien « Je suis Jade ») par le prénom public ;
 //  2) retire toute signature déjà présente (après la formule de politesse ou « -- ») ;
-//  3) réappose une signature propre « {Prénom} / Service client {Marque} / site ».
+//  3) réappose « {Nom public} / Customer Success {Marque} ».
 
-// Bloc signature par marque : lignes affichées sous le prénom.
-const SIGNATURE: Record<string, string[]> = {
-  moom: ['Service client Mōom', 'www.moom-paris.co'],
-  bowa: ['Service client Bowa Concept', 'www.bowa-concept.com'],
-  krom: ['Service client Krom', 'www.krom-paris.com'],
+// Nom PUBLIC complet par agent interne (clé = prénom réel en minuscules) PAR MARQUE.
+const DISPLAY_NAME: Record<string, Record<string, string>> = {
+  satiana: { moom: 'Jade Mayet',  bowa: 'Marine Vayet' },
+  lary:    { moom: 'Laura',       bowa: 'Laura' },
+}
+
+// Libellé de marque affiché dans la ligne de rôle.
+const BRAND_LABEL: Record<string, string> = {
+  moom: 'Mōom',
+  bowa: 'Bowa Concept',
+  krom: 'Krom',
 }
 
 // Mots qui suivent « Je suis … » mais ne sont PAS des prénoms (adjectifs/états).
@@ -29,17 +36,18 @@ export function firstNameOf(fullName: string | null | undefined): string {
   return (fullName ?? '').trim().split(/\s+/)[0] ?? ''
 }
 
-// Nom PUBLIC de signature (ce que voit le client) ≠ nom interne d'attribution.
-// L'attribution (verrou anti-double-réponse, stats Qualité) reste sur le full_name
-// réel (Satiana, Lary…) ; côté client on affiche un prénom choisi. Clé = prénom
-// interne en minuscules.
-const DISPLAY_NAME: Record<string, string> = {
-  satiana: 'Jade',
-  lary:    'Laura',
+// Nom PUBLIC complet affiché dans la signature (ex. « Jade Mayet »). Sans mapping,
+// on retombe sur le prénom réel de l'agent.
+export function signatureDisplayName(fullName: string | null | undefined, brand: string): string {
+  const key = firstNameOf(fullName).toLowerCase()
+  const byBrand = DISPLAY_NAME[key]
+  if (byBrand) return byBrand[brand] ?? byBrand.moom ?? firstNameOf(fullName)
+  return firstNameOf(fullName)
 }
-export function signatureName(fullName: string | null | undefined): string {
-  const first = firstNameOf(fullName)
-  return DISPLAY_NAME[first.toLowerCase()] ?? first
+
+// Prénom PUBLIC (1er mot du nom affiché) pour l'intro « Je suis … » et {{PRÉNOM}}.
+export function signatureFirstName(fullName: string | null | undefined, brand: string): string {
+  return firstNameOf(signatureDisplayName(fullName, brand))
 }
 
 // Formules de politesse de clôture — la signature vient toujours APRÈS.
@@ -50,17 +58,18 @@ export function personalizeReply(
   fullName: string | null | undefined,
   brand: string,
 ): string {
-  const first = signatureName(fullName)
-  if (!first || !body) return body
+  const displayFirst = signatureFirstName(fullName, brand)
+  const displayFull  = signatureDisplayName(fullName, brand)
+  if (!displayFirst || !body) return body
 
   let t = body.replace(/\r\n/g, '\n')
-  // 0) Marqueur {{PRÉNOM}} → prénom de l'agent (brouillons générés avec le marqueur).
-  t = t.replace(PRENOM_MARKER, first)
+  // 0) Marqueur {{PRÉNOM}} → prénom public (brouillons générés avec le marqueur).
+  t = t.replace(PRENOM_MARKER, displayFirst)
   t = t.replace(/\n{3,}/g, '\n\n').trimEnd()
 
-  // 1) Ancienne auto-présentation « Je suis X » / « Je m'appelle X » → prénom agent.
+  // 1) Ancienne auto-présentation « Je suis X » / « Je m'appelle X » → prénom public.
   t = t.replace(/\b(Je suis|Je m['’]appelle)\s+([A-ZÀ-ÖØ-Þ][\wÀ-ÿ'’-]+)/g, (m, lead, name) => {
-    return NOT_A_NAME.has(String(name).toLowerCase()) ? m : `${lead} ${first}`
+    return NOT_A_NAME.has(String(name).toLowerCase()) ? m : `${lead} ${displayFirst}`
   })
 
   // 2) Retirer la signature existante.
@@ -69,19 +78,19 @@ export function personalizeReply(
   const sepAt = lines.findIndex(l => /^\s*--\s*$/.test(l))
   let kept = sepAt !== -1 ? lines.slice(0, sepAt) : lines
   // b) sinon/ensuite, couper juste après la DERNIÈRE formule de politesse (tout ce
-  //    qui suit est une signature : nom, équipe, service client, url…).
+  //    qui suit est une signature : nom, équipe, rôle, url…).
   let lastClosing = -1
   for (let i = 0; i < kept.length; i++) if (CLOSING_RE.test(kept[i])) lastClosing = i
   if (lastClosing !== -1) kept = kept.slice(0, lastClosing + 1)
   else {
     // c) pas de formule trouvée : on retire les dernières lignes qui ressemblent à
-    //    une signature (équipe/persona/url/service client).
-    const sigRe = /^(l['’]équipe\b|service client\b|customer service\b|www\.|m?ōom\b|moom\b|bowa\b|krom\b|jade\b|marine\b)/i
+    //    une signature (équipe/rôle/persona/url).
+    const sigRe = /^(l['’]équipe\b|service client\b|customer service\b|customer success\b|www\.|m?ōom\b|moom\b|bowa\b|krom\b|jade\b|marine\b|laura\b)/i
     while (kept.length && (kept[kept.length - 1].trim() === '' || sigRe.test(kept[kept.length - 1].trim())))
       kept.pop()
   }
 
   const clean = kept.join('\n').trimEnd()
-  const sigLines = SIGNATURE[brand] ?? [`Service client ${brand.charAt(0).toUpperCase()}${brand.slice(1)}`]
-  return `${clean}\n\n${first}\n${sigLines.join('\n')}`
+  const brandLabel = BRAND_LABEL[brand] ?? `${brand.charAt(0).toUpperCase()}${brand.slice(1)}`
+  return `${clean}\n\n${displayFull}\nCustomer Success ${brandLabel}`
 }
