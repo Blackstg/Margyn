@@ -954,12 +954,19 @@ function DashboardPage() {
   }
 
   const brand                  = useBrand()
-  const [period, setPeriodState] = useState<Period>(() =>
-    urlToPeriod(searchParams.get('period'))
-  )
+  // État initial = URL si présente (lien partageable prioritaire), sinon dernière
+  // préférence mémorisée, sinon 7j. Lu dès l'init (composant rendu côté client via
+  // useSearchParams+Suspense) → on démarre direct sur la bonne période, sans flash 7j.
+  const [period, setPeriodState] = useState<Period>(() => {
+    if (searchParams.get('period')) return urlToPeriod(searchParams.get('period'))
+    if (searchParams.get('month')) return '7j'
+    return loadDashPref(brand).period ?? '7j'
+  })
   const [selectedMonth, setSelectedMonthState] = useState<string | null>(() => {
     const m = searchParams.get('month')
-    return m && /^\d{4}-\d{2}$/.test(m) ? m : null
+    if (m && /^\d{4}-\d{2}$/.test(m)) return m
+    if (searchParams.get('period')) return null
+    return loadDashPref(brand).month ?? null
   })
 
   function buildParams(b: Brand, p: Period, m: string | null) {
@@ -986,17 +993,16 @@ function DashboardPage() {
     router.replace(`${pathname}?${buildParams(brand, period, m).toString()}`)
   }
 
-  // Au montage : si l'URL ne précise pas la période, on restaure la dernière
-  // choisie (localStorage) au lieu de retomber sur « 7 jours ». L'URL reste
-  // prioritaire (liens partageables). Un seul passage, par marque.
-  const prefRestored = useRef(false)
+  // L'état démarre déjà sur la bonne période (init depuis localStorage). Ici on
+  // se contente de refléter ce choix dans l'URL si elle était vide, pour garder
+  // des liens cohérents — sans relancer de chargement (load ne dépend pas de l'URL).
+  const urlSynced = useRef(false)
   useEffect(() => {
-    if (prefRestored.current) return
-    prefRestored.current = true
+    if (urlSynced.current) return
+    urlSynced.current = true
     if (searchParams.get('period') || searchParams.get('month')) return
-    const pref = loadDashPref(brand)
-    if (pref.month) { setMonth(pref.month) }
-    else if (pref.period && pref.period !== '7j') { setPeriod(pref.period) }
+    if (period === '7j' && !selectedMonth) return
+    router.replace(`${pathname}?${buildParams(brand, period, selectedMonth).toString()}`)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
