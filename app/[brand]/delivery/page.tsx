@@ -424,6 +424,14 @@ function PlanificateurView() {
   const [showDeferredSection, setShowDeferredSection] = useState(false)
   const [ordersViewMode, setOrdersViewMode] = useUrlState<'list' | 'map'>('ordersView', 'list')
   const [toursViewMode, setToursViewMode] = useUrlState<'list' | 'map'>('toursView', 'list')
+  // Liste de chargement détaillée : repliée par défaut (le récap suffit en général).
+  const [loadingOpen, setLoadingOpen] = useState<Set<string>>(new Set())
+  const toggleLoadingOpen = (tourId: string) => setLoadingOpen((prev) => {
+    const n = new Set(prev)
+    if (n.has(tourId)) n.delete(tourId)
+    else n.add(tourId)
+    return n
+  })
   const [syncingStopId, setSyncingStopId] = useState<string | null>(null)
   // Date de commande Shopify par shopify_order_id (chargée à l'ouverture de la carte)
   const [orderDates, setOrderDates] = useState<Record<string, string>>({})
@@ -2153,16 +2161,16 @@ function PlanificateurView() {
                                   <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-[#1a1a2e]">Récap chargement</p>
                                   <span className="text-[10px] text-[#9b9b93]">{tour.stops.length} arrêt{tour.stops.length > 1 ? 's' : ''} · {totalPanels} panneaux</span>
                                 </div>
-                                <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2">
+                                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-1.5">
                                   {recap.map((r) => {
                                     const accent = ACCENT[r.label] ?? '#9b9b93'
                                     const short = r.label.replace(/\s*\(.*\)/, '')
                                     return (
-                                      <div key={r.label} className="rounded-[10px] bg-[#faf9f8] border border-[#eceae6] pl-3 pr-2.5 py-2 flex items-center gap-2.5" style={{ borderLeft: `3px solid ${accent}` }}>
-                                        <span className="text-2xl font-bold tabular-nums leading-none" style={{ color: accent }}>{r.qty}</span>
-                                        <span className="min-w-0">
-                                          <span className="block text-[11px] font-semibold text-[#1a1a2e] leading-tight truncate" title={r.label}>{short}</span>
-                                          {r.note && <span className="block text-[9px] text-[#9b9b93] leading-tight">{r.note}</span>}
+                                      <div key={r.label} className="rounded-[8px] bg-[#faf9f8] border border-[#eceae6] pl-2.5 pr-3 py-1.5 flex items-center gap-2.5" style={{ borderLeft: `3px solid ${accent}` }}>
+                                        <span className="text-lg font-bold tabular-nums leading-none shrink-0" style={{ color: accent }}>{r.qty}</span>
+                                        <span className="text-[11px] font-semibold text-[#1a1a2e] leading-tight flex-1 min-w-0">
+                                          {short}
+                                          {r.note && <span className="text-[#9b9b93] font-normal"> · {r.note}</span>}
                                         </span>
                                       </div>
                                     )
@@ -2273,10 +2281,19 @@ function PlanificateurView() {
                             if (loadingList.length === 0) return null
                             return (
                               <div className="mt-4 pt-3 border-t border-[#e8e8e4]">
-                                <div className="flex items-center gap-1.5 mb-2">
-                                  <Package size={13} className="text-[#6b6b63]" />
-                                  <span className="text-xs font-semibold text-[#1a1a2e]">Liste de chargement</span>
-                                </div>
+                                <button
+                                  type="button"
+                                  onClick={(e) => { e.stopPropagation(); toggleLoadingOpen(tour.id) }}
+                                  className="flex items-center justify-between w-full mb-2 group"
+                                >
+                                  <span className="flex items-center gap-1.5">
+                                    <Package size={13} className="text-[#6b6b63]" />
+                                    <span className="text-xs font-semibold text-[#1a1a2e]">Liste de chargement détaillée</span>
+                                    <span className="text-[10px] text-[#9b9b93]">({loadingList.length})</span>
+                                  </span>
+                                  <ChevronDown size={15} className={`text-[#6b6b63] transition-transform ${loadingOpen.has(tour.id) ? 'rotate-180' : ''}`} />
+                                </button>
+                                {loadingOpen.has(tour.id) && (
                                 <div className="space-y-1.5">
                                   {loadingList.map((item, i) => (
                                     <div key={i} className="rounded-[8px] bg-[#f5f5f3] px-3 py-2">
@@ -2295,6 +2312,7 @@ function PlanificateurView() {
                                     </div>
                                   ))}
                                 </div>
+                                )}
                               </div>
                             )
                           })()}
