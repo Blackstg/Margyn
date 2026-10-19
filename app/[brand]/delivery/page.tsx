@@ -2132,20 +2132,41 @@ function PlanificateurView() {
                             </button>
                           </div>
 
-                          {/* Récap chargement — totaux par type de produit (pour Léa) */}
+                          {/* Récap chargement — tuiles KPI par type de produit (pour Léa) */}
                           {(() => {
                             const recap = tourProductRecap(tour.stops)
                             if (recap.length === 0) return null
+                            const STYLE: Record<string, { emoji: string; bg: string; br: string; fg: string }> = {
+                              'Akupanel':              { emoji: '🪵', bg: '#eef2ff', br: '#c7d2fe', fg: '#3730a3' },
+                              'Extpanel (panneaux)':   { emoji: '🧱', bg: '#eff6ff', br: '#bfdbfe', fg: '#1e40af' },
+                              'Stonepanel':            { emoji: '🪨', bg: '#f5f3ff', br: '#ddd6fe', fg: '#6d28d9' },
+                              'Tasseaux':              { emoji: '📏', bg: '#fff7ed', br: '#fed7aa', fg: '#9a3412' },
+                              'Angles de finition':    { emoji: '📐', bg: '#fff7ed', br: '#fed7aa', fg: '#9a3412' },
+                              'Profilés / finitions':  { emoji: '📏', bg: '#fff7ed', br: '#fed7aa', fg: '#9a3412' },
+                              'Colle':                 { emoji: '🧴', bg: '#f0fdf4', br: '#bbf7d0', fg: '#1a7f4b' },
+                              'Visserie':              { emoji: '🔩', bg: '#f8f7f5', br: '#eceae6', fg: '#6b6b63' },
+                            }
+                            const DEF = { emoji: '📦', bg: '#f8f7f5', br: '#eceae6', fg: '#6b6b63' }
+                            const totalPanels = recap.filter(r => ['Akupanel', 'Extpanel (panneaux)', 'Stonepanel'].includes(r.label)).reduce((n, r) => n + r.qty, 0)
                             return (
-                              <div className="mb-2 rounded-[10px] bg-[#1a1a2e] px-4 py-3">
-                                <p className="text-[10px] font-semibold uppercase tracking-[0.1em] text-white/50 mb-2">📦 Récap chargement · {tour.stops.length} arrêt{tour.stops.length > 1 ? 's' : ''}</p>
-                                <div className="flex flex-wrap gap-x-5 gap-y-1.5">
-                                  {recap.map((r) => (
-                                    <span key={r.label} className="text-xs text-white">
-                                      {r.label} : <b className="tabular-nums">{r.qty}</b>
-                                      {r.note ? <span className="text-white/50"> ({r.note})</span> : null}
-                                    </span>
-                                  ))}
+                              <div className="mb-3 rounded-[14px] bg-white border border-[#e8e8e4] px-4 py-3.5 shadow-[0_1px_8px_rgba(0,0,0,0.04)]">
+                                <div className="flex items-center justify-between mb-2.5">
+                                  <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-[#9b9b93]">📦 Récap chargement</p>
+                                  <span className="text-[10px] text-[#9b9b93]">{tour.stops.length} arrêt{tour.stops.length > 1 ? 's' : ''} · {totalPanels} panneaux</span>
+                                </div>
+                                <div className="grid grid-cols-3 sm:grid-cols-4 lg:grid-cols-6 gap-2">
+                                  {recap.map((r) => {
+                                    const st = STYLE[r.label] ?? DEF
+                                    const short = r.label.replace(/\s*\(.*\)/, '')
+                                    return (
+                                      <div key={r.label} className="rounded-[10px] border px-2 py-2 text-center" style={{ backgroundColor: st.bg, borderColor: st.br }}>
+                                        <div className="text-base leading-none mb-1">{st.emoji}</div>
+                                        <div className="text-xl font-bold tabular-nums leading-none" style={{ color: st.fg }}>{r.qty}</div>
+                                        <div className="text-[9px] font-medium text-[#6b6b63] leading-tight mt-1 truncate" title={r.label}>{short}</div>
+                                        {r.note && <div className="text-[8px] font-semibold" style={{ color: st.fg }}>{r.note}</div>}
+                                      </div>
+                                    )
+                                  })}
                                 </div>
                               </div>
                             )
