@@ -133,6 +133,38 @@ function extPanelPacks(title: string, qty: number): number | null {
   return null
 }
 
+// Récap produits d'une tournée : totaux par catégorie (Akupanel, Extpanel,
+// Stonepanel, tasseaux, angles, colle, visserie…). Pour le planificateur (Léa).
+function tourProductRecap(stops: { panel_details?: { title?: string; qty?: number }[] }[]): { label: string; qty: number; note?: string }[] {
+  const cat = (title: string): string => {
+    const t = (title || '').toLowerCase()
+    if (/akupanel/.test(t) && /panneau/.test(t)) return 'Akupanel'
+    if (/extpanel/.test(t) && /panneau/.test(t)) return 'Extpanel (panneaux)'
+    if (/stonepanel|feuille\s*de\s*pierre/.test(t)) return 'Stonepanel'
+    if (/tasseau/.test(t)) return 'Tasseaux'
+    if (/angle/.test(t)) return 'Angles de finition'
+    if (/profil|baguette|plinthe|corniche|liteau|lambourde/.test(t)) return 'Profilés / finitions'
+    if (/colle/.test(t)) return 'Colle'
+    if (/vis/.test(t)) return 'Visserie'
+    return (title || 'Autre').replace(/™/g, '').trim()
+  }
+  const order = ['Akupanel', 'Extpanel (panneaux)', 'Stonepanel', 'Tasseaux', 'Angles de finition', 'Profilés / finitions', 'Colle', 'Visserie']
+  const map = new Map<string, number>()
+  for (const s of stops) for (const it of (s.panel_details ?? [])) {
+    const c = cat(it.title ?? '')
+    map.set(c, (map.get(c) ?? 0) + (it.qty ?? 0))
+  }
+  return [...map.entries()]
+    .map(([label, qty]) => ({
+      label, qty,
+      note: label === 'Extpanel (panneaux)' ? `${Math.ceil(qty / EXT_PACK)} paquet${Math.ceil(qty / EXT_PACK) > 1 ? 's' : ''}` : undefined,
+    }))
+    .sort((a, b) => {
+      const ia = order.indexOf(a.label), ib = order.indexOf(b.label)
+      return (ia === -1 ? 99 : ia) - (ib === -1 ? 99 : ib) || b.qty - a.qty
+    })
+}
+
 function formatDate(dateStr: string): string {
   if (!dateStr) return ''
   const d = new Date(dateStr + 'T00:00:00')
@@ -2100,6 +2132,25 @@ function PlanificateurView() {
                             </button>
                           </div>
 
+                          {/* Récap chargement — totaux par type de produit (pour Léa) */}
+                          {(() => {
+                            const recap = tourProductRecap(tour.stops)
+                            if (recap.length === 0) return null
+                            return (
+                              <div className="mb-2 rounded-[10px] bg-[#1a1a2e] px-4 py-3">
+                                <p className="text-[10px] font-semibold uppercase tracking-[0.1em] text-white/50 mb-2">📦 Récap chargement · {tour.stops.length} arrêt{tour.stops.length > 1 ? 's' : ''}</p>
+                                <div className="flex flex-wrap gap-x-5 gap-y-1.5">
+                                  {recap.map((r) => (
+                                    <span key={r.label} className="text-xs text-white">
+                                      {r.label} : <b className="tabular-nums">{r.qty}</b>
+                                      {r.note ? <span className="text-white/50"> ({r.note})</span> : null}
+                                    </span>
+                                  ))}
+                                </div>
+                              </div>
+                            )
+                          })()}
+
                           {/* Stops list */}
                           {sortedStops.length === 0 ? (
                             <div className="text-xs text-[#6b6b63] text-center py-3">Aucun arrêt</div>
@@ -2121,19 +2172,6 @@ function PlanificateurView() {
                                     <div className="flex-1 min-w-0">
                                       <div className="font-medium text-[#1a1a2e]">{stop.order_name}</div>
                                       <div className="text-[#6b6b63]">{stop.customer_name} · {stop.zip} {stop.city}</div>
-                                      {stop.panel_details?.length > 0 && (
-                                        <div className="mt-1 text-[10px] text-[#6b6b63] space-y-0.5">
-                                          {stop.panel_details.map((item, i) => (
-                                            <div key={i} className="flex items-center gap-1">
-                                              <span className="font-mono bg-white border border-[#e8e8e4] px-1 rounded text-[9px] shrink-0">{item.sku?.trim() || '—'}</span>
-                                              <span className="truncate">{item.title}</span>
-                                              {item.variant_title && <span className="shrink-0 font-medium text-[#1a1a2e]">· {item.variant_title}</span>}
-                                              <span className="shrink-0 font-semibold text-[#1a1a2e]">×{item.qty}</span>
-                                              {(() => { const p = extPanelPacks(item.title, item.qty); return p ? <span className="shrink-0 text-[9px] font-semibold text-[#9a3412] bg-[#fff7ed] px-1 rounded">{p} paquet{p > 1 ? 's' : ''} de {EXT_PACK}</span> : null })()}
-                                            </div>
-                                          ))}
-                                        </div>
-                                      )}
                                     </div>
                                     <div className="flex items-center gap-1 shrink-0">
                                       <button
