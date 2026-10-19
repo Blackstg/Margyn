@@ -228,6 +228,16 @@ function phaseFromEvent(label: string, code: string | null, country: string | nu
   // Livraison finale (tournée du transporteur local)
   if (/en cours de livraison|out for delivery/.test(L)) return PHASE_IDX.delivery
 
+  // Avis d'arrivée (NOA = Notice of Arrival) → le colis est arrivé dans le pays de
+  // destination et un avis a été émis : il est forcément POST-dédouanement/transit.
+  // Idem « vol international arrivé » côté destination (country ≠ CN). Sinon ces
+  // events (sub_status générique InTransit_Other) retombent sur « transit » (idx 3)
+  // et le dédouanement en cours (idx 4) les masque → le suivi reste bloqué sur
+  // « Dédouanement » alors que 17Track montre le colis déjà arrivé. On mappe donc
+  // sur « Au centre de tri » (arrivé dans le pays).
+  if (/avis d.?arriv[ée]|noa received/.test(L)) return PHASE_IDX.sorting
+  if (destSide && /vol international arriv[ée]|international flight has arrived/.test(L)) return PHASE_IDX.sorting
+
   // Dédouanement à l'import (surtout pas l'export/déclaration au départ).
   // Une fois le dédouanement TERMINÉ (import completed/released), le colis a quitté
   // la douane et est dans le pays → on affiche « Au centre de tri » (dernière étape
