@@ -29,6 +29,19 @@ export function firstNameOf(fullName: string | null | undefined): string {
   return (fullName ?? '').trim().split(/\s+/)[0] ?? ''
 }
 
+// Nom PUBLIC de signature (ce que voit le client) ≠ nom interne d'attribution.
+// L'attribution (verrou anti-double-réponse, stats Qualité) reste sur le full_name
+// réel (Satiana, Lary…) ; côté client on affiche un prénom choisi. Clé = prénom
+// interne en minuscules.
+const DISPLAY_NAME: Record<string, string> = {
+  satiana: 'Jade',
+  lary:    'Laura',
+}
+export function signatureName(fullName: string | null | undefined): string {
+  const first = firstNameOf(fullName)
+  return DISPLAY_NAME[first.toLowerCase()] ?? first
+}
+
 // Formules de politesse de clôture — la signature vient toujours APRÈS.
 const CLOSING_RE = /(bien cordialement|cordialement|bien à vous|belle journée|bonne journée|excellente journée|très belle journée|à bientôt|à très bientôt|au plaisir)/i
 
@@ -37,7 +50,7 @@ export function personalizeReply(
   fullName: string | null | undefined,
   brand: string,
 ): string {
-  const first = firstNameOf(fullName)
+  const first = signatureName(fullName)
   if (!first || !body) return body
 
   let t = body.replace(/\r\n/g, '\n')
