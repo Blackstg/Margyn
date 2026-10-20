@@ -995,13 +995,14 @@ interface AttachmentState {
   token:    string
 }
 
-function ReplyPanel({ ticket, draft, solved, onDraftChange, onSolvedChange, onSent, onArchive }: {
+function ReplyPanel({ ticket, draft, solved, onDraftChange, onSolvedChange, onSent, onArchive, onStartAnswer }: {
   ticket: ProcessedTicket
   draft: string; solved: boolean
   onDraftChange: (v: string) => void
   onSolvedChange: (v: boolean) => void
   onSent: (action: ReplyAction, wasModified?: boolean) => void
   onArchive: () => void
+  onStartAnswer?: () => void
 }) {
   const [sending, setSending]             = useState(false)
   const [archiving, setArchiving]         = useState(false)
@@ -1300,7 +1301,8 @@ function ReplyPanel({ ticket, draft, solved, onDraftChange, onSolvedChange, onSe
         ) : (
           <textarea
             value={draft}
-            onChange={e => { onDraftChange(e.target.value); setPreviousDraft(null) }}
+            onFocus={() => onStartAnswer?.()}
+            onChange={e => { onStartAnswer?.(); onDraftChange(e.target.value); setPreviousDraft(null) }}
             className="w-full flex-1 text-xs text-[#1a1a2e] bg-[#f8f7f5] rounded-xl px-3 py-3 leading-relaxed resize-none border border-transparent focus:border-[#aeb0c9] focus:outline-none transition-colors font-[inherit]"
             style={{ minHeight: 0 }}
           />
@@ -2485,11 +2487,18 @@ export default function SavPage() {
   }, [load])
 
   // ── Attributions des tickets (qui répond : agents SAV) ────────────────
+  // Rafraîchi au montage PUIS toutes les 15 s : une réservation (quand un agent
+  // commence à répondre) ou un transfert manuel se propage vite à l'autre écran,
+  // au lieu de rester figé au chargement (source des blocages « fantômes »).
   useEffect(() => {
-    savFetch('/api/sav/assign')
+    let alive = true
+    const refresh = () => savFetch('/api/sav/assign')
       .then(r => r.json())
-      .then(d => { setAssignments(d.assignments ?? {}); setAssignMeta(d.meta ?? {}) })
+      .then(d => { if (alive) { setAssignments(d.assignments ?? {}); setAssignMeta(d.meta ?? {}) } })
       .catch(() => {})
+    refresh()
+    const id = setInterval(refresh, 15_000)
+    return () => { alive = false; clearInterval(id) }
   }, [])
 
   // ── Balises manuelles des tickets ──────────────────────────────────────
@@ -2546,10 +2555,11 @@ export default function SavPage() {
     } catch { /* optimiste — l'UI reste à jour */ }
   }
 
-  // Revendication à l'OUVERTURE : dès qu'un agent ouvre un ticket non attribué, il
-  // se le réserve (insert-si-absent, ne vole pas un ticket déjà pris) → les autres
-  // agents voient tout de suite qu'il est pris. Le vrai blocage est côté serveur à l'envoi.
-  async function claimOnOpen(ticketId: number) {
+  // Revendication quand on COMMENCE À RÉPONDRE (focus dans la zone de réponse) :
+  // insert-si-absent, ne vole JAMAIS un ticket déjà pris. Lire un ticket ne réserve
+  // plus rien → on ne bloque plus un collègue juste en l'ouvrant. Le vrai verrou
+  // anti-double reste côté serveur à l'envoi.
+  async function claimForAnswer(ticketId: number) {
     if (!savAssignees().includes(myName)) return // admin/non-agent : pas d'auto-claim
     if (assignments[ticketId]) return                              // déjà attribué
     setAssignments(prev => ({ ...prev, [ticketId]: myName }))      // optimiste
@@ -2598,7 +2608,10 @@ export default function SavPage() {
     if (!ticketStartTimes.current[raw.ticket_id]) {
       ticketStartTimes.current[raw.ticket_id] = Date.now()
     }
-    claimOnOpen(raw.ticket_id)
+    // Plus d'auto-réservation à la simple OUVERTURE : lire un ticket ne le verrouille
+    // plus pour les collègues. On réserve seulement quand on COMMENCE à répondre
+    // (focus dans la zone de réponse → claimForAnswer). Le vrai verrou anti-double
+    // reste côté serveur à l'envoi.
     if (!processedCache[raw.ticket_id]) processTicket(raw)
   }
 
@@ -3115,6 +3128,7 @@ export default function SavPage() {
               onSolvedChange={v => setSolvedMap(prev => ({ ...prev, [selectedProcessed.ticket_id]: v }))}
               onSent={handleSent}
               onArchive={handleArchive}
+              onStartAnswer={() => claimForAnswer(selectedProcessed.ticket_id)}
             />
           )
         ) : null}
