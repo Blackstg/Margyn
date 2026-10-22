@@ -133,11 +133,13 @@ export async function importHistoryBatch(batchSize = 10, brand: 'moom' | 'bowa' 
 
   let newExamples: Awaited<ReturnType<typeof exportSolvedTickets>>['examples'] = []
   let nextCursor: string | null = cursor
+  let reachedEnd = false
 
   try {
     const result = await exportSolvedTickets(batchSize, cursor, brand)
     newExamples = result.examples
     nextCursor  = result.nextCursor
+    reachedEnd  = result.reachedEnd
 
     await saveHistoryBatch(newExamples, brand)
     await saveCursor(nextCursor, brand)
@@ -162,8 +164,10 @@ export async function importHistoryBatch(batchSize = 10, brand: 'moom' | 'bowa' 
   const dates = newExamples.map(e => e.created_at).filter(Boolean).sort()
   return {
     imported: newExamples.length,
+    // « done » = on a rattrapé la fin du flux (curseur désormais CONSERVÉ pour ne
+    // récupérer que les nouveaux tickets au prochain passage, plus de recrawl total).
     total:    count ?? 0,
-    done:     nextCursor === null,
+    done:     reachedEnd,
     oldest:   dates[0] ?? null,
     newest:   dates[dates.length - 1] ?? null,
   }

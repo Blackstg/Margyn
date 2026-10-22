@@ -608,13 +608,14 @@ export async function exportSolvedTickets(
   maxTickets = 25,
   resumeUrl?: string | null,
   brand: SavBrand = 'moom',
-): Promise<{ examples: SolvedTicketData[]; nextCursor: string | null }> {
+): Promise<{ examples: SolvedTicketData[]; nextCursor: string | null; reachedEnd: boolean }> {
   // maxPages = how many Zendesk pages to fetch per call (each page ~100 tickets)
   // We take ALL solved tickets from each page — never skip any.
   const maxPages = maxTickets  // parameter is reused as page count
   let url: string | null = resumeUrl ??
     `${await base(brand)}/incremental/tickets/cursor.json?start_time=1735689600&per_page=100`
   let nextCursor: string | null = null
+  let reachedEnd = false
   const allTickets: ZendeskTicket[] = []
   let pagesRead = 0
 
@@ -631,9 +632,14 @@ export async function exportSolvedTickets(
     // Take ALL solved/closed from this page — no artificial limit
     const solved = (data.tickets ?? []).filter(t => t.status === 'solved' || t.status === 'closed')
     allTickets.push(...solved)
-    nextCursor = data.end_of_stream ? null : (data.after_url ?? null)
+    // On CONSERVE toujours le curseur incrémental (after_url), MÊME à end_of_stream :
+    // Zendesk renvoie alors un curseur persistant qui ne livrera QUE les nouveaux
+    // événements au prochain appel. Avant, on le mettait à null à end_of_stream → le
+    // run suivant repartait de start_time=2025 et recrawlait tout l'historique en
+    // boucle (Moom, gros volume, ne rattrapait jamais les tickets récents).
+    nextCursor = data.after_url ?? nextCursor
     pagesRead++
-    if (data.end_of_stream) break
+    if (data.end_of_stream) { reachedEnd = true; break }
     url = data.after_url ?? null
   }
 
@@ -664,5 +670,5 @@ export async function exportSolvedTickets(
     }
   )
 
-  return { examples, nextCursor }
+  return { examples, nextCursor, reachedEnd }
 }
