@@ -347,6 +347,21 @@ function buildRealTimeline(result: TrackingResult, settings: TrackingSettings | 
   // qu'il n'y ait pas de grand vide qui inquiète. Les events sont triés du + récent
   // au + ancien : en écrasant dateFor, on garde la date d'ENTRÉE (la plus ancienne)
   // dans chaque phase → dates croissantes. placeByIdx garde le lieu le + récent.
+  // Dernier scan CÔTÉ ORIGINE (encore en Chine / en train de quitter l'origine).
+  // Sert à ignorer les events destination PRÉMATURÉS : CIRRO/YunExpress émettent
+  // parfois une pré-déclaration douanière en France AVANT que l'avion ait quitté la
+  // Chine → sans ça, on saute à « Dédouanement » alors que le colis est encore en
+  // transit international (désaccord avec 17Track, qui reflète le dernier scan réel).
+  let latestOriginMs = 0
+  for (const e of result.tracking_events) {
+    const c = countryOf(e.location)
+    const L = (e.label || '').toLowerCase()
+    const isOrigin = c === 'CN' || /export|vol international parti|international flight has departed|origin facility|origine|centre de tri \((départ|origine)\)/.test(L)
+    if (!isOrigin) continue
+    const t = new Date(e.date).getTime()
+    if (!isNaN(t) && t > latestOriginMs) latestOriginMs = t
+  }
+
   const dateFor: Record<string, string> = {}
   const latestDateByIdx: Record<number, string> = {}  // date du scan le + RÉCENT de la phase
   const placeByIdx: Record<number, string | null> = {}
@@ -354,6 +369,13 @@ function buildRealTimeline(result: TrackingResult, settings: TrackingSettings | 
   for (const e of result.tracking_events) {  // du + récent au + ancien
     const idx = phaseFromEvent(e.label, e.code, countryOf(e.location))
     if (idx == null) continue
+    // Garde-fou chronologique : un event CÔTÉ DESTINATION (dédouanement import,
+    // arrivée dans le pays, tri, livraison) plus ANCIEN que le dernier scan d'origine
+    // est une donnée transporteur en avance/désordre → on l'ignore.
+    if (idx >= PHASE_IDX.customs && latestOriginMs > 0) {
+      const t = new Date(e.date).getTime()
+      if (!isNaN(t) && t < latestOriginMs) continue
+    }
     if (idx > maxIdx) maxIdx = idx
     dateFor[RT_PHASES[idx].key] = e.date          // écrasé → garde la date d'ENTRÉE (la + ancienne)
     if (latestDateByIdx[idx] == null) latestDateByIdx[idx] = e.date  // 1re vue = la + récente
