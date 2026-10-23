@@ -1480,6 +1480,32 @@ function FollowUpPanel({ ticket, onSent }: {
   const [sending, setSending] = useState(false)
   const [archiving, setArchiving] = useState(false)
   const [error, setError]     = useState<string | null>(null)
+  const [attachments, setAttachments] = useState<AttachmentState[]>([])
+  const [uploading, setUploading]     = useState(false)
+  const fileInputRef                  = useRef<HTMLInputElement>(null)
+
+  async function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const files = Array.from(e.target.files ?? [])
+    if (files.length === 0) return
+    e.target.value = ''
+    setUploading(true); setError(null)
+    try {
+      const uploaded = await Promise.all(files.map(async file => {
+        const form = new FormData()
+        form.append('file', file)
+        const res = await savFetch('/api/sav/upload', { method: 'POST', body: form })
+        const d   = await res.json() as { token?: string; filename?: string; error?: string }
+        if (!res.ok) throw new Error(d.error ?? `HTTP ${res.status}`)
+        return { filename: d.filename ?? file.name, token: d.token! }
+      }))
+      setAttachments(prev => [...prev, ...uploaded])
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Erreur upload')
+    } finally { setUploading(false) }
+  }
+  function removeAttachment(token: string) {
+    setAttachments(prev => prev.filter(a => a.token !== token))
+  }
 
   async function send() {
     if (!body.trim()) return
@@ -1488,7 +1514,7 @@ function FollowUpPanel({ ticket, onSent }: {
       const res = await savFetch('/api/sav/send', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ticket_id: ticket.ticket_id, reply_body: body, solved: false, action: 'auto_reply' }),
+        body: JSON.stringify({ ticket_id: ticket.ticket_id, reply_body: body, solved: false, action: 'auto_reply', uploads: attachments.map(a => a.token), category: ticket.category }),
       })
       if (!res.ok) { const d = await savJson<{ error?: string }>(res); throw new Error(d.error ?? `HTTP ${res.status}`) }
       onSent('auto_reply')
@@ -1541,8 +1567,39 @@ function FollowUpPanel({ ticket, onSent }: {
         {error && (
           <p className="text-[11px] text-[#c7293a] bg-[#fce8ea] rounded-lg px-3 py-2">{error}</p>
         )}
+
+        {/* Pièces jointes (ex. facture) */}
+        <input
+          ref={fileInputRef}
+          type="file"
+          multiple
+          className="hidden"
+          onChange={handleFileChange}
+          accept=".pdf,.jpg,.jpeg,.png,.gif,.webp,.zip,.doc,.docx,.xls,.xlsx"
+        />
+        {attachments.length > 0 && (
+          <div className="flex flex-col gap-1.5">
+            {attachments.map(att => (
+              <div key={att.token} className="flex items-center gap-2 px-3 py-2 rounded-lg bg-[#f0efec] border border-[#e0deda]">
+                <Paperclip size={12} strokeWidth={1.8} className="text-[#6b6b63] shrink-0" />
+                <span className="text-[11px] text-[#1a1a2e] truncate flex-1 font-medium">{att.filename}</span>
+                <button onClick={() => removeAttachment(att.token)} className="shrink-0 text-[#9b9b93] hover:text-[#c7293a] transition-colors">
+                  <X size={13} strokeWidth={2} />
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
         <button
-          onClick={send} disabled={sending || archiving || !body.trim()}
+          onClick={() => fileInputRef.current?.click()}
+          disabled={uploading || sending || archiving}
+          className="w-full flex items-center justify-center gap-1.5 py-2 rounded-xl border border-[#e0deda] bg-white text-[11px] font-medium text-[#6b6b63] hover:bg-[#f0efec] hover:border-[#c8c6c0] transition-colors disabled:opacity-40"
+        >
+          {uploading ? <RefreshCw size={12} strokeWidth={1.8} className="animate-spin" /> : <Paperclip size={12} strokeWidth={1.8} />}
+          {uploading ? 'Upload…' : 'Joindre un fichier (facture…)'}
+        </button>
+        <button
+          onClick={send} disabled={sending || archiving || uploading || !body.trim()}
           className="w-full flex items-center justify-center gap-1.5 py-2.5 rounded-xl bg-[#1a1a2e] text-white text-xs font-semibold hover:bg-[#2a2a4e] transition-colors disabled:opacity-50"
         >
           {sending ? <RefreshCw size={13} className="animate-spin" /> : <Send size={13} strokeWidth={1.8} />}
