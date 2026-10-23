@@ -6,8 +6,10 @@
 export interface EmbedResult { vector: number[]; model: string }
 
 export function embeddingProvider(): 'openai' | 'voyage' | null {
-  if (process.env.OPENAI_API_KEY) return 'openai'
+  // Voyage prioritaire : dès que VOYAGE_API_KEY est posée, on l'utilise (sans avoir
+  // à retirer une éventuelle clé OpenAI invalide). OpenAI en repli.
   if (process.env.VOYAGE_API_KEY) return 'voyage'
+  if (process.env.OPENAI_API_KEY) return 'openai'
   return null
 }
 
