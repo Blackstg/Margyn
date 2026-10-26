@@ -191,6 +191,11 @@ const RT_PHASES: { key: string; title: string; desc: string }[] = [
   { key: 'transit',   title: 'En transit international', desc: 'Votre colis voyage vers votre pays. Cette étape peut prendre plusieurs jours, c’est tout à fait normal.' },
   { key: 'customs',   title: 'Dédouanement',            desc: 'Votre colis passe les formalités douanières d’importation.' },
   { key: 'sorting',   title: 'Au centre de tri',        desc: 'Votre colis est arrivé dans votre pays et est en cours de tri.' },
+  // Après la remise au transporteur local (ex. GOFO) : le colis traverse le pays
+  // jusqu'à l'agence de livraison, souvent SANS scan pendant plusieurs jours. Sans
+  // cette étape, le client restait bloqué sur « Au centre de tri · Paris » et
+  // s'inquiétait (cas Krom #1368, livraison en Charente-Maritime).
+  { key: 'domestic',  title: 'Acheminement vers chez vous', desc: 'Votre colis est en France, pris en charge par notre transporteur. Il est acheminé vers votre région : cette étape prend généralement 2 à 4 jours ouvrés, parfois sans nouveau scan entre-temps.' },
   { key: 'delivery',  title: 'En cours de livraison',   desc: 'Votre colis est en tournée de livraison.' },
   { key: 'delivered', title: 'Livré',                   desc: 'Votre colis a été livré. Bonne réception !' },
 ]
@@ -265,6 +270,51 @@ function phaseFromEvent(label: string, code: string | null, country: string | nu
   return null
 }
 
+// Instant de la remise au transporteur local (dernier kilomètre) ; les scans de
+// tri qui suivent appartiennent à l'acheminement domestique, pas à l'arrivée.
+function handoverTime(events: TrackingResult['tracking_events']): number | null {
+  let ms: number | null = null
+  for (const e of events ?? []) {
+    if (!/remis au transporteur local|handed over to (the )?local|last.?mile/i.test(e.label || '')) continue
+    const t = new Date(e.date).getTime()
+    if (!isNaN(t) && (ms == null || t < ms)) ms = t
+  }
+  return ms
+}
+function phaseOf(e: TrackingResult['tracking_events'][number], handoverMs: number | null): number | null {
+  const idx = phaseFromEvent(e.label, e.code, countryOf(e.location))
+  // Tout scan postérieur à la remise au transporteur local est domestique (même
+  // « Arrived at sorting center · Paris » sans code pays, qui retombait sinon en
+  // « transit international »), sauf la tournée et la livraison.
+  if (handoverMs != null && idx != null && idx < PHASE_IDX.delivery && new Date(e.date).getTime() >= handoverMs) return PHASE_IDX.domestic
+  return idx
+}
+
+// Libellés transporteur restés en anglais → français (journal « voir le détail »)
+const EN_LABELS: [RegExp, string][] = [
+  [/^arrived at (the )?sorting cent(er|re)/i, 'Arrivé au centre de tri'],
+  [/^shipment is ready for outbound/i, 'Prêt à partir du centre de tri'],
+  [/^collected at cargo terminal/i, 'Réceptionné au terminal de fret'],
+  [/^departed (from )?(the )?(sorting )?(facility|cent(er|re))/i, 'Départ du centre de tri'],
+  [/^out for delivery/i, 'En cours de livraison'],
+  [/^delivered/i, 'Livré'],
+]
+function frLabel(label: string): string {
+  for (const [re, fr] of EN_LABELS) if (re.test(label.trim())) return fr
+  return label
+}
+
+// Ajoute n jours ouvrés (ni samedi, ni dimanche, ni férié) — délais transporteur.
+function addWorkingDays(d: Date, n: number): Date {
+  let r = new Date(d)
+  let left = n, guard = 0
+  while (left > 0 && guard++ < 40) {
+    r = new Date(r.getTime() + 86_400_000)
+    if (r.getUTCDay() !== 0 && r.getUTCDay() !== 6 && !isFrenchHoliday(r)) left--
+  }
+  return r
+}
+
 // Date de livraison estimée, TOUJOURS dans le futur (rassurant) :
 // ETA transporteur si dispo → sinon commande + délai → si dépassée, glissante depuis le dernier event.
 // Dimanche de Pâques (algorithme de Meeus/Butcher, grégorien) — base des fériés mobiles.
@@ -319,8 +369,9 @@ function estimatedDeliveryDate(result: TrackingResult, settings: TrackingSetting
   const lastScan = result.tracking_events?.[0]?.date
   if (!delivered && lastScan) {
     let phase = 0
+    const handoverMs = handoverTime(result.tracking_events)
     for (const e of result.tracking_events ?? []) {
-      const idx = phaseFromEvent(e.label, e.code, countryOf(e.location))
+      const idx = phaseOf(e, handoverMs)
       if (idx != null && idx > phase) phase = idx
     }
     const capDays = phase >= PHASE_IDX.delivery ? 1 : phase >= PHASE_IDX.sorting ? 2 : null
@@ -339,9 +390,41 @@ function estimatedDeliveryDate(result: TrackingResult, settings: TrackingSetting
   return nextDeliveryDay(d)
 }
 
+// Fourchette affichée au client une fois le colis en France : ancrée sur le
+// DERNIER SCAN (+2 à +4 jours ouvrés) et non sur « aujourd'hui », pour que la date
+// ne recule pas d'un jour chaque matin (« ça fait que bouger »). Ne glisse que si
+// la fourchette est dépassée.
+function estimatedDeliveryRange(result: TrackingResult, settings: TrackingSettings | null): { from: Date; to: Date } | null {
+  const single = estimatedDeliveryDate(result, settings)
+  const lastScan = result.tracking_events?.[0]?.date
+  if (result.step === 5 || !lastScan || result.carrier_eta?.to) return single ? { from: single, to: single } : null
+  const handoverMs = handoverTime(result.tracking_events)
+  let phase = 0
+  for (const e of result.tracking_events ?? []) {
+    const idx = phaseOf(e, handoverMs)
+    if (idx != null && idx > phase) phase = idx
+  }
+  if (phase < PHASE_IDX.sorting) return single ? { from: single, to: single } : null
+  const anchor = new Date(lastScan)
+  const [a, b] = phase >= PHASE_IDX.delivery ? [1, 2] : [2, 4]
+  let from = addWorkingDays(anchor, a), to = addWorkingDays(anchor, b)
+  const now = new Date()
+  if (to.getTime() < now.getTime()) { from = addWorkingDays(now, 1); to = addWorkingDays(now, 3) }
+  else if (from.getTime() < now.getTime()) { const next = addWorkingDays(now, 1); from = next < to ? next : to }
+  return { from, to }
+}
+
+function fmtRange(r: { from: Date; to: Date }): string {
+  const day = (d: Date) => d.toLocaleDateString('fr-FR', { day: 'numeric' })
+  const full = (d: Date) => d.toLocaleDateString('fr-FR', { day: 'numeric', month: 'long' })
+  if (r.from.toDateString() === r.to.toDateString()) return full(r.to)
+  return r.from.getMonth() === r.to.getMonth() ? `${day(r.from)} – ${full(r.to)}` : `${full(r.from)} – ${full(r.to)}`
+}
+
 function buildRealTimeline(result: TrackingResult, settings: TrackingSettings | null): TLEvent[] {
   const delivered = result.step === 5
-  const estDate = estimatedDeliveryDate(result, settings)
+  const estDate = estimatedDeliveryRange(result, settings)?.to ?? null
+  const handoverMs = handoverTime(result.tracking_events)
 
   // On affiche TOUTES les étapes franchies du trajet (chacune avec sa date) pour
   // qu'il n'y ait pas de grand vide qui inquiète. Les events sont triés du + récent
@@ -365,9 +448,10 @@ function buildRealTimeline(result: TrackingResult, settings: TrackingSettings | 
   const dateFor: Record<string, string> = {}
   const latestDateByIdx: Record<number, string> = {}  // date du scan le + RÉCENT de la phase
   const placeByIdx: Record<number, string | null> = {}
+  const datesByIdx: Record<number, string[]> = {}
   let maxIdx = 0
   for (const e of result.tracking_events) {  // du + récent au + ancien
-    const idx = phaseFromEvent(e.label, e.code, countryOf(e.location))
+    const idx = phaseOf(e, handoverMs)
     if (idx == null) continue
     // Garde-fou chronologique : un event CÔTÉ DESTINATION (dédouanement import,
     // arrivée dans le pays, tri, livraison) plus ANCIEN que le dernier scan d'origine
@@ -378,8 +462,23 @@ function buildRealTimeline(result: TrackingResult, settings: TrackingSettings | 
     }
     if (idx > maxIdx) maxIdx = idx
     dateFor[RT_PHASES[idx].key] = e.date          // écrasé → garde la date d'ENTRÉE (la + ancienne)
+    ;(datesByIdx[idx] ??= []).push(e.date)
     if (latestDateByIdx[idx] == null) latestDateByIdx[idx] = e.date  // 1re vue = la + récente
     if (placeByIdx[idx] == null) placeByIdx[idx] = prettyPlace(e.location)
+  }
+  // Dates d'entrée croissantes : un scan d'une étape antérieur à l'entrée dans
+  // l'étape précédente (ex. « avis d'arrivée » 19/10 classé « centre de tri » avant
+  // le dédouanement du 20/10) donnerait un fil en désordre → on prend le 1er scan
+  // de l'étape postérieur à l'étape précédente.
+  let prevMs = 0
+  for (let i = 0; i < RT_PHASES.length; i++) {
+    const ds = datesByIdx[i]
+    if (!ds?.length) continue
+    const ms = ds.map(d => new Date(d).getTime()).filter(t => !isNaN(t)).sort((a, b) => a - b)
+    const pick = ms.find(t => t >= prevMs) ?? ms[ms.length - 1]
+    const iso = ds.find(d => new Date(d).getTime() === pick)
+    if (iso) dateFor[RT_PHASES[i].key] = iso
+    prevMs = Math.max(prevMs, pick)
   }
   // "Livré" UNIQUEMENT si le transporteur confirme le statut Delivered (step 5),
   // sinon on plafonne à "En cours de livraison".
@@ -424,7 +523,15 @@ function buildRealTimeline(result: TrackingResult, settings: TrackingSettings | 
     }
     const time = p.key === 'confirmed' ? fmtDate(rawDate) : (rawDate ? fmtDateTime(rawDate) : null)
     const place = status === 'current' ? currentPlace : null
-    return { status, title: p.title, time, est: false, desc, place }
+    // Pas de nouveau scan depuis > 48 h une fois en France : on explique que c'est
+    // normal (le transporteur ne scanne qu'aux grandes étapes).
+    let nextup: string | undefined
+    const lastScan = result.tracking_events?.[0]?.date
+    if (status === 'current' && i >= PHASE_IDX.sorting && lastScan && Date.now() - new Date(lastScan).getTime() > 48 * 3600 * 1000) {
+      const since = new Date(lastScan).toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' })
+      nextup = `Pas de nouveau scan depuis ${since} : c'est normal pendant le transport en France. Le colis sera scanné à nouveau à son arrivée près de chez vous, puis livré.`
+    }
+    return { status, title: p.title, time, est: false, desc, place, nextup }
   })
 }
 
@@ -903,7 +1010,7 @@ export default function BrandTrackingPage({ params }: { params: { brand: string 
 
                 {/* Delivery estimate badge — date estimée (toujours future) */}
                 {!isDelivered && (() => {
-                  const est = estimatedDeliveryDate(result, settings)
+                  const est = estimatedDeliveryRange(result, settings)
                   if (!est) return null
                   return (
                     <div style={{ background: primary, borderRadius: 12, padding: '10px 12px', textAlign: 'center', flexShrink: 0, minWidth: 96, maxWidth: 130 }}>
@@ -911,7 +1018,7 @@ export default function BrandTrackingPage({ params }: { params: { brand: string 
                         LIVRAISON ESTIMÉE
                       </p>
                       <p style={{ fontSize: 13, fontWeight: 700, color: '#fff', lineHeight: 1.35 }}>
-                        {est.toLocaleDateString('fr-FR', { day: 'numeric', month: 'long' })}
+                        {fmtRange(est)}
                       </p>
                     </div>
                   )
@@ -1038,7 +1145,7 @@ export default function BrandTrackingPage({ params }: { params: { brand: string 
                         </div>
                         <div style={{ flex: 1, minWidth: 0 }}>
                           <p style={{ fontSize: 13, fontWeight: i === 0 ? 700 : 500, color: i === 0 ? '#111' : 'rgba(0,0,0,0.6)', lineHeight: 1.3 }}>
-                            {ev.label}
+                            {frLabel(ev.label)}
                           </p>
                           {ev.message && (
                             <p style={{ fontSize: 12, color: 'rgba(0,0,0,0.45)', marginTop: 2 }}>{ev.message}</p>
