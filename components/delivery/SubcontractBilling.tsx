@@ -40,16 +40,21 @@ const monthLong = (ym: string) => {
 }
 
 // Mois depuis le début de la collaboration jusqu'au mois courant (le plus récent en premier)
+// (construit en chaînes YYYY-MM : toISOString() décalerait au mois précédent hors UTC)
+const ym = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
 function monthsSince(start: string): string[] {
   const out: string[] = []
-  const d = new Date(start.slice(0, 7) + '-01T00:00:00')
-  const now = new Date()
-  while (d <= now) { out.unshift(d.toISOString().slice(0, 7)); d.setMonth(d.getMonth() + 1) }
+  let [y, m] = start.slice(0, 7).split('-').map(Number)
+  const end = ym(new Date())
+  for (let s = `${y}-${String(m).padStart(2, '0')}`; s <= end; s = `${y}-${String(m).padStart(2, '0')}`) {
+    out.unshift(s)
+    if (++m > 12) { m = 1; y++ }
+  }
   return out
 }
 
 export default function SubcontractBilling({ brand, internalCostPerPanel }: { brand: string; internalCostPerPanel: number | null }) {
-  const [month, setMonth] = useState(() => new Date().toISOString().slice(0, 7))
+  const [month, setMonth] = useState(() => ym(new Date()))
   const [data, setData] = useState<Data | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
