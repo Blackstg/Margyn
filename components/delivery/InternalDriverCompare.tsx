@@ -10,7 +10,7 @@ import { Save, Info } from 'lucide-react'
 
 type Internal = {
   dayRate: number; askedRate: number; fuelPerKm: number; tollPerKm: number; hotelNight: number; mealsPerDay: number
-  travelDays: number; truckMonthly: number; depotMonthly: number; adminHours: number; hourlyRate: number; toursPerMonth: number
+  travelDays: number; truckMonthly: number; depotMonthly: number; adminHours: number; hourlyRate: number; panelsPerMonth: number
   daysByTour: Record<string, number>; nightsByTour: Record<string, number>
 }
 type Tour = {
@@ -24,6 +24,8 @@ type Data = { allDrivers: string[]; tours: Tour[]; settings: { name: string; int
 const FROM = '2026-08-01'
 const eur = (n: number | null | undefined) =>
   n == null || !isFinite(n) ? '—' : Math.round(n).toLocaleString('fr-FR') + ' €'
+const eur2 = (n: number | null | undefined) =>
+  n == null || !isFinite(n) ? '—' : n.toLocaleString('fr-FR', { minimumFractionDigits: 1, maximumFractionDigits: 1 }) + ' €'
 const signed = (n: number) => `${n > 0 ? '+' : n < 0 ? '−' : ''}${eur(Math.abs(n))}`
 const dayFr = (d: string) => new Date(d + 'T12:00:00').toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit' })
 const todayParis = () => new Date().toLocaleDateString('sv-SE', { timeZone: 'Europe/Paris' })
@@ -40,7 +42,7 @@ const FIELDS: { key: keyof Internal; label: string; unit: string; step?: number 
   { key: 'depotMonthly', label: 'Loyer dépôt Bourges', unit: '€/mois' },
   { key: 'adminHours', label: 'Temps de gestion (tickets, notes de frais…)', unit: 'h/mois' },
   { key: 'hourlyRate', label: 'Coût de ce temps', unit: '€/h' },
-  { key: 'toursPerMonth', label: 'Tournées par mois', unit: 'tournées' },
+  { key: 'panelsPerMonth', label: 'Panneaux livrés par mois en interne', unit: 'panneaux' },
 ]
 
 export default function InternalDriverCompare({ brand }: { brand: string }) {
@@ -96,27 +98,29 @@ export default function InternalDriverCompare({ brand }: { brand: string }) {
         ? (t.costs.hotel ?? 0) + (t.costs.meal ?? 0)
         : nights * p.hotelNight + days * p.mealsPerDay
       const expenses = fuel + toll + stay
-      return { t, days, nights, expenses, at: (rate: number) => days * rate + expenses }
+      return { t, days, nights, road: fuel + toll, stay, expenses, at: (rate: number) => days * rate + expenses }
     })
   }, [data, p])
 
+  // Tout ramené au panneau : coût variable des tournées réelles ÷ panneaux livrés,
+  // + coûts fixes de l'interne (camion, dépôt, gestion) ÷ volume mensuel.
   const agg = useMemo(() => {
     if (!p || rows.length === 0) return null
-    const n = rows.length
-    const avgDays = rows.reduce((a, r) => a + r.days, 0) / n
-    const avgExpenses = rows.reduce((a, r) => a + r.expenses, 0) / n
-    const avgTerence = rows.reduce((a, r) => a + r.t.terenceHT, 0) / n
-    const avgDeliveries = rows.reduce((a, r) => a + r.t.billed, 0) / n
+    const panels = rows.reduce((a, r) => a + r.t.panels, 0)
+    if (panels === 0) return null
+    const days = rows.reduce((a, r) => a + r.days, 0)
+    const terencePP = rows.reduce((a, r) => a + r.t.terenceHT, 0) / panels
+    const roadPP = rows.reduce((a, r) => a + r.road, 0) / panels
+    const stayPP = rows.reduce((a, r) => a + r.stay, 0) / panels
     // Coûts qui n'existent que si on garde une activité interne (supprimés en full Terence)
     const fixed = p.truckMonthly + p.depotMonthly + p.adminHours * p.hourlyRate
-    const internalMonth = (rate: number, tours = p.toursPerMonth) => tours * (avgDays * rate + avgExpenses) + fixed
-    const terenceMonth = (tours = p.toursPerMonth) => tours * avgTerence
-    // Nombre de tournées/mois à partir duquel l'interne devient moins cher
-    const breakEvenTours = (rate: number) => {
-      const gain = avgTerence - (avgDays * rate + avgExpenses)
-      return gain > 0 ? fixed / gain : null
-    }
-    return { n, avgDays, avgExpenses, avgTerence, avgDeliveries, fixed, internalMonth, terenceMonth, breakEvenTours }
+    const fixedPP = p.panelsPerMonth > 0 ? fixed / p.panelsPerMonth : 0
+    const driverPP = (rate: number) => days * rate / panels
+    const internalPP = (rate: number) => driverPP(rate) + roadPP + stayPP + fixedPP
+    const gainMonth = (rate: number) => (terencePP - internalPP(rate)) * p.panelsPerMonth
+    // Tarif journalier au-delà duquel l'interne coûte plus cher au panneau que Terence
+    const breakEvenRate = (terencePP - roadPP - stayPP - fixedPP) * panels / days
+    return { panels, days, terencePP, roadPP, stayPP, fixed, fixedPP, driverPP, internalPP, gainMonth, breakEvenRate, panelsPerDay: panels / days }
   }, [rows, p])
 
   const name = data?.settings.name ?? 'Terence'
@@ -151,88 +155,92 @@ export default function InternalDriverCompare({ brand }: { brand: string }) {
 
       {data && p && agg && (
         <div className={`space-y-5 ${loading ? 'opacity-60 pointer-events-none' : ''}`}>
-          {/* Verdict mensuel */}
+          {/* Verdict au panneau */}
           {(() => {
-            const cur = agg.internalMonth(p.dayRate), ask = agg.internalMonth(p.askedRate), ter = agg.terenceMonth()
-            const card = (label: string, value: number, sub: string, diff?: number) => (
-              <div className="rounded-2xl px-5 py-4 bg-white border border-[#e8e8e4]">
-                <p className="text-[10px] font-semibold uppercase tracking-[0.1em] text-[#9b9b93]">{label}</p>
-                <p className="text-3xl font-bold mt-1 tabular-nums text-[#1a1a2e]">{eur(value)}<span className="text-sm font-medium text-[#9b9b93]"> /mois</span></p>
-                <p className="text-[11px] mt-0.5 text-[#9b9b93]">{sub}</p>
-                {diff != null && (
-                  <p className={`text-xs font-semibold mt-1 ${diff > 0 ? 'text-[#c7293a]' : 'text-[#1f7a5a]'}`}>
-                    {diff > 0 ? `${eur(diff)} de plus que ${name}` : `${eur(-diff)} d'économie vs ${name}`}
-                  </p>
-                )}
-              </div>
-            )
-            const verdictAsk = ask - ter
+            const pp = (n: number) => eur2(n) + ' / pann.'
+            const card = (label: string, rate: number | null) => {
+              const v = rate == null ? agg.terencePP : agg.internalPP(rate)
+              const d = rate == null ? null : agg.terencePP - v
+              return (
+                <div className={`rounded-2xl px-5 py-4 border ${rate == null ? 'bg-[#1a1a2e] border-[#1a1a2e]' : 'bg-white border-[#e8e8e4]'}`}>
+                  <p className={`text-[10px] font-semibold uppercase tracking-[0.1em] ${rate == null ? 'text-white/50' : 'text-[#9b9b93]'}`}>{label}</p>
+                  <p className={`text-3xl font-bold mt-1 tabular-nums ${rate == null ? 'text-white' : 'text-[#1a1a2e]'}`}>{eur2(v)}<span className={`text-sm font-medium ${rate == null ? 'text-white/50' : 'text-[#9b9b93]'}`}> / panneau</span></p>
+                  {d == null
+                    ? <p className="text-[11px] mt-0.5 text-white/40">sa grille, sur les mêmes livraisons · ni camion, ni dépôt, ni gestion</p>
+                    : <p className={`text-xs font-semibold mt-1 ${d < 0 ? 'text-[#c7293a]' : 'text-[#1f7a5a]'}`}>
+                        {d >= 0 ? `${eur2(d)} de gain / panneau` : `${eur2(-d)} de plus / panneau`} · {signed(d * p.panelsPerMonth)}/mois
+                      </p>}
+                </div>
+              )
+            }
+            const gain = agg.gainMonth(p.askedRate)
+            const gainPP = agg.terencePP - agg.internalPP(p.askedRate)
             return (
               <>
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                  {card(`${who} à ${p.dayRate} €/j`, cur, `${p.toursPerMonth} tournées + camion + dépôt + gestion`, cur - ter)}
-                  {card(`${who} à ${p.askedRate} €/j`, ask, 'au tarif qu’il demande', ask - ter)}
-                  {card(`Tout chez ${name}`, ter, `${eur(agg.avgTerence)} par tournée · ni camion, ni dépôt, ni gestion`)}
+                  {card(`${who} à ${p.dayRate} €/j`, p.dayRate)}
+                  {card(`${who} à ${p.askedRate} €/j`, p.askedRate)}
+                  {card(`${name}`, null)}
                 </div>
-                {(() => {
-                  const be = agg.breakEvenTours(p.askedRate), beNow = agg.breakEvenTours(p.dayRate)
-                  const fmt = (n: number) => n.toLocaleString('fr-FR', { maximumFractionDigits: 1 })
-                  return (
-                    <div className={`rounded-2xl px-5 py-4 border ${verdictAsk > 0 ? 'bg-[#fdf3f4] border-[#f5c9cf]' : 'bg-[#eef8f3] border-[#c5e6d6]'}`}>
-                      <p className="text-sm text-[#1a1a2e]">
-                        {be == null
-                          ? <>Au tarif demandé, une tournée de {who} coûte déjà plus cher qu&apos;avec {name} : <b>full {name}</b>.</>
-                          : <>Au tarif demandé ({p.askedRate} €/j), garder {who} n&apos;est rentable qu&apos;<b>à partir de {fmt(be)} tournées par mois</b>
-                            {beNow != null && <> ({fmt(beNow)} à {p.dayRate} €/j)</>}. En dessous, camion + dépôt + gestion ({eur(agg.fixed)}/mois) mangent l&apos;économie faite sur chaque tournée.</>}
-                      </p>
-                      <p className="text-xs text-[#1a1a2e] mt-1.5">
-                        À {p.toursPerMonth} tournée{p.toursPerMonth > 1 ? 's' : ''}/mois :{' '}
-                        {verdictAsk > 0
-                          ? <><b>{name} moins cher de {eur(verdictAsk)}/mois</b></>
-                          : <><b>{who} moins cher de {eur(-verdictAsk)}/mois</b> — soit {eur(-verdictAsk / Math.max(1, p.toursPerMonth))} par tournée pour gérer le gars, ses tickets et le camion.</>}
-                      </p>
-                      <p className="text-[11px] text-[#6b6b63] mt-1">
-                        Une tournée interne coûte en moyenne {eur(agg.avgDays * p.askedRate + agg.avgExpenses)} ({fmt(agg.avgDays)} jours) contre {eur(agg.avgTerence)} chez {name} sur les mêmes livraisons.
-                      </p>
-                    </div>
-                  )
-                })()}
+                <div className={`rounded-2xl px-5 py-4 border ${gain < 0 ? 'bg-[#fdf3f4] border-[#f5c9cf]' : 'bg-[#eef8f3] border-[#c5e6d6]'}`}>
+                  <p className="text-sm text-[#1a1a2e]">
+                    Au tarif demandé ({p.askedRate} €/j), {who} revient à <b>{pp(agg.internalPP(p.askedRate))}</b> contre <b>{pp(agg.terencePP)}</b> chez {name} :{' '}
+                    {gainPP >= 0
+                      ? <><b>{eur2(gainPP)} de gain par panneau</b>, soit ≈ <b>{eur(gain)}/mois</b> pour {p.panelsPerMonth.toLocaleString('fr-FR')} panneaux.</>
+                      : <><b>{eur2(-gainPP)} de plus par panneau</b>, soit ≈ <b>{eur(-gain)}/mois</b> de plus pour {p.panelsPerMonth.toLocaleString('fr-FR')} panneaux.</>}
+                  </p>
+                  <p className="text-xs text-[#1a1a2e] mt-1.5">
+                    {agg.breakEvenRate > 0
+                      ? <>{who} devient plus cher que {name} <b>au-delà de {eur(agg.breakEvenRate)}/jour</b>.</>
+                      : <>Même à 0 €/jour, l&apos;interne resterait plus cher que {name}.</>}
+                    {' '}Il livre ≈ {agg.panelsPerDay.toLocaleString('fr-FR', { maximumFractionDigits: 0 })} panneaux par jour payé : chaque +50 €/jour = +{eur2(50 / agg.panelsPerDay)} par panneau.
+                  </p>
+                </div>
               </>
             )
           })()}
 
-          {/* Sensibilité au nombre de tournées */}
+          {/* Décomposition au panneau */}
           <div className="rounded-2xl bg-white border border-[#e8e8e4] overflow-hidden">
-            <p className="px-5 py-3 text-[11px] font-semibold uppercase tracking-[0.1em] text-[#6b6b63] border-b border-[#efefec]">Selon le nombre de tournées par mois</p>
+            <p className="px-5 py-3 text-[11px] font-semibold uppercase tracking-[0.1em] text-[#6b6b63] border-b border-[#efefec]">Coût au panneau · selon le tarif journalier</p>
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
                 <thead>
                   <tr className="text-[11px] text-[#9b9b93]">
-                    <th className="text-left font-semibold px-5 py-2">Tournées / mois</th>
-                    <th className="text-right font-semibold px-3 py-2">{who} {p.dayRate} €/j</th>
-                    <th className="text-right font-semibold px-3 py-2">{who} {p.askedRate} €/j</th>
+                    <th className="text-left font-semibold px-5 py-2">Tarif {who}</th>
+                    <th className="text-right font-semibold px-3 py-2">Chauffeur</th>
+                    <th className="text-right font-semibold px-3 py-2">Carburant + péages</th>
+                    <th className="text-right font-semibold px-3 py-2">Hôtel + repas</th>
+                    <th className="text-right font-semibold px-3 py-2" title={`${eur(agg.fixed)}/mois ÷ ${p.panelsPerMonth} panneaux`}>Camion + dépôt + gestion</th>
+                    <th className="text-right font-semibold px-3 py-2">Total interne</th>
                     <th className="text-right font-semibold px-3 py-2">{name}</th>
-                    <th className="text-right font-semibold px-5 py-2">Écart au tarif demandé</th>
+                    <th className="text-right font-semibold px-5 py-2">Gain / mois</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {[1, 2, 3, 4, 5, 6].map(n => {
-                    const ask = agg.internalMonth(p.askedRate, n), ter = agg.terenceMonth(n)
+                  {[...new Set([p.dayRate, p.askedRate, 300, 350, 400])].sort((a, b) => a - b).map(rate => {
+                    const total = agg.internalPP(rate), gain = agg.gainMonth(rate)
+                    const hl = rate === p.dayRate || rate === p.askedRate
                     return (
-                      <tr key={n} className={`border-t border-[#f3f3f1] ${n === p.toursPerMonth ? 'bg-[#f7f7f5] font-semibold' : ''}`}>
-                        <td className="px-5 py-2 tabular-nums">{n}</td>
-                        <td className="px-3 py-2 text-right tabular-nums">{eur(agg.internalMonth(p.dayRate, n))}</td>
-                        <td className="px-3 py-2 text-right tabular-nums">{eur(ask)}</td>
-                        <td className="px-3 py-2 text-right tabular-nums">{eur(ter)}</td>
-                        <td className={`px-5 py-2 text-right tabular-nums ${ask > ter ? 'text-[#c7293a]' : 'text-[#1f7a5a]'}`}>
-                          {ask > ter ? `${name} moins cher de ${eur(ask - ter)}` : `${who} moins cher de ${eur(ter - ask)}`}
-                        </td>
+                      <tr key={rate} className={`border-t border-[#f3f3f1] ${hl ? 'bg-[#f7f7f5] font-semibold' : ''}`}>
+                        <td className="px-5 py-2 tabular-nums">{rate} €/j{rate === p.dayRate ? ' (actuel)' : rate === p.askedRate ? ' (demandé)' : ''}</td>
+                        <td className="px-3 py-2 text-right tabular-nums">{eur2(agg.driverPP(rate))}</td>
+                        <td className="px-3 py-2 text-right tabular-nums">{eur2(agg.roadPP)}</td>
+                        <td className="px-3 py-2 text-right tabular-nums">{eur2(agg.stayPP)}</td>
+                        <td className="px-3 py-2 text-right tabular-nums">{eur2(agg.fixedPP)}</td>
+                        <td className="px-3 py-2 text-right tabular-nums font-semibold text-[#1a1a2e]">{eur2(total)}</td>
+                        <td className="px-3 py-2 text-right tabular-nums">{eur2(agg.terencePP)}</td>
+                        <td className={`px-5 py-2 text-right tabular-nums font-semibold ${gain < 0 ? 'text-[#c7293a]' : 'text-[#1f7a5a]'}`}>{signed(gain)}</td>
                       </tr>
                     )
                   })}
                 </tbody>
               </table>
             </div>
+            <p className="px-5 py-2.5 text-[11px] text-[#9b9b93] border-t border-[#f3f3f1] flex items-start gap-1.5">
+              <Info size={12} className="mt-0.5 shrink-0" />
+              Calculé sur {agg.panels} panneaux livrés en {agg.days.toLocaleString('fr-FR')} jours payés (tournées cochées). Gain / mois = écart au panneau × {p.panelsPerMonth} panneaux/mois. Camion, dépôt et gestion ({eur(agg.fixed)}/mois) disparaissent en full {name}.
+            </p>
           </div>
 
           {/* Détail par tournée */}
@@ -299,7 +307,7 @@ export default function InternalDriverCompare({ brand }: { brand: string }) {
             </div>
             <p className="px-5 py-2.5 text-[11px] text-[#9b9b93] border-t border-[#f3f3f1] flex items-start gap-1.5">
               <Info size={12} className="mt-0.5 shrink-0" />
-              Hors camion et temps de gestion (comptés dans le mensuel). Écart positif = la tournée interne coûte plus cher que {name}. Jours et nuits modifiables par tournée.
+              Hors camion, dépôt et gestion (comptés au panneau ci-dessus). Écart positif = la tournée interne coûte plus cher que {name}. Jours et nuits modifiables par tournée.
             </p>
           </div>
 

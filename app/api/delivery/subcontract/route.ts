@@ -55,7 +55,7 @@ export type InternalDriverSettings = {
   depotMonthly: number     // loyer dépôt Bourges (supprimé si tout part chez Terence)
   adminHours: number       // gestion du gars / mois (tickets, notes de frais, planning)
   hourlyRate: number
-  toursPerMonth: number    // tournées confiées au chauffeur interne par mois
+  panelsPerMonth: number   // volume livré en interne par mois (répartit camion + dépôt + gestion)
   daysByTour: Record<string, number>    // jours payés par tournée (sinon jours de livraison)
   nightsByTour: Record<string, number>
 }
@@ -76,7 +76,7 @@ const DEFAULT_SETTINGS: SubcontractSettings = {
   vatRate: 20,
   internal: {
     dayRate: 200, askedRate: 250, fuelPerKm: 0.30, tollPerKm: 0.11, hotelNight: 90, mealsPerDay: 30,
-    travelDays: 1, truckMonthly: 1400, depotMonthly: 990, adminHours: 4, hourlyRate: 35, toursPerMonth: 2,
+    travelDays: 1, truckMonthly: 1400, depotMonthly: 990, adminHours: 4, hourlyRate: 35, panelsPerMonth: 500,
     daysByTour: {}, nightsByTour: {},
   },
 }
