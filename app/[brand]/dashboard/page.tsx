@@ -116,6 +116,10 @@ function sumSnapshots(rows: SnapshotRow[]): SnapshotAgg {
 
 // ─── Fetchers ─────────────────────────────────────────────────────────────────
 
+// Début de la sous-traitance livraison Bowa (Terence) : au-delà, le coût de
+// livraison vient de la facture calculée (/api/delivery/subcontract).
+const BOWA_SUBCONTRACT_START = '2026-10-01'
+
 async function fetchSnapshotData(brand: Brand, date: string): Promise<SnapshotData | null> {
   const brands = brandFilter(brand)
 
@@ -190,7 +194,14 @@ async function fetchSnapshotData(brand: Brand, date: string): Promise<SnapshotDa
     const todayPanelOrders = new Set(todayRows.map(r => r.order_id).filter(Boolean)).size
     const prevPanelOrders  = new Set(prevRows.map(r => r.order_id).filter(Boolean)).size
 
-    if (prevPanelOrders > 0 && prevTotalFulfillment > 0) {
+    if (date >= BOWA_SUBCONTRACT_START) {
+      // Sous-traitance : prix moyen réel d'une livraison Terence sur les 30 derniers jours
+      const d30 = fmtD(new Date(dateObj.getTime() - 30 * 86_400_000))
+      const sub = await fetch(`/api/delivery/subcontract?brand=bowa&from=${d30 < BOWA_SUBCONTRACT_START ? BOWA_SUBCONTRACT_START : d30}&to=${date}`)
+        .then(r => r.json() as Promise<{ summary?: { perOrder: number | null } }>).catch(() => null)
+      const perDelivery = sub?.summary?.perOrder
+      if (perDelivery) snap.fulfillment_cost = Math.round(perDelivery * todayPanelOrders)
+    } else if (prevPanelOrders > 0 && prevTotalFulfillment > 0) {
       snap.fulfillment_cost = Math.round((prevTotalFulfillment / prevPanelOrders) * todayPanelOrders)
     }
   }
@@ -394,13 +405,56 @@ async function fetchKpiData(brand: Brand, from: string, to: string, days: number
   ]
 
   // For Bowa: fulfillment is "unconfigured" only if no fulfillment fixed costs AND no per-order rate
-  const fulfillment_configured = brand !== 'bowa' || sentinelFulfillment > 0 || monthlyFulfillment > 0 || shippingRateRaw != null
+  let fulfillment_configured = brand !== 'bowa' || sentinelFulfillment > 0 || monthlyFulfillment > 0 || shippingRateRaw != null
 
   let fulfillment      = Math.round(shippingRate * snaps.order_count)
   let fulfillment_note: string | undefined
   let fulfillment_breakdown_final = fulfillment_breakdown
 
-  if (brand === 'bowa' && (sentinelFulfillment > 0 || monthlyFulfillment > 0)) {
+  if (brand === 'bowa' && to >= BOWA_SUBCONTRACT_START) {
+    // Depuis la sous-traitance (Terence) : coût RÉEL = facture Terence des livraisons
+    // de la période (grille, onglet « Facture Terence ») + ce qui reste de la feuille
+    // transport interne, proratisé au nombre de jours de la période couverts par
+    // chaque mois. Les lignes « Terence » de la feuille sont ignorées (déjà comptées).
+    const fmtEurSimple = (n: number) => new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR', maximumFractionDigits: 0 }).format(n)
+    const subFrom = from < BOWA_SUBCONTRACT_START ? BOWA_SUBCONTRACT_START : from
+    type SubRes = { summary?: { orders: number; totalHT: number; revenueHT: number; deliveryPctOfRevenue: number | null; lossLines: number; marginAfterDelivery: number } }
+    const sub = await fetch(`/api/delivery/subcontract?brand=bowa&from=${subFrom}&to=${to}`)
+      .then(r => r.json() as Promise<SubRes>).catch(() => null)
+    const subTotal = sub?.summary?.totalHT ?? 0
+
+    const dayMs = 86_400_000
+    const pFrom = new Date(from + 'T00:00:00Z').getTime(), pTo = new Date(to + 'T00:00:00Z').getTime()
+    const internalRows: { label: string; amount: number }[] = sentinelFulfillmentRows
+      .map(r => ({ label: r.label, amount: Math.round(r.amount * sentinelRatio) }))
+    for (const r of allFixedCosts) {
+      if (r.category !== 'fulfillment' || !r.month || r.month === '1900-01-01' || /terence/i.test(r.label ?? '')) continue
+      const mStart = new Date(r.month.slice(0, 7) + '-01T00:00:00Z')
+      const mEnd = new Date(Date.UTC(mStart.getUTCFullYear(), mStart.getUTCMonth() + 1, 0))
+      const overlap = (Math.min(pTo, mEnd.getTime()) - Math.max(pFrom, mStart.getTime())) / dayMs + 1
+      if (overlap <= 0) continue
+      const amount = Math.round((r.amount ?? 0) * overlap / mEnd.getUTCDate())
+      if (amount > 0) internalRows.push({ label: r.label ?? 'Transport interne', amount })
+    }
+    const internal = internalRows.reduce((acc, r) => acc + r.amount, 0)
+
+    fulfillment = subTotal + internal
+    fulfillment_configured = true
+    fulfillment_breakdown_final = [
+      ...(sub?.summary ? [{ label: `Terence (${sub.summary.orders} livr.)`, amount: subTotal }] : []),
+      ...internalRows,
+    ]
+    const sm = sub?.summary
+    if (sm && sm.orders > 0) {
+      fulfillment_note = [
+        `${fmtEurSimple(Math.round(subTotal / sm.orders))}/livraison`,
+        sm.deliveryPctOfRevenue != null ? `${sm.deliveryPctOfRevenue} % du CA livré` : '',
+        sm.lossLines > 0 ? `${sm.lossLines} cmd à perte` : '',
+      ].filter(Boolean).join(' · ')
+    } else if (!sub) {
+      fulfillment_note = 'Facture Terence indisponible'
+    }
+  } else if (brand === 'bowa' && (sentinelFulfillment > 0 || monthlyFulfillment > 0)) {
     const fmtDate = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
     const fmtEurSimple = (n: number) => new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR', maximumFractionDigits: 0 }).format(n)
     type ORow = { order_id: string | null; quantity?: number | null }

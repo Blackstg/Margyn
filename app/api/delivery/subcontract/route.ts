@@ -138,6 +138,9 @@ type Line = {
   price: number | null
   attempts: number        // passages (dont absences) — seule la livraison est facturée
   merged: number          // nb de commandes regroupées (même adresse, même jour)
+  revenueHT: number | null  // CA HT des commandes livrées (Shopify, TTC ÷ 1,2)
+  cogs: number | null       // coût d'achat des produits
+  margin: number | null     // CA HT − coût produits − prix livraison
   note?: string
 }
 
@@ -145,7 +148,13 @@ type Line = {
 export async function GET(req: NextRequest) {
   try {
     const brand = req.nextUrl.searchParams.get('brand') ?? 'bowa'
+    // Période : ?month=YYYY-MM, ou ?from=YYYY-MM-DD&to=YYYY-MM-DD (dashboard). Jours en heure de Paris.
     const month = req.nextUrl.searchParams.get('month') ?? new Date().toISOString().slice(0, 7)
+    const [my, mm] = month.split('-').map(Number)
+    const from = req.nextUrl.searchParams.get('from') ?? `${month}-01`
+    const to = req.nextUrl.searchParams.get('to') ?? `${month}-${String(new Date(my, mm, 0).getDate()).padStart(2, '0')}`
+    const parisDay = (iso: string) => new Date(iso).toLocaleDateString('sv-SE', { timeZone: 'Europe/Paris' })
+    const inPeriod = (iso: string | null) => { if (!iso) return false; const d = parisDay(iso); return d >= from && d <= to }
     const admin = getAdmin()
     const settings = await loadSettings(admin, brand)
 
@@ -165,7 +174,7 @@ export async function GET(req: NextRequest) {
     const tourIds = [...tourDriver.keys()]
 
     type Stop = {
-      id: string; tour_id: string; order_name: string | null; customer_name: string | null; city: string | null; zip: string | null
+      id: string; tour_id: string; order_name: string | null; shopify_order_id: string | null; customer_name: string | null; city: string | null; zip: string | null
       address1: string | null; status: string; delivered_at: string | null; panel_count: number | null; panel_details: unknown; lat: number | null; lng: number | null
     }
     const stops: Stop[] = []
@@ -174,7 +183,7 @@ export async function GET(req: NextRequest) {
       for (let from = 0; from < 20_000; from += 1000) {
         const { data } = await admin
           .from('delivery_stops')
-          .select('id, tour_id, order_name, customer_name, address1, city, zip, status, delivered_at, panel_count, panel_details, lat, lng')
+          .select('id, tour_id, order_name, shopify_order_id, customer_name, address1, city, zip, status, delivered_at, panel_count, panel_details, lat, lng')
           .in('tour_id', ids).order('id').range(from, from + 999)
         if (!data || data.length === 0) break
         stops.push(...(data as Stop[]))
@@ -194,7 +203,7 @@ export async function GET(req: NextRequest) {
     const cacheKey = (lat: number, lng: number) => `${depotKey}>${lat.toFixed(4)},${lng.toFixed(4)}`
 
     // Commandes livrées du mois, avant regroupement par adresse
-    type Billable = { order: string; first: Stop; panels: number; stones: number; failed: number }
+    type Billable = { order: string; first: Stop; panels: number; stones: number; failed: number; sids: string[] }
     const billable: Billable[] = []
     const lines: Line[] = []
     const geoOf = new Map<Line, { lat: number; lng: number }>()
@@ -207,14 +216,14 @@ export async function GET(req: NextRequest) {
       const first = delivered[0]
       if (!first) {
         // Échecs (absence…) sans livraison : rien à payer. Affichés pour info si dans le mois.
-        const failed = group.filter(s => s.status === 'failed' && String(s.delivered_at ?? '').startsWith(month))
+        const failed = group.filter(s => s.status === 'failed' && inPeriod(s.delivered_at))
         if (failed.length > 0) {
           const f = failed[0]
           unbilled.push({ order, customer: f.customer_name ?? '', city: f.city ?? '', driver: tourDriver.get(f.tour_id) ?? '', date: f.delivered_at, reason: 'Échec / absence — pas encore livrée' })
         }
         continue
       }
-      if (!String(first.delivered_at).startsWith(month)) continue
+      if (!inPeriod(first.delivered_at)) continue
 
       const panels = Math.max(...delivered.map(s => Number(s.panel_count) || 0))
       const stones = Math.max(...delivered.map(s => stonesFromDetails(s.panel_details)))
@@ -225,18 +234,18 @@ export async function GET(req: NextRequest) {
         unbilled.push({ order, customer: first.customer_name ?? '', city: first.city ?? '', driver, date: first.delivered_at, reason: 'Accessoires seuls — inclus dans le prix panneau' })
         continue
       }
-      billable.push({ order, first, panels, stones, failed })
+      billable.push({ order, first, panels, stones, failed, sids: [...new Set(group.map(s => s.shopify_order_id).filter(Boolean) as string[])] })
     }
 
     // Plusieurs commandes livrées à la MÊME adresse le MÊME jour = un seul arrêt
     // → un seul forfait, sur le total de panneaux (« un forfait par adresse »).
-    const parisDay = (iso: string) => new Date(iso).toLocaleDateString('sv-SE', { timeZone: 'Europe/Paris' })
     const norm = (v: string | null) => (v ?? '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]+/g, ' ').trim()
     const byAddress = new Map<string, Billable[]>()
     for (const b of billable) {
       const key = `${norm(b.first.address1)}|${norm(b.first.zip)}|${parisDay(String(b.first.delivered_at))}`
       byAddress.set(key, [...(byAddress.get(key) ?? []), b])
     }
+    const sidsOf = new Map<Line, string[]>()
     for (const group of byAddress.values()) {
       group.sort((a, b) => a.order.localeCompare(b.order))
       const first = group[0].first
@@ -254,11 +263,51 @@ export async function GET(req: NextRequest) {
         driver: tourDriver.get(first.tour_id) ?? '',
         date: String(first.delivered_at), km: null, kmEstimated: false, zone: null,
         panels, stones, billedQty, bucket: BUCKETS.findIndex(b => billedQty <= b.max), price: null,
-        attempts: failed + 1, merged: group.length,
+        attempts: failed + 1, merged: group.length, revenueHT: null, cogs: null, margin: null,
         note: notes.length ? notes.join(' · ') : undefined,
       }
       lines.push(line)
+      sidsOf.set(line, group.flatMap(b => b.sids))
       if (first.lat != null && first.lng != null) geoOf.set(line, { lat: Number(first.lat), lng: Number(first.lng) })
+    }
+
+    // CA + coût produits des commandes livrées (product_sales × coûts variantes)
+    const allSids = [...new Set([...sidsOf.values()].flat())]
+    const salesByOrder = new Map<string, { revenue: number; cogs: number; missingCost: boolean }>()
+    if (allSids.length > 0) {
+      type Sale = { order_id: string; variant_id: string | null; shopify_product_id: string | null; quantity: number | null; revenue: number | null }
+      const sales: Sale[] = []
+      for (let i = 0; i < allSids.length; i += 100) {
+        for (let off = 0; off < 10_000; off += 1000) {
+          const { data } = await admin.from('product_sales')
+            .select('order_id, variant_id, shopify_product_id, quantity, revenue')
+            .eq('brand', brand).in('order_id', allSids.slice(i, i + 100))
+            .order('order_id').order('variant_id').range(off, off + 999)
+          if (!data || data.length === 0) break
+          sales.push(...(data as Sale[]))
+          if (data.length < 1000) break
+        }
+      }
+      const [{ data: variants }, { data: products }] = await Promise.all([
+        admin.from('product_variants').select('shopify_variant_id, cost_price').eq('brand', brand).not('cost_price', 'is', null).limit(5000),
+        admin.from('products').select('shopify_id, cost_price').eq('brand', brand).not('cost_price', 'is', null).limit(5000),
+      ])
+      const costByVariant = new Map((variants ?? []).map(v => [String(v.shopify_variant_id), Number(v.cost_price)]))
+      const costByProduct = new Map((products ?? []).map(p => [String(p.shopify_id), Number(p.cost_price)]))
+      for (const sale of sales) {
+        const e = salesByOrder.get(sale.order_id) ?? { revenue: 0, cogs: 0, missingCost: false }
+        const unit = costByVariant.get(String(sale.variant_id)) ?? costByProduct.get(String(sale.shopify_product_id))
+        e.revenue += Number(sale.revenue) || 0
+        if (unit == null) e.missingCost = true
+        else e.cogs += unit * (Number(sale.quantity) || 0)
+        salesByOrder.set(sale.order_id, e)
+      }
+    }
+    for (const [line, sids] of sidsOf) {
+      const found = sids.map(id => salesByOrder.get(id)).filter(Boolean) as { revenue: number; cogs: number }[]
+      if (found.length === 0) continue
+      line.revenueHT = Math.round(found.reduce((acc, e) => acc + e.revenue, 0) / 1.2)
+      line.cogs = Math.round(found.reduce((acc, e) => acc + e.cogs, 0))
     }
 
     // Distances routières (cache → OSRM → repli vol d'oiseau × 1,3)
@@ -282,6 +331,7 @@ export async function GET(req: NextRequest) {
       else if (l.km != null) l.zone = l.km <= lim1 ? 0 : l.km <= lim2 ? 1 : 2
       else l.note = 'Adresse non géolocalisée — zone à vérifier'
       l.price = l.zone != null ? settings.grid[l.zone]?.[l.bucket] ?? null : null
+      if (l.revenueHT != null) l.margin = l.revenueHT - (l.cogs ?? 0) - (l.price ?? 0)
     }
     lines.sort((a, b) => a.date.localeCompare(b.date) || a.order.localeCompare(b.order))
 
@@ -293,8 +343,13 @@ export async function GET(req: NextRequest) {
       return { count: ls.length, amount: ls.reduce((s, l) => s + (l.price ?? 0), 0) }
     }))
 
+    const withSales = lines.filter(l => l.revenueHT != null)
+    const revenueHT = withSales.reduce((s, l) => s + (l.revenueHT ?? 0), 0)
+    const salesCogs = withSales.reduce((s, l) => s + (l.cogs ?? 0), 0)
+    const salesDelivery = withSales.reduce((s, l) => s + (l.price ?? 0), 0)
+
     return NextResponse.json({
-      brand, month, settings: { ...settings, drivers: [...selected] }, allDrivers,
+      brand, month, from, to, settings: { ...settings, drivers: [...selected] }, allDrivers,
       buckets: BUCKETS.map(b => b.label),
       lines, unbilled,
       summary: {
@@ -307,6 +362,12 @@ export async function GET(req: NextRequest) {
         perOrder: lines.length > 0 ? Math.round(totalHT / lines.length) : null,
         toQuote: lines.filter(l => l.price == null).length,
         estimatedKm: lines.filter(l => l.kmEstimated).length,
+        revenueHT,
+        cogs: salesCogs,
+        marginAfterDelivery: revenueHT - salesCogs - salesDelivery,
+        deliveryPctOfRevenue: revenueHT > 0 ? Math.round((salesDelivery / revenueHT) * 1000) / 10 : null,
+        linesWithSales: withSales.length,
+        lossLines: withSales.filter(l => (l.margin ?? 0) < 0).length,
         mergedOrders: lines.reduce((s, l) => s + l.merged - 1, 0),
         failedNotBilled: lines.reduce((s, l) => s + (l.attempts - 1), 0) + unbilled.filter(u => u.reason.startsWith('Échec')).length,
       },
