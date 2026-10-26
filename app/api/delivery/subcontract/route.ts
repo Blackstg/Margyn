@@ -137,6 +137,7 @@ type Line = {
   bucket: number
   price: number | null
   attempts: number        // passages (dont absences) — seule la livraison est facturée
+  merged: number          // nb de commandes regroupées (même adresse, même jour)
   note?: string
 }
 
@@ -165,7 +166,7 @@ export async function GET(req: NextRequest) {
 
     type Stop = {
       id: string; tour_id: string; order_name: string | null; customer_name: string | null; city: string | null; zip: string | null
-      status: string; delivered_at: string | null; panel_count: number | null; panel_details: unknown; lat: number | null; lng: number | null
+      address1: string | null; status: string; delivered_at: string | null; panel_count: number | null; panel_details: unknown; lat: number | null; lng: number | null
     }
     const stops: Stop[] = []
     for (let i = 0; i < tourIds.length; i += 100) {
@@ -173,7 +174,7 @@ export async function GET(req: NextRequest) {
       for (let from = 0; from < 20_000; from += 1000) {
         const { data } = await admin
           .from('delivery_stops')
-          .select('id, tour_id, order_name, customer_name, city, zip, status, delivered_at, panel_count, panel_details, lat, lng')
+          .select('id, tour_id, order_name, customer_name, address1, city, zip, status, delivered_at, panel_count, panel_details, lat, lng')
           .in('tour_id', ids).order('id').range(from, from + 999)
         if (!data || data.length === 0) break
         stops.push(...(data as Stop[]))
@@ -192,6 +193,9 @@ export async function GET(req: NextRequest) {
     const depotKey = `${settings.depot.lat.toFixed(4)},${settings.depot.lng.toFixed(4)}`
     const cacheKey = (lat: number, lng: number) => `${depotKey}>${lat.toFixed(4)},${lng.toFixed(4)}`
 
+    // Commandes livrées du mois, avant regroupement par adresse
+    type Billable = { order: string; first: Stop; panels: number; stones: number; failed: number }
+    const billable: Billable[] = []
     const lines: Line[] = []
     const geoOf = new Map<Line, { lat: number; lng: number }>()
     const unbilled: { order: string; customer: string; city: string; driver: string; date: string | null; reason: string }[] = []
@@ -215,18 +219,43 @@ export async function GET(req: NextRequest) {
       const panels = Math.max(...delivered.map(s => Number(s.panel_count) || 0))
       const stones = Math.max(...delivered.map(s => stonesFromDetails(s.panel_details)))
       const billedQty = panels + (settings.countStones ? stones : 0)
-      const attempts = group.filter(s => s.status === 'failed' || s.status === 'delivered' || s.status === 'partial').length
+      const failed = group.filter(s => s.status === 'failed').length
       const driver = tourDriver.get(first.tour_id) ?? ''
       if (billedQty === 0) {
         unbilled.push({ order, customer: first.customer_name ?? '', city: first.city ?? '', driver, date: first.delivered_at, reason: 'Accessoires seuls — inclus dans le prix panneau' })
         continue
       }
-      const bucket = BUCKETS.findIndex(b => billedQty <= b.max)
+      billable.push({ order, first, panels, stones, failed })
+    }
+
+    // Plusieurs commandes livrées à la MÊME adresse le MÊME jour = un seul arrêt
+    // → un seul forfait, sur le total de panneaux (« un forfait par adresse »).
+    const parisDay = (iso: string) => new Date(iso).toLocaleDateString('sv-SE', { timeZone: 'Europe/Paris' })
+    const norm = (v: string | null) => (v ?? '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]+/g, ' ').trim()
+    const byAddress = new Map<string, Billable[]>()
+    for (const b of billable) {
+      const key = `${norm(b.first.address1)}|${norm(b.first.zip)}|${parisDay(String(b.first.delivered_at))}`
+      byAddress.set(key, [...(byAddress.get(key) ?? []), b])
+    }
+    for (const group of byAddress.values()) {
+      group.sort((a, b) => a.order.localeCompare(b.order))
+      const first = group[0].first
+      const panels = group.reduce((acc, b) => acc + b.panels, 0)
+      const stones = group.reduce((acc, b) => acc + b.stones, 0)
+      const billedQty = panels + (settings.countStones ? stones : 0)
+      const failed = group.reduce((acc, b) => acc + b.failed, 0)
+      const notes = [
+        group.length > 1 ? `${group.length} commandes même adresse même jour → 1 forfait` : '',
+        failed > 0 ? `${failed} passage(s) en échec non refacturé(s)` : '',
+      ].filter(Boolean)
       const line: Line = {
-        order, customer: first.customer_name ?? '', city: first.city ?? '', zip: first.zip ?? '', driver,
+        order: group.map(b => b.order).join(' + '),
+        customer: first.customer_name ?? '', city: first.city ?? '', zip: first.zip ?? '',
+        driver: tourDriver.get(first.tour_id) ?? '',
         date: String(first.delivered_at), km: null, kmEstimated: false, zone: null,
-        panels, stones, billedQty, bucket, price: null, attempts,
-        note: attempts > 1 ? `${attempts - 1} passage(s) en échec non refacturé(s)` : undefined,
+        panels, stones, billedQty, bucket: BUCKETS.findIndex(b => billedQty <= b.max), price: null,
+        attempts: failed + 1, merged: group.length,
+        note: notes.length ? notes.join(' · ') : undefined,
       }
       lines.push(line)
       if (first.lat != null && first.lng != null) geoOf.set(line, { lat: Number(first.lat), lng: Number(first.lng) })
@@ -278,6 +307,7 @@ export async function GET(req: NextRequest) {
         perOrder: lines.length > 0 ? Math.round(totalHT / lines.length) : null,
         toQuote: lines.filter(l => l.price == null).length,
         estimatedKm: lines.filter(l => l.kmEstimated).length,
+        mergedOrders: lines.reduce((s, l) => s + l.merged - 1, 0),
         failedNotBilled: lines.reduce((s, l) => s + (l.attempts - 1), 0) + unbilled.filter(u => u.reason.startsWith('Échec')).length,
       },
       matrix,

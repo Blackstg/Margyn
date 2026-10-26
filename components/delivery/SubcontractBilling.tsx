@@ -17,7 +17,7 @@ type Line = {
   order: string; customer: string; city: string; zip: string; driver: string; date: string
   km: number | null; kmEstimated: boolean; zone: number | null
   panels: number; stones: number; billedQty: number; bucket: number; price: number | null
-  attempts: number; note?: string
+  attempts: number; merged: number; note?: string
 }
 type Unbilled = { order: string; customer: string; city: string; driver: string; date: string | null; reason: string }
 type Data = {
@@ -25,7 +25,7 @@ type Data = {
   lines: Line[]; unbilled: Unbilled[]
   summary: {
     orders: number; panels: number; totalHT: number; vat: number; totalTTC: number
-    perPanel: number | null; perOrder: number | null; toQuote: number; estimatedKm: number; failedNotBilled: number
+    perPanel: number | null; perOrder: number | null; mergedOrders: number; toQuote: number; estimatedKm: number; failedNotBilled: number
   }
   matrix: { count: number; amount: number }[][]
 }
@@ -160,9 +160,9 @@ export default function SubcontractBilling({ brand, internalCostPerPanel }: { br
               <p className="text-[11px] mt-0.5 text-white/40">{eur(s.totalTTC, 2)} TTC (TVA {data.settings.vatRate} %)</p>
             </div>
             <div className="rounded-2xl px-5 py-4 bg-white border border-[#e8e8e4]">
-              <p className="text-[10px] font-semibold uppercase tracking-[0.1em] text-[#9b9b93]">Commandes facturées</p>
+              <p className="text-[10px] font-semibold uppercase tracking-[0.1em] text-[#9b9b93]">Forfaits facturés</p>
               <p className="text-3xl font-bold mt-1 tabular-nums text-[#1a1a2e]">{s.orders}</p>
-              <p className="text-[11px] mt-0.5 text-[#9b9b93]">{eur(s.perOrder)} en moyenne</p>
+              <p className="text-[11px] mt-0.5 text-[#9b9b93]">{eur(s.perOrder)} en moyenne{s.mergedOrders > 0 ? ` · ${s.mergedOrders} cmd regroupée(s)` : ''}</p>
             </div>
             <div className="rounded-2xl px-5 py-4 bg-white border border-[#e8e8e4]">
               <p className="text-[10px] font-semibold uppercase tracking-[0.1em] text-[#9b9b93]">Panneaux livrés</p>
@@ -179,8 +179,9 @@ export default function SubcontractBilling({ brand, internalCostPerPanel }: { br
           </div>
 
           {/* Alertes */}
-          {(s.toQuote > 0 || s.estimatedKm > 0 || s.failedNotBilled > 0) && (
+          {(s.toQuote > 0 || s.estimatedKm > 0 || s.failedNotBilled > 0 || s.mergedOrders > 0) && (
             <div className="rounded-xl bg-white border border-[#e8e8e4] px-4 py-3 text-xs text-[#6b6b63] space-y-1">
+              {s.mergedOrders > 0 && <p>✓ <b>{s.mergedOrders}</b> commande(s) livrée(s) à une adresse déjà servie le même jour : <b>regroupée(s) en un seul forfait</b>.</p>}
               {s.failedNotBilled > 0 && <p>✓ <b>{s.failedNotBilled}</b> passage(s) en échec (absence, représentation) <b>non refacturé(s)</b>.</p>}
               {s.toQuote > 0 && <p className="text-[#8a5a00]">⚠ <b>{s.toQuote}</b> commande(s) hors grille (Corse / adresse non géolocalisée) : montant à fixer sur devis, non inclus dans le total.</p>}
               {s.estimatedKm > 0 && <p className="text-[#8a5a00]">⚠ <b>{s.estimatedKm}</b> distance(s) estimée(s) à vol d&apos;oiseau × 1,3 (routage indisponible) : vérifier la zone si proche d&apos;une limite.</p>}
