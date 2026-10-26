@@ -6,6 +6,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { usePathname, useSearchParams, useRouter } from 'next/navigation'
 import { Coins, TrendingDown, TrendingUp, Info } from 'lucide-react'
 import SubcontractBilling from '@/components/delivery/SubcontractBilling'
+import InternalDriverCompare from '@/components/delivery/InternalDriverCompare'
 
 type Post = { label: string; amount: number; kind: 'fixe' | 'variable' }
 type MonthRow = {
@@ -66,8 +67,9 @@ export default function DeliveryCostsPage() {
   // Onglets : analyse du coût interne / chiffrage du sous-traitant (Terence). Deep link ?tab=
   const searchParams = useSearchParams()
   const router = useRouter()
-  const tab = searchParams.get('tab') === 'terence' ? 'terence' : 'analyse'
-  const setTab = (t: 'analyse' | 'terence') => router.replace(t === 'analyse' ? pathname : `${pathname}?tab=${t}`)
+  const tabParam = searchParams.get('tab')
+  const tab = tabParam === 'terence' || tabParam === 'moha' ? tabParam : 'analyse'
+  const setTab = (t: 'analyse' | 'terence' | 'moha') => router.replace(t === 'analyse' ? pathname : `${pathname}?tab=${t}`)
 
   const [data, setData] = useState<Data | null>(null)
   const [loading, setLoading] = useState(true)
@@ -157,7 +159,7 @@ export default function DeliveryCostsPage() {
         </div>
 
         <div className="flex gap-1 border-b border-[#e8e8e4]">
-          {([['analyse', 'Analyse des coûts'], ['terence', 'Facture Terence']] as const).map(([k, label]) => (
+          {([['analyse', 'Analyse des coûts'], ['terence', 'Facture Terence'], ['moha', 'Moha vs Terence']] as const).map(([k, label]) => (
             <button key={k} onClick={() => setTab(k)}
               className={`px-4 py-2 text-sm font-medium -mb-px border-b-2 ${tab === k ? 'border-[#1a1a2e] text-[#1a1a2e]' : 'border-transparent text-[#9b9b93] hover:text-[#1a1a2e]'}`}>
               {label}
@@ -165,6 +167,7 @@ export default function DeliveryCostsPage() {
           ))}
         </div>
 
+        {tab === 'moha' && <InternalDriverCompare brand={brand} />}
         {tab === 'terence' && <SubcontractBilling brand={brand} internalCostPerPanel={data?.summary.avgCostPerPanel ?? null} />}
 
         {tab === 'analyse' && loading && <div className="space-y-3">{[1,2,3].map(i => <div key={i} className="h-28 bg-[#f3f3f1] rounded-2xl animate-pulse" />)}</div>}

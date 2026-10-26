@@ -37,6 +37,24 @@ export type SubcontractSettings = {
   countStones: boolean                 // feuilles de pierre comptées comme panneaux
   startDate: string                    // début de la collaboration
   vatRate: number
+  internal: InternalDriverSettings     // onglet « Moha » : chauffeur interne vs tout chez Terence
+}
+
+// Chauffeur indépendant payé à la journée, sur NOTRE camion avec NOTRE CB
+// (carburant, péages, hôtel, repas). Valeurs par défaut tirées de la feuille
+// transport mai–sept. 2026 (carburant ≈ 0,30 €/km, péages ≈ 0,11 €/km).
+export type InternalDriverSettings = {
+  dayRate: number          // tarif actuel €/jour
+  askedRate: number        // tarif qu'il demande
+  fuelPerKm: number
+  tollPerKm: number
+  nightCost: number        // hôtel + repas par nuit dehors
+  truckMonthly: number     // leasing + assurance + entretien (économisé si tout part chez Terence)
+  adminHours: number       // gestion du gars / mois (tickets, notes de frais, planning)
+  hourlyRate: number
+  toursPerMonth: number    // tournées confiées au chauffeur interne par mois
+  daysByTour: Record<string, number>    // jours payés par tournée (sinon jours de livraison)
+  nightsByTour: Record<string, number>
 }
 
 // Grille « Bowa — Tarifs de livraison, départ Bordeaux » du 9 octobre 2026.
@@ -53,6 +71,11 @@ const DEFAULT_SETTINGS: SubcontractSettings = {
   countStones: true,
   startDate: '2026-10-01',
   vatRate: 20,
+  internal: {
+    dayRate: 200, askedRate: 250, fuelPerKm: 0.30, tollPerKm: 0.11, nightCost: 110,
+    truckMonthly: 1400, adminHours: 4, hourlyRate: 35, toursPerMonth: 4,
+    daysByTour: {}, nightsByTour: {},
+  },
 }
 
 const BUCKETS = [
@@ -91,7 +114,7 @@ async function writeJson(admin: ReturnType<typeof getAdmin>, path: string, value
 
 async function loadSettings(admin: ReturnType<typeof getAdmin>, brand: string): Promise<SubcontractSettings> {
   const saved = await readJson<Partial<SubcontractSettings>>(admin, settingsPath(brand))
-  return { ...DEFAULT_SETTINGS, ...(saved ?? {}) }
+  return { ...DEFAULT_SETTINGS, ...(saved ?? {}), internal: { ...DEFAULT_SETTINGS.internal, ...(saved?.internal ?? {}) } }
 }
 
 const haversineKm = (a: { lat: number; lng: number }, b: { lat: number; lng: number }) => {
@@ -127,6 +150,7 @@ type Line = {
   city: string
   zip: string
   driver: string
+  tourId: string
   date: string            // date de livraison facturée (1ʳᵉ livraison)
   km: number | null
   kmEstimated: boolean    // true = vol d'oiseau × 1,3 (routage indisponible)
@@ -160,13 +184,19 @@ export async function GET(req: NextRequest) {
 
     // Tournées depuis le début de la collaboration (marge d'une semaine pour les
     // tournées planifiées un peu avant).
-    const since = new Date(new Date(settings.startDate).getTime() - 7 * 86400_000).toISOString().slice(0, 10)
+    // ?drivers=moha,noah : simulation « et si Terence avait fait ces tournées »
+    // (onglet Moha) — ne modifie pas la sélection enregistrée.
+    const driversParam = req.nextUrl.searchParams.get('drivers')
+    const start = driversParam && from < settings.startDate ? from : settings.startDate
+    const since = new Date(new Date(start).getTime() - 7 * 86400_000).toISOString().slice(0, 10)
     const { data: tours } = await admin
-      .from('delivery_tours').select('id, driver_name, planned_date')
+      .from('delivery_tours').select('id, name, driver_name, planned_date, total_km, cost_fuel, cost_toll, cost_hotel, cost_meal')
       .eq('brand', brand).gte('planned_date', since).limit(5000)
 
     const allDrivers = [...new Set((tours ?? []).flatMap(t => driverParts(t.driver_name)))].sort((a, b) => a.localeCompare(b, 'fr'))
-    const selected = settings.drivers.length > 0
+    const selected = driversParam
+      ? new Set(driversParam.split(',').map(d => d.trim().toLowerCase()).filter(Boolean))
+      : settings.drivers.length > 0
       ? new Set(settings.drivers.map(d => d.toLowerCase()))
       : new Set(allDrivers.filter(d => /^terence/i.test(d)).map(d => d.toLowerCase()))
     const subTours = (tours ?? []).filter(t => driverParts(t.driver_name).some(p => selected.has(p.toLowerCase())))
@@ -260,7 +290,7 @@ export async function GET(req: NextRequest) {
       const line: Line = {
         order: group.map(b => b.order).join(' + '),
         customer: first.customer_name ?? '', city: first.city ?? '', zip: first.zip ?? '',
-        driver: tourDriver.get(first.tour_id) ?? '',
+        driver: tourDriver.get(first.tour_id) ?? '', tourId: first.tour_id,
         date: String(first.delivered_at), km: null, kmEstimated: false, zone: null,
         panels, stones, billedQty, bucket: BUCKETS.findIndex(b => billedQty <= b.max), price: null,
         attempts: failed + 1, merged: group.length, revenueHT: null, cogs: null, margin: null,
@@ -348,8 +378,41 @@ export async function GET(req: NextRequest) {
     const salesCogs = withSales.reduce((s, l) => s + (l.cogs ?? 0), 0)
     const salesDelivery = withSales.reduce((s, l) => s + (l.price ?? 0), 0)
 
+    // Jours consécutifs de la tournée (une re-livraison isolée quelques jours plus
+    // tard, pointée sur la même tournée, n'allonge pas la tournée).
+    const tourDays = (days: string[]) => {
+      const sorted = [...new Set(days)].sort()
+      const out = sorted.slice(0, 1)
+      for (const d of sorted.slice(1)) {
+        if ((new Date(d).getTime() - new Date(out[out.length - 1]).getTime()) / 86400_000 > 1) break
+        out.push(d)
+      }
+      return out
+    }
+    // Résumé par tournée (onglet Moha) : jours de livraison, km, ce que Terence aurait facturé
+    const tourRows = subTours
+      .filter(t => t.planned_date >= from && t.planned_date <= to)
+      .map(t => {
+        const ts = stops.filter(s => s.tour_id === t.id && s.delivered_at && ['delivered', 'partial', 'failed'].includes(s.status))
+        const tl = lines.filter(l => l.tourId === t.id)
+        return {
+          id: t.id as string, name: t.name as string, driver: t.driver_name as string, plannedDate: t.planned_date as string,
+          totalKm: Number(t.total_km) || 0,
+          costs: { fuel: t.cost_fuel, toll: t.cost_toll, hotel: t.cost_hotel, meal: t.cost_meal } as Record<string, number | null>,
+          deliveryDays: tourDays(ts.map(s => parisDay(String(s.delivered_at)))),
+          delivered: ts.filter(s => s.status !== 'failed').length,
+          failed: ts.filter(s => s.status === 'failed').length,
+          billed: tl.length,
+          panels: tl.reduce((a, l) => a + l.billedQty, 0),
+          terenceHT: tl.reduce((a, l) => a + (l.price ?? 0), 0),
+          toQuote: tl.filter(l => l.price == null).length,
+          revenueHT: tl.reduce((a, l) => a + (l.revenueHT ?? 0), 0),
+        }
+      })
+      .sort((a, b) => b.plannedDate.localeCompare(a.plannedDate))
+
     return NextResponse.json({
-      brand, month, from, to, settings: { ...settings, drivers: [...selected] }, allDrivers,
+      brand, month, from, to, settings: { ...settings, drivers: [...selected] }, allDrivers, tours: tourRows,
       buckets: BUCKETS.map(b => b.label),
       lines, unbilled,
       summary: {
@@ -379,7 +442,7 @@ export async function GET(req: NextRequest) {
   }
 }
 
-// PUT { brand, grid?, drivers?, countStones? } → enregistre les réglages
+// PUT { brand, grid?, drivers?, countStones?, internal? } → enregistre les réglages
 export async function PUT(req: NextRequest) {
   try {
     const body = await req.json()
@@ -392,6 +455,17 @@ export async function PUT(req: NextRequest) {
     }
     if (Array.isArray(body.drivers)) next.drivers = body.drivers.map((d: unknown) => String(d).trim()).filter(Boolean)
     if (typeof body.countStones === 'boolean') next.countStones = body.countStones
+    if (body.internal && typeof body.internal === 'object') {
+      const inc = body.internal as Record<string, unknown>
+      const merged = { ...cur.internal } as Record<string, unknown>
+      for (const [k, v] of Object.entries(inc)) {
+        if (!(k in DEFAULT_SETTINGS.internal)) continue
+        if (k === 'daysByTour' || k === 'nightsByTour') {
+          merged[k] = Object.fromEntries(Object.entries((v ?? {}) as Record<string, unknown>).map(([id, n]) => [id, Math.max(0, Number(n) || 0)]))
+        } else merged[k] = Math.max(0, Number(v) || 0)
+      }
+      next.internal = merged as InternalDriverSettings
+    }
     await writeJson(admin, settingsPath(brand), next)
     return NextResponse.json({ ok: true, settings: next })
   } catch (err) {
