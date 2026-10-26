@@ -3,8 +3,9 @@
 export const dynamic = 'force-dynamic'
 
 import { useEffect, useMemo, useState } from 'react'
-import { usePathname } from 'next/navigation'
+import { usePathname, useSearchParams, useRouter } from 'next/navigation'
 import { Coins, TrendingDown, TrendingUp, Info } from 'lucide-react'
+import SubcontractBilling from '@/components/delivery/SubcontractBilling'
 
 type Post = { label: string; amount: number; kind: 'fixe' | 'variable' }
 type MonthRow = {
@@ -62,6 +63,11 @@ function Kpi({ label, value, sub, accent }: { label: string; value: string; sub?
 export default function DeliveryCostsPage() {
   const pathname = usePathname()
   const brand = pathname.split('/').filter(Boolean)[0] ?? 'bowa'
+  // Onglets : analyse du coût interne / chiffrage du sous-traitant (Terence). Deep link ?tab=
+  const searchParams = useSearchParams()
+  const router = useRouter()
+  const tab = searchParams.get('tab') === 'terence' ? 'terence' : 'analyse'
+  const setTab = (t: 'analyse' | 'terence') => router.replace(t === 'analyse' ? pathname : `${pathname}?tab=${t}`)
 
   const [data, setData] = useState<Data | null>(null)
   const [loading, setLoading] = useState(true)
@@ -150,16 +156,27 @@ export default function DeliveryCostsPage() {
           </div>
         </div>
 
-        {loading && <div className="space-y-3">{[1,2,3].map(i => <div key={i} className="h-28 bg-[#f3f3f1] rounded-2xl animate-pulse" />)}</div>}
-        {error && <div className="rounded-xl bg-[#fce8ea] border border-[#fecaca] px-4 py-3 text-xs text-[#c7293a]">{error}</div>}
+        <div className="flex gap-1 border-b border-[#e8e8e4]">
+          {([['analyse', 'Analyse des coûts'], ['terence', 'Facture Terence']] as const).map(([k, label]) => (
+            <button key={k} onClick={() => setTab(k)}
+              className={`px-4 py-2 text-sm font-medium -mb-px border-b-2 ${tab === k ? 'border-[#1a1a2e] text-[#1a1a2e]' : 'border-transparent text-[#9b9b93] hover:text-[#1a1a2e]'}`}>
+              {label}
+            </button>
+          ))}
+        </div>
 
-        {!loading && !error && data && data.summary.monthsCount === 0 && (
+        {tab === 'terence' && <SubcontractBilling brand={brand} internalCostPerPanel={data?.summary.avgCostPerPanel ?? null} />}
+
+        {tab === 'analyse' && loading && <div className="space-y-3">{[1,2,3].map(i => <div key={i} className="h-28 bg-[#f3f3f1] rounded-2xl animate-pulse" />)}</div>}
+        {tab === 'analyse' && error && <div className="rounded-xl bg-[#fce8ea] border border-[#fecaca] px-4 py-3 text-xs text-[#c7293a]">{error}</div>}
+
+        {tab === 'analyse' && !loading && !error && data && data.summary.monthsCount === 0 && (
           <div className="rounded-2xl bg-white border border-[#e8e8e4] px-5 py-8 text-center text-sm text-[#6b6b63]">
             Pas encore de mois avec coût ET volume livré. (Le coût vient de la feuille transport, les volumes du module livraison.)
           </div>
         )}
 
-        {!loading && !error && data && data.summary.monthsCount > 0 && (() => {
+        {tab === 'analyse' && !loading && !error && data && data.summary.monthsCount > 0 && (() => {
           const s = data.summary
           return (
             <>
