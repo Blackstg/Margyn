@@ -10,7 +10,7 @@ import { Save, Info } from 'lucide-react'
 
 type Internal = {
   dayRate: number; askedRate: number; fuelPerKm: number; tollPerKm: number; hotelNight: number; mealsPerDay: number
-  travelDays: number; truckMonthly: number; depotMonthly: number; adminHours: number; hourlyRate: number; panelsPerMonth: number
+  travelDays: number; truckMonthly: number; depotMonthly: number; adminHours: number; hourlyRate: number; panelsPerMonth: number; redeliveryPct: number
   daysByTour: Record<string, number>; nightsByTour: Record<string, number>
 }
 type Tour = {
@@ -42,6 +42,7 @@ const FIELDS: { key: keyof Internal; label: string; unit: string; step?: number 
   { key: 'depotMonthly', label: 'Loyer dépôt Bourges', unit: '€/mois' },
   { key: 'adminHours', label: 'Temps de gestion (tickets, notes de frais…)', unit: 'h/mois' },
   { key: 'hourlyRate', label: 'Coût de ce temps', unit: '€/h' },
+  { key: 'redeliveryPct', label: 'Coût d’une représentation (en % d’une livraison moyenne)', unit: '%' },
   { key: 'panelsPerMonth', label: 'Panneaux livrés par mois en interne', unit: 'panneaux' },
 ]
 
@@ -116,11 +117,19 @@ export default function InternalDriverCompare({ brand }: { brand: string }) {
     const fixed = p.truckMonthly + p.depotMonthly + p.adminHours * p.hourlyRate
     const fixedPP = p.panelsPerMonth > 0 ? fixed / p.panelsPerMonth : 0
     const driverPP = (rate: number) => days * rate / panels
-    const internalPP = (rate: number) => driverPP(rate) + roadPP + stayPP + fixedPP
+    // Représentations (absence, erreur de chargement) : gratuites chez Terence, mais en
+    // interne il faut y retourner. Coût = nb d'échecs × coût moyen d'une livraison.
+    const failed = rows.reduce((a, r) => a + r.t.failed, 0)
+    const stops = rows.reduce((a, r) => a + r.t.delivered, 0)
+    const failRate = stops + failed > 0 ? failed / (stops + failed) : 0
+    const redeliveryPP = (rate: number) => stops > 0
+      ? failed * (driverPP(rate) + roadPP + stayPP) * panels / stops * (p.redeliveryPct / 100) / panels : 0
+    const internalPP = (rate: number) => driverPP(rate) + roadPP + stayPP + redeliveryPP(rate) + fixedPP
     const gainMonth = (rate: number) => (terencePP - internalPP(rate)) * p.panelsPerMonth
     // Tarif journalier au-delà duquel l'interne coûte plus cher au panneau que Terence
-    const breakEvenRate = (terencePP - roadPP - stayPP - fixedPP) * panels / days
-    return { panels, days, terencePP, roadPP, stayPP, fixed, fixedPP, driverPP, internalPP, gainMonth, breakEvenRate, panelsPerDay: panels / days }
+    const k = 1 + (stops > 0 ? failed / stops * p.redeliveryPct / 100 : 0)
+    const breakEvenRate = ((terencePP - fixedPP) / k - roadPP - stayPP) * panels / days
+    return { failed, stops, failRate, redeliveryPP, panels, days, terencePP, roadPP, stayPP, fixed, fixedPP, driverPP, internalPP, gainMonth, breakEvenRate, panelsPerDay: panels / days }
   }, [rows, p])
 
   const name = data?.settings.name ?? 'Terence'
@@ -211,6 +220,7 @@ export default function InternalDriverCompare({ brand }: { brand: string }) {
                     <th className="text-right font-semibold px-3 py-2">Chauffeur</th>
                     <th className="text-right font-semibold px-3 py-2">Carburant + péages</th>
                     <th className="text-right font-semibold px-3 py-2">Hôtel + repas</th>
+                    <th className="text-right font-semibold px-3 py-2" title={`${agg.failed} échec(s) sur ${agg.failed + agg.stops} passages`}>Représentations</th>
                     <th className="text-right font-semibold px-3 py-2" title={`${eur(agg.fixed)}/mois ÷ ${p.panelsPerMonth} panneaux`}>Camion + dépôt + gestion</th>
                     <th className="text-right font-semibold px-3 py-2">Total interne</th>
                     <th className="text-right font-semibold px-3 py-2">{name}</th>
@@ -227,6 +237,7 @@ export default function InternalDriverCompare({ brand }: { brand: string }) {
                         <td className="px-3 py-2 text-right tabular-nums">{eur2(agg.driverPP(rate))}</td>
                         <td className="px-3 py-2 text-right tabular-nums">{eur2(agg.roadPP)}</td>
                         <td className="px-3 py-2 text-right tabular-nums">{eur2(agg.stayPP)}</td>
+                        <td className="px-3 py-2 text-right tabular-nums">{eur2(agg.redeliveryPP(rate))}</td>
                         <td className="px-3 py-2 text-right tabular-nums">{eur2(agg.fixedPP)}</td>
                         <td className="px-3 py-2 text-right tabular-nums font-semibold text-[#1a1a2e]">{eur2(total)}</td>
                         <td className="px-3 py-2 text-right tabular-nums">{eur2(agg.terencePP)}</td>
@@ -239,7 +250,7 @@ export default function InternalDriverCompare({ brand }: { brand: string }) {
             </div>
             <p className="px-5 py-2.5 text-[11px] text-[#9b9b93] border-t border-[#f3f3f1] flex items-start gap-1.5">
               <Info size={12} className="mt-0.5 shrink-0" />
-              Calculé sur {agg.panels} panneaux livrés en {agg.days.toLocaleString('fr-FR')} jours payés (tournées cochées). Gain / mois = écart au panneau × {p.panelsPerMonth} panneaux/mois. Camion, dépôt et gestion ({eur(agg.fixed)}/mois) disparaissent en full {name}.
+              Calculé sur {agg.panels} panneaux livrés en {agg.days.toLocaleString('fr-FR')} jours payés (tournées cochées). Représentations : {agg.failed} échec(s) sur {agg.failed + agg.stops} passages ({Math.round(agg.failRate * 100)} %), chacun compté {p.redeliveryPct} % du coût moyen d&apos;une livraison — gratuites chez {name}. Gain / mois = écart au panneau × {p.panelsPerMonth} panneaux/mois. Camion, dépôt et gestion ({eur(agg.fixed)}/mois) disparaissent en full {name}.
             </p>
           </div>
 
