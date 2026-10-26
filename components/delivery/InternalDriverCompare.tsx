@@ -9,8 +9,8 @@ import { Save, Info } from 'lucide-react'
 // de ces tournées (?drivers=…), avec les mêmes règles que sa facture.
 
 type Internal = {
-  dayRate: number; askedRate: number; fuelPerKm: number; tollPerKm: number; nightCost: number
-  truckMonthly: number; adminHours: number; hourlyRate: number; toursPerMonth: number
+  dayRate: number; askedRate: number; fuelPerKm: number; tollPerKm: number; hotelNight: number; mealsPerDay: number
+  travelDays: number; truckMonthly: number; depotMonthly: number; adminHours: number; hourlyRate: number; toursPerMonth: number
   daysByTour: Record<string, number>; nightsByTour: Record<string, number>
 }
 type Tour = {
@@ -33,8 +33,11 @@ const FIELDS: { key: keyof Internal; label: string; unit: string; step?: number 
   { key: 'askedRate', label: 'Tarif demandé', unit: '€/jour' },
   { key: 'fuelPerKm', label: 'Carburant', unit: '€/km', step: 0.01 },
   { key: 'tollPerKm', label: 'Péages', unit: '€/km', step: 0.01 },
-  { key: 'nightCost', label: 'Hôtel + repas', unit: '€/nuit' },
+  { key: 'hotelNight', label: 'Hôtel', unit: '€/nuit' },
+  { key: 'mealsPerDay', label: 'Repas midi + soir', unit: '€/jour' },
+  { key: 'travelDays', label: 'Jours aller/retour (en plus des jours de livraison)', unit: 'jours' },
   { key: 'truckMonthly', label: 'Camion (leasing, assurance, entretien)', unit: '€/mois' },
+  { key: 'depotMonthly', label: 'Loyer dépôt Bourges', unit: '€/mois' },
   { key: 'adminHours', label: 'Temps de gestion (tickets, notes de frais…)', unit: 'h/mois' },
   { key: 'hourlyRate', label: 'Coût de ce temps', unit: '€/h' },
   { key: 'toursPerMonth', label: 'Tournées par mois', unit: 'tournées' },
@@ -85,11 +88,13 @@ export default function InternalDriverCompare({ brand }: { brand: string }) {
   const rows = useMemo(() => {
     if (!data || !p) return []
     return data.tours.map(t => {
-      const days = p.daysByTour[t.id] ?? Math.max(1, t.deliveryDays.length)
+      const days = p.daysByTour[t.id] ?? Math.max(1, t.deliveryDays.length) + p.travelDays
       const nights = p.nightsByTour[t.id] ?? Math.max(0, days - 1)
       const fuel = t.costs.fuel ?? t.totalKm * p.fuelPerKm
       const toll = t.costs.toll ?? t.totalKm * p.tollPerKm
-      const stay = t.costs.hotel != null || t.costs.meal != null ? (t.costs.hotel ?? 0) + (t.costs.meal ?? 0) : nights * p.nightCost
+      const stay = t.costs.hotel != null || t.costs.meal != null
+        ? (t.costs.hotel ?? 0) + (t.costs.meal ?? 0)
+        : nights * p.hotelNight + days * p.mealsPerDay
       const expenses = fuel + toll + stay
       return { t, days, nights, expenses, at: (rate: number) => days * rate + expenses }
     })
@@ -102,13 +107,16 @@ export default function InternalDriverCompare({ brand }: { brand: string }) {
     const avgExpenses = rows.reduce((a, r) => a + r.expenses, 0) / n
     const avgTerence = rows.reduce((a, r) => a + r.t.terenceHT, 0) / n
     const avgDeliveries = rows.reduce((a, r) => a + r.t.billed, 0) / n
-    const fixed = p.truckMonthly + p.adminHours * p.hourlyRate
+    // Coûts qui n'existent que si on garde une activité interne (supprimés en full Terence)
+    const fixed = p.truckMonthly + p.depotMonthly + p.adminHours * p.hourlyRate
     const internalMonth = (rate: number, tours = p.toursPerMonth) => tours * (avgDays * rate + avgExpenses) + fixed
     const terenceMonth = (tours = p.toursPerMonth) => tours * avgTerence
-    // Tarif journalier au-delà duquel Terence devient moins cher
-    const breakEven = p.toursPerMonth > 0 && avgDays > 0
-      ? (terenceMonth() - fixed - p.toursPerMonth * avgExpenses) / (p.toursPerMonth * avgDays) : null
-    return { n, avgDays, avgExpenses, avgTerence, avgDeliveries, fixed, internalMonth, terenceMonth, breakEven }
+    // Nombre de tournées/mois à partir duquel l'interne devient moins cher
+    const breakEvenTours = (rate: number) => {
+      const gain = avgTerence - (avgDays * rate + avgExpenses)
+      return gain > 0 ? fixed / gain : null
+    }
+    return { n, avgDays, avgExpenses, avgTerence, avgDeliveries, fixed, internalMonth, terenceMonth, breakEvenTours }
   }, [rows, p])
 
   const name = data?.settings.name ?? 'Terence'
@@ -162,24 +170,33 @@ export default function InternalDriverCompare({ brand }: { brand: string }) {
             return (
               <>
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                  {card(`${who} à ${p.dayRate} €/j`, cur, `${p.toursPerMonth} tournées + camion + gestion`, cur - ter)}
+                  {card(`${who} à ${p.dayRate} €/j`, cur, `${p.toursPerMonth} tournées + camion + dépôt + gestion`, cur - ter)}
                   {card(`${who} à ${p.askedRate} €/j`, ask, 'au tarif qu’il demande', ask - ter)}
-                  {card(`Tout chez ${name}`, ter, `${eur(agg.avgTerence)} par tournée · 0 gestion`)}
+                  {card(`Tout chez ${name}`, ter, `${eur(agg.avgTerence)} par tournée · ni camion, ni dépôt, ni gestion`)}
                 </div>
-                <div className={`rounded-2xl px-5 py-4 border ${verdictAsk > 0 ? 'bg-[#fdf3f4] border-[#f5c9cf]' : 'bg-[#eef8f3] border-[#c5e6d6]'}`}>
-                  <p className="text-sm text-[#1a1a2e]">
-                    {verdictAsk > 0
-                      ? <>Au tarif demandé, garder {who} coûte <b>{eur(verdictAsk)} de plus par mois</b> que de tout donner à {name}.</>
-                      : <>Même au tarif demandé, garder {who} fait <b>économiser {eur(-verdictAsk)} par mois</b> par rapport à {name}.</>}
-                    {' '}
-                    {agg.breakEven == null ? null : agg.breakEven <= 0
-                      ? <>Même à 0 €/jour il resterait plus cher (camion + frais).</>
-                      : <>{who} reste intéressant tant qu&apos;il est <b>sous {eur(agg.breakEven)}/jour</b> (à {p.toursPerMonth} tournées/mois).</>}
-                  </p>
-                  <p className="text-[11px] text-[#6b6b63] mt-1">
-                    Le camion ({eur(p.truckMonthly)}/mois) n&apos;est économisé que si plus aucune tournée interne ne roule. Avec peu de tournées par mois, c&apos;est lui qui fait pencher la balance.
-                  </p>
-                </div>
+                {(() => {
+                  const be = agg.breakEvenTours(p.askedRate), beNow = agg.breakEvenTours(p.dayRate)
+                  const fmt = (n: number) => n.toLocaleString('fr-FR', { maximumFractionDigits: 1 })
+                  return (
+                    <div className={`rounded-2xl px-5 py-4 border ${verdictAsk > 0 ? 'bg-[#fdf3f4] border-[#f5c9cf]' : 'bg-[#eef8f3] border-[#c5e6d6]'}`}>
+                      <p className="text-sm text-[#1a1a2e]">
+                        {be == null
+                          ? <>Au tarif demandé, une tournée de {who} coûte déjà plus cher qu&apos;avec {name} : <b>full {name}</b>.</>
+                          : <>Au tarif demandé ({p.askedRate} €/j), garder {who} n&apos;est rentable qu&apos;<b>à partir de {fmt(be)} tournées par mois</b>
+                            {beNow != null && <> ({fmt(beNow)} à {p.dayRate} €/j)</>}. En dessous, camion + dépôt + gestion ({eur(agg.fixed)}/mois) mangent l&apos;économie faite sur chaque tournée.</>}
+                      </p>
+                      <p className="text-xs text-[#1a1a2e] mt-1.5">
+                        À {p.toursPerMonth} tournée{p.toursPerMonth > 1 ? 's' : ''}/mois :{' '}
+                        {verdictAsk > 0
+                          ? <><b>{name} moins cher de {eur(verdictAsk)}/mois</b></>
+                          : <><b>{who} moins cher de {eur(-verdictAsk)}/mois</b> — soit {eur(-verdictAsk / Math.max(1, p.toursPerMonth))} par tournée pour gérer le gars, ses tickets et le camion.</>}
+                      </p>
+                      <p className="text-[11px] text-[#6b6b63] mt-1">
+                        Une tournée interne coûte en moyenne {eur(agg.avgDays * p.askedRate + agg.avgExpenses)} ({fmt(agg.avgDays)} jours) contre {eur(agg.avgTerence)} chez {name} sur les mêmes livraisons.
+                      </p>
+                    </div>
+                  )
+                })()}
               </>
             )
           })()}
@@ -199,7 +216,7 @@ export default function InternalDriverCompare({ brand }: { brand: string }) {
                   </tr>
                 </thead>
                 <tbody>
-                  {[1, 2, 3, 4, 6, 8].map(n => {
+                  {[1, 2, 3, 4, 5, 6].map(n => {
                     const ask = agg.internalMonth(p.askedRate, n), ter = agg.terenceMonth(n)
                     return (
                       <tr key={n} className={`border-t border-[#f3f3f1] ${n === p.toursPerMonth ? 'bg-[#f7f7f5] font-semibold' : ''}`}>
@@ -310,7 +327,7 @@ export default function InternalDriverCompare({ brand }: { brand: string }) {
             </div>
             <p className="text-[11px] text-[#9b9b93] leading-relaxed">
               Carburant et péages au km : moyenne de la feuille transport mai–sept. 2026. Camion : leasing VW (1 268 €) + assurance (82 €) + entretien.
-              Non chiffré : avec {name}, les représentations après absence ne sont pas refacturées ; le stock doit être au dépôt de Bordeaux.
+              Jours par défaut = jours de livraison + aller/retour ; nuits = jours − 1. Non chiffré : avec {name}, les représentations après absence ne sont pas refacturées ; le stock doit être au dépôt de Bordeaux.
             </p>
           </div>
         </div>
