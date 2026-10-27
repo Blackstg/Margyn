@@ -4,6 +4,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 import { shopifyCreds } from '@/lib/tenant/integrations'
+import { loadBillingOverride, applyBillingOverride } from '@/lib/billing/overrides'
 
 export const dynamic = 'force-dynamic'
 
@@ -45,7 +46,13 @@ export async function GET(req: NextRequest) {
     const sb = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!, { auth: { persistSession: false } })
     const { data: settings } = await sb.from('invoice_settings').select('*').eq('brand', brand).maybeSingle()
 
-    return NextResponse.json({ order, settings: settings ?? null })
+    const o = order as { id?: number; billing_address?: Record<string, unknown> | null }
+    const override = o.id ? await loadBillingOverride(brand, o.id) : null
+    // Champs internes (auteur de la modif) non exposés sur la page publique.
+    const merged = applyBillingOverride(o, override)
+    delete (merged as { billing_override?: unknown }).billing_override
+
+    return NextResponse.json({ order: merged, settings: settings ?? null })
   } catch (e) {
     return NextResponse.json({ error: String(e) }, { status: 500 })
   }

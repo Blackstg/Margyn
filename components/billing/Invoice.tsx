@@ -39,6 +39,7 @@ export interface ShopifyOrder {
     zip?:      string
     country?:  string
     phone?:    string
+    vat_number?: string
   } | null
   line_items: LineItem[]
   refunds?:   Refund[]
@@ -291,6 +292,7 @@ export function Invoice({ order, settings, mode }: { order: ShopifyOrder; settin
               <p style={S.addrLine}>{[billingAddr.zip, billingAddr.city].filter(Boolean).join(' ')}</p>
             )}
             {billingAddr?.country && <p style={S.addrLine}>{billingAddr.country}</p>}
+            {billingAddr?.vat_number && <p style={{ ...S.addrLine, marginTop: 6 }}>N° de TVA : {billingAddr.vat_number}</p>}
           </div>
         </div>
 

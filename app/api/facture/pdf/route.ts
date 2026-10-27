@@ -13,7 +13,7 @@ interface Order {
   name: string; created_at: string; total_price: string; subtotal_price: string; total_tax: string
   financial_status: string; gateway?: string; payment_gateway_names?: string[]
   customer: { first_name?: string; last_name?: string } | null
-  billing_address: { name?: string; company?: string; address1?: string; address2?: string; city?: string; zip?: string; country?: string } | null
+  billing_address: { name?: string; company?: string; address1?: string; address2?: string; city?: string; zip?: string; country?: string; vat_number?: string } | null
   line_items: LineItem[]
 }
 interface Settings {
@@ -128,7 +128,7 @@ export async function GET(req: NextRequest) {
   text(clientName, colR, billing?.company ? y - 13 : y, { size: 11, font: billing?.company ? font : bold })
   y -= 14
   const sellerLines = [settings.address_line1, settings.address_line2, [settings.zip, settings.city].filter(Boolean).join(' '), settings.country, settings.vat_number ? `No de TVA : ${settings.vat_number}` : ''].filter(Boolean) as string[]
-  const buyerLines = [billing?.address1, billing?.address2, [billing?.zip, billing?.city].filter(Boolean).join(' '), billing?.country].filter(Boolean) as string[]
+  const buyerLines = [billing?.address1, billing?.address2, [billing?.zip, billing?.city].filter(Boolean).join(' '), billing?.country, billing?.vat_number ? `N° de TVA : ${billing.vat_number}` : ''].filter(Boolean) as string[]
   let ys = y, yb = billing?.company ? y - 13 : y
   for (const l of sellerLines) { text(l, L, ys, { size: 10, color: rgb(0.33, 0.33, 0.33) }); ys -= 13 }
   for (const l of buyerLines)  { text(l, colR, yb, { size: 10, color: rgb(0.33, 0.33, 0.33) }); yb -= 13 }

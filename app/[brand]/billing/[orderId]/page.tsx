@@ -4,10 +4,11 @@ export const dynamic = 'force-dynamic'
 
 import { useState, useEffect, useCallback } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
-import { ArrowLeft, Download, Loader2, AlertCircle } from 'lucide-react'
+import { ArrowLeft, Download, Loader2, AlertCircle, UserPen } from 'lucide-react'
 import { useBrand } from '@/context/BrandContext'
 
 import { Invoice, type ShopifyOrder, type InvoiceSettings } from '@/components/billing/Invoice'
+import { BillingContactEditor } from '@/components/billing/BillingContactEditor'
 
 
 // ─── Page ─────────────────────────────────────────────────────────────────────
@@ -23,6 +24,9 @@ export default function InvoicePage({ params }: { params: { orderId: string } })
   const [settings, setSettings] = useState<InvoiceSettings | null>(null)
   const [loading, setLoading]   = useState(true)
   const [error, setError]       = useState<string | null>(null)
+  const [shopifyBilling, setShopifyBilling] = useState<Record<string, string> | null>(null)
+  const [hasOverride, setHasOverride]       = useState(false)
+  const [editing, setEditing]               = useState(false)
 
   // La commande a-t-elle un remboursement Shopify ? (pastille sur l'onglet Avoir)
   const orderHasRefund = !!order?.refunds?.some(r =>
@@ -65,6 +69,8 @@ export default function InvoicePage({ params }: { params: { orderId: string } })
       const settingsData = await settingsRes.json()
       if (orderData.error) { setError(orderData.error); return }
       setOrder(orderData.order)
+      setShopifyBilling(orderData.shopify_billing ?? null)
+      setHasOverride(!!orderData.order?.billing_override)
       setSettings(settingsData.settings ?? null)
     } catch (e) {
       setError(String(e))
@@ -109,6 +115,15 @@ export default function InvoicePage({ params }: { params: { orderId: string } })
               </div>
 
               <button
+                onClick={() => setEditing(true)}
+                className="flex items-center gap-2 px-3.5 py-2 rounded-xl border border-[#e8e8e4] text-sm font-medium text-[#1a1a2e] hover:bg-[#f3f3f1] transition-colors"
+              >
+                <UserPen size={14} strokeWidth={2} />
+                Modifier le client
+                {hasOverride && <span className="w-1.5 h-1.5 rounded-full bg-[#2563eb]" title="Contact modifié" />}
+              </button>
+
+              <button
                 onClick={handlePrint}
                 className="flex items-center gap-2 px-4 py-2 rounded-xl bg-[#1a1a2e] text-white text-sm font-medium hover:bg-[#2d2d4a] transition-colors shadow-sm"
               >
@@ -139,6 +154,18 @@ export default function InvoicePage({ params }: { params: { orderId: string } })
           ) : null}
         </div>
       </div>
+
+      {editing && order && (
+        <BillingContactEditor
+          brand={brand}
+          orderId={params.orderId}
+          current={order.billing_address as Record<string, string> | null}
+          shopify={shopifyBilling}
+          hasOverride={hasOverride}
+          onClose={() => setEditing(false)}
+          onSaved={() => { setEditing(false); load() }}
+        />
+      )}
     </>
   )
 }
