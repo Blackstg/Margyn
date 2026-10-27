@@ -193,8 +193,8 @@ export function Invoice({ order, settings, mode }: { order: ShopifyOrder; settin
     logo:       { height: settings?.logo_size ?? 36, objectFit: 'contain' as const },
     logoText:   { fontSize: settings?.logo_size ?? 28, fontWeight: 900, letterSpacing: '-1px', color: '#1a1a18', lineHeight: 1 },
     headerRight:{ display: 'flex', flexDirection: 'column' as const, alignItems: 'flex-end', gap: 6 },
-    invoiceLabel:{ fontSize: 11, color: '#888', letterSpacing: '0.5px' },
-    invoiceNum: { fontSize: 13, fontWeight: 700, letterSpacing: '0.5px' },
+    invoiceLabel:{ fontSize: 22, fontWeight: 900, color: '#1a1a18', letterSpacing: '1px', lineHeight: 1.1, textAlign: 'right' as const },
+    invoiceNum: { fontSize: 14, fontWeight: 700, letterSpacing: '0.5px', marginTop: 2, textAlign: 'right' as const },
     dateBadge:  { backgroundColor: primary, color: '#fff', padding: '6px 14px', fontSize: 11, fontWeight: 700, letterSpacing: '0.5px', textAlign: 'center' as const },
     dateLabel:  { fontSize: 9, opacity: 0.75, marginBottom: 2, letterSpacing: '0.5px' },
     dateVal:    { fontSize: 12, fontWeight: 800, letterSpacing: '0.5px' },
@@ -251,7 +251,7 @@ export function Invoice({ order, settings, mode }: { order: ShopifyOrder; settin
           <div style={S.headerRight}>
             <div>
               <div style={{ ...S.invoiceLabel, ...(isAvoir ? { color: '#c7293a', fontWeight: 700 } : {}) }}>{isAvoir ? "FACTURE D'AVOIR" : 'FACTURE'}</div>
-              <div style={S.invoiceNum} data-invoice-number>{docNumber}</div>
+              <div style={S.invoiceNum} data-invoice-number>N° {docNumber}</div>
               {isAvoir && (
                 <div style={{ fontSize: 10, color: '#c7293a', marginTop: 2, textAlign: 'right' }}>
                   Avoir sur facture n° {invoiceNumber}

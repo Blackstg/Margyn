@@ -105,8 +105,8 @@ export async function GET(req: NextRequest) {
 
   // Header
   text(settings.company_name || 'Steero', L, y, { size: 22, font: bold })
-  text('FACTURE', R, y + 4, { size: 11, font: bold, color: grey, align: 'right' })
-  text(`No ${invoiceNumber}`, R, y - 10, { size: 12, font: bold, align: 'right' })
+  text('FACTURE', R, y + 2, { size: 20, font: bold, align: 'right' })
+  text(`N° ${invoiceNumber}`, R, y - 13, { size: 12, font: bold, align: 'right' })
   // Badge date
   const badgeW = 150, badgeH = 34, bx = R - badgeW, by = y - 52
   page.drawRectangle({ x: bx, y: by, width: badgeW, height: badgeH, color: primary })
