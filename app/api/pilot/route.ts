@@ -15,6 +15,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 import { shopifyCreds } from '@/lib/tenant/integrations'
 import { loadValidity, activeIn, validityKey } from '@/lib/fixedCostValidity'
+import { loadTargets } from '@/lib/pilotTargets'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 120
@@ -150,6 +151,7 @@ export async function GET(req: NextRequest) {
     ])
     const feeRate = Number(settings?.transaction_fee_rate ?? 0.017)
     const validity = await loadValidity(sb, brand)
+    const targets = await loadTargets(sb, brand)
 
     // ── Agrégation par mois ───────────────────────────────────────────────────
     type Bucket = { key: string; label: string; orders: number; revenueHT: number; cogs: number; delivery: number; estimated: number; fees: number; shippingHT: number }
@@ -305,7 +307,7 @@ export async function GET(req: NextRequest) {
     // Charges récurrentes éditables (salaires, crédits/compta, applis) avec leur période
     const recurringRows = (fixed ?? []).filter(r => r.month === '1900-01-01' && ['team', 'infra', 'app'].includes(String(r.category)))
       .map(r => ({ category: String(r.category), label: String(r.label ?? ''), amount: Number(r.amount || 0), ...validity[validityKey(String(r.category), String(r.label ?? ''))] }))
-    return NextResponse.json({ brand, today, subcontractStart: SUBCONTRACT_START, feeRate, recurring: recurringRows, avgTerenceByBucket: avgPrice.map(v => v == null ? null : r0(v)),
+    return NextResponse.json({ brand, today, subcontractStart: SUBCONTRACT_START, feeRate, targets, recurring: recurringRows, avgTerenceByBucket: avgPrice.map(v => v == null ? null : r0(v)),
       missingCostProducts: [...missingTitles.entries()].sort((a, b) => b[1] - a[1]).slice(0, 15).map(([title, qty]) => ({ title, qty })),
       months: out })
   } catch (e) {

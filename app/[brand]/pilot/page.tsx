@@ -21,11 +21,12 @@ type Month = {
   buckets: Bucket[]
 }
 type FixedRow = { category: string; label: string; amount: number; from?: string; to?: string }
-type Data = { today: string; recurring: FixedRow[]; subcontractStart: string; avgTerenceByBucket: (number | null)[]; missingCostProducts: { title: string; qty: number }[]; months: Month[] }
+type Targets = { profit: number; products: number; delivery: number; ads: number; fees: number }
+type Data = { today: string; targets: Targets; recurring: FixedRow[]; subcontractStart: string; avgTerenceByBucket: (number | null)[]; missingCostProducts: { title: string; qty: number }[]; months: Month[] }
 
-// Repères (% du CA HT net) — ordres de grandeur pour un e-commerce rentable de produits
-// encombrants livrés. À ajuster selon vos objectifs.
-const TARGETS = { products: 30, delivery: 15, ads: 20, fees: 2 }
+// Cibles (% du CA HT net) : modifiables dans la page (carte « Tes cibles »), enregistrées
+// par marque. Le « plafond » d'un poste = ce qu'il peut peser pour atteindre le bénéfice
+// visé, les autres postes et les charges fixes restant à leur niveau du mois.
 
 const eur = (n: number | null | undefined) => n == null ? '—' : new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR', maximumFractionDigits: 0 }).format(n)
 const pct = (n: number, d: number) => d > 0 ? Math.round((n / d) * 1000) / 10 : 0
@@ -39,6 +40,7 @@ export default function PilotPage() {
   const [error, setError] = useState<string | null>(null)
   const [sel, setSel] = useState<string | null>(null)
   const [reload, setReload] = useState(0)
+  const [targets, setTargets] = useState<Targets | null>(null)
 
   useEffect(() => {
     setError(null)
@@ -47,6 +49,7 @@ export default function PilotPage() {
       .then((d: Data & { error?: string }) => {
         if (d.error) { setError(d.error); return }
         setData(d)
+        setTargets(t => t ?? d.targets)
         setSel(prev => prev && d.months.some(x => x.month === prev) ? prev : d.months[d.months.length - 1]?.month ?? null)
       })
       .catch(e => setError(String(e)))
@@ -57,7 +60,7 @@ export default function PilotPage() {
   if (error) return (
     <div className="p-8"><div className="flex items-center gap-2 rounded-xl border border-red-100 bg-red-50 px-4 py-3 text-sm text-red-700"><AlertCircle size={15} />{error}</div></div>
   )
-  if (!data || !m) return <div className="flex items-center justify-center py-32"><Loader2 size={24} className="animate-spin text-[#9b9b93]" /></div>
+  if (!data || !m || !targets) return <div className="flex items-center justify-center py-32"><Loader2 size={24} className="animate-spin text-[#9b9b93]" /></div>
 
   const ca = m.revenue.netHT
   const c = m.costs
@@ -67,16 +70,23 @@ export default function PilotPage() {
   const variableRate = ca > 0 ? (c.products + deliveryAll + c.fees) / ca : 0
   const breakEvenCA = variableRate < 1 ? (c.ads + fixedAll) / (1 - variableRate) : null
 
-  // Leviers : écart au repère, en € par mois
+  const TARGETS = targets
+  const fixedShare = pct(fixedAll, ca)
+  const variableShares = { products: pct(c.products, ca), delivery: pct(deliveryAll, ca), ads: pct(c.ads, ca), fees: pct(c.fees, ca) }
+  // Plafond d'un poste pour atteindre le bénéfice visé, le reste inchangé
+  const ceiling = (key: keyof typeof variableShares) => Math.round((100 - TARGETS.profit - fixedShare
+    - Object.entries(variableShares).filter(([k]) => k !== key).reduce((s, [, v]) => s + v, 0)) * 10) / 10
+
+  // Leviers : écart à la cible, en € par mois
   const levers = [
-    { key: 'delivery', label: 'Livraison (Terence + transport interne)', value: deliveryAll, target: TARGETS.delivery,
+    { key: 'delivery' as const, label: 'Livraison (Terence + transport interne)', value: deliveryAll, target: TARGETS.delivery,
       hint: 'Faire payer la livraison des petites commandes, arrêter les coûts fixes du transport interne (dépôt, leasing) si tout passe chez Terence, regrouper les livraisons.' },
-    { key: 'ads', label: 'Publicité', value: c.ads, target: TARGETS.ads,
+    { key: 'ads' as const, label: 'Publicité', value: c.ads, target: TARGETS.ads,
       hint: `Chaque commande panneaux coûte ${eur(m.kpis.cac)} de pub. Couper les campagnes qui ramènent surtout des échantillons ou des petites commandes.` },
-    { key: 'products', label: "Coût d'achat produits", value: c.products, target: TARGETS.products,
+    { key: 'products' as const, label: "Coût d'achat produits", value: c.products, target: TARGETS.products,
       hint: 'Renégocier les achats, ou augmenter les prix de vente.' },
-    { key: 'fees', label: 'Frais de paiement', value: c.fees, target: TARGETS.fees, hint: 'Commission Shopify Payments / PayPal.' },
-  ].map(l => ({ ...l, share: pct(l.value, ca), gap: Math.max(0, Math.round(l.value - ca * l.target / 100)) }))
+    { key: 'fees' as const, label: 'Frais de paiement', value: c.fees, target: TARGETS.fees, hint: 'Commission Shopify Payments / PayPal.' },
+  ].map(l => ({ ...l, share: pct(l.value, ca), ceiling: ceiling(l.key), gap: Math.max(0, Math.round(l.value - ca * l.target / 100)) }))
     .sort((a, b) => b.gap - a.gap)
 
   const small = m.buckets.find(b => b.key === '1-3')
@@ -85,8 +95,7 @@ export default function PilotPage() {
   // Répartition de 100 € de CA
   const split = [
     { label: 'Produits', v: c.products, target: TARGETS.products },
-    { label: 'Livraison Terence', v: c.delivery, target: c.transport > 0 ? undefined : TARGETS.delivery },
-    { label: 'Transport interne', v: c.transport, target: c.delivery > 0 ? undefined : TARGETS.delivery },
+    { label: c.delivery > 0 && c.transport > 0 ? 'Livraison (Terence + interne)' : c.transport > 0 ? 'Livraison (transport interne)' : 'Livraison Terence', v: deliveryAll, target: TARGETS.delivery },
     { label: 'Pub', v: c.ads, target: TARGETS.ads },
     { label: 'Salaires', v: c.team },
     { label: 'Crédits, compta, applis', v: c.infra + c.apps },
@@ -145,6 +154,8 @@ export default function PilotPage() {
           </div>
         )}
 
+        <TargetsEditor brand={brand} targets={TARGETS} onChange={setTargets} fixedShare={fixedShare} month={monthLabel(m.month)} />
+
         <div className="grid gap-5 lg:grid-cols-2">
           {/* Où part chaque 100 € */}
           <Card title={`Où part 100 € de CA · ${monthLabel(m.month)}`}>
@@ -153,14 +164,14 @@ export default function PilotPage() {
                 const share = pct(s.v, ca)
                 const over = s.target != null && share > s.target
                 return (
-                  <div key={s.label} title={`${s.label} : ${eur(s.v)} = ${share} % du CA${s.target != null ? ` (repère ${s.target} %)` : ''}`}>
+                  <div key={s.label} title={`${s.label} : ${eur(s.v)} = ${share} % du CA${s.target != null ? ` (cible ${s.target} %)` : ''}`}>
                     <div className="mb-1 flex justify-between text-xs">
                       <span className="text-[#1a1a2e]">{s.label}</span>
                       <span className="tabular-nums text-[#6b6b63]">{eur(s.v)} · <b className="text-[#1a1a2e]">{share.toLocaleString('fr-FR')} €</b></span>
                     </div>
                     <div className="relative h-2.5 rounded-full bg-[#f0f0ee]">
                       <div className="h-2.5 rounded-full" style={{ width: `${Math.min(100, share / maxShare * 100)}%`, background: over ? '#c7293a' : '#1a1a2e' }} />
-                      {s.target != null && <div className="absolute top-[-3px] h-4 w-0.5 bg-[#1f7a5a]" style={{ left: `${s.target / maxShare * 100}%` }} title={`Repère ${s.target} %`} />}
+                      {s.target != null && <div className="absolute top-[-3px] h-4 w-0.5 bg-[#1f7a5a]" style={{ left: `${s.target / maxShare * 100}%` }} title={`Cible ${s.target} %`} />}
                     </div>
                   </div>
                 )
@@ -169,7 +180,7 @@ export default function PilotPage() {
                 <span className="font-semibold text-[#1a1a2e]">Il reste</span>
                 <span className={`font-bold tabular-nums ${m.result < 0 ? 'text-[#c7293a]' : 'text-[#1f7a5a]'}`}>{pct(m.result, ca).toLocaleString('fr-FR')} €</span>
               </div>
-              <p className="text-[11px] text-[#9b9b93]">Trait vert = repère. Barre rouge = au-dessus du repère.</p>
+              <p className="text-[11px] text-[#9b9b93]">Trait vert = ta cible. Barre rouge = au-dessus de la cible.</p>
             </div>
           </Card>
 
@@ -180,10 +191,13 @@ export default function PilotPage() {
                 <div key={l.key} className="rounded-xl border border-[#efefec] px-3.5 py-3">
                   <div className="flex items-baseline justify-between gap-3">
                     <p className="text-sm font-semibold text-[#1a1a2e]">{i + 1}. {l.label}</p>
-                    <p className="shrink-0 text-xs tabular-nums text-[#6b6b63]">{l.share.toLocaleString('fr-FR')} % <span className="text-[#9b9b93]">/ repère {l.target} %</span></p>
+                    <p className="shrink-0 text-xs tabular-nums text-[#6b6b63]">{l.share.toLocaleString('fr-FR')} % <span className="text-[#9b9b93]">/ cible {l.target.toLocaleString('fr-FR')} %</span></p>
                   </div>
                   <p className={`mt-0.5 text-xs font-medium ${l.gap > 0 ? 'text-[#c7293a]' : 'text-[#1f7a5a]'}`}>
-                    {l.gap > 0 ? `${eur(l.gap)} de trop ce mois-ci par rapport au repère` : 'Dans le repère'}
+                    {l.gap > 0 ? `${eur(l.gap)} de trop ce mois-ci par rapport à la cible` : 'Dans la cible'}
+                  </p>
+                  <p className="mt-0.5 text-[11px] text-[#6b6b63]">
+                    Plafond pour {TARGETS.profit.toLocaleString('fr-FR')} % de bénéfice, le reste inchangé : <b className={l.share > l.ceiling ? 'text-[#c7293a]' : 'text-[#1f7a5a]'}>{l.ceiling > 0 ? `${l.ceiling.toLocaleString('fr-FR')} %` : 'impossible seul'}</b>
                   </p>
                   {l.gap > 0 && <p className="mt-1 text-[11px] leading-relaxed text-[#6b6b63]">{l.hint}</p>}
                 </div>
@@ -431,6 +445,74 @@ function FixedCostsEditor({ brand, rows, onSaved }: { brand: string; rows: Fixed
           {state === 'saving' ? <Loader2 size={13} className="animate-spin" /> : <Save size={13} />} Enregistrer
         </button>
       </div>
+    </Card>
+  )
+}
+
+const TARGET_FIELDS: { key: keyof Targets; label: string; hint: string }[] = [
+  { key: 'profit', label: 'Bénéfice visé', hint: 'ce qui doit rester à la fin' },
+  { key: 'products', label: 'Produits', hint: "coût d'achat" },
+  { key: 'delivery', label: 'Livraison', hint: 'Terence + transport interne' },
+  { key: 'ads', label: 'Pub', hint: 'toutes plateformes' },
+  { key: 'fees', label: 'Frais de paiement', hint: 'Shopify, PayPal' },
+]
+
+// Cibles en % du CA : appliquées en direct à la page (simulation), enregistrées sur demande.
+function TargetsEditor({ brand, targets, onChange, fixedShare, month }: {
+  brand: string; targets: Targets; onChange: (t: Targets) => void; fixedShare: number; month: string
+}) {
+  const [state, setState] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle')
+  const [msg, setMsg] = useState('')
+  const variable = targets.products + targets.delivery + targets.ads + targets.fees
+  const left = Math.round((100 - variable - fixedShare) * 10) / 10
+
+  async function save() {
+    setState('saving'); setMsg('')
+    try {
+      const res = await fetch(`/api/pilot/targets?brand=${brand}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(targets) })
+      const d = await res.json().catch(() => ({}))
+      if (!res.ok || d.error) throw new Error(d.error ?? `Erreur ${res.status}`)
+      setState('saved'); setTimeout(() => setState('idle'), 2500)
+    } catch (e) {
+      setState('error'); setMsg(e instanceof Error ? e.message : String(e))
+    }
+  }
+
+  return (
+    <Card title="Tes cibles (% du CA HT)">
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-5">
+        {TARGET_FIELDS.map(f => (
+          <label key={f.key} className="block">
+            <span className="text-xs font-medium text-[#1a1a2e]">{f.label}</span>
+            <div className="mt-1 flex items-center gap-1">
+              <input type="number" min={0} max={100} step={0.5} value={targets[f.key]}
+                onChange={e => { const n = parseFloat(e.target.value); onChange({ ...targets, [f.key]: Number.isFinite(n) ? n : 0 }) }}
+                className="w-20 rounded-lg border border-[#e8e8e4] px-2 py-1 text-right text-sm tabular-nums" />
+              <span className="text-sm text-[#6b6b63]">%</span>
+            </div>
+            <span className="text-[11px] text-[#9b9b93]">{f.hint}</span>
+          </label>
+        ))}
+      </div>
+      <div className="mt-3 flex flex-wrap items-center justify-between gap-3 border-t border-[#f0f0ee] pt-3">
+        <p className="text-xs text-[#6b6b63]">
+          Produits + livraison + pub + frais = <b className="text-[#1a1a2e]">{variable.toLocaleString('fr-FR')} %</b>, charges fixes de {month} = <b className="text-[#1a1a2e]">{fixedShare.toLocaleString('fr-FR')} %</b>
+          {' → '}il resterait <b className={left < targets.profit ? 'text-[#c7293a]' : 'text-[#1f7a5a]'}>{left.toLocaleString('fr-FR')} %</b> de bénéfice
+          {left < targets.profit ? ` (moins que les ${targets.profit.toLocaleString('fr-FR')} % visés : baisse une cible ou fais monter le CA pour diluer les fixes)` : ''}.
+        </p>
+        <div className="flex items-center gap-3">
+          {state === 'error' && <span className="text-xs text-[#c7293a]">{msg}</span>}
+          {state === 'saved' && <span className="text-xs text-[#1f7a5a]">Cibles enregistrées</span>}
+          <button onClick={save} disabled={state === 'saving'}
+            className="inline-flex items-center gap-2 rounded-xl bg-[#1a1a2e] px-4 py-2 text-sm font-medium text-white hover:bg-[#2d2d4a] disabled:opacity-50">
+            {state === 'saving' ? <Loader2 size={13} className="animate-spin" /> : <Save size={13} />} Enregistrer
+          </button>
+        </div>
+      </div>
+      <p className="mt-2 text-[11px] text-[#9b9b93]">
+        Les chiffres de la page se mettent à jour dès que tu changes une cible (simulation) ; « Enregistrer » les garde pour la prochaine fois.
+        Livraison : produit lourd livré, colles, vis et accessoires voyagent avec les panneaux sans surcoût.
+      </p>
     </Card>
   )
 }
