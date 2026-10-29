@@ -83,8 +83,8 @@ export default function PilotPage() {
   // Répartition de 100 € de CA
   const split = [
     { label: 'Produits', v: c.products, target: TARGETS.products },
-    { label: 'Livraison Terence', v: c.delivery },
-    { label: 'Transport interne', v: c.transport },
+    { label: 'Livraison Terence', v: c.delivery, target: c.transport > 0 ? undefined : TARGETS.delivery },
+    { label: 'Transport interne', v: c.transport, target: c.delivery > 0 ? undefined : TARGETS.delivery },
     { label: 'Pub', v: c.ads, target: TARGETS.ads },
     { label: 'Salaires', v: c.team },
     { label: 'Crédits, compta, applis', v: c.infra + c.apps },
@@ -204,7 +204,7 @@ export default function PilotPage() {
                 <tr className="text-[11px] text-[#9b9b93]">
                   <th className="py-2 pr-4 text-left font-semibold"></th>
                   {data.months.map(x => (
-                    <th key={x.month} className={`px-3 py-2 text-right font-semibold capitalize ${x.month === sel ? 'text-[#1a1a2e]' : ''}`}>{monthShort(x.month)}{x.partial ? ' (en cours)' : ''}</th>
+                    <th key={x.month} className={`px-3 py-2 text-right font-semibold ${x.month === sel ? 'text-[#1a1a2e]' : ''}`}><span className="capitalize">{monthShort(x.month)}</span>{x.partial ? ' (en cours)' : ''}</th>
                   ))}
                 </tr>
               </thead>
@@ -327,7 +327,7 @@ function PL({ months, sel, label, get, strong, share, color, note, plain, raw }:
         return (
           <td key={x.month} className={`px-3 py-1.5 text-right tabular-nums ${x.month === sel ? 'bg-[#f7f7f5]' : ''}`} title={n}>
             <span className={`${strong ? 'font-semibold' : ''} ${color && v != null ? (v < 0 ? 'text-[#c7293a]' : 'text-[#1f7a5a]') : v != null && v < 0 ? 'text-[#6b6b63]' : 'text-[#1a1a2e]'}`}>
-              {v == null ? '—' : raw ? v.toLocaleString('fr-FR') : eur(v)}
+              {v == null || (v === 0 && !strong) ? '—' : raw ? v.toLocaleString('fr-FR') : eur(v + 0)}
             </span>
             {share && v != null && x.revenue.netHT > 0 && <span className="block text-[10px] text-[#9b9b93]">{Math.abs(pct(v, x.revenue.netHT)).toLocaleString('fr-FR')} %</span>}
             {n && <span className="block text-[10px] text-[#8a5a00]">{n.length > 28 ? '' : n}</span>}
