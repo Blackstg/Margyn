@@ -4,11 +4,28 @@
 // La livraison est une feature Bowa uniquement (table delivery_stops, sans colonne brand).
 import { NextRequest, NextResponse } from 'next/server'
 import { createAdminClient } from '@/lib/supabase'
+import { createServerClient } from '@supabase/auth-helpers-nextjs'
+import { cookies } from 'next/headers'
 
 export const dynamic = 'force-dynamic'
 export const fetchCache = 'force-no-store'
 
+async function signedIn(): Promise<boolean> {
+  try {
+    const store = await cookies()
+    const sb = createServerClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+      { cookies: { getAll() { return store.getAll() }, setAll() {} } },
+    )
+    const { data: { user } } = await sb.auth.getUser()
+    return !!user
+  } catch { return false }
+}
+
 export async function GET(req: NextRequest) {
+  // Adresses, téléphones, signatures : réservé aux comptes connectés
+  if (!(await signedIn())) return NextResponse.json({ stops: [], error: 'Non connecté' }, { status: 401 })
   const email = (req.nextUrl.searchParams.get('email') ?? '').trim()
   const order = (req.nextUrl.searchParams.get('order') ?? '').trim()
   if (!email && !order) return NextResponse.json({ stops: [] })
