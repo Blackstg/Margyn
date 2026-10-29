@@ -480,6 +480,7 @@ function OrderBlock({ order }: { order: MoomOrder }) {
           <span className="font-medium text-[#1a1a2e]">{order.estimated_delivery}</span>
         </>}
       </div>
+      {order.order_number && <OrderReceivedLine order={order.order_number} />}
       {order.products.length > 0 && (
         <div className="border-t border-[#eeede9] pt-2 space-y-1">
           {order.products.map((p, i) => (
@@ -801,23 +802,50 @@ const DELIVERY_STATUS: Record<string, { label: string; cls: string }> = {
   partial:   { label: 'Partiel',        cls: 'bg-[#fef3c7] text-[#b45309]' },
   failed:    { label: 'Échec livraison', cls: 'bg-[#fce8ea] text-[#c7293a]' },
 }
-function BowaDeliveryProof({ email }: { email: string }) {
+// Livraisons Bowa d'un client, par email et/ou n° de commande
+function useDeliveryProof(email: string, order?: string | null) {
   const [stops, setStops] = useState<DeliveryStopProof[] | null>(null)
   useEffect(() => {
-    if (savBrand() !== 'bowa' || !email) { setStops(null); return }
+    if (savBrand() !== 'bowa' || (!email && !order)) { setStops(null); return }
     let cancelled = false
-    fetch(`/api/sav/delivery-proof?email=${encodeURIComponent(email)}`, { cache: 'no-store' })
+    const qs = new URLSearchParams()
+    if (email) qs.set('email', email)
+    if (order) qs.set('order', order)
+    fetch(`/api/sav/delivery-proof?${qs}`, { cache: 'no-store' })
       .then(r => r.json())
       .then(d => { if (!cancelled) setStops(d.stops ?? []) })
       .catch(() => { if (!cancelled) setStops([]) })
     return () => { cancelled = true }
-  }, [email])
+  }, [email, order])
+  return stops
+}
+
+// « Reçue et signée le 29 octobre 2026 à 13:59 » (heure de Paris)
+function receivedLine(s: DeliveryStopProof): string | null {
+  if (!s.delivered_at) return null
+  const d = new Date(s.delivered_at)
+  const day = d.toLocaleDateString('fr-FR', { day: 'numeric', month: 'long', year: 'numeric', timeZone: 'Europe/Paris' })
+  const time = d.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Paris' })
+  const what = s.status === 'failed' ? 'Échec de livraison le'
+    : s.status === 'partial' ? (s.signature_url ? 'Reçue en partie et signée le' : 'Reçue en partie le')
+    : s.status === 'delivered' ? (s.signature_url ? 'Reçue et signée le' : 'Livrée (sans signature) le')
+    : null
+  return what ? `${what} ${day} à ${time}` : null
+}
+
+// Ligne compacte sous une commande : date et heure de réception / signature
+function OrderReceivedLine({ order }: { order: string }) {
+  const stops = useDeliveryProof('', order)
+  const s = stops?.find(x => x.status === 'delivered' || x.status === 'partial') ?? stops?.[0]
+  const line = s ? receivedLine(s) : null
+  if (!line) return null
+  return <p className={`text-[10px] font-medium mt-0.5 ${s!.status === 'failed' ? 'text-[#c7293a]' : 'text-[#1a7f4b]'}`}>✍️ {line}</p>
+}
+
+function BowaDeliveryProof({ email, order }: { email: string; order?: string | null }) {
+  const stops = useDeliveryProof(email, order)
 
   if (savBrand() !== 'bowa' || !stops || stops.length === 0) return null
-
-  const fmt = (iso: string | null) => iso
-    ? new Date(iso).toLocaleString('fr-FR', { day: '2-digit', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Paris' })
-    : '—'
 
   return (
     <div>
@@ -831,7 +859,7 @@ function BowaDeliveryProof({ email }: { email: string }) {
                 <span className={`inline-flex px-2 py-0.5 rounded-full text-[10px] font-semibold ${st.cls}`}>{st.label}</span>
                 {s.order_name && <span className="font-mono text-xs text-[#6b6b63]">{s.order_name}</span>}
               </div>
-              {s.delivered_at && <p className="text-sm text-[#1a1a2e]"><span className="text-[#9b9b93]">📅 </span>{fmt(s.delivered_at)}</p>}
+              {receivedLine(s) && <p className="text-sm font-medium text-[#1a1a2e]">✍️ {receivedLine(s)}</p>}
               {(s.address1 || s.city) && <p className="text-xs text-[#6b6b63] mt-0.5">{[s.address1, s.zip, s.city].filter(Boolean).join(' · ')}</p>}
               {s.comment && <p className="text-xs text-[#8a6d1f] mt-1">🗒 {s.comment}</p>}
               {(s.signature_url || s.photo_url) && (
@@ -917,7 +945,7 @@ function TicketDetail({ ticket, refreshKey }: { ticket: ProcessedTicket; refresh
         </div>
 
         {/* Preuve de livraison (Bowa) */}
-        <BowaDeliveryProof email={ticket.customer_email} />
+        <BowaDeliveryProof email={ticket.customer_email} order={ticket.order?.order_number} />
 
         {/* Order */}
         {ticket.order && (
@@ -2972,6 +3000,7 @@ export default function SavPage() {
                         {zdOrder.financial_status_fr ? ` · ${zdOrder.financial_status_fr}` : ''}
                         {zdOrder.carrier ? ` · ${zdOrder.carrier}` : ''}
                       </div>
+                      {zdOrder.order_number && <OrderReceivedLine order={zdOrder.order_number} />}
                       {zdOrder.tracking_url && (
                         <a href={zdOrder.tracking_url} target="_blank" rel="noopener noreferrer" className="text-[10px] text-[#1d4ed8] underline">Suivi{zdOrder.tracking_number ? ` : ${zdOrder.tracking_number}` : ''}</a>
                       )}
