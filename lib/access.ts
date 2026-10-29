@@ -18,7 +18,7 @@ export const BRAND_LABELS: Record<Brand, string> = {
 }
 
 export type FeatureKey =
-  | 'dashboard' | 'campaigns' | 'creatives' | 'margins'
+  | 'dashboard' | 'pilot' | 'campaigns' | 'creatives' | 'margins'
   | 'reorder' | 'billing' | 'delivery' | 'delivery-costs' | 'stock' | 'invoices' | 'products' | 'ventes-privees'
   | 'sav' | 'sav-defects' | 'sav-krom'
 
@@ -31,6 +31,7 @@ export interface Feature {
 
 export const FEATURES: Feature[] = [
   { key: 'dashboard',   label: 'Dashboard',  section: 'Analyse',    brandLock: null   },
+  { key: 'pilot',       label: 'Pilote',     section: 'Analyse',    brandLock: 'bowa' },
   { key: 'campaigns',   label: 'Campagnes',  section: 'Analyse',    brandLock: null   },
   { key: 'creatives',   label: 'Créatives',  section: 'Analyse',    brandLock: null   },
   { key: 'margins',     label: 'Marges',     section: 'Analyse',    brandLock: null   },

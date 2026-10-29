@@ -419,9 +419,15 @@ async function fetchKpiData(brand: Brand, from: string, to: string, days: number
     const fmtEurSimple = (n: number) => new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR', maximumFractionDigits: 0 }).format(n)
     const subFrom = from < BOWA_SUBCONTRACT_START ? BOWA_SUBCONTRACT_START : from
     type SubRes = { summary?: { orders: number; totalHT: number; revenueHT: number; deliveryPctOfRevenue: number | null; lossLines: number; marginAfterDelivery: number } }
-    const sub = await fetch(`/api/delivery/subcontract?brand=bowa&from=${subFrom}&to=${to}`)
-      .then(r => r.json() as Promise<SubRes>).catch(() => null)
-    const subTotal = sub?.summary?.totalHT ?? 0
+    // Livraison des commandes PASSÉES sur la période (réel si livrée, même plus tard ;
+    // estimé sinon) — même règle que la page Pilote. La facture Terence du mois
+    // (livraisons faites dans la période) reste affichée en info.
+    type CohortRes = { actual: number; estimated: number; total: number; delivered: number; pending: number; internal: number }
+    const [sub, cohort] = await Promise.all([
+      fetch(`/api/delivery/subcontract?brand=bowa&from=${subFrom}&to=${to}`).then(r => r.json() as Promise<SubRes>).catch(() => null),
+      fetch(`/api/pilot?brand=bowa&from=${from}&to=${to}`).then(r => r.ok ? r.json() as Promise<CohortRes> : null).catch(() => null),
+    ])
+    const subTotal = cohort?.total ?? sub?.summary?.totalHT ?? 0
 
     const dayMs = 86_400_000
     const pFrom = new Date(from + 'T00:00:00Z').getTime(), pTo = new Date(to + 'T00:00:00Z').getTime()
@@ -441,13 +447,16 @@ async function fetchKpiData(brand: Brand, from: string, to: string, days: number
     fulfillment = subTotal + internal
     fulfillment_configured = true
     fulfillment_breakdown_final = [
-      ...(sub?.summary ? [{ label: `Terence (${sub.summary.orders} livr.)`, amount: subTotal }] : []),
+      ...(cohort
+        ? [{ label: `Terence · cmd de la période (${cohort.delivered} livrées${cohort.pending ? ` + ${cohort.pending} à livrer, estimé ${fmtEurSimple(cohort.estimated)}` : ''})`, amount: subTotal }]
+        : sub?.summary ? [{ label: `Terence (${sub.summary.orders} livr.)`, amount: subTotal }] : []),
       ...internalRows,
     ]
     const sm = sub?.summary
     if (sm && sm.orders > 0) {
       fulfillment_note = [
-        `${fmtEurSimple(Math.round(subTotal / sm.orders))}/livraison`,
+        `${fmtEurSimple(Math.round(sm.totalHT / sm.orders))}/livraison`,
+        `facture Terence période ${fmtEurSimple(sm.totalHT)}`,
         sm.deliveryPctOfRevenue != null ? `${sm.deliveryPctOfRevenue} % du CA livré` : '',
         sm.lossLines > 0 ? `${sm.lossLines} cmd à perte` : '',
       ].filter(Boolean).join(' · ')
