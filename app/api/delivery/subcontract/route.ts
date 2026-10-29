@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
+import { shopifyCreds } from '@/lib/tenant/integrations'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 60
@@ -166,7 +167,8 @@ type Line = {
   price: number | null
   attempts: number        // passages (dont absences) — seule la livraison est facturée
   merged: number          // nb de commandes regroupées (même adresse, même jour)
-  revenueHT: number | null  // CA HT des commandes livrées (Shopify, TTC ÷ 1,2)
+  revenueHT: number | null  // CA HT produits des commandes livrées (Shopify, TTC ÷ 1,2)
+  shippingHT: number | null // frais de livraison payés par le client (HT)
   cogs: number | null       // coût d'achat des produits
   margin: number | null     // CA HT − coût produits − prix livraison
   note?: string
@@ -297,7 +299,7 @@ export async function GET(req: NextRequest) {
         driver: tourDriver.get(first.tour_id) ?? '', tourId: first.tour_id,
         date: String(first.delivered_at), km: null, kmEstimated: false, zone: null,
         panels, stones, billedQty, bucket: BUCKETS.findIndex(b => billedQty <= b.max), price: null,
-        attempts: failed + 1, merged: group.length, revenueHT: null, cogs: null, margin: null,
+        attempts: failed + 1, merged: group.length, revenueHT: null, shippingHT: null, cogs: null, margin: null,
         note: notes.length ? notes.join(' · ') : undefined,
       }
       lines.push(line)
@@ -337,10 +339,26 @@ export async function GET(req: NextRequest) {
         salesByOrder.set(sale.order_id, e)
       }
     }
+    // Frais de livraison payés par le client (absents de product_sales = lignes produits seules)
+    const shippingByOrder = new Map<string, number>()
+    const creds = allSids.length > 0 ? await shopifyCreds(brand) : null
+    if (creds?.shop && creds?.token) {
+      for (let i = 0; i < allSids.length; i += 250) {
+        const ids = allSids.slice(i, i + 250).join(',')
+        const res = await fetch(
+          `https://${creds.shop}/admin/api/2024-01/orders.json?status=any&limit=250&ids=${ids}&fields=id,total_shipping_price_set`,
+          { headers: { 'X-Shopify-Access-Token': creds.token }, cache: 'no-store' },
+        )
+        if (!res.ok) continue
+        const { orders } = await res.json() as { orders?: { id: number; total_shipping_price_set?: { shop_money?: { amount?: string } } }[] }
+        for (const o of orders ?? []) shippingByOrder.set(String(o.id), parseFloat(o.total_shipping_price_set?.shop_money?.amount ?? '0') || 0)
+      }
+    }
     for (const [line, sids] of sidsOf) {
       const found = sids.map(id => salesByOrder.get(id)).filter(Boolean) as { revenue: number; cogs: number }[]
       if (found.length === 0) continue
       line.revenueHT = Math.round(found.reduce((acc, e) => acc + e.revenue, 0) / 1.2)
+      line.shippingHT = Math.round(sids.reduce((acc, id) => acc + (shippingByOrder.get(id) ?? 0), 0) / 1.2)
       line.cogs = Math.round(found.reduce((acc, e) => acc + e.cogs, 0))
     }
 
@@ -365,7 +383,7 @@ export async function GET(req: NextRequest) {
       else if (l.km != null) l.zone = l.km <= lim1 ? 0 : l.km <= lim2 ? 1 : 2
       else l.note = 'Adresse non géolocalisée — zone à vérifier'
       l.price = l.zone != null ? settings.grid[l.zone]?.[l.bucket] ?? null : null
-      if (l.revenueHT != null) l.margin = l.revenueHT - (l.cogs ?? 0) - (l.price ?? 0)
+      if (l.revenueHT != null) l.margin = l.revenueHT + (l.shippingHT ?? 0) - (l.cogs ?? 0) - (l.price ?? 0)
     }
     lines.sort((a, b) => a.date.localeCompare(b.date) || a.order.localeCompare(b.order))
 
@@ -381,6 +399,7 @@ export async function GET(req: NextRequest) {
     const revenueHT = withSales.reduce((s, l) => s + (l.revenueHT ?? 0), 0)
     const salesCogs = withSales.reduce((s, l) => s + (l.cogs ?? 0), 0)
     const salesDelivery = withSales.reduce((s, l) => s + (l.price ?? 0), 0)
+    const shippingHT = withSales.reduce((s, l) => s + (l.shippingHT ?? 0), 0)
 
     // Jours consécutifs de la tournée (une re-livraison isolée quelques jours plus
     // tard, pointée sur la même tournée, n'allonge pas la tournée).
@@ -431,8 +450,10 @@ export async function GET(req: NextRequest) {
         estimatedKm: lines.filter(l => l.kmEstimated).length,
         revenueHT,
         cogs: salesCogs,
-        marginAfterDelivery: revenueHT - salesCogs - salesDelivery,
-        deliveryPctOfRevenue: revenueHT > 0 ? Math.round((salesDelivery / revenueHT) * 1000) / 10 : null,
+        shippingHT,
+        marginAfterDelivery: revenueHT + shippingHT - salesCogs - salesDelivery,
+        // Coût de livraison NET (Terence − port payé par le client) rapporté au CA produits
+        deliveryPctOfRevenue: revenueHT > 0 ? Math.round(((salesDelivery - shippingHT) / revenueHT) * 1000) / 10 : null,
         linesWithSales: withSales.length,
         lossLines: withSales.filter(l => (l.margin ?? 0) < 0).length,
         mergedOrders: lines.reduce((s, l) => s + l.merged - 1, 0),

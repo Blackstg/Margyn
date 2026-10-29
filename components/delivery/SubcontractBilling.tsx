@@ -17,7 +17,7 @@ type Line = {
   order: string; customer: string; city: string; zip: string; driver: string; date: string
   km: number | null; kmEstimated: boolean; zone: number | null
   panels: number; stones: number; billedQty: number; bucket: number; price: number | null
-  attempts: number; merged: number; revenueHT: number | null; cogs: number | null; margin: number | null; note?: string
+  attempts: number; merged: number; revenueHT: number | null; shippingHT: number | null; cogs: number | null; margin: number | null; note?: string
 }
 type Unbilled = { order: string; customer: string; city: string; driver: string; date: string | null; reason: string }
 type Data = {
@@ -26,7 +26,7 @@ type Data = {
   summary: {
     orders: number; panels: number; totalHT: number; vat: number; totalTTC: number
     perPanel: number | null; perOrder: number | null; mergedOrders: number
-    revenueHT: number; cogs: number; marginAfterDelivery: number; deliveryPctOfRevenue: number | null; linesWithSales: number; lossLines: number; toQuote: number; estimatedKm: number; failedNotBilled: number
+    revenueHT: number; shippingHT: number; cogs: number; marginAfterDelivery: number; deliveryPctOfRevenue: number | null; linesWithSales: number; lossLines: number; toQuote: number; estimatedKm: number; failedNotBilled: number
   }
   matrix: { count: number; amount: number }[][]
 }
@@ -103,11 +103,11 @@ export default function SubcontractBilling({ brand, internalCostPerPanel }: { br
     if (!data) return
     const zl = (z: number | null) => z == null ? 'Devis' : `Zone ${z + 1}`
     const rows = [
-      ['Date', 'Commande', 'Client', 'Ville', 'CP', 'Chauffeur', 'Km route', 'Zone', 'Panneaux', 'Feuilles de pierre', 'Tranche', 'Prix HT', 'CA HT commande', 'Coût produits', 'Marge après livraison', 'Remarque'],
+      ['Date', 'Commande', 'Client', 'Ville', 'CP', 'Chauffeur', 'Km route', 'Zone', 'Panneaux', 'Feuilles de pierre', 'Tranche', 'Prix HT', 'CA HT commande', 'Port payé HT', 'Coût produits', 'Marge après livraison', 'Remarque'],
       ...data.lines.map(l => [
         dateFr(l.date), l.order, l.customer, l.city, l.zip, l.driver,
         l.km == null ? '' : `${l.km}${l.kmEstimated ? ' (estimé)' : ''}`, zl(l.zone),
-        l.panels, l.stones, data.buckets[l.bucket], l.price ?? '', l.revenueHT ?? '', l.cogs ?? '', l.margin ?? '', l.note ?? '',
+        l.panels, l.stones, data.buckets[l.bucket], l.price ?? '', l.revenueHT ?? '', l.shippingHT ?? '', l.cogs ?? '', l.margin ?? '', l.note ?? '',
       ]),
       [],
       ['', '', '', '', '', '', '', '', '', '', 'Total HT', data.summary.totalHT],
@@ -196,17 +196,20 @@ export default function SubcontractBilling({ brand, internalCostPerPanel }: { br
             const losses = data.lines.filter(l => l.margin != null && l.margin < 0)
             const lossTotal = losses.reduce((acc, l) => acc + (l.margin ?? 0), 0)
             const small = data.lines.filter(l => l.billedQty <= 3 && l.revenueHT != null)
-            const smallPct = small.length ? Math.round(small.reduce((a, l) => a + (l.price ?? 0), 0) / Math.max(1, small.reduce((a, l) => a + (l.revenueHT ?? 0), 0)) * 100) : null
+            const smallCost = small.reduce((a, l) => a + (l.price ?? 0), 0)
+            const smallPaid = small.reduce((a, l) => a + (l.shippingHT ?? 0), 0)
+            const smallPct = small.length ? Math.round((smallCost - smallPaid) / Math.max(1, small.reduce((a, l) => a + (l.revenueHT ?? 0), 0)) * 100) : null
             return (
               <div className="rounded-2xl bg-white border border-[#e8e8e4] px-5 py-4 space-y-3">
                 <p className="text-[11px] font-semibold uppercase tracking-[0.1em] text-[#6b6b63]">Rentabilité des commandes livrées</p>
                 <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
                   <div>
-                    <p className="text-[11px] text-[#9b9b93]">CA HT livré</p>
+                    <p className="text-[11px] text-[#9b9b93]">CA HT livré (produits)</p>
                     <p className="text-xl font-bold tabular-nums text-[#1a1a2e]">{eur(s.revenueHT)}</p>
+                    <p className="text-[11px] text-[#6b6b63]">+ {eur(s.shippingHT)} de frais de livraison payés</p>
                   </div>
                   <div>
-                    <p className="text-[11px] text-[#9b9b93]">Livraison / CA</p>
+                    <p className="text-[11px] text-[#9b9b93]" title="(Terence − frais de livraison payés par les clients) ÷ CA produits">Livraison nette / CA</p>
                     <p className={`text-xl font-bold tabular-nums ${pct > 25 ? 'text-[#c7293a]' : pct > 15 ? 'text-[#8a5a00]' : 'text-[#1f7a5a]'}`}>{pct.toLocaleString('fr-FR')} %</p>
                   </div>
                   <div>
@@ -220,8 +223,8 @@ export default function SubcontractBilling({ brand, internalCostPerPanel }: { br
                   </div>
                 </div>
                 <p className="text-[11px] text-[#6b6b63] leading-relaxed">
-                  Marge = CA HT − coût d&apos;achat des produits − livraison Terence, <b>avant pub et frais fixes</b>.
-                  {smallPct != null && <> Les petites commandes (1 à 3 panneaux) coûtent <b>{smallPct} %</b> de leur CA en livraison.</>}
+                  Marge = CA HT produits + frais de livraison payés par le client − coût d&apos;achat des produits − livraison Terence, <b>avant pub et frais fixes</b>.
+                  {smallPct != null && <> Petites commandes (1 à 3 panneaux) : Terence {eur(smallCost)}, clients {eur(smallPaid)} de port → livraison nette = <b>{smallPct} %</b> de leur CA.</>}
                   {' '}Commandes à perte : ligne en rouge dans le détail.
                 </p>
               </div>
@@ -340,7 +343,7 @@ export default function SubcontractBilling({ brand, internalCostPerPanel }: { br
                       <th className="font-semibold px-3 py-2">Zone</th>
                       <th className="font-semibold px-3 py-2 text-right">Panneaux</th>
                       <th className="font-semibold px-3 py-2 text-right">Prix HT</th>
-                      <th className="font-semibold px-5 py-2 text-right" title="CA HT − coût produits − livraison">Marge</th>
+                      <th className="font-semibold px-5 py-2 text-right" title="CA HT + port payé − coût produits − livraison">Marge</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -367,9 +370,9 @@ export default function SubcontractBilling({ brand, internalCostPerPanel }: { br
                           {l.stones > 0 && <span className="block text-[11px] text-[#9b9b93]">{l.panels} pann. + {l.stones} pierre</span>}
                         </td>
                         <td className="px-3 py-2 text-right tabular-nums font-semibold text-[#1a1a2e]">{eur(l.price)}</td>
-                        <td className="px-5 py-2 text-right tabular-nums" title={l.revenueHT != null ? `CA HT ${eur(l.revenueHT)} − produits ${eur(l.cogs)} − livraison ${eur(l.price)}` : 'Commande introuvable dans les ventes'}>
+                        <td className="px-5 py-2 text-right tabular-nums" title={l.revenueHT != null ? `CA HT ${eur(l.revenueHT)} + port payé ${eur(l.shippingHT ?? 0)} − produits ${eur(l.cogs)} − livraison ${eur(l.price)}` : 'Commande introuvable dans les ventes'}>
                           <span className={l.margin == null ? 'text-[#c4c4bc]' : l.margin < 0 ? 'font-semibold text-[#c7293a]' : 'text-[#1f7a5a]'}>{eur(l.margin)}</span>
-                          {l.revenueHT != null && <span className="block text-[11px] text-[#9b9b93]">CA {eur(l.revenueHT)}</span>}
+                          {l.revenueHT != null && <span className="block text-[11px] text-[#9b9b93]">CA {eur(l.revenueHT)}{l.shippingHT ? ` + port ${eur(l.shippingHT)}` : ' · port offert'}</span>}
                         </td>
                       </tr>
                     ))}
