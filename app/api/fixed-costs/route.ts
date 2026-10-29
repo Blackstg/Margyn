@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
+import { loadValidity, validityKey } from '@/lib/fixedCostValidity'
 
 function getAdmin() {
   return createClient(
@@ -19,5 +20,7 @@ export async function GET(req: NextRequest) {
     .eq('brand', brand)
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
-  return NextResponse.json(data ?? [])
+  // Période de validité des lignes récurrentes (from/to 'YYYY-MM'), cf. lib/fixedCostValidity
+  const validity = await loadValidity(getAdmin(), brand)
+  return NextResponse.json((data ?? []).map(r => r.month === '1900-01-01' ? { ...r, ...validity[validityKey(r.category, r.label)] } : r))
 }

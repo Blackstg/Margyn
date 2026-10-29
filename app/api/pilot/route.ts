@@ -14,6 +14,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 import { shopifyCreds } from '@/lib/tenant/integrations'
+import { loadValidity, activeIn, validityKey } from '@/lib/fixedCostValidity'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 120
@@ -148,6 +149,7 @@ export async function GET(req: NextRequest) {
       sb.from('supplementary_revenue').select('month, amount, fees, source').eq('brand', brand).gte('month', firstDay),
     ])
     const feeRate = Number(settings?.transaction_fee_rate ?? 0.017)
+    const validity = await loadValidity(sb, brand)
 
     // ── Agrégation par mois ───────────────────────────────────────────────────
     type Bucket = { key: string; label: string; orders: number; revenueHT: number; cogs: number; delivery: number; estimated: number; fees: number; shippingHT: number }
@@ -240,7 +242,7 @@ export async function GET(req: NextRequest) {
       for (const a of ads ?? []) if (String(a.date).startsWith(month)) adsBy[a.platform] = (adsBy[a.platform] ?? 0) + Number(a.spend || 0)
       const adsTotal = Object.values(adsBy).reduce((s, v) => s + v, 0)
 
-      const recurring = (fixed ?? []).filter(r => r.month === '1900-01-01')
+      const recurring = (fixed ?? []).filter(r => r.month === '1900-01-01' && activeIn(validity, String(r.category), String(r.label ?? ''), month))
       const monthly = (fixed ?? []).filter(r => String(r.month ?? '').startsWith(month) && !/terence/i.test(r.label ?? ''))
       const group = (rows: typeof recurring, scale: number) => rows.map(r => ({ label: String(r.label ?? ''), amount: r0(Number(r.amount || 0) * scale) }))
       const team = group(recurring.filter(r => r.category === 'team'), ratio)
@@ -300,7 +302,10 @@ export async function GET(req: NextRequest) {
       }
     })
 
-    return NextResponse.json({ brand, today, subcontractStart: SUBCONTRACT_START, feeRate, avgTerenceByBucket: avgPrice.map(v => v == null ? null : r0(v)),
+    // Charges récurrentes éditables (salaires, crédits/compta, applis) avec leur période
+    const recurringRows = (fixed ?? []).filter(r => r.month === '1900-01-01' && ['team', 'infra', 'app'].includes(String(r.category)))
+      .map(r => ({ category: String(r.category), label: String(r.label ?? ''), amount: Number(r.amount || 0), ...validity[validityKey(String(r.category), String(r.label ?? ''))] }))
+    return NextResponse.json({ brand, today, subcontractStart: SUBCONTRACT_START, feeRate, recurring: recurringRows, avgTerenceByBucket: avgPrice.map(v => v == null ? null : r0(v)),
       missingCostProducts: [...missingTitles.entries()].sort((a, b) => b[1] - a[1]).slice(0, 15).map(([title, qty]) => ({ title, qty })),
       months: out })
   } catch (e) {

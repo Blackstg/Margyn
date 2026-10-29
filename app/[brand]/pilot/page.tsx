@@ -5,7 +5,7 @@ export const dynamic = 'force-dynamic'
 // Pilote — rentabilité mensuelle « par commandes du mois » et leviers d'optimisation.
 // Données : /api/pilot (Shopify direct + Terence réel/estimé + pub + charges).
 import { useEffect, useMemo, useState } from 'react'
-import { Compass, Loader2, AlertCircle, AlertTriangle, Info } from 'lucide-react'
+import { Compass, Loader2, AlertCircle, AlertTriangle, Info, Plus, Trash2, Save } from 'lucide-react'
 import { useBrand } from '@/context/BrandContext'
 
 type Row = { label: string; amount: number }
@@ -20,7 +20,8 @@ type Month = {
   kpis: { avgBasketHT: number | null; cac: number | null; mer: number | null; deliveryPerOrder: number | null }
   buckets: Bucket[]
 }
-type Data = { today: string; subcontractStart: string; avgTerenceByBucket: (number | null)[]; missingCostProducts: { title: string; qty: number }[]; months: Month[] }
+type FixedRow = { category: string; label: string; amount: number; from?: string; to?: string }
+type Data = { today: string; recurring: FixedRow[]; subcontractStart: string; avgTerenceByBucket: (number | null)[]; missingCostProducts: { title: string; qty: number }[]; months: Month[] }
 
 // Repères (% du CA HT net) — ordres de grandeur pour un e-commerce rentable de produits
 // encombrants livrés. À ajuster selon vos objectifs.
@@ -37,18 +38,19 @@ export default function PilotPage() {
   const [data, setData] = useState<Data | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [sel, setSel] = useState<string | null>(null)
+  const [reload, setReload] = useState(0)
 
   useEffect(() => {
-    setData(null); setError(null)
+    setError(null)
     fetch(`/api/pilot?brand=${brand}&months=6`)
       .then(r => r.json())
       .then((d: Data & { error?: string }) => {
         if (d.error) { setError(d.error); return }
         setData(d)
-        setSel(d.months[d.months.length - 1]?.month ?? null)
+        setSel(prev => prev && d.months.some(x => x.month === prev) ? prev : d.months[d.months.length - 1]?.month ?? null)
       })
       .catch(e => setError(String(e)))
-  }, [brand])
+  }, [brand, reload])
 
   const m = useMemo(() => data?.months.find(x => x.month === sel) ?? null, [data, sel])
 
@@ -274,6 +276,8 @@ export default function PilotPage() {
           </p>
         </Card>
 
+        <FixedCostsEditor brand={brand} rows={data.recurring} onSaved={() => setReload(n => n + 1)} />
+
         {data.missingCostProducts.length > 0 && (
           <Card title="Produits sans coût d'achat dans Shopify (6 derniers mois)">
             <p className="mb-2 text-xs text-[#6b6b63]">À renseigner dans Shopify (fiche produit → variante → « Coût par article ») pour que la marge soit juste.</p>
@@ -335,5 +339,98 @@ function PL({ months, sel, label, get, strong, share, color, note, plain, raw }:
         )
       })}
     </tr>
+  )
+}
+
+const CAT_LABEL: Record<string, string> = { team: 'Salaires', infra: 'Crédits, compta, loyers', app: 'Applis Shopify' }
+
+// Charges récurrentes avec période : « depuis » / « jusqu'au » (mois inclus). Une personne
+// partie : renseigner « jusqu'au » plutôt que supprimer la ligne, pour garder les mois passés justes.
+function FixedCostsEditor({ brand, rows, onSaved }: { brand: string; rows: FixedRow[]; onSaved: () => void }) {
+  type Edit = { id: number; category: string; label: string; amount: string; from: string; to: string }
+  const toEdit = (r: FixedRow[]) => r.map((x, i) => ({ id: i, category: x.category, label: x.label, amount: String(x.amount), from: x.from ?? '', to: x.to ?? '' }))
+  const [list, setList] = useState<Edit[]>(() => toEdit(rows))
+  const [state, setState] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle')
+  const [msg, setMsg] = useState('')
+  useEffect(() => { setList(toEdit(rows)) }, [rows])
+
+  const set = (id: number, k: keyof Edit, v: string) => setList(l => l.map(x => x.id === id ? { ...x, [k]: v } : x))
+  const add = (category: string) => setList(l => [...l, { id: Date.now(), category, label: '', amount: '', from: new Date().toISOString().slice(0, 7), to: '' }])
+  const del = (id: number) => setList(l => l.filter(x => x.id !== id))
+  const thisMonth = new Date().toISOString().slice(0, 7)
+
+  async function save() {
+    setState('saving'); setMsg('')
+    try {
+      const res = await fetch(`/api/pilot/fixed?brand=${brand}`, {
+        method: 'PUT', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ rows: list.map(x => ({ category: x.category, label: x.label, amount: parseFloat(x.amount.replace(',', '.')), from: x.from || undefined, to: x.to || undefined })) }),
+      })
+      const d = await res.json().catch(() => ({}))
+      if (!res.ok || d.error) throw new Error(d.error ?? `Erreur ${res.status}`)
+      setState('saved'); onSaved()
+      setTimeout(() => setState('idle'), 2500)
+    } catch (e) {
+      setState('error'); setMsg(e instanceof Error ? e.message : String(e))
+    }
+  }
+
+  return (
+    <Card title="Charges fixes mensuelles">
+      <p className="mb-3 text-xs text-[#6b6b63]">
+        Quelqu&apos;un n&apos;est plus dans l&apos;équipe : renseigne <b>« jusqu&apos;au »</b> (dernier mois payé) au lieu de supprimer la ligne, pour que les mois passés restent justes.
+        Le transport (dépôt, leasing, carburant, salaire livreur) vient de la feuille « Coût du transport ».
+      </p>
+      <div className="space-y-4">
+        {['team', 'infra', 'app'].map(cat => {
+          const items = list.filter(x => x.category === cat)
+          const activeTotal = items.filter(x => (!x.from || x.from <= thisMonth) && (!x.to || x.to >= thisMonth)).reduce((s, x) => s + (parseFloat(x.amount.replace(',', '.')) || 0), 0)
+          return (
+            <div key={cat}>
+              <div className="mb-1 flex items-baseline justify-between">
+                <p className="text-sm font-semibold text-[#1a1a2e]">{CAT_LABEL[cat]}</p>
+                <p className="text-xs tabular-nums text-[#6b6b63]">ce mois-ci : <b className="text-[#1a1a2e]">{eur(activeTotal)}</b></p>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="text-left text-[11px] text-[#9b9b93]">
+                      <th className="py-1 pr-2 font-semibold">Poste</th>
+                      <th className="px-2 py-1 font-semibold">€ / mois</th>
+                      <th className="px-2 py-1 font-semibold">Depuis</th>
+                      <th className="px-2 py-1 font-semibold">Jusqu&apos;au</th>
+                      <th></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {items.map(x => {
+                      const ended = !!x.to && x.to < thisMonth
+                      return (
+                        <tr key={x.id} className={ended ? 'opacity-50' : ''}>
+                          <td className="py-1 pr-2"><input value={x.label} onChange={e => set(x.id, 'label', e.target.value)} className="w-full min-w-[9rem] rounded-lg border border-[#e8e8e4] px-2 py-1 text-sm" /></td>
+                          <td className="px-2 py-1"><input value={x.amount} inputMode="decimal" onChange={e => set(x.id, 'amount', e.target.value)} className="w-24 rounded-lg border border-[#e8e8e4] px-2 py-1 text-right text-sm tabular-nums" /></td>
+                          <td className="px-2 py-1"><input type="month" value={x.from} onChange={e => set(x.id, 'from', e.target.value)} className="rounded-lg border border-[#e8e8e4] px-2 py-1 text-sm" /></td>
+                          <td className="px-2 py-1"><input type="month" value={x.to} onChange={e => set(x.id, 'to', e.target.value)} className="rounded-lg border border-[#e8e8e4] px-2 py-1 text-sm" /></td>
+                          <td className="py-1 pl-1"><button onClick={() => del(x.id)} title="Supprimer (aussi des mois passés)" className="text-[#9b9b93] hover:text-[#c7293a]"><Trash2 size={14} /></button></td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
+              </div>
+              <button onClick={() => add(cat)} className="mt-1 inline-flex items-center gap-1 text-xs text-[#6b6b63] hover:text-[#1a1a2e]"><Plus size={12} /> Ajouter</button>
+            </div>
+          )
+        })}
+      </div>
+      <div className="mt-4 flex items-center justify-end gap-3">
+        {state === 'error' && <span className="text-xs text-[#c7293a]">{msg}</span>}
+        {state === 'saved' && <span className="text-xs text-[#1f7a5a]">Enregistré, chiffres recalculés</span>}
+        <button onClick={save} disabled={state === 'saving'}
+          className="inline-flex items-center gap-2 rounded-xl bg-[#1a1a2e] px-4 py-2 text-sm font-medium text-white hover:bg-[#2d2d4a] disabled:opacity-50">
+          {state === 'saving' ? <Loader2 size={13} className="animate-spin" /> : <Save size={13} />} Enregistrer
+        </button>
+      </div>
+    </Card>
   )
 }

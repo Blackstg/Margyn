@@ -352,7 +352,7 @@ async function fetchKpiData(brand: Brand, from: string, to: string, days: number
   )
 
   // Fixed costs: separate sentinel (recurring) from monthly fulfillment extras
-  type FixedRow = { amount?: number | null; category?: string | null; month?: string | null; label?: string | null }
+  type FixedRow = { amount?: number | null; category?: string | null; month?: string | null; label?: string | null; from?: string; to?: string }
   const fromMonth = from.slice(0, 7) + '-01'
   const toMonth   = to.slice(0, 7)   + '-01'
   const allFixedCosts: FixedRow[] = Array.isArray(fixedCostsRaw) ? fixedCostsRaw : []
@@ -363,6 +363,8 @@ async function fetchKpiData(brand: Brand, from: string, to: string, days: number
   for (const r of allFixedCosts) {
     const amount = r.amount ?? 0
     const isSentinel = r.month === '1900-01-01'
+    // Charge récurrente hors de sa période de validité (ex. salarié parti) → ignorée
+    if (isSentinel && ((r.from && r.from > toMonth.slice(0, 7)) || (r.to && r.to < fromMonth.slice(0, 7)))) continue
     const isInPeriod = r.month != null && r.month >= fromMonth && r.month <= toMonth
 
     if (isSentinel) {
@@ -902,13 +904,16 @@ async function fetchAnnualData(brand: Brand, year: number): Promise<MonthPoint[]
   }
 
   // Fixed costs: all rows from API (bypass RLS), split sentinel vs monthly in JS
-  type FixedRow = { amount?: number | null; category?: string | null; month?: string | null }
+  type FixedRow = { amount?: number | null; category?: string | null; month?: string | null; from?: string; to?: string }
   const allFixedCosts: FixedRow[] = Array.isArray(fixedCostsRaw) ? fixedCostsRaw : []
   let fixedApp = 0, fixedOther = 0, fixedFulfillmentSentinel = 0
+  // Lignes récurrentes datées (from/to) : appliquées mois par mois ci-dessous
+  const datedSentinel = allFixedCosts.filter(r => r.month === '1900-01-01' && (r.from || r.to))
   const monthlyFulfillmentByMonth = new Map<number, number>()
   for (const r of allFixedCosts) {
     const amount = r.amount ?? 0
     if (r.month === '1900-01-01') {
+      if (r.from || r.to) continue
       if (r.category === 'app')              fixedApp += amount
       else if (r.category === 'fulfillment') fixedFulfillmentSentinel += amount
       else                                   fixedOther += amount
@@ -933,7 +938,14 @@ async function fetchAnnualData(brand: Brand, year: number): Promise<MonthPoint[]
   return Array.from({ length: 12 }, (_, i) => {
     const month = i + 1
     const d     = byMonth.get(month) ?? { ca: 0, gross_profit: 0, order_count: 0, marketing: 0 }
-    const fixed = fixedTemplate
+    const ym = `${year}-${String(month).padStart(2, '0')}`
+    const fixed = { ...fixedTemplate }
+    for (const r of datedSentinel) {
+      if ((r.from && ym < r.from) || (r.to && ym > r.to)) continue
+      if (r.category === 'app') fixed.app += r.amount ?? 0
+      else if (r.category === 'fulfillment') fixed.fulfillmentSentinel += r.amount ?? 0
+      else fixed.other += r.amount ?? 0
+    }
 
     // Bowa: total_sales is TTC. On garde le HT pour les CALCULS de marge (fees,
     // marge nette), mais le CA AFFICHÉ dans le graph reste TTC — comme le KPI du
