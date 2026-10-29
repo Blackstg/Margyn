@@ -102,6 +102,33 @@ interface TourStop {
   photo_url?: string | null
   partial_delivered?: { sku: string; title: string; qty_ordered: number; qty_delivered: number }[] | null
   client_availability?: 'confirmed' | 'unavailable' | null
+  shopify_alert?: ShopifyAlert | null   // annulée / remboursée sur Shopify depuis la mise en tournée
+}
+
+// Renseigné par /api/delivery/tours pour les arrêts à livrer des tournées actives
+interface ShopifyAlert {
+  state: 'cancelled' | 'refunded' | 'items_refunded'
+  at: string | null
+  message: string
+  refundedItems?: { title: string; qty: number }[]
+}
+// Commande entière annulée / remboursée : à ne pas charger ni livrer
+const isBlocked = (s: { shopify_alert?: ShopifyAlert | null }) => s.shopify_alert?.state === 'cancelled' || s.shopify_alert?.state === 'refunded'
+
+function ShopifyAlertBanner({ stops }: { stops: TourStop[] }) {
+  const flagged = stops.filter((s) => s.shopify_alert)
+  if (flagged.length === 0) return null
+  return (
+    <div className="mb-3 rounded-[14px] border-2 border-[#fca5a5] bg-[#fef2f2] px-4 py-3">
+      <p className="text-sm font-bold text-[#b91c1c]">⛔ {flagged.length} commande{flagged.length > 1 ? 's' : ''} modifiée{flagged.length > 1 ? 's' : ''} sur Shopify depuis la mise en tournée</p>
+      <ul className="mt-1 space-y-0.5">
+        {flagged.map((s) => (
+          <li key={s.id} className="text-xs text-[#b91c1c]"><b>{s.order_name}</b> {s.customer_name} : {s.shopify_alert!.message}</li>
+        ))}
+      </ul>
+      {flagged.some(isBlocked) && <p className="mt-1.5 text-[11px] text-[#b91c1c]/80">Les commandes annulées ou remboursées sont retirées du chargement. Retire-les de la tournée.</p>}
+    </div>
+  )
 }
 
 interface Tour {
@@ -2140,9 +2167,11 @@ function PlanificateurView() {
                             </button>
                           </div>
 
+                          <ShopifyAlertBanner stops={tour.stops} />
+
                           {/* Récap chargement — tuiles KPI par type de produit (pour Léa) */}
                           {(() => {
-                            const recap = tourProductRecap(tour.stops)
+                            const recap = tourProductRecap(tour.stops.filter((st) => !isBlocked(st)))
                             if (recap.length === 0) return null
                             const ACCENT: Record<string, string> = {
                               'Akupanel':              '#4338ca',
@@ -2201,6 +2230,7 @@ function PlanificateurView() {
                                     <div className="flex-1 min-w-0">
                                       <div className="font-medium text-[#1a1a2e]">{stop.order_name}</div>
                                       <div className="text-[#6b6b63]">{stop.customer_name} · {stop.zip} {stop.city}</div>
+                                      {stop.shopify_alert && <div className="mt-0.5 font-semibold text-[#b91c1c]">⛔ {stop.shopify_alert.message}</div>}
                                     </div>
                                     <div className="flex items-center gap-1 shrink-0">
                                       <button
@@ -2277,7 +2307,7 @@ function PlanificateurView() {
 
                           {/* Liste de chargement */}
                           {sortedStops.length > 0 && (() => {
-                            const loadingList = buildLoadingList(tour.stops)
+                            const loadingList = buildLoadingList(tour.stops.filter((st) => !isBlocked(st)))
                             if (loadingList.length === 0) return null
                             return (
                               <div className="mt-4 pt-3 border-t border-[#e8e8e4]">
@@ -3891,7 +3921,7 @@ function LivreurView() {
   // Loading order: stops in REVERSE delivery order (last stop loaded first = goes deepest in truck)
   // Each stop shows its own items so the driver knows what to load for each destination
   const loadingStops = tour
-    ? [...sortedStops].reverse().map((stop) => ({
+    ? [...sortedStops].reverse().filter((stop) => !isBlocked(stop)).map((stop) => ({
         stop,
         items: (stop.panel_details ?? []).filter((p) => p.qty > 0),
       })).filter((s) => s.items.length > 0)
@@ -4042,6 +4072,8 @@ function LivreurView() {
       // On vérifie explicitement le succès : sinon une validation pouvait échouer
       // en silence (le livreur pense avoir validé alors que non).
       if (!res.ok) {
+        const d = await res.json().catch(() => ({})) as { code?: string; error?: string }
+        if (d.code === 'ORDER_CANCELLED') { alert(`⛔ ${d.error}`); await fetchTours(); return false }
         alert('La validation a échoué (connexion ?). Ta livraison n’a PAS été enregistrée — réessaie.')
         return false
       }
@@ -4167,7 +4199,7 @@ function LivreurView() {
       qty_ordered:   item.qty,
       qty_delivered: partialQtys[i] ?? item.qty,
     }))
-    await fetch(`/api/delivery/stops/${currentStop.id}`, {
+    const res = await fetch(`/api/delivery/stops/${currentStop.id}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -4176,6 +4208,10 @@ function LivreurView() {
         ...(partialNote.trim() ? { comment: partialNote.trim() } : {}),
       }),
     })
+    if (res.status === 409) {
+      const d = await res.json().catch(() => ({})) as { error?: string }
+      alert(`⛔ ${d.error ?? 'Commande annulée sur Shopify'}`)
+    }
     await fetchTours()
     setMarkingPartial(false)
     setCommentMode('none')
@@ -4963,11 +4999,15 @@ function LivreurView() {
         }}
         onMarkDelivered={async (stopId, comment) => {
           void sendPos()   // position au moment du marquage (preuve de présence)
-          await fetch(`/api/delivery/stops/${stopId}`, {
+          const res = await fetch(`/api/delivery/stops/${stopId}`, {
             method: 'PATCH',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ status: 'delivered', ...(comment ? { comment } : {}) }),
           })
+          if (res.status === 409) {
+            const d = await res.json().catch(() => ({})) as { error?: string }
+            alert(`⛔ ${d.error ?? 'Commande annulée sur Shopify'}`)
+          }
           await fetchTours()
         }}
         onMarkFailed={async (stopId, comment) => {
@@ -5455,6 +5495,8 @@ function LivreurView() {
           )
         })()}
 
+        <ShopifyAlertBanner stops={sortedStops} />
+
         {loadingStops.length === 0 ? (
           <div className="rounded-[20px] bg-white shadow-[0_4px_24px_rgba(0,0,0,0.08)] p-8 text-center text-sm text-[#6b6b63]">Aucun produit</div>
         ) : (
@@ -5665,6 +5707,7 @@ function LivreurView() {
                   <div className="font-semibold text-sm truncate flex items-center gap-1.5">
                     {stop.customer_name}
                     {stop.client_availability === 'unavailable' && <span className="shrink-0 text-[11px]" title="Client indisponible">⚠️</span>}
+                    {stop.shopify_alert && <span className="shrink-0 text-[11px]" title={stop.shopify_alert.message}>⛔</span>}
                   </div>
                   <div className={`text-xs truncate ${i === stopIdx ? 'text-white/60' : 'text-[#9b9b93]'}`}>{stop.city}</div>
                 </div>
@@ -5808,6 +5851,15 @@ function LivreurView() {
             <div className="flex items-center gap-2 mb-1">
               <span className="font-mono text-sm font-semibold text-[#1a1a2e] bg-[#f5f5f3] px-2 py-0.5 rounded-[6px]">{currentStop.order_name}</span>
             </div>
+            {currentStop.shopify_alert && (
+              <div className="flex items-start gap-2.5 my-2 px-4 py-3 rounded-[14px] bg-[#fef2f2] border-2 border-[#ef4444]">
+                <span className="text-lg leading-none">⛔</span>
+                <div>
+                  <p className="text-sm font-bold text-[#b91c1c] leading-snug">{currentStop.shopify_alert.message}</p>
+                  {isBlocked(currentStop) && <p className="text-xs text-[#b91c1c]/80 leading-snug mt-0.5">Appelle le bureau avant toute livraison.</p>}
+                </div>
+              </div>
+            )}
             <div className="text-3xl font-bold text-[#1a1a2e] leading-tight mb-1">
               {currentStop.customer_name}
             </div>
@@ -6551,7 +6603,7 @@ function CorrectDeliveryModal({
     }))
     const fullyDelivered = partial_delivered.every(p => p.qty_delivered >= p.qty_ordered)
     try {
-      await fetch(`/api/delivery/stops/${stopId}`, {
+      const res = await fetch(`/api/delivery/stops/${stopId}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -6559,6 +6611,11 @@ function CorrectDeliveryModal({
           partial_delivered: fullyDelivered ? null : partial_delivered,
         }),
       })
+      if (res.status === 409) {
+        const d = await res.json().catch(() => ({})) as { error?: string }
+        alert(`⛔ ${d.error ?? 'Commande annulée sur Shopify'}`)
+        return
+      }
       onDone()
     } finally {
       setSaving(false)

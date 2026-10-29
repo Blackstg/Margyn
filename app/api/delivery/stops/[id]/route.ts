@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
+import { blockingAlert, alertMessage } from '@/lib/delivery/shopifyCancellations'
 
 function getAdmin() {
   return createClient(
@@ -174,7 +175,8 @@ export async function PATCH(
 ) {
   try {
     const body = await req.json()
-    const { status, sequence, email_sent_at, comment, sav_note, signature_url, photo_url, partial_delivered, tour_id } = body as {
+    const { status, sequence, email_sent_at, comment, sav_note, signature_url, photo_url, partial_delivered, tour_id, force } = body as {
+      force?: boolean
       status?: string
       sequence?: number
       email_sent_at?: string
@@ -206,6 +208,20 @@ export async function PATCH(
         .single()
       if (error) throw error
       return NextResponse.json({ stop: data })
+    }
+
+    // Livraison d'une commande annulée / remboursée sur Shopify entre-temps : refusée
+    // (sauf correction volontaire, force=true). Ne concerne que le passage à livré.
+    if ((status === 'delivered' || status === 'partial') && !force) {
+      const { data: current } = await getAdmin()
+        .from('delivery_stops')
+        .select('status, shopify_order_id, panel_details')
+        .eq('id', params.id)
+        .single()
+      if (current && current.status !== 'delivered' && current.status !== 'partial') {
+        const alert = await blockingAlert(current)
+        if (alert) return NextResponse.json({ error: alertMessage(alert), code: 'ORDER_CANCELLED', alert }, { status: 409 })
+      }
     }
 
     const updates: Record<string, unknown> = {}

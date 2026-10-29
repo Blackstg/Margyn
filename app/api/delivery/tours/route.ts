@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 import { normalizeDriverName } from '@/lib/delivery/driver'
+import { shopifyAlerts, alertMessage } from '@/lib/delivery/shopifyCancellations'
 
 export const dynamic = 'force-dynamic'
 
@@ -59,8 +60,22 @@ export async function GET() {
 
     if (error) throw error
 
+    // Arrêts encore à livrer dans une tournée active : la commande a-t-elle été
+    // annulée / remboursée sur Shopify depuis sa mise en tournée ?
+    type RawStop = { panel_count: number; status?: string; shopify_order_id?: string | null; panel_details?: { sku?: string; title?: string; qty?: number }[] }
+    const ACTIVE = ['draft', 'planned', 'in_progress']
+    const toCheck = (tours ?? [])
+      .filter((t) => ACTIVE.includes(String((t as { status?: string }).status)))
+      .flatMap((t) => (t.delivery_stops ?? []) as RawStop[])
+      .filter((s) => s.status === 'pending' || s.status === 'failed')
+    const alerts = await shopifyAlerts(toCheck)
+
     const result = (tours ?? []).map((tour) => {
-      const rawStops = (tour.delivery_stops ?? []) as { panel_count: number; panel_details?: { title?: string; qty?: number }[] }[]
+      const active = ACTIVE.includes(String((tour as { status?: string }).status))
+      const rawStops = ((tour.delivery_stops ?? []) as RawStop[]).map((s) => {
+        const a = active && (s.status === 'pending' || s.status === 'failed') ? alerts.get(String(s.shopify_order_id ?? '')) : undefined
+        return a ? { ...s, shopify_alert: { ...a, message: alertMessage(a) } } : s
+      })
       // On RECALCULE le panel_count de chaque arrêt (exclut la feuille de pierre et
       // applique les slots extpanel/akupanel60) pour que la CARTE — qui somme les
       // panel_count par arrêt — affiche le même total que la LISTE (total_panels).
