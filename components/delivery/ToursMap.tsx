@@ -284,7 +284,7 @@ export default function ToursMap({ tours, height = 480, onMoveStop, orderDates }
               const i = activeTours.findIndex(a => a.id === t.id)
               const b = document.createElement('button')
               b.type = 'button'
-              b.innerHTML = `<span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:${tourColor(i)};margin-right:6px"></span>${esc(t.name)}`
+              b.innerHTML = `<span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:${tourColor(i)};margin-right:6px"></span>${esc(t.name)}${t.driver_name ? ` <b style="margin-left:4px">· ${esc(t.driver_name)}</b>` : ''}`
               b.style.cssText = 'display:flex;align-items:center;width:100%;text-align:left;padding:5px 8px;margin-bottom:3px;border:1px solid #e8e8e4;border-radius:8px;background:#fff;cursor:pointer;font-size:11px;color:#1a1a2e'
               b.addEventListener('click', async () => {
                 if (!onMoveStopRef.current) return
@@ -324,7 +324,7 @@ export default function ToursMap({ tours, height = 480, onMoveStop, orderDates }
               <span style="flex-shrink:0;width:18px;height:18px;border-radius:50%;background:${tourColor(r.tourIdx)};color:#fff;font-size:10px;font-weight:700;display:flex;align-items:center;justify-content:center">${r.stop.sequence}</span>
               <div style="min-width:0">
                 <div style="font-weight:600;color:#1a1a2e">${esc(r.stop.customer_name || r.stop.order_name)} <span style="font-family:ui-monospace,monospace;color:#888;font-weight:400">${esc(r.stop.order_name)}</span></div>
-                <div style="color:#6b6b63;font-size:11px">${esc(r.tour.name)} · ${r.stop.panel_count} panneau${r.stop.panel_count !== 1 ? 'x' : ''}</div>
+                <div style="color:#6b6b63;font-size:11px">${esc(r.tour.name)}${r.tour.driver_name ? ` · ${esc(r.tour.driver_name)}` : ''} · ${r.stop.panel_count} panneau${r.stop.panel_count !== 1 ? 'x' : ''}</div>
                 ${odInfo ? `<div style="font-size:10px;font-weight:600;color:${odInfo.color}">🗓️ ${odInfo.label}</div>` : ''}
               </div>
             </div>`
@@ -435,7 +435,7 @@ export default function ToursMap({ tours, height = 480, onMoveStop, orderDates }
                 />
                 <div className="min-w-0 flex-1">
                   <p className={`text-[11px] font-semibold truncate leading-tight ${isHidden ? 'line-through text-[#9b9b93]' : 'text-[#1a1a2e]'}`}>{tour.name}</p>
-                  <p className="text-[10px] text-[#9b9b93] leading-tight">{tour.stops.length} stops · {panels} panneau{panels !== 1 ? 'x' : ''}</p>
+                  <p className="text-[10px] text-[#9b9b93] leading-tight">{tour.driver_name ? <span className="font-semibold text-[#6b6b63]">{tour.driver_name} · </span> : null}{tour.stops.length} stops · {panels} panneau{panels !== 1 ? 'x' : ''}</p>
                 </div>
                 <span className="text-[11px] shrink-0 leading-none">{isHidden ? '🚫' : '👁️'}</span>
               </button>

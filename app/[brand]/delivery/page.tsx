@@ -2376,7 +2376,7 @@ function PlanificateurView() {
                   {targetTourId
                     ? (() => {
                         const t = tours.find((t) => t.id === targetTourId)
-                        return t ? `${t.name}${t.planned_date ? ` · ${formatDate(t.planned_date)}` : ''}` : 'Choisir une tournée'
+                        return t ? `${t.name}${t.driver_name ? ` · ${normalizeDriverName(t.driver_name)}` : ''}${t.planned_date ? ` · ${formatDate(t.planned_date)}` : ''}` : 'Choisir une tournée'
                       })()
                     : 'Choisir une tournée'}
                 </span>
@@ -2398,7 +2398,9 @@ function PlanificateurView() {
                       onClick={() => { setTargetTourId(t.id); setTourDropdownOpen(false) }}
                       className={`w-full text-left px-3 py-2 text-sm hover:bg-white/10 whitespace-nowrap ${targetTourId === t.id ? 'text-white font-medium' : 'text-white/80'}`}
                     >
-                      {t.name}{t.planned_date ? ` · ${formatDate(t.planned_date)}` : ''}
+                      {t.name}
+                      {t.driver_name && <span className="font-semibold text-white"> · {normalizeDriverName(t.driver_name)}</span>}
+                      {t.planned_date ? ` · ${formatDate(t.planned_date)}` : ''}
                     </button>
                   ))}
                 </div>
