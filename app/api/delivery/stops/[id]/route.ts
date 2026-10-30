@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 import { blockingAlert, alertMessage } from '@/lib/delivery/shopifyCancellations'
-import { fulfillStop } from '@/lib/delivery/shopifyFulfill'
+import { fulfillOrder } from '@/lib/delivery/shopifyFulfill'
 
 function getAdmin() {
   return createClient(
@@ -258,8 +258,12 @@ export async function PATCH(
 
     // Marque « traitée » dans Shopify ce qui vient d'être livré. Un échec ne bloque
     // jamais le livreur : le rattrapage nocturne (/api/delivery/shopify-fulfill) repasse.
-    if (status === 'delivered' || status === 'partial') {
-      const r = await fulfillStop(data)
+    if ((status === 'delivered' || status === 'partial') && data.shopify_order_id) {
+      const { data: orderStops } = await admin
+        .from('delivery_stops')
+        .select('order_name, shopify_order_id, status, panel_details, partial_delivered')
+        .eq('shopify_order_id', data.shopify_order_id)
+      const r = await fulfillOrder(orderStops ?? [data])
       if (r.error) console.error('[shopify fulfill]', r.order, r.error)
     }
 

@@ -56,49 +56,61 @@ function deliveredItems(stop: FulfillStop): Item[] {
 
 const norm = (s?: string | null) => (s ?? '').trim().toLowerCase()
 
-export async function fulfillStop(stop: FulfillStop, opts: { dryRun?: boolean } = {}): Promise<FulfillResult> {
-  const order = stop.order_name ?? String(stop.shopify_order_id ?? '')
-  const id = String(stop.shopify_order_id ?? '')
+// Toutes les livraisons Steero d'UNE commande → on marque « traité » dans Shopify
+// exactement ce qui a été livré au total, moins ce qui est déjà traité. Calcul au
+// niveau commande (pas arrêt) : un arrêt partiel relu au rattrapage ne doit pas
+// re-traiter ses articles (bug du 30/10/2026 sur #10908, #11008, #10935).
+export async function fulfillOrder(stops: FulfillStop[], opts: { dryRun?: boolean } = {}): Promise<FulfillResult> {
+  const order = stops[0]?.order_name ?? String(stops[0]?.shopify_order_id ?? '')
+  const id = String(stops[0]?.shopify_order_id ?? '')
   if (!id) return { order, fulfilled: [], skipped: 'pas de commande Shopify liée' }
-  const items = deliveredItems(stop)
+  const items = stops.flatMap(deliveredItems)
   if (!items.length) return { order, fulfilled: [], skipped: 'rien de livré' }
 
   try {
-    const { order: o } = await shopify<{ order: { cancelled_at: string | null; financial_status: string; line_items: LineItem[] } }>(
-      `orders/${id}.json?fields=cancelled_at,financial_status,line_items`)
+    const { order: o } = await shopify<{ order: {
+      cancelled_at: string | null; financial_status: string
+      line_items: (LineItem & { quantity: number })[]
+      fulfillments: { status: string; line_items: { id: number; quantity: number }[] }[]
+    } }>(`orders/${id}.json?fields=cancelled_at,financial_status,line_items,fulfillments`)
     if (o.cancelled_at || o.financial_status === 'refunded' || o.financial_status === 'voided')
       return { order, fulfilled: [], skipped: 'commande annulée / remboursée' }
 
-    const { fulfillment_orders } = await shopify<{ fulfillment_orders: FO[] }>(`orders/${id}/fulfillment_orders.json`)
-    const open = fulfillment_orders.filter(f => f.status === 'open' || f.status === 'in_progress')
-    // Reste à traiter par ligne de commande
-    const left = new Map<number, { fo: number; line: FOLine }[]>()
-    for (const f of open) for (const l of f.line_items) if (l.fulfillable_quantity > 0)
-      left.set(l.line_item_id, [...(left.get(l.line_item_id) ?? []), { fo: f.id, line: l }])
-
-    const byFo = new Map<number, { id: number; quantity: number }[]>()
-    const fulfilled: { title: string; qty: number }[] = []
+    // Livré au total, réparti sur les lignes Shopify correspondantes
+    const delivered = new Map<number, number>()
     for (const it of items) {
       // Même article : SKU d'abord, sinon titre (+ variante si connue)
       const matches = o.line_items.filter(li =>
         (it.sku && norm(li.sku) === norm(it.sku)) ||
         (!it.sku && norm(li.title) === norm(it.title) && (!it.variant_title || norm(li.variant_title) === norm(it.variant_title))))
       let need = it.qty
-      for (const li of matches) for (const slot of left.get(li.id) ?? []) {
-        if (need <= 0) break
-        const q = Math.min(need, slot.line.fulfillable_quantity)
+      for (const li of matches) {
+        const q = Math.min(need, li.quantity - (delivered.get(li.id) ?? 0))
         if (q <= 0) continue
-        slot.line.fulfillable_quantity -= q
+        delivered.set(li.id, (delivered.get(li.id) ?? 0) + q)
         need -= q
-        // Shopify refuse deux fois la même ligne dans un envoi : on cumule
-        const lines = byFo.get(slot.fo) ?? []
-        const same = lines.find(x => x.id === slot.line.id)
-        if (same) same.quantity += q
-        else lines.push({ id: slot.line.id, quantity: q })
-        byFo.set(slot.fo, lines)
       }
-      const done = it.qty - need
-      if (done > 0) fulfilled.push({ title: it.title ?? it.sku ?? '', qty: done })
+    }
+    // Déjà traité dans Shopify (par Steero ou à la main)
+    const done = new Map<number, number>()
+    for (const f of o.fulfillments ?? []) if (f.status === 'success')
+      for (const l of f.line_items) done.set(l.id, (done.get(l.id) ?? 0) + l.quantity)
+
+    const { fulfillment_orders } = await shopify<{ fulfillment_orders: FO[] }>(`orders/${id}/fulfillment_orders.json`)
+    const open = fulfillment_orders.filter(f => f.status === 'open' || f.status === 'in_progress')
+    const byFo = new Map<number, { id: number; quantity: number }[]>()
+    const fulfilled: { title: string; qty: number }[] = []
+    for (const li of o.line_items) {
+      let need = (delivered.get(li.id) ?? 0) - (done.get(li.id) ?? 0)
+      const start = need
+      for (const f of open) for (const l of f.line_items) {
+        if (need <= 0 || l.line_item_id !== li.id) continue
+        const q = Math.min(need, l.fulfillable_quantity)
+        if (q <= 0) continue
+        need -= q
+        byFo.set(f.id, [...(byFo.get(f.id) ?? []), { id: l.id, quantity: q }])
+      }
+      if (start - need > 0) fulfilled.push({ title: li.title, qty: start - need })
     }
     if (!byFo.size) return { order, fulfilled: [], skipped: 'déjà traitée dans Shopify' }
 

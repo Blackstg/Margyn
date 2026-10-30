@@ -3,7 +3,7 @@
 // l'automatisation…). GET (cron) ou POST ?days=45&dry=1 — protégé par CRON_SECRET.
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
-import { fulfillStop, notFulfilledIds, type FulfillResult, type FulfillStop } from '@/lib/delivery/shopifyFulfill'
+import { fulfillOrder, notFulfilledIds, type FulfillResult, type FulfillStop } from '@/lib/delivery/shopifyFulfill'
 
 export const maxDuration = 300
 export const dynamic = 'force-dynamic'
@@ -22,21 +22,24 @@ async function run(req: NextRequest) {
 
   const sb = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!, { auth: { persistSession: false } })
   const { data, error } = await sb.from('delivery_stops')
-    .select('order_name, shopify_order_id, status, panel_details, partial_delivered, delivered_at')
+    .select('shopify_order_id')
     .in('status', ['delivered', 'partial'])
     .gte('delivered_at', since)
-    .order('delivered_at')
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
 
-  const stops = (data ?? []) as (FulfillStop & { delivered_at: string })[]
-  const todo = await notFulfilledIds([...new Set(stops.map(s => String(s.shopify_order_id ?? '')).filter(Boolean))])
+  const recent = (data ?? []) as FulfillStop[]
+  const todo = [...await notFulfilledIds([...new Set(recent.map(s => String(s.shopify_order_id ?? '')).filter(Boolean))])]
+  // Toutes les livraisons de ces commandes (même anciennes), calcul par commande
+  const { data: all, error: e2 } = todo.length
+    ? await sb.from('delivery_stops').select('order_name, shopify_order_id, status, panel_details, partial_delivered').in('shopify_order_id', todo)
+    : { data: [], error: null }
+  if (e2) return NextResponse.json({ error: e2.message }, { status: 500 })
   const results: FulfillResult[] = []
-  for (const s of stops) {
-    if (!todo.has(String(s.shopify_order_id ?? ''))) continue
-    results.push(await fulfillStop(s, { dryRun }))
+  for (const id of todo) {
+    results.push(await fulfillOrder(((all ?? []) as FulfillStop[]).filter(s => String(s.shopify_order_id) === id), { dryRun }))
   }
   return NextResponse.json({
-    dryRun, days, checked: stops.length,
+    dryRun, days, checked: todo.length,
     fulfilled: results.filter(r => r.fulfilled.length).length,
     errors: results.filter(r => r.error).length,
     results,
