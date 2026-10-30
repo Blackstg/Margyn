@@ -11,6 +11,7 @@ import { useBrand } from '@/context/BrandContext'
 import { geoAddress, streetLine } from '@/lib/delivery/geo'
 import { geocodeParts } from '@/lib/delivery/geocode'
 import { normalizeDriverName } from '@/lib/delivery/driver'
+import { canSeeShopifyFulfillment } from '@/lib/access'
 import { ChevronDown, ChevronUp, ChevronLeft, ChevronRight, Trash2, Mail, Plus, X, MapPin, Package, Truck, Map as MapIcon, Search, Pencil, Check, MessageSquare, GripVertical, Printer, RefreshCw, Clock, Calendar, ArrowLeftRight } from 'lucide-react'
 import {
   DndContext, DragEndEvent, DragOverlay, DragStartEvent,
@@ -312,8 +313,8 @@ function DeliveryPageInner() {
           ? ['livreur']
           : ALL_VIEWS
       // Stats tab is only shown to users who have planificateur access
-      // « Traitement Shopify » : pour qui planifie ou fait le SAV (pointage des commandes)
-      const withShopify: DeliveryView[] = base.includes('planificateur') || base.includes('sav')
+      // « Traitement Shopify » : admin et SAV uniquement (jamais un compte livreur)
+      const withShopify: DeliveryView[] = canSeeShopifyFulfillment(role) && !base.every(v => v === 'livreur')
         ? [...base, 'shopify']
         : base
       const withStats: DeliveryView[] = base.includes('planificateur')

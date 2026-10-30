@@ -64,6 +64,12 @@ export function isAdminRole(role?: string | null): boolean {
   return !role || role === 'admin'
 }
 
+// Onglet Livraison « Traitement Shopify » (clients, articles, suivi) : admin et SAV
+// uniquement — jamais un compte livreur, même s'il a une vue SAV.
+export function canSeeShopifyFulfillment(role?: string | null): boolean {
+  return isAdminRole(role) || role === 'sav'
+}
+
 // Fallback feature sets for users created before per-user `features` existed.
 const ROLE_DEFAULT_FEATURES: Record<string, FeatureKey[]> = {
   sav:      ['billing', 'delivery', 'sav', 'sav-defects', 'sav-krom'],

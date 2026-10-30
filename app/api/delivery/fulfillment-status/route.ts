@@ -4,12 +4,13 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createServerClient } from '@supabase/auth-helpers-nextjs'
 import { cookies } from 'next/headers'
 import { fulfillmentStatus } from '@/lib/delivery/fulfillmentStatus'
+import { canSeeShopifyFulfillment } from '@/lib/access'
 
 export const dynamic = 'force-dynamic'
 export const fetchCache = 'force-no-store'
 export const maxDuration = 60
 
-async function signedIn(): Promise<boolean> {
+async function allowed(): Promise<boolean> {
   try {
     const store = await cookies()
     const sb = createServerClient(
@@ -18,12 +19,12 @@ async function signedIn(): Promise<boolean> {
       { cookies: { getAll() { return store.getAll() }, setAll() {} } },
     )
     const { data: { user } } = await sb.auth.getUser()
-    return !!user
+    return !!user && canSeeShopifyFulfillment(user.user_metadata?.role as string | undefined)
   } catch { return false }
 }
 
 export async function GET(req: NextRequest) {
-  if (!(await signedIn())) return NextResponse.json({ error: 'Non connecté' }, { status: 401 })
+  if (!(await allowed())) return NextResponse.json({ error: 'Réservé aux comptes admin et SAV' }, { status: 403 })
   const days = Math.min(120, Math.max(7, Number(req.nextUrl.searchParams.get('days') ?? 30)))
   try {
     return NextResponse.json(await fulfillmentStatus(days))
