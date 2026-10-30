@@ -5,7 +5,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Loader2, AlertCircle, ExternalLink, RefreshCw } from 'lucide-react'
 
-type State = 'manual' | 'waiting' | 'auto' | 'done'
+type State = 'manual' | 'waiting' | 'auto' | 'done' | 'samples'
 type Row = {
   id: number; name: string; created_at: string; customer: string; city: string | null; state: State
   remaining: { title: string; variant: string | null; qty: number; truck: boolean; sample: boolean }[]
@@ -15,11 +15,13 @@ type Row = {
 type Data = { days: number; counts: Record<State, number>; rows: Row[] }
 
 const STATES: { key: State; label: string; hint: string; cls: string }[] = [
-  { key: 'manual',  label: 'À traiter à la main',      hint: 'La Poste, échantillons, accessoires hors tournée', cls: 'bg-[#fce8ea] text-[#c7293a]' },
+  { key: 'manual',  label: 'À traiter à la main',      hint: 'accessoires hors tournée (La Poste…)', cls: 'bg-[#fce8ea] text-[#c7293a]' },
   { key: 'waiting', label: 'En attente de livraison',  hint: 'traitée automatiquement au « livré »',              cls: 'bg-[#fef3c7] text-[#b45309]' },
   { key: 'auto',    label: 'Traitée par Steero',       hint: 'au moment de la livraison',                         cls: 'bg-[#dcf5e7] text-[#1a7f4b]' },
   { key: 'done',    label: 'Traitée à la main',        hint: 'au moins en partie',                                cls: 'bg-[#eeede9] text-[#6b6b63]' },
 ]
+// Hors compteurs : échantillons seuls, envoyés par le prestataire échantillons
+const SAMPLES_STATE = { key: 'samples' as const, label: 'Échantillons (prestataire)', hint: '', cls: 'bg-[#eef2ff] text-[#4338ca]' }
 const SHOP_ADMIN = 'https://admin.shopify.com/store/booa-france/orders'
 
 const fmtDay = (iso: string) => new Date(iso).toLocaleDateString('fr-FR', { day: 'numeric', month: 'short', timeZone: 'Europe/Paris' })
@@ -102,7 +104,7 @@ export default function FulfillmentStatusView() {
             <tbody>
               {rows.length === 0 && <tr><td colSpan={6} className="px-4 py-8 text-center text-sm text-[#9b9b93]">Aucune commande.</td></tr>}
               {rows.map(r => {
-                const st = STATES.find(s => s.key === r.state)!
+                const st = STATES.find(s => s.key === r.state) ?? SAMPLES_STATE
                 return (
                   <tr key={r.id} className="border-t border-[#f3f3f1] align-top">
                     <td className="px-4 py-2.5">
@@ -117,7 +119,8 @@ export default function FulfillmentStatusView() {
                       {r.remaining.length === 0 ? <span className="text-[#9b9b93]">—</span> : r.remaining.map((it, i) => (
                         <p key={i}>
                           {it.qty}× {it.title}{it.variant ? <span className="text-[#9b9b93]"> · {it.variant}</span> : null}
-                          {!it.truck && <span className="ml-1 text-[10px] font-semibold text-[#c7293a]">{it.sample ? 'échantillon' : 'hors camion'}</span>}
+                          {it.sample ? <span className="ml-1 text-[10px] font-semibold text-[#4338ca]">échantillon · prestataire</span>
+                            : !it.truck && <span className="ml-1 text-[10px] font-semibold text-[#c7293a]">hors camion</span>}
                         </p>
                       ))}
                     </td>

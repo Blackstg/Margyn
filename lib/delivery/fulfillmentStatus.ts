@@ -4,6 +4,7 @@
 //   waiting  : reste des articles qui partent en camion → traités auto à la livraison
 //   auto     : entièrement traitée par Steero (au « livré »)
 //   done     : entièrement traitée, au moins en partie à la main
+//   samples  : ne reste que des échantillons → envoyés par le prestataire échantillons
 import { createClient } from '@supabase/supabase-js'
 import { isSteeroTracking } from './shopifyFulfill'
 
@@ -68,14 +69,16 @@ export async function fulfillmentStatus(days: number) {
     const activeTitles = new Set((active?.panel_details ?? []).map(p => p.title ?? ''))
     const lastDelivery = os.filter(s => s.delivered_at && (s.status === 'delivered' || s.status === 'partial')).map(s => s.delivered_at!).sort().pop() ?? null
 
-    let state: 'manual' | 'waiting' | 'auto' | 'done'
-    if (!remaining.length) state = success.length && success.every(f => isSteeroTracking(f.tracking_number)) ? 'auto' : 'done'
+    let state: 'manual' | 'waiting' | 'auto' | 'done' | 'samples'
+    if (remaining.length && remaining.every(r => r.sample)) state = 'samples'
+    else if (!remaining.length) state = success.length && success.every(f => isSteeroTracking(f.tracking_number)) ? 'auto' : 'done'
     else {
       // Reste un article camion → toute la commande part en tournée (colle, vis
       // voyagent avec les panneaux) et sera traitée au « livré ». Sinon, ce qui
       // n'est pas dans une tournée prévue est à traiter à la main (La Poste…).
-      const truckLeft = remaining.some(r => r.truck)
-      const allPlanned = remaining.every(r => activeTitles.has(r.title))
+      const left = remaining.filter(r => !r.sample)   // échantillons : prestataire
+      const truckLeft = left.some(r => r.truck)
+      const allPlanned = left.every(r => activeTitles.has(r.title))
       state = truckLeft || (active && allPlanned) ? 'waiting' : 'manual'
     }
     const name = [o.shipping_address?.first_name ?? o.customer?.first_name, o.shipping_address?.last_name ?? o.customer?.last_name].filter(Boolean).join(' ')
@@ -89,7 +92,7 @@ export async function fulfillmentStatus(days: number) {
     }
   }).sort((a, b) => b.created_at.localeCompare(a.created_at))
 
-  const counts = { manual: 0, waiting: 0, auto: 0, done: 0 }
+  const counts = { manual: 0, waiting: 0, auto: 0, done: 0, samples: 0 }
   for (const r of rows) counts[r.state]++
   return { days, counts, rows }
 }
