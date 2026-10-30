@@ -90,7 +90,12 @@ export async function fulfillStop(stop: FulfillStop, opts: { dryRun?: boolean } 
         if (q <= 0) continue
         slot.line.fulfillable_quantity -= q
         need -= q
-        byFo.set(slot.fo, [...(byFo.get(slot.fo) ?? []), { id: slot.line.id, quantity: q }])
+        // Shopify refuse deux fois la même ligne dans un envoi : on cumule
+        const lines = byFo.get(slot.fo) ?? []
+        const same = lines.find(x => x.id === slot.line.id)
+        if (same) same.quantity += q
+        else lines.push({ id: slot.line.id, quantity: q })
+        byFo.set(slot.fo, lines)
       }
       const done = it.qty - need
       if (done > 0) fulfilled.push({ title: it.title ?? it.sku ?? '', qty: done })
