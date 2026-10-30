@@ -6,6 +6,10 @@
 // satisfaction Bowa part déjà à la livraison).
 
 const API = '2024-01'
+// Repère posé sur nos envois (n° de suivi) : distingue « traité par Steero » de « à la main »
+export const STEERO_TRACKING = 'Livraison Bowa (Steero)'
+// Shopify retire les espaces du n° stocké (« LivraisonBowa(Steero) ») → on compare sur le mot
+export const isSteeroTracking = (n?: string | null) => /steero/i.test(n ?? '')
 
 type Item = { sku?: string | null; title?: string | null; variant_title?: string | null; qty: number }
 
@@ -119,7 +123,7 @@ export async function fulfillOrder(stops: FulfillStop[], opts: { dryRun?: boolea
       for (const [foId, lines] of byFo) {
         await shopify('fulfillments.json', {
           method: 'POST',
-          body: JSON.stringify({ fulfillment: { notify_customer: false, line_items_by_fulfillment_order: [{ fulfillment_order_id: foId, fulfillment_order_line_items: lines }] } }),
+          body: JSON.stringify({ fulfillment: { notify_customer: false, tracking_info: { number: STEERO_TRACKING }, line_items_by_fulfillment_order: [{ fulfillment_order_id: foId, fulfillment_order_line_items: lines }] } }),
         })
       }
     }

@@ -23,6 +23,7 @@ import { CSS } from '@dnd-kit/utilities'
 
 const TourMap            = nextDynamic(() => import('@/components/delivery/TourMap'),            { ssr: false })
 const OrdersMap          = nextDynamic(() => import('@/components/delivery/OrdersMap'),          { ssr: false })
+const FulfillmentStatusView = nextDynamic(() => import('@/components/delivery/FulfillmentStatusView'), { ssr: false })
 const SavPositionMap     = nextDynamic(() => import('@/components/delivery/SavPositionMap'),     { ssr: false })
 const StatsView          = nextDynamic(() => import('@/components/delivery/StatsView'),          { ssr: false })
 const ToursMap           = nextDynamic(() => import('@/components/delivery/ToursMap'),           { ssr: false })
@@ -276,13 +277,14 @@ export default function DeliveryPage() {
   )
 }
 
-type DeliveryView = 'planificateur' | 'livreur' | 'sav' | 'stats'
+type DeliveryView = 'planificateur' | 'livreur' | 'sav' | 'shopify' | 'stats'
 const ALL_VIEWS: DeliveryView[] = ['planificateur', 'livreur', 'sav']
 
 const TAB_LABELS: Record<DeliveryView, string> = {
   planificateur: 'Planificateur',
   livreur:       'Livreur',
   sav:           'SAV',
+  shopify:       'Traitement Shopify',
   stats:         'Stats',
 }
 
@@ -310,16 +312,20 @@ function DeliveryPageInner() {
           ? ['livreur']
           : ALL_VIEWS
       // Stats tab is only shown to users who have planificateur access
-      const withStats: DeliveryView[] = base.includes('planificateur')
-        ? [...base, 'stats']
+      // « Traitement Shopify » : pour qui planifie ou fait le SAV (pointage des commandes)
+      const withShopify: DeliveryView[] = base.includes('planificateur') || base.includes('sav')
+        ? [...base, 'shopify']
         : base
+      const withStats: DeliveryView[] = base.includes('planificateur')
+        ? [...withShopify, 'stats']
+        : withShopify
       setAllowedViews(withStats)
     })
   }, [])
 
   const rawView = searchParams.get('view')
   const activeTab: DeliveryView =
-    rawView === 'livreur' || rawView === 'sav' || rawView === 'planificateur' || rawView === 'stats'
+    rawView === 'livreur' || rawView === 'sav' || rawView === 'planificateur' || rawView === 'shopify' || rawView === 'stats'
       ? rawView
       : 'planificateur'
 
@@ -412,6 +418,7 @@ function DeliveryPageInner() {
       {effectiveTab === 'planificateur' && <PlanificateurView />}
       {effectiveTab === 'livreur' && <LivreurView />}
       {effectiveTab === 'sav' && <SavView />}
+      {effectiveTab === 'shopify' && <FulfillmentStatusView />}
     </div>
   )
 }
