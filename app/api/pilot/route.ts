@@ -35,16 +35,35 @@ const isStone   = (t: string) => /stonepanel|feuille\s*de\s*pierre/i.test(t)
 const isPanel   = (t: string) => /panneau/i.test(t) && !isStone(t)
 const isBulky   = (t: string) => /tasseau|profil|baguette|plinthe|corniche|liteau|lambourde/i.test(t)
 
+// Onglets « par produit » : famille + taille. slot = place dans le camion (base de
+// répartition de la livraison) : Extpanel vendu à l'unité mais par paquets de 4,
+// Akupanel 60 = 2 par place, feuille de pierre comptée comme un panneau (lourde).
+// Accessoires : livrés avec les panneaux sans surcoût (slot 0).
+type ProductKey = { key: string; label: string; slot: number }
+function productKey(title: string, variant?: string | null): ProductKey | null {
+  if (isSample(title)) return null
+  const size = (String(variant ?? '').match(/\b(60|120|240|270|300)\b/) ?? [])[1] ?? ''
+  const sz = (k: string, l: string, slot: number) => ({ key: size ? `${k}-${size}` : k, label: size ? `${l} ${size}` : l, slot })
+  if (/akupanel/i.test(title) && /akupanel\W{0,3}60/i.test(title)) return { key: 'akupanel-60', label: 'Akupanel 60×60', slot: 0.5 }
+  if (/extpanel/i.test(title)) return sz('extpanel', 'Extpanel', 0.25)
+  if (/lightpanel/i.test(title)) return sz('lightpanel', 'Lightpanel', 1)
+  if (/akupanel/i.test(title) && isPanel(title)) return sz('akupanel', 'Akupanel', 1)
+  if (isStone(title)) return sz('stonepanel', 'Stonepanel', 1)
+  if (isPanel(title)) return { key: 'autre-panneau', label: 'Autres panneaux', slot: 1 }
+  return { key: 'accessoires', label: 'Accessoires (colle, vis, tasseaux…)', slot: 0 }
+}
+type ProductAgg = { label: string; qty: number; slots: number; ttc: number; cogs: number; missingQty: number; shippingHT: number; delivery: number; estimated: number }
+
 const parisDate = (iso: string) => new Date(iso).toLocaleDateString('sv-SE', { timeZone: 'Europe/Paris' })
 const r0 = (n: number) => Math.round(n)
 
-type LineItem = { id: number; variant_id: number | null; product_id: number | null; title: string; quantity: number; price: string; total_discount: string; discount_allocations?: { amount: string }[] }
+type LineItem = { id: number; variant_id: number | null; product_id: number | null; title: string; variant_title?: string | null; quantity: number; price: string; total_discount: string; discount_allocations?: { amount: string }[] }
 type Order = {
   id: number; name: string; created_at: string; total_price: string; total_tax: string
   financial_status: string; cancelled_at: string | null
   total_shipping_price_set?: { shop_money?: { amount?: string } }
   line_items: LineItem[]
-  refunds?: { refund_line_items?: { line_item_id: number; quantity: number }[]; transactions?: { kind: string; status: string; amount: string }[] }[]
+  refunds?: { refund_line_items?: { line_item_id: number; quantity: number; subtotal?: string | number; total_tax?: string | number }[]; transactions?: { kind: string; status: string; amount: string }[] }[]
 }
 type SubLine = { order: string; date: string; price: number | null; billedQty: number; bucket: number }
 
@@ -166,6 +185,7 @@ export async function GET(req: NextRequest) {
       productsHT: 0, shippingHT: 0, refundsHT: 0, suppHT: 0, ttcNet: 0,
       cogs: 0, giftCogs: 0, missingCost: 0,
       panelQty: 0, panelTTC: 0, panelCogs: 0,
+      products: new Map<string, ProductAgg>(),
       terence: 0, terenceEstimated: 0,
       buckets: newBuckets(),
     }]))
@@ -190,6 +210,7 @@ export async function GET(req: NextRequest) {
 
       let cogs = 0, panels = 0, stones = 0, truck = false, missing = false
       let panelQty = 0, panelTTC = 0, panelCogs = 0   // panneaux réellement vendus (hors remboursés)
+      const lines: { pk: ProductKey; qty: number; ttc: number; cogs: number; missing: boolean }[] = []
       for (const li of o.line_items) {
         const qty = Math.max(0, li.quantity - (refundedQty.get(li.id) ?? 0))
         const unit = costByVariant.get(String(li.variant_id)) ?? costByProduct.get(String(li.product_id))
@@ -201,6 +222,11 @@ export async function GET(req: NextRequest) {
         }
         if (unit == null) { if (qty > 0 && !isSample(li.title)) { missing = true; missingTitles.set(li.title, (missingTitles.get(li.title) ?? 0) + qty) } }
         else cogs += unit * qty
+        const pk = productKey(li.title, li.variant_title)
+        if (pk && qty > 0) {
+          const disc = Math.max(parseFloat(li.total_discount) || 0, (li.discount_allocations ?? []).reduce((s, d) => s + (parseFloat(d.amount) || 0), 0))
+          lines.push({ pk, qty, ttc: (parseFloat(li.price) || 0) * qty - disc * (qty / li.quantity), cogs: (unit ?? 0) * qty, missing: unit == null })
+        }
         if (isSample(li.title)) continue
         if (isPanel(li.title)) { panels += li.quantity; truck = true }
         else if (isStone(li.title)) { stones += li.quantity; truck = true }
@@ -230,6 +256,28 @@ export async function GET(req: NextRequest) {
       }
       m.terence += delivery
       m.terenceEstimated += estimated
+
+      // Par produit : le port payé et la livraison de la commande sont répartis sur ses
+      // panneaux (au prorata des places camion) ; les gestes commerciaux (remboursements
+      // sans article) au prorata du montant de chaque ligne.
+      const lineRefunds = (o.refunds ?? []).flatMap(r => r.refund_line_items ?? [])
+        .reduce((s, x) => s + (Number(x.subtotal) || 0) + (Number(x.total_tax) || 0), 0)
+      const gestureTTC = Math.max(0, refundTTC - lineRefunds)
+      const linesTTC = lines.reduce((s, l) => s + l.ttc, 0)
+      const slotsTot = lines.reduce((s, l) => s + l.pk.slot * l.qty, 0)
+      for (const l of lines) {
+        const w = slotsTot > 0 ? (l.pk.slot * l.qty) / slotsTot : (l.pk.key === 'accessoires' ? 1 / Math.max(1, lines.filter(x => x.pk.key === 'accessoires').length) : 0)
+        const a = m.products.get(l.pk.key) ?? { label: l.pk.label, qty: 0, slots: 0, ttc: 0, cogs: 0, missingQty: 0, shippingHT: 0, delivery: 0, estimated: 0 }
+        a.qty += l.qty
+        a.slots += l.pk.slot * l.qty
+        a.ttc += l.ttc - (linesTTC > 0 ? gestureTTC * l.ttc / linesTTC : 0)
+        a.cogs += l.cogs
+        if (l.missing) a.missingQty += l.qty
+        a.shippingHT += shippingHT * w
+        a.delivery += (delivery + estimated) * w
+        a.estimated += estimated * w
+        m.products.set(l.pk.key, a)
+      }
 
       const kind = samplesOnly ? 'samples' : truck ? BUCKETS[bIdx].key : 'postal'
       if (kind === 'samples') m.counts.samples++
@@ -307,6 +355,29 @@ export async function GET(req: NextRequest) {
           avgPriceTTC: m.panelQty ? Math.round(m.panelTTC / m.panelQty * 100) / 100 : null,
           avgCost: m.panelQty ? Math.round(m.panelCogs / m.panelQty * 100) / 100 : null,
         },
+        // Par produit (famille + taille) : tout en sommes du mois, la page divise par qty.
+        // Transport interne réparti par place camion ; pub et charges fixes au prorata du CA HT.
+        products: (() => {
+          const all = [...m.products.entries()]
+          const slotsAll = all.reduce((s, [, a]) => s + a.slots, 0)
+          const fixedAll = costs.team + costs.apps + costs.infra
+          return all.map(([key, a]) => {
+            const ht = a.ttc / VAT
+            const share = revenueHT > 0 ? (ht + a.shippingHT) / revenueHT : 0
+            const transportShare = slotsAll > 0 ? costs.transport * a.slots / slotsAll : 0
+            const fees = a.ttc * feeRate
+            const adsShare = costs.ads * share
+            const fixedShare = fixedAll * share
+            return {
+              key, label: a.label, qty: a.qty,
+              ttc: r0(a.ttc), ht: r0(ht), shippingHT: r0(a.shippingHT), cogs: r0(a.cogs), missingQty: a.missingQty,
+              fees: r0(fees), delivery: r0(a.delivery + transportShare), deliveryEstimated: r0(a.estimated),
+              ads: r0(adsShare), fixed: r0(fixedShare),
+              contribution: r0(ht + a.shippingHT - a.cogs - fees - a.delivery - transportShare),
+              result: r0(ht + a.shippingHT - a.cogs - fees - a.delivery - transportShare - adsShare - fixedShare),
+            }
+          }).sort((x, y) => y.ttc - x.ttc)
+        })(),
         kpis: {
           avgBasketHT: panelOrders ? r0(m.buckets.filter(b => BUCKETS.some(x => x.key === b.key)).reduce((s, b) => s + b.revenueHT, 0) / panelOrders) : null,
           cac: panelOrders ? r0(adsTotal / panelOrders) : null,           // pub ÷ commandes panneaux
