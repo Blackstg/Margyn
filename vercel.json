@@ -7,6 +7,7 @@
     { "path": "/api/sync-all", "schedule": "0 22 * * *" },
     { "path": "/api/margins/fulfillment-sync", "schedule": "0 6 * * *" },
     { "path": "/api/shopify/refund-catchup",   "schedule": "30 4 * * *" },
+    { "path": "/api/delivery/shopify-fulfill", "schedule": "0 23 * * *" },
     { "path": "/api/pinterest/sync",          "schedule": "0 2 * * *" },
     { "path": "/api/cron/sync-creatives",     "schedule": "0 5 * * *" },
     { "path": "/api/cron/sync-creatives",     "schedule": "0 17 * * *" },
