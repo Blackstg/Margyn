@@ -3,6 +3,7 @@
 //   manual   : reste des articles à traiter À LA MAIN (La Poste, échantillons…)
 //   waiting  : reste des articles qui partent en camion → traités auto à la livraison
 //   auto     : entièrement traitée par Steero (au « livré »)
+//   replan   : livraison partielle / échouée, reste des articles camion hors tournée
 //   done     : entièrement traitée, au moins en partie à la main
 //   samples  : ne reste que des échantillons → envoyés par le prestataire échantillons
 import { createClient } from '@supabase/supabase-js'
@@ -45,12 +46,18 @@ export async function fulfillmentStatus(days: number) {
 
   // Livraisons Steero de ces commandes
   const sb = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!, { auth: { persistSession: false } })
-  type Stop = { shopify_order_id: string; status: string; delivered_at: string | null; panel_details: { title?: string; qty?: number }[] | null; delivery_tours: { planned_date: string; driver_name: string; status: string } | null }
+  type Stop = {
+    shopify_order_id: string; status: string; delivered_at: string | null; created_at: string
+    comment: string | null; comment_at: string | null
+    panel_details: { title?: string; qty?: number }[] | null
+    partial_delivered: { title?: string; qty_ordered?: number; qty_delivered?: number }[] | null
+    delivery_tours: { planned_date: string; driver_name: string; status: string } | null
+  }
   const stops: Stop[] = []
   const ids = orders.map(o => String(o.id))
   for (let i = 0; i < ids.length; i += 200) {
     const { data, error } = await sb.from('delivery_stops')
-      .select('shopify_order_id, status, delivered_at, panel_details, delivery_tours(planned_date, driver_name, status)')
+      .select('shopify_order_id, status, delivered_at, created_at, comment, comment_at, panel_details, partial_delivered, delivery_tours(planned_date, driver_name, status)')
       .in('shopify_order_id', ids.slice(i, i + 200))
     if (error) throw new Error(error.message)
     stops.push(...((data ?? []) as unknown as Stop[]))
@@ -69,7 +76,17 @@ export async function fulfillmentStatus(days: number) {
     const activeTitles = new Set((active?.panel_details ?? []).map(p => p.title ?? ''))
     const lastDelivery = os.filter(s => s.delivered_at && (s.status === 'delivered' || s.status === 'partial')).map(s => s.delivered_at!).sort().pop() ?? null
 
-    let state: 'manual' | 'waiting' | 'auto' | 'done' | 'samples'
+    // Dernier passage partiel / en échec (pour replanifier les manquants)
+    const lastIssue = os.filter(s => (s.status === 'partial' || s.status === 'failed') && s.delivered_at)
+      .sort((a, b) => a.delivered_at!.localeCompare(b.delivered_at!)).pop() ?? null
+    // Le passage partiel / en échec est-il le dernier (pas re-livré depuis) ?
+    const issueIsLatest = !!lastIssue && lastIssue.delivered_at! >= (lastDelivery ?? '') && remaining.some(r => r.truck)
+    // Notes laissées par les livreurs, la plus récente d'abord
+    const notes = os.filter(s => s.comment?.trim())
+      .map(s => ({ at: s.comment_at ?? s.delivered_at ?? s.created_at, status: s.status, driver: s.delivery_tours?.driver_name ?? null, text: s.comment!.trim() }))
+      .sort((a, b) => b.at.localeCompare(a.at))
+
+    let state: 'manual' | 'waiting' | 'replan' | 'auto' | 'done' | 'samples'
     if (remaining.length && remaining.every(r => r.sample)) state = 'samples'
     else if (!remaining.length) state = success.length && success.every(f => isSteeroTracking(f.tracking_number)) ? 'auto' : 'done'
     else {
@@ -79,7 +96,8 @@ export async function fulfillmentStatus(days: number) {
       const left = remaining.filter(r => !r.sample)   // échantillons : prestataire
       const truckLeft = left.some(r => r.truck)
       const allPlanned = left.every(r => activeTitles.has(r.title))
-      state = truckLeft || (active && allPlanned) ? 'waiting' : 'manual'
+      state = truckLeft && !active && lastIssue ? 'replan'
+        : truckLeft || (active && allPlanned) ? 'waiting' : 'manual'
     }
     const name = [o.shipping_address?.first_name ?? o.customer?.first_name, o.shipping_address?.last_name ?? o.customer?.last_name].filter(Boolean).join(' ')
     return {
@@ -88,11 +106,19 @@ export async function fulfillmentStatus(days: number) {
       fulfillments: success.map(f => ({ at: f.created_at, by: isSteeroTracking(f.tracking_number) ? 'steero' : 'manual', tracking: [f.tracking_company, f.tracking_number].filter(Boolean).join(' · ') || null, qty: f.line_items.reduce((s, l) => s + l.quantity, 0) })),
       delivery: active
         ? { kind: 'planned', date: active.delivery_tours!.planned_date, driver: active.delivery_tours!.driver_name }
-        : lastDelivery ? { kind: 'delivered', date: lastDelivery, driver: null } : null,
+        : issueIsLatest
+          ? { kind: lastIssue.status as 'partial' | 'failed', date: lastIssue.delivered_at!, driver: lastIssue.delivery_tours?.driver_name ?? null }
+          : lastDelivery ? { kind: 'delivered', date: lastDelivery, driver: null } : null,
+      // Ce qui manquait au dernier passage partiel
+      missing: lastIssue?.status === 'partial' && (issueIsLatest || !!active)
+        ? (lastIssue.partial_delivered ?? []).filter(p => (p.qty_ordered ?? 0) > (p.qty_delivered ?? 0))
+            .map(p => ({ title: p.title ?? '', qty: (p.qty_ordered ?? 0) - (p.qty_delivered ?? 0) }))
+        : [],
+      notes,
     }
   }).sort((a, b) => b.created_at.localeCompare(a.created_at))
 
-  const counts = { manual: 0, waiting: 0, auto: 0, done: 0, samples: 0 }
+  const counts = { manual: 0, waiting: 0, replan: 0, auto: 0, done: 0, samples: 0 }
   for (const r of rows) counts[r.state]++
   return { days, counts, rows }
 }

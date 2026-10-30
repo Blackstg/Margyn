@@ -5,17 +5,20 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Loader2, AlertCircle, ExternalLink, RefreshCw } from 'lucide-react'
 
-type State = 'manual' | 'waiting' | 'auto' | 'done' | 'samples'
+type State = 'manual' | 'waiting' | 'replan' | 'auto' | 'done' | 'samples'
 type Row = {
   id: number; name: string; created_at: string; customer: string; city: string | null; state: State
   remaining: { title: string; variant: string | null; qty: number; truck: boolean; sample: boolean }[]
   fulfillments: { at: string; by: 'steero' | 'manual'; tracking: string | null; qty: number }[]
-  delivery: { kind: 'planned' | 'delivered'; date: string; driver: string | null } | null
+  delivery: { kind: 'planned' | 'delivered' | 'partial' | 'failed'; date: string; driver: string | null } | null
+  missing: { title: string; qty: number }[]
+  notes: { at: string; status: string; driver: string | null; text: string }[]
 }
 type Data = { days: number; counts: Record<State, number>; rows: Row[] }
 
 const STATES: { key: State; label: string; hint: string; cls: string }[] = [
   { key: 'manual',  label: 'À traiter à la main',      hint: 'accessoires hors tournée (La Poste…)', cls: 'bg-[#fce8ea] text-[#c7293a]' },
+  { key: 'replan',  label: 'À replanifier',            hint: 'livraison partielle ou échouée',                    cls: 'bg-[#ffedd5] text-[#c2410c]' },
   { key: 'waiting', label: 'En attente de livraison',  hint: 'traitée automatiquement au « livré »',              cls: 'bg-[#fef3c7] text-[#b45309]' },
   { key: 'auto',    label: 'Traitée par Steero',       hint: 'au moment de la livraison',                         cls: 'bg-[#dcf5e7] text-[#1a7f4b]' },
   { key: 'done',    label: 'Traitée à la main',        hint: 'au moins en partie',                                cls: 'bg-[#eeede9] text-[#6b6b63]' },
@@ -68,7 +71,7 @@ export default function FulfillmentStatusView() {
         </div>
       </div>
 
-      <div className="grid grid-cols-2 gap-2 lg:grid-cols-4">
+      <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-5">
         {STATES.map(s => (
           <button key={s.key} onClick={() => setFilter(f => f === s.key ? 'all' : s.key)}
             className={`rounded-[14px] border bg-white px-4 py-3 text-left transition-all ${filter === s.key ? 'border-[#1a1a2e] shadow-[0_2px_10px_rgba(0,0,0,0.08)]' : 'border-[#e8e8e4] hover:border-[#c9c9c2]'}`}>
@@ -127,6 +130,17 @@ export default function FulfillmentStatusView() {
                     <td className="px-3 py-2.5 text-xs text-[#6b6b63]">
                       {r.delivery?.kind === 'planned' && <>Tournée du {fmtDay(r.delivery.date)}{r.delivery.driver && <p className="text-[11px]">{r.delivery.driver}</p>}</>}
                       {r.delivery?.kind === 'delivered' && <>Livrée le {fmtDateTime(r.delivery.date)}</>}
+                      {r.delivery?.kind === 'partial' && <span className="font-semibold text-[#c2410c]">Livrée en partie le {fmtDateTime(r.delivery.date)}</span>}
+                      {r.delivery?.kind === 'failed' && <span className="font-semibold text-[#c7293a]">Échec le {fmtDateTime(r.delivery.date)}</span>}
+                      {(r.delivery?.kind === 'partial' || r.delivery?.kind === 'failed') && r.delivery.driver && <p className="text-[11px]">{r.delivery.driver}</p>}
+                      {r.missing.length > 0 && (
+                        <p className="mt-0.5 text-[11px] text-[#c2410c]">Manquant : {r.missing.map(m => `${m.qty}× ${m.title}`).join(', ')}</p>
+                      )}
+                      {r.notes.map((n, i) => (
+                        <p key={i} className="mt-1 rounded-md bg-[#fffbeb] px-1.5 py-1 text-[11px] text-[#8a6d1f]" title={fmtDateTime(n.at)}>
+                          🗒 {n.text}<span className="block text-[10px] text-[#b4a067]">{n.driver ? `${n.driver} · ` : ''}{fmtDateTime(n.at)}</span>
+                        </p>
+                      ))}
                       {!r.delivery && <span className="text-[#9b9b93]">{r.remaining.some(x => x.truck) ? 'À planifier' : '—'}</span>}
                     </td>
                     <td className="px-3 py-2.5 text-xs text-[#6b6b63]">
