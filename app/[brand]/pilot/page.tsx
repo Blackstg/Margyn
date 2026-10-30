@@ -7,6 +7,8 @@ export const dynamic = 'force-dynamic'
 import { useEffect, useMemo, useState } from 'react'
 import { Compass, Loader2, AlertCircle, AlertTriangle, Info, Plus, Trash2, Save } from 'lucide-react'
 import { useBrand } from '@/context/BrandContext'
+import { Card } from '@/components/pilot/Card'
+import PanelBreakdown from '@/components/pilot/PanelBreakdown'
 
 type Row = { label: string; amount: number }
 type Bucket = { key: string; label: string; orders: number; revenueHT: number; shippingHT: number; cogs: number; delivery: number; estimated: number; fees: number; contribution: number }
@@ -18,6 +20,7 @@ type Month = {
   detail: { ads: Record<string, number>; team: Row[]; apps: Row[]; infra: Row[]; transport: Row[]; giftCogs: number }
   result: number; contributionBeforeAds: number; terenceInvoice: number; missingCost: number
   kpis: { avgBasketHT: number | null; cac: number | null; mer: number | null; deliveryPerOrder: number | null }
+  panels: { sold: number; avgPriceTTC: number | null; avgCost: number | null }
   buckets: Bucket[]
 }
 type FixedRow = { category: string; label: string; amount: number; from?: string; to?: string }
@@ -153,6 +156,8 @@ export default function PilotPage() {
             ))}
           </div>
         )}
+
+        <PanelBreakdown m={m} />
 
         <TargetsEditor brand={brand} targets={TARGETS} onChange={setTargets} fixedShare={fixedShare} month={monthLabel(m.month)} />
 
@@ -323,14 +328,6 @@ function Tile({ label, value, sub, tone }: { label: string; value: string; sub?:
   )
 }
 
-function Card({ title, children }: { title: string; children: React.ReactNode }) {
-  return (
-    <div className="rounded-2xl border border-[#e8e8e4] bg-white px-5 py-4">
-      <p className="mb-3 text-[11px] font-semibold uppercase tracking-[0.1em] text-[#6b6b63]">{title}</p>
-      {children}
-    </div>
-  )
-}
 
 function PL({ months, sel, label, get, strong, share, color, note, plain, raw }: {
   months: Month[]; sel: string | null; label: string; get: (m: Month) => number | null

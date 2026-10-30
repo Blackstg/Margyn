@@ -38,7 +38,7 @@ const isBulky   = (t: string) => /tasseau|profil|baguette|plinthe|corniche|litea
 const parisDate = (iso: string) => new Date(iso).toLocaleDateString('sv-SE', { timeZone: 'Europe/Paris' })
 const r0 = (n: number) => Math.round(n)
 
-type LineItem = { id: number; variant_id: number | null; product_id: number | null; title: string; quantity: number; price: string; total_discount: string }
+type LineItem = { id: number; variant_id: number | null; product_id: number | null; title: string; quantity: number; price: string; total_discount: string; discount_allocations?: { amount: string }[] }
 type Order = {
   id: number; name: string; created_at: string; total_price: string; total_tax: string
   financial_status: string; cancelled_at: string | null
@@ -165,6 +165,7 @@ export async function GET(req: NextRequest) {
       counts: { orders: 0, paid: 0, truck: 0, samples: 0, postal: 0, gifts: 0, cancelled: 0, refunded: 0, undelivered: 0, internal: 0 },
       productsHT: 0, shippingHT: 0, refundsHT: 0, suppHT: 0, ttcNet: 0,
       cogs: 0, giftCogs: 0, missingCost: 0,
+      panelQty: 0, panelTTC: 0, panelCogs: 0,
       terence: 0, terenceEstimated: 0,
       buckets: newBuckets(),
     }]))
@@ -188,9 +189,16 @@ export async function GET(req: NextRequest) {
       for (const r of o.refunds ?? []) for (const li of r.refund_line_items ?? []) refundedQty.set(li.line_item_id, (refundedQty.get(li.line_item_id) ?? 0) + li.quantity)
 
       let cogs = 0, panels = 0, stones = 0, truck = false, missing = false
+      let panelQty = 0, panelTTC = 0, panelCogs = 0   // panneaux réellement vendus (hors remboursés)
       for (const li of o.line_items) {
         const qty = Math.max(0, li.quantity - (refundedQty.get(li.id) ?? 0))
         const unit = costByVariant.get(String(li.variant_id)) ?? costByProduct.get(String(li.product_id))
+        if (isPanel(li.title) && !isSample(li.title) && qty > 0) {
+          const disc = Math.max(parseFloat(li.total_discount) || 0, (li.discount_allocations ?? []).reduce((s, d) => s + (parseFloat(d.amount) || 0), 0))
+          panelQty += qty
+          panelTTC += (parseFloat(li.price) || 0) * qty - disc * (qty / li.quantity)
+          panelCogs += (unit ?? 0) * qty
+        }
         if (unit == null) { if (qty > 0 && !isSample(li.title)) { missing = true; missingTitles.set(li.title, (missingTitles.get(li.title) ?? 0) + qty) } }
         else cogs += unit * qty
         if (isSample(li.title)) continue
@@ -203,6 +211,7 @@ export async function GET(req: NextRequest) {
       m.counts.orders++
       if (total === 0) { m.counts.gifts++; m.giftCogs += cogs; continue }
       m.counts.paid++
+      m.panelQty += panelQty; m.panelTTC += panelTTC; m.panelCogs += panelCogs
       if (refundTTC > 0) m.counts.refunded++
       if (missing) m.missingCost++
       m.productsHT += productsHT; m.shippingHT += shippingHT; m.refundsHT += refundsHT
@@ -291,6 +300,13 @@ export async function GET(req: NextRequest) {
         contributionBeforeAds: r0(revenueHT - costs.products - costs.delivery - costs.fees),
         terenceInvoice: r0(invoiceByMonth.get(month) ?? 0),
         missingCost: m.missingCost,
+        // Panneaux vendus ce mois (commandes payées, hors remboursés) : prix moyen TTC
+        // payé par le client pour UN panneau (remises déduites) et coût d'achat moyen.
+        panels: {
+          sold: m.panelQty,
+          avgPriceTTC: m.panelQty ? Math.round(m.panelTTC / m.panelQty * 100) / 100 : null,
+          avgCost: m.panelQty ? Math.round(m.panelCogs / m.panelQty * 100) / 100 : null,
+        },
         kpis: {
           avgBasketHT: panelOrders ? r0(m.buckets.filter(b => BUCKETS.some(x => x.key === b.key)).reduce((s, b) => s + b.revenueHT, 0) / panelOrders) : null,
           cac: panelOrders ? r0(adsTotal / panelOrders) : null,           // pub ÷ commandes panneaux
