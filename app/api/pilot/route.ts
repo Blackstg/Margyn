@@ -15,7 +15,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 import { shopifyCreds } from '@/lib/tenant/integrations'
 import { loadValidity, activeIn, validityKey } from '@/lib/fixedCostValidity'
-import { billedPanelsOfItem, billedPanels } from '@/lib/delivery/panelWeight'
+import { billedPanelsOfItem, billedPanels, STONE_WEIGHT } from '@/lib/delivery/panelWeight'
 import { loadTargets } from '@/lib/pilotTargets'
 
 export const dynamic = 'force-dynamic'
@@ -49,7 +49,7 @@ function productKey(title: string, variant?: string | null): ProductKey | null {
   if (/extpanel/i.test(title)) return sz('extpanel', 'Extpanel', 0.25)
   if (/lightpanel/i.test(title)) return sz('lightpanel', 'Lightpanel', 1)
   if (/akupanel/i.test(title) && isPanel(title)) return sz('akupanel', 'Akupanel', 1)
-  if (isStone(title)) return sz('stonepanel', 'Stonepanel', 1)
+  if (isStone(title)) return sz('stonepanel', 'Stonepanel', 0.5)
   if (isPanel(title)) return { key: 'autre-panneau', label: 'Autres panneaux', slot: 1 }
   return { key: 'accessoires', label: 'Accessoires (colle, vis, tasseaux…)', slot: 0 }
 }
@@ -247,7 +247,7 @@ export async function GET(req: NextRequest) {
 
       // Livraison de CETTE commande
       let delivery = 0, estimated = 0
-      const billedQty = billedPanels(panels + (sub?.settings.countStones ? stones : 0))
+      const billedQty = billedPanels(panels + (sub?.settings.countStones ? stones * STONE_WEIGHT : 0))
       const bIdx = BUCKETS.findIndex(b => Math.max(1, billedQty) <= b.max)
       if (terenceByOrder.has(o.name)) delivery = terenceByOrder.get(o.name)!
       else if (deliveredInternally.has(o.name)) m.counts.internal++
@@ -461,7 +461,7 @@ async function deliveryOfOrders(req: NextRequest, brand: string, from: string, t
       else if (isBulky(li.title)) truck = true
     }
     if (!truck) continue
-    const qty = billedPanels(panels + (sub?.settings.countStones ? stones : 0))
+    const qty = billedPanels(panels + (sub?.settings.countStones ? stones * STONE_WEIGHT : 0))
     const b = BUCKETS.findIndex(x => Math.max(1, qty) <= x.max)
     estimated += priceSum[b].n ? priceSum[b].sum / priceSum[b].n : 0
     pending++

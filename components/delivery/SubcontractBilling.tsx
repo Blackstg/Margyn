@@ -324,7 +324,7 @@ export default function SubcontractBilling({ brand, internalCostPerPanel }: { br
             <label className="flex items-center gap-2 text-xs text-[#1a1a2e] cursor-pointer">
               <input type="checkbox" checked={data.settings.countStones} disabled={saving}
                 onChange={e => saveSettings({ countStones: e.target.checked })} />
-              Compter les feuilles de pierre comme des panneaux (sinon une commande « pierre seule » n&apos;est pas facturée)
+              Facturer les feuilles de pierre (2 feuilles = 1 panneau ; sinon une commande « pierre seule » n&apos;est pas facturée)
             </label>
           </div>
 

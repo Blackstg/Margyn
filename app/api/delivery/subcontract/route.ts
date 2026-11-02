@@ -93,7 +93,7 @@ const BUCKETS = [
   { label: '13+', max: Infinity },
 ]
 
-import { billedPanelsOfItem, billedPanels } from '@/lib/delivery/panelWeight'
+import { billedPanelsOfItem, billedPanels, STONE_WEIGHT } from '@/lib/delivery/panelWeight'
 
 const isStonepanel = (title: string) => /stonepanel|feuille\s*de\s*pierre/i.test(title)
 function stonesFromDetails(details: unknown): number {
@@ -278,7 +278,7 @@ export async function GET(req: NextRequest) {
 
       const panels = Math.max(...delivered.map(panelsOf))
       const stones = Math.max(...delivered.map(s => stonesFromDetails(s.panel_details)))
-      const billedQty = panels + (settings.countStones ? stones : 0)
+      const billedQty = panels + (settings.countStones ? stones * STONE_WEIGHT : 0)
       const failed = group.filter(s => s.status === 'failed').length
       const driver = tourDriver.get(first.tour_id) ?? ''
       if (billedQty === 0) {
@@ -302,7 +302,7 @@ export async function GET(req: NextRequest) {
       const first = group[0].first
       const panels = group.reduce((acc, b) => acc + b.panels, 0)
       const stones = group.reduce((acc, b) => acc + b.stones, 0)
-      const billedQty = billedPanels(panels + (settings.countStones ? stones : 0))
+      const billedQty = billedPanels(panels + (settings.countStones ? stones * STONE_WEIGHT : 0))
       const failed = group.reduce((acc, b) => acc + b.failed, 0)
       const notes = [
         group.length > 1 ? `${group.length} commandes même adresse même jour → 1 forfait` : '',
