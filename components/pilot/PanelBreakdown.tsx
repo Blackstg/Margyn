@@ -140,8 +140,29 @@ function productLayers(p: ProductLine) {
   return { ttc, layers, result: per(p.result) }
 }
 
-export default function PanelBreakdown({ m, defaultTab = 'avg' }: { m: PanelMonth; defaultTab?: string }) {
+// Prix de vente conseillé : on garde les coûts par unité du mois (achat, livraison, pub
+// et charges en € par unité) et le taux de remise moyen, et on cherche le prix qui laisse
+// `target` % du prix HT en bénéfice. Les frais de paiement suivent le prix.
+export type Pricing = { feeRate: number; catalog: Record<string, number> }
+function suggestPrice(p: ProductLine, pricing: Pricing, target: number) {
+  const u = (v: number) => v / p.qty
+  const paid = u(p.ttc)                                                     // encaissé TTC / u
+  const costs = u(p.cogs + p.delivery + p.ads + p.fixed) - u(p.shippingHT)  // HT / u, port client déduit
+  const k = (r: number) => (1 - r) / 1.2 - pricing.feeRate                   // part du TTC qui couvre les coûts
+  const breakEven = costs / k(0)
+  const needed = costs / k(target / 100)
+  const catalog = pricing.catalog[p.key] ?? null
+  const discount = catalog ? paid / catalog : 1                              // encaissé ÷ catalogue (remises)
+  const roundUp = (x: number) => Math.ceil(x + 0.1) - 0.1                     // 97,30 → 97,90
+  const suggestedCatalog = catalog ? Math.max(catalog, roundUp(needed / discount)) : null
+  const newPaid = suggestedCatalog != null ? suggestedCatalog * discount : Math.max(paid, needed)
+  const gainU = (newPaid - paid) * (1 / 1.2 - pricing.feeRate)
+  return { paid, breakEven, needed, catalog, suggestedCatalog, newPaid, resultU: u(p.result), newResultU: u(p.result) + gainU, gainMonth: gainU * p.qty, ok: needed <= paid }
+}
+
+export default function PanelBreakdown({ m, defaultTab = 'avg', pricing, targetProfit = 10 }: { m: PanelMonth; defaultTab?: string; pricing?: Pricing; targetProfit?: number }) {
   const [tab, setTab] = useState<string>(defaultTab)
+  const [target, setTarget] = useState(targetProfit)
   const n = m.panels?.sold ?? 0
   const products = (m.products ?? []).filter(p => p.qty > 0)
     .sort((a, b) => (a.key === 'accessoires' ? 1 : 0) - (b.key === 'accessoires' ? 1 : 0) || b.qty - a.qty)
@@ -189,6 +210,17 @@ export default function PanelBreakdown({ m, defaultTab = 'avg' }: { m: PanelMont
             ⚠ {current.missingQty} unité{current.missingQty > 1 ? 's' : ''} sans coût d&apos;achat dans Shopify : l&apos;achat est sous-estimé et la marge surestimée.
           </p>
         )}
+        {pricing && !isAcc && (() => {
+          const sp = suggestPrice(current, pricing, target)
+          return (
+            <p className={`mb-3 rounded-lg px-3 py-2 text-xs ${sp.ok ? 'bg-[#e3f4ee] text-[#1f7a5a]' : 'bg-[#eef2ff] text-[#3730a3]'}`}>
+              {sp.ok
+                ? <>Prix actuel suffisant pour {target} % de marge nette (seuil de rentabilité : {e2(sp.breakEven)} encaissés).</>
+                : <>Prix conseillé pour {target} % de marge nette : <b>{sp.suggestedCatalog != null ? `${e2(sp.suggestedCatalog)} au catalogue` : `${e2(sp.needed)} encaissés`}</b>
+                  {sp.catalog != null && <> (aujourd&apos;hui {e2(sp.catalog)})</>} · seuil de rentabilité {e2(sp.breakEven)} encaissés · {e2(sp.newResultU)} de marge nette par unité.</>}
+            </p>
+          )
+        })()}
         <PanelLayers ttc={ttc} layers={layers} result={result} unit={isAcc ? 'article' : 'unité'} />
         <p className="mt-3 text-[11px] leading-relaxed text-[#9b9b93]">
           {isAcc
@@ -258,6 +290,67 @@ export default function PanelBreakdown({ m, defaultTab = 'avg' }: { m: PanelMont
           </p>
         </div>
       )}
+
+      {pricing && products.some(p => p.key !== 'accessoires') && (() => {
+        const rows = products.filter(p => p.key !== 'accessoires' && p.qty >= 3).map(p => ({ p, sp: suggestPrice(p, pricing, target) }))
+        const gain = rows.reduce((a, r) => a + Math.max(0, r.sp.gainMonth), 0)
+        return (
+          <div className="mt-6">
+            <div className="mb-2 flex flex-wrap items-center gap-2">
+              <p className="flex-1 text-[11px] font-semibold uppercase tracking-[0.1em] text-[#6b6b63]">Prix de vente conseillés · {monthLabel(m.month)}</p>
+              <label className="flex items-center gap-1.5 text-xs text-[#6b6b63]">
+                Marge nette visée
+                <input type="number" min={0} max={40} step={1} value={target}
+                  onChange={e => setTarget(Math.min(40, Math.max(0, Number(e.target.value) || 0)))}
+                  className="w-14 rounded-[6px] border border-[#e0e0e0] px-1.5 py-1 text-right text-sm tabular-nums" />
+                % du prix HT
+              </label>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="text-right text-[11px] text-[#9b9b93]">
+                    <th className="py-2 pr-3 text-left font-semibold">Produit</th>
+                    <th className="px-2 py-2 font-semibold">Prix catalogue</th>
+                    <th className="px-2 py-2 font-semibold" title="Prix moyen réellement payé, remises déduites">Encaissé moyen</th>
+                    <th className="px-2 py-2 font-semibold" title="Prix encaissé à partir duquel le produit ne perd plus d'argent">Seuil (encaissé)</th>
+                    <th className="px-2 py-2 font-semibold">Prix conseillé</th>
+                    <th className="px-2 py-2 font-semibold">Hausse</th>
+                    <th className="px-2 py-2 font-semibold">Marge nette / u</th>
+                    <th className="px-2 py-2 font-semibold" title="À volume égal">Gain / mois</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {rows.map(({ p, sp }) => (
+                    <tr key={p.key} onClick={() => setTab(p.key)} className="cursor-pointer border-t border-[#f3f3f1] text-right tabular-nums hover:bg-[#f7f7f5]">
+                      <td className="py-1.5 pr-3 text-left text-[#1a1a2e]">{p.label}</td>
+                      <td className="px-2 py-1.5 text-[#6b6b63]">{sp.catalog != null ? e2(sp.catalog) : '—'}</td>
+                      <td className="px-2 py-1.5 text-[#6b6b63]">{e2(sp.paid)}</td>
+                      <td className="px-2 py-1.5 text-[#6b6b63]">{e2(sp.breakEven)}</td>
+                      <td className="px-2 py-1.5 font-semibold text-[#1a1a2e]">
+                        {sp.ok ? <span className="font-normal text-[#1f7a5a]">garder</span> : sp.suggestedCatalog != null ? e2(sp.suggestedCatalog) : `${e2(sp.needed)} enc.`}
+                        {!sp.ok && sp.catalog != null && sp.suggestedCatalog != null && sp.suggestedCatalog > sp.catalog * 1.5 && (
+                          <span className="block text-[10px] font-normal text-[#b45309]">irréaliste : le problème est la livraison, pas le prix</span>
+                        )}
+                      </td>
+                      <td className="px-2 py-1.5">{!sp.ok && sp.catalog != null && sp.suggestedCatalog != null ? `+${e2(sp.suggestedCatalog - sp.catalog)} (+${Math.round((sp.suggestedCatalog / sp.catalog - 1) * 100)} %)` : '—'}</td>
+                      <td className="px-2 py-1.5">
+                        <span className={sp.resultU < 0 ? 'text-[#c7293a]' : 'text-[#1f7a5a]'}>{e2(sp.resultU)}</span>
+                        {!sp.ok && <> → <span className={`font-semibold ${sp.newResultU < 0 ? 'text-[#c7293a]' : 'text-[#1f7a5a]'}`}>{e2(sp.newResultU)}</span></>}
+                      </td>
+                      <td className="px-2 py-1.5 font-semibold text-[#1f7a5a]">{sp.ok ? '—' : `+${eur0(sp.gainMonth)}`}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <p className="mt-2 text-[11px] leading-relaxed text-[#9b9b93]">
+              À volume égal : + {eur0(gain)} par mois au total. Calcul sur les coûts par unité de {monthLabel(m.month)} (achat, livraison, pub et charges en € par unité),
+              avec le même taux de remise moyen ; prix arrondis au ,90 supérieur. Une hausse peut faire baisser les ventes : à tester produit par produit.
+            </p>
+          </div>
+        )
+      })()}
     </Card>
   )
 }

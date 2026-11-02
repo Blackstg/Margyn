@@ -25,7 +25,7 @@ type Month = {
 }
 type FixedRow = { category: string; label: string; amount: number; from?: string; to?: string }
 type Targets = { profit: number; products: number; delivery: number; ads: number; fees: number }
-type Data = { today: string; targets: Targets; recurring: FixedRow[]; subcontractStart: string; avgTerenceByBucket: (number | null)[]; missingCostProducts: { title: string; qty: number }[]; months: Month[] }
+type Data = { today: string; feeRate: number; catalog: Record<string, number>; targets: Targets; recurring: FixedRow[]; subcontractStart: string; avgTerenceByBucket: (number | null)[]; missingCostProducts: { title: string; qty: number }[]; months: Month[] }
 
 // Cibles (% du CA HT net) : modifiables dans la page (carte « Tes cibles »), enregistrées
 // par marque. Le « plafond » d'un poste = ce qu'il peut peser pour atteindre le bénéfice
@@ -157,7 +157,7 @@ export default function PilotPage() {
           </div>
         )}
 
-        <PanelBreakdown m={m} />
+        <PanelBreakdown m={m} pricing={{ feeRate: data.feeRate, catalog: data.catalog ?? {} }} targetProfit={TARGETS.profit} />
 
         <TargetsEditor brand={brand} targets={TARGETS} onChange={setTargets} fixedShare={fixedShare} month={monthLabel(m.month)} />
 

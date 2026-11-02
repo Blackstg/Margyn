@@ -391,10 +391,25 @@ export async function GET(req: NextRequest) {
       }
     })
 
+    // Prix catalogue actuel par produit (famille + taille) : médiane des variantes actives,
+    // pour les suggestions de prix de vente
+    const { data: priced } = await sb.from('product_variants').select('product_title, variant_title, sell_price')
+      .eq('brand', brand).eq('product_status', 'active').not('sell_price', 'is', null).limit(10000)
+    const pricesByKey = new Map<string, number[]>()
+    for (const v of priced ?? []) {
+      const pk = productKey(String(v.product_title ?? ''), v.variant_title as string | null)
+      if (!pk || pk.key === 'accessoires' || !(Number(v.sell_price) > 0)) continue
+      pricesByKey.set(pk.key, [...(pricesByKey.get(pk.key) ?? []), Number(v.sell_price)])
+    }
+    const catalog = Object.fromEntries([...pricesByKey].map(([k, xs]) => {
+      const s = xs.sort((a, b) => a - b)
+      return [k, s[Math.floor(s.length / 2)]]
+    }))
+
     // Charges récurrentes éditables (salaires, crédits/compta, applis) avec leur période
     const recurringRows = (fixed ?? []).filter(r => r.month === '1900-01-01' && ['team', 'infra', 'app'].includes(String(r.category)))
       .map(r => ({ category: String(r.category), label: String(r.label ?? ''), amount: Number(r.amount || 0), ...validity[validityKey(String(r.category), String(r.label ?? ''))] }))
-    return NextResponse.json({ brand, today, subcontractStart: SUBCONTRACT_START, feeRate, targets, recurring: recurringRows, avgTerenceByBucket: avgPrice.map(v => v == null ? null : r0(v)),
+    return NextResponse.json({ brand, today, subcontractStart: SUBCONTRACT_START, feeRate, catalog, targets, recurring: recurringRows, avgTerenceByBucket: avgPrice.map(v => v == null ? null : r0(v)),
       missingCostProducts: [...missingTitles.entries()].sort((a, b) => b[1] - a[1]).slice(0, 15).map(([title, qty]) => ({ title, qty })),
       months: out })
   } catch (e) {
