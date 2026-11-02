@@ -93,12 +93,24 @@ const BUCKETS = [
   { label: '13+', max: Infinity },
 ]
 
+import { billedPanelsOfItem, billedPanels } from '@/lib/delivery/panelWeight'
+
 const isStonepanel = (title: string) => /stonepanel|feuille\s*de\s*pierre/i.test(title)
 function stonesFromDetails(details: unknown): number {
   if (!Array.isArray(details)) return 0
   return (details as { title?: string; qty?: number }[])
     .filter(d => isStonepanel(d.title ?? ''))
     .reduce((s, d) => s + (d.qty ?? 0), 0)
+}
+
+// Panneaux en équivalent « panneau classique » (4 × Akupanel 60×60 = 1), d'après le
+// détail des articles ; anciens arrêts sans détail : panel_count brut
+function panelsOf(stop: { panel_count?: number | null; panel_details?: unknown }): number {
+  const details = stop.panel_details
+  if (!Array.isArray(details) || details.length === 0) return Number(stop.panel_count) || 0
+  return (details as { title?: string; variant_title?: string; qty?: number }[])
+    .filter(d => /panneau/i.test(d.title ?? ''))
+    .reduce((s, d) => s + billedPanelsOfItem(d.title ?? '', d.variant_title, d.qty ?? 0), 0)
 }
 
 // « Terence & Terence 1 » → ['Terence', 'Terence 1']
@@ -264,7 +276,7 @@ export async function GET(req: NextRequest) {
       }
       if (!inPeriod(first.delivered_at)) continue
 
-      const panels = Math.max(...delivered.map(s => Number(s.panel_count) || 0))
+      const panels = Math.max(...delivered.map(panelsOf))
       const stones = Math.max(...delivered.map(s => stonesFromDetails(s.panel_details)))
       const billedQty = panels + (settings.countStones ? stones : 0)
       const failed = group.filter(s => s.status === 'failed').length
@@ -290,7 +302,7 @@ export async function GET(req: NextRequest) {
       const first = group[0].first
       const panels = group.reduce((acc, b) => acc + b.panels, 0)
       const stones = group.reduce((acc, b) => acc + b.stones, 0)
-      const billedQty = panels + (settings.countStones ? stones : 0)
+      const billedQty = billedPanels(panels + (settings.countStones ? stones : 0))
       const failed = group.reduce((acc, b) => acc + b.failed, 0)
       const notes = [
         group.length > 1 ? `${group.length} commandes même adresse même jour → 1 forfait` : '',

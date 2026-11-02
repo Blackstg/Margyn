@@ -15,6 +15,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 import { shopifyCreds } from '@/lib/tenant/integrations'
 import { loadValidity, activeIn, validityKey } from '@/lib/fixedCostValidity'
+import { billedPanelsOfItem, billedPanels } from '@/lib/delivery/panelWeight'
 import { loadTargets } from '@/lib/pilotTargets'
 
 export const dynamic = 'force-dynamic'
@@ -44,7 +45,7 @@ function productKey(title: string, variant?: string | null): ProductKey | null {
   if (isSample(title)) return null
   const size = (String(variant ?? '').match(/\b(60|120|240|270|300)\b/) ?? [])[1] ?? ''
   const sz = (k: string, l: string, slot: number) => ({ key: size ? `${k}-${size}` : k, label: size ? `${l} ${size}` : l, slot })
-  if (/akupanel/i.test(title) && /akupanel\W{0,3}60/i.test(title)) return { key: 'akupanel-60', label: 'Akupanel 60×60', slot: 0.5 }
+  if (/akupanel/i.test(title) && /akupanel\W{0,3}60/i.test(title)) return { key: 'akupanel-60', label: 'Akupanel 60×60', slot: 0.25 }
   if (/extpanel/i.test(title)) return sz('extpanel', 'Extpanel', 0.25)
   if (/lightpanel/i.test(title)) return sz('lightpanel', 'Lightpanel', 1)
   if (/akupanel/i.test(title) && isPanel(title)) return sz('akupanel', 'Akupanel', 1)
@@ -228,7 +229,7 @@ export async function GET(req: NextRequest) {
           lines.push({ pk, qty, ttc: (parseFloat(li.price) || 0) * qty - disc * (qty / li.quantity), cogs: (unit ?? 0) * qty, missing: unit == null })
         }
         if (isSample(li.title)) continue
-        if (isPanel(li.title)) { panels += li.quantity; truck = true }
+        if (isPanel(li.title)) { panels += billedPanelsOfItem(li.title, li.variant_title, li.quantity); truck = true }
         else if (isStone(li.title)) { stones += li.quantity; truck = true }
         else if (isBulky(li.title)) truck = true
       }
@@ -246,7 +247,7 @@ export async function GET(req: NextRequest) {
 
       // Livraison de CETTE commande
       let delivery = 0, estimated = 0
-      const billedQty = panels + (sub?.settings.countStones ? stones : 0)
+      const billedQty = billedPanels(panels + (sub?.settings.countStones ? stones : 0))
       const bIdx = BUCKETS.findIndex(b => Math.max(1, billedQty) <= b.max)
       if (terenceByOrder.has(o.name)) delivery = terenceByOrder.get(o.name)!
       else if (deliveredInternally.has(o.name)) m.counts.internal++
@@ -455,12 +456,12 @@ async function deliveryOfOrders(req: NextRequest, brand: string, from: string, t
     let panels = 0, stones = 0, truck = false
     for (const li of o.line_items) {
       if (isSample(li.title)) continue
-      if (isPanel(li.title)) { panels += li.quantity; truck = true }
+      if (isPanel(li.title)) { panels += billedPanelsOfItem(li.title, li.variant_title, li.quantity); truck = true }
       else if (isStone(li.title)) { stones += li.quantity; truck = true }
       else if (isBulky(li.title)) truck = true
     }
     if (!truck) continue
-    const qty = panels + (sub?.settings.countStones ? stones : 0)
+    const qty = billedPanels(panels + (sub?.settings.countStones ? stones : 0))
     const b = BUCKETS.findIndex(x => Math.max(1, qty) <= x.max)
     estimated += priceSum[b].n ? priceSum[b].sum / priceSum[b].n : 0
     pending++
