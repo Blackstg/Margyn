@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react'
 import { Download, Save, Info } from 'lucide-react'
+import GridSimulator from './GridSimulator'
 
 type Settings = {
   name: string
@@ -298,6 +299,10 @@ export default function SubcontractBilling({ brand, internalCostPerPanel }: { br
               Zone = distance routière aller depuis le dépôt ({data.settings.depot.label}). Un seul forfait par commande, même si plusieurs passages ou chauffeurs. Accessoires et envois La Poste inclus dans le prix panneau (non refacturés).
             </p>
           </div>
+
+          {/* Simulateur : contre-proposition sur les vraies livraisons */}
+          <GridSimulator brand={brand} current={{ zoneLimitsKm: data.settings.zoneLimitsKm, grid: data.settings.grid }}
+            monthLines={data.lines} monthLabel={monthLong(month)} startDate={data.settings.startDate} />
 
           {/* Réglages : chauffeurs + feuilles de pierre */}
           <div className="rounded-2xl bg-white border border-[#e8e8e4] px-5 py-4 space-y-3">
