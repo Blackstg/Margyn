@@ -1,5 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
+import { createServerClient } from '@supabase/auth-helpers-nextjs'
+import { cookies } from 'next/headers'
+import { isAdminRole } from '@/lib/access'
 import { shopifyCreds } from '@/lib/tenant/integrations'
 
 export const dynamic = 'force-dynamic'
@@ -467,8 +470,23 @@ export async function GET(req: NextRequest) {
   }
 }
 
+// Réglages (grille facturée…) : comptes admin uniquement
+async function isAdmin(): Promise<boolean> {
+  try {
+    const store = await cookies()
+    const sb = createServerClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+      { cookies: { getAll() { return store.getAll() }, setAll() {} } },
+    )
+    const { data: { user } } = await sb.auth.getUser()
+    return !!user && isAdminRole(user.user_metadata?.role as string | undefined)
+  } catch { return false }
+}
+
 // PUT { brand, grid?, drivers?, countStones?, internal? } → enregistre les réglages
 export async function PUT(req: NextRequest) {
+  if (!(await isAdmin())) return NextResponse.json({ error: 'Réservé aux comptes admin' }, { status: 403 })
   try {
     const body = await req.json()
     const brand = String(body.brand ?? 'bowa')
