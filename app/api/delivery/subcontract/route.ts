@@ -113,6 +113,17 @@ function panelsOf(stop: { panel_count?: number | null; panel_details?: unknown }
     .reduce((s, d) => s + billedPanelsOfItem(d.title ?? '', d.variant_title, d.qty ?? 0), 0)
 }
 
+// Panneaux livrés, comptés comme partout dans Steero (1 feuille de pierre = 1,
+// 1 Akupanel 60×60 = 1, Extpanel par lot de 4) : c'est ce qui sert au coût / panneau.
+// Le poids (pierre ½, 60×60 ¼) ne sert qu'à choisir la tranche de la grille (billedQty).
+function unitsOf(stop: { panel_count?: number | null; panel_details?: unknown }): number {
+  const details = stop.panel_details
+  if (!Array.isArray(details) || details.length === 0) return Number(stop.panel_count) || 0
+  return (details as { title?: string; qty?: number }[])
+    .filter(d => /panneau/i.test(d.title ?? '') || isStonepanel(d.title ?? ''))
+    .reduce((s, d) => s + (/extpanel|ext[_\s-]?panel/i.test(d.title ?? '') ? Math.ceil((d.qty ?? 0) / 4) : d.qty ?? 0), 0)
+}
+
 // « Terence & Terence 1 » → ['Terence', 'Terence 1']
 const driverParts = (name: string | null) =>
   (name ?? '').split(/\s*[&,]\s*/).map(s => s.trim()).filter(Boolean)
@@ -177,7 +188,8 @@ type Line = {
   zone: number | null     // 0..2, null = sur devis (Corse) ou sans géoloc
   panels: number
   stones: number
-  billedQty: number
+  units: number           // panneaux physiquement livrés (pierre et 60×60 comptés 1 chacun)
+  billedQty: number       // équivalent « panneau classique » → tranche de la grille
   bucket: number
   price: number | null
   attempts: number        // passages (dont absences) — seule la livraison est facturée
@@ -254,7 +266,7 @@ export async function GET(req: NextRequest) {
     const cacheKey = (lat: number, lng: number) => `${depotKey}>${lat.toFixed(4)},${lng.toFixed(4)}`
 
     // Commandes livrées du mois, avant regroupement par adresse
-    type Billable = { order: string; first: Stop; panels: number; stones: number; failed: number; sids: string[] }
+    type Billable = { order: string; first: Stop; panels: number; stones: number; units: number; failed: number; sids: string[] }
     const billable: Billable[] = []
     const lines: Line[] = []
     const geoOf = new Map<Line, { lat: number; lng: number }>()
@@ -278,6 +290,7 @@ export async function GET(req: NextRequest) {
 
       const panels = Math.max(...delivered.map(panelsOf))
       const stones = Math.max(...delivered.map(s => stonesFromDetails(s.panel_details)))
+      const units = Math.max(...delivered.map(unitsOf))
       const billedQty = panels + (settings.countStones ? stones * STONE_WEIGHT : 0)
       const failed = group.filter(s => s.status === 'failed').length
       const driver = tourDriver.get(first.tour_id) ?? ''
@@ -285,7 +298,7 @@ export async function GET(req: NextRequest) {
         unbilled.push({ order, customer: first.customer_name ?? '', city: first.city ?? '', driver, date: first.delivered_at, reason: 'Accessoires seuls — inclus dans le prix panneau' })
         continue
       }
-      billable.push({ order, first, panels, stones, failed, sids: [...new Set(group.map(s => s.shopify_order_id).filter(Boolean) as string[])] })
+      billable.push({ order, first, panels, stones, units, failed, sids: [...new Set(group.map(s => s.shopify_order_id).filter(Boolean) as string[])] })
     }
 
     // Plusieurs commandes livrées à la MÊME adresse le MÊME jour = un seul arrêt
@@ -302,6 +315,7 @@ export async function GET(req: NextRequest) {
       const first = group[0].first
       const panels = group.reduce((acc, b) => acc + b.panels, 0)
       const stones = group.reduce((acc, b) => acc + b.stones, 0)
+      const units = group.reduce((acc, b) => acc + b.units, 0)
       const billedQty = billedPanels(panels + (settings.countStones ? stones * STONE_WEIGHT : 0))
       const failed = group.reduce((acc, b) => acc + b.failed, 0)
       const notes = [
@@ -313,7 +327,7 @@ export async function GET(req: NextRequest) {
         customer: first.customer_name ?? '', city: first.city ?? '', zip: first.zip ?? '',
         driver: tourDriver.get(first.tour_id) ?? '', tourId: first.tour_id,
         date: String(first.delivered_at), km: null, kmEstimated: false, zone: null,
-        panels, stones, billedQty, bucket: BUCKETS.findIndex(b => billedQty <= b.max), price: null,
+        panels, stones, units, billedQty, bucket: BUCKETS.findIndex(b => billedQty <= b.max), price: null,
         attempts: failed + 1, merged: group.length, revenueHT: null, shippingHT: null, cogs: null, margin: null,
         note: notes.length ? notes.join(' · ') : undefined,
       }
@@ -403,7 +417,9 @@ export async function GET(req: NextRequest) {
     lines.sort((a, b) => a.date.localeCompare(b.date) || a.order.localeCompare(b.order))
 
     const totalHT = lines.reduce((s, l) => s + (l.price ?? 0), 0)
-    const totalPanels = lines.reduce((s, l) => s + l.billedQty, 0)
+    // Panneaux réellement livrés (base du coût / panneau) ; billedEquivalent = ce qui fixe les tranches
+    const totalPanels = lines.reduce((s, l) => s + l.units, 0)
+    const billedEquivalent = lines.reduce((s, l) => s + l.billedQty, 0)
     // Matrice zone × tranche : nb de commandes et montant
     const matrix = settings.grid.map((_, z) => BUCKETS.map((_, b) => {
       const ls = lines.filter(l => l.zone === z && l.bucket === b)
@@ -441,7 +457,7 @@ export async function GET(req: NextRequest) {
           delivered: ts.filter(s => s.status !== 'failed').length,
           failed: ts.filter(s => s.status === 'failed').length,
           billed: tl.length,
-          panels: tl.reduce((a, l) => a + l.billedQty, 0),
+          panels: tl.reduce((a, l) => a + l.units, 0),
           terenceHT: tl.reduce((a, l) => a + (l.price ?? 0), 0),
           toQuote: tl.filter(l => l.price == null).length,
           revenueHT: tl.reduce((a, l) => a + (l.revenueHT ?? 0), 0),
@@ -456,6 +472,7 @@ export async function GET(req: NextRequest) {
       summary: {
         orders: lines.length,
         panels: totalPanels,
+        billedEquivalent,
         totalHT,
         vat: Math.round(totalHT * settings.vatRate) / 100,
         totalTTC: Math.round(totalHT * (100 + settings.vatRate)) / 100,

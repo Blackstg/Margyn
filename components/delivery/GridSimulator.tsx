@@ -8,7 +8,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { Plus, Minus, Copy, Check, RotateCcw } from 'lucide-react'
 
 export type SimLine = {
-  order: string; km: number | null; zone: number | null; billedQty: number; price: number | null
+  order: string; km: number | null; zone: number | null; billedQty: number; units?: number; price: number | null
   revenueHT: number | null; shippingHT: number | null; cogs: number | null
 }
 type Scenario = {
@@ -90,7 +90,7 @@ export default function GridSimulator({ brand, current, monthLines, monthLabel, 
       const p = priceOf(sc, l.km!, l.billedQty)
       const c = cells[bucketOf(sc.zoneLimitsKm, l.km!)][bucketOf(sc.tranches, l.billedQty)]
       c.n++; c.now += l.price!; c.sim += p
-      now += l.price!; sim += p; panels += l.billedQty
+      now += l.price!; sim += p; panels += l.units ?? l.billedQty
       if (l.revenueHT != null) {
         rev += l.revenueHT; ship += l.shippingHT ?? 0
         const m = l.revenueHT + (l.shippingHT ?? 0) - (l.cogs ?? 0)

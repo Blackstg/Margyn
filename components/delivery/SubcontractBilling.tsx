@@ -17,7 +17,7 @@ type Settings = {
 type Line = {
   order: string; customer: string; city: string; zip: string; driver: string; date: string
   km: number | null; kmEstimated: boolean; zone: number | null
-  panels: number; stones: number; billedQty: number; bucket: number; price: number | null
+  panels: number; stones: number; units: number; billedQty: number; bucket: number; price: number | null
   attempts: number; merged: number; revenueHT: number | null; shippingHT: number | null; cogs: number | null; margin: number | null; note?: string
 }
 type Unbilled = { order: string; customer: string; city: string; driver: string; date: string | null; reason: string }
@@ -25,7 +25,7 @@ type Data = {
   month: string; settings: Settings; allDrivers: string[]; buckets: string[]
   lines: Line[]; unbilled: Unbilled[]
   summary: {
-    orders: number; panels: number; totalHT: number; vat: number; totalTTC: number
+    orders: number; panels: number; billedEquivalent?: number; totalHT: number; vat: number; totalTTC: number
     perPanel: number | null; perOrder: number | null; mergedOrders: number
     revenueHT: number; shippingHT: number; cogs: number; marginAfterDelivery: number; deliveryPctOfRevenue: number | null; linesWithSales: number; lossLines: number; toQuote: number; estimatedKm: number; failedNotBilled: number
   }
@@ -104,16 +104,16 @@ export default function SubcontractBilling({ brand, internalCostPerPanel }: { br
     if (!data) return
     const zl = (z: number | null) => z == null ? 'Devis' : `Zone ${z + 1}`
     const rows = [
-      ['Date', 'Commande', 'Client', 'Ville', 'CP', 'Chauffeur', 'Km route', 'Zone', 'Panneaux', 'Feuilles de pierre', 'Tranche', 'Prix HT', 'CA HT commande', 'Port payé HT', 'Coût produits', 'Marge après livraison', 'Remarque'],
+      ['Date', 'Commande', 'Client', 'Ville', 'CP', 'Chauffeur', 'Km route', 'Zone', 'Panneaux livrés', 'dont feuilles de pierre', 'Équivalent grille', 'Tranche', 'Prix HT', 'CA HT commande', 'Port payé HT', 'Coût produits', 'Marge après livraison', 'Remarque'],
       ...data.lines.map(l => [
         dateFr(l.date), l.order, l.customer, l.city, l.zip, l.driver,
         l.km == null ? '' : `${l.km}${l.kmEstimated ? ' (estimé)' : ''}`, zl(l.zone),
-        l.panels, l.stones, data.buckets[l.bucket], l.price ?? '', l.revenueHT ?? '', l.shippingHT ?? '', l.cogs ?? '', l.margin ?? '', l.note ?? '',
+        l.units, l.stones, l.billedQty, data.buckets[l.bucket], l.price ?? '', l.revenueHT ?? '', l.shippingHT ?? '', l.cogs ?? '', l.margin ?? '', l.note ?? '',
       ]),
       [],
-      ['', '', '', '', '', '', '', '', '', '', 'Total HT', data.summary.totalHT],
-      ['', '', '', '', '', '', '', '', '', '', `TVA ${data.settings.vatRate} %`, data.summary.vat],
-      ['', '', '', '', '', '', '', '', '', '', 'Total TTC', data.summary.totalTTC],
+      ['', '', '', '', '', '', '', '', '', '', '', 'Total HT', data.summary.totalHT],
+      ['', '', '', '', '', '', '', '', '', '', '', `TVA ${data.settings.vatRate} %`, data.summary.vat],
+      ['', '', '', '', '', '', '', '', '', '', '', 'Total TTC', data.summary.totalTTC],
     ]
     const csv = rows.map(r => r.map(c => `"${String(c).replace(/"/g, '""')}"`).join(';')).join('\n')
     const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8' })
@@ -169,7 +169,12 @@ export default function SubcontractBilling({ brand, internalCostPerPanel }: { br
             <div className="rounded-2xl px-5 py-4 bg-white border border-[#e8e8e4]">
               <p className="text-[10px] font-semibold uppercase tracking-[0.1em] text-[#9b9b93]">Panneaux livrés</p>
               <p className="text-3xl font-bold mt-1 tabular-nums text-[#1a1a2e]">{s.panels}</p>
-              <p className="text-[11px] mt-0.5 text-[#9b9b93]">{s.perPanel != null ? `${eur(s.perPanel, 1)} / panneau` : '—'}</p>
+              <p className="text-[11px] mt-0.5 text-[#9b9b93]">{s.perPanel != null ? `${eur(s.perPanel, 1)} / panneau livré` : '—'}</p>
+              {s.billedEquivalent != null && s.billedEquivalent !== s.panels && (
+                <p className="text-[11px] text-[#9b9b93]" title="Feuille de pierre = ½ panneau, Akupanel 60×60 = ¼ : sert uniquement à choisir la tranche de la grille">
+                  {s.billedEquivalent} en équivalent grille
+                </p>
+              )}
             </div>
             <div className="rounded-2xl px-5 py-4 bg-white border border-[#e8e8e4]">
               <p className="text-[10px] font-semibold uppercase tracking-[0.1em] text-[#9b9b93]">vs coût interne</p>
@@ -371,8 +376,8 @@ export default function SubcontractBilling({ brand, internalCostPerPanel }: { br
                             : <span className={`text-xs font-semibold px-2 py-0.5 rounded-md ${ZONE_STYLE[l.zone]}`}>Z{l.zone + 1}</span>}
                         </td>
                         <td className="px-3 py-2 text-right tabular-nums">
-                          {l.billedQty}
-                          {l.stones > 0 && <span className="block text-[11px] text-[#9b9b93]">{l.panels} pann. + {l.stones} pierre</span>}
+                          {l.units}
+                          {l.units !== l.billedQty && <span className="block text-[11px] text-[#9b9b93]" title="Équivalent panneau classique utilisé pour la tranche de la grille">= {l.billedQty} éq. grille</span>}
                         </td>
                         <td className="px-3 py-2 text-right tabular-nums font-semibold text-[#1a1a2e]">{eur(l.price)}</td>
                         <td className="px-5 py-2 text-right tabular-nums" title={l.revenueHT != null ? `CA HT ${eur(l.revenueHT)} + port payé ${eur(l.shippingHT ?? 0)} − produits ${eur(l.cogs)} − livraison ${eur(l.price)}` : 'Commande introuvable dans les ventes'}>
