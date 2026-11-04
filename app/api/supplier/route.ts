@@ -7,7 +7,7 @@ import { createServerClient } from '@supabase/auth-helpers-nextjs'
 import { createClient } from '@supabase/supabase-js'
 import { cookies } from 'next/headers'
 import { effectiveBrands, isAdminRole } from '@/lib/access'
-import { computeForecast, loadOrInitConfig, newToken, saveConfig, type Batch, type BatchStatus, type SupplierConfig } from '@/lib/supplierForecast'
+import { forecastWithAutoFreeze, loadOrInitConfig, newToken, saveConfig, type Batch, type BatchStatus, type SupplierConfig } from '@/lib/supplierForecast'
 
 export const dynamic = 'force-dynamic'
 export const fetchCache = 'force-no-store'
@@ -37,7 +37,7 @@ export async function GET(req: NextRequest) {
   try {
     const db = admin()
     const config = await loadOrInitConfig(db, brand)
-    const forecast = await computeForecast(db, brand, config)
+    const forecast = await forecastWithAutoFreeze(db, brand, config)
     return NextResponse.json({ forecast, canEdit: a.admin, shareUrl: a.admin ? shareUrl(req, config.token) : null })
   } catch (e) {
     return NextResponse.json({ error: String(e) }, { status: 500 })

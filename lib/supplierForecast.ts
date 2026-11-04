@@ -50,20 +50,14 @@ export type SupplierConfig = {
   showStock: boolean       // montrer le stock France à l'usine
   seasonality: Record<string, number>  // 'MM' → coefficient (1 = normal)
   items: Record<string, ItemConfig>
-  note: string             // conditions du deal, affichées à l'usine
+  note: string             // message libre affiché à l'usine (en plus des 3 étapes)
   batches: Batch[]
 }
-
-export const DEFAULT_NOTE =
-  'Proposal: one batch per month. Each month we confirm a firm order for the next batch (column "Next batch"). ' +
-  'Please keep the "Buffer stock" finished and ready to ship at all times: it covers your production time if sales jump. ' +
-  'The buffer is not ordered yet; it is paid when it ships, and we commit to take it within the next batches. ' +
-  'Months +2 and +3 are forecasts to help you plan materials, not firm orders.'
 
 const DEFAULTS: Omit<SupplierConfig, 'token'> = {
   factoryName: '', lang: 'en',
   productionDays: 20, transitDays: 10, batchDay: 5, safetyDays: 7, bufferPct: 30,
-  showStock: true, seasonality: {}, items: {}, note: DEFAULT_NOTE, batches: [],
+  showStock: true, seasonality: {}, items: {}, note: '', batches: [],
 }
 
 export const newToken = (brand: string) => `${brand}-${randomBytes(16).toString('hex')}`
@@ -152,6 +146,7 @@ const atDay = (month: string, day: number) => `${month}-${String(Math.min(day, d
 export type ItemForecast = {
   key: string
   name: string; nameZh: string; nameFr: string; sku: string | null
+  image: string | null
   composition: { title: string; variant: string | null; mult: number; variantId: string }[]
   include: boolean; pack: number; moq: number
   history: { month: string; units: number; partial: boolean }[]
@@ -184,18 +179,24 @@ function demand(c: SupplierConfig, r: number, from: string, to: string) {
   for (let d = from; d < to; d = addDays(d, 1)) s += r * coefOf(c, d)
   return s
 }
+// Quantités « rondes » pour l'usine : au carton si renseigné, sinon par 5 (< 50),
+// 10 (< 200) ou 50 — jamais « 48 bouteilles » ou « 2 pcs »
+const step = (q: number) => q < 50 ? 5 : q < 200 ? 10 : 50
 const roundUp = (q: number, pack: number, moq: number) => {
-  if (q <= 0) return 0
-  const v = Math.ceil(Math.max(q, moq) / pack) * pack
-  return v
+  if (q <= 0.5) return 0
+  const v = Math.max(q, moq)
+  const unit = pack > 1 ? pack : step(v)
+  return Math.ceil(v / unit) * unit
 }
+// En dessous de ce volume (unités / mois), l'article n'entre pas dans le plan par défaut
+export const MIN_MONTHLY = 5
 
 export async function computeForecast(sb: SupabaseClient, brand: string, config: SupplierConfig, now = new Date()): Promise<Forecast> {
   const today = parisDay(now)
   const histFrom = atDay(addMonths(monthOf(today), -11), 1)
 
   const { data: variants } = await sb.from('product_variants')
-    .select('shopify_variant_id, product_title, variant_title, sku, stock_quantity, product_status')
+    .select('shopify_variant_id, product_title, variant_title, sku, stock_quantity, product_status, image_url')
     .eq('brand', brand)
   const sales: { date: string; variant_id: string | null; quantity: number | null; product_title: string | null; variant_title: string | null }[] = []
   for (let p = 0; ; p++) {
@@ -208,29 +209,30 @@ export async function computeForecast(sb: SupabaseClient, brand: string, config:
   }
 
   // Titre par variante : catalogue Shopify, sinon la vente la plus récente
-  const vInfo = new Map<string, { title: string; variant: string | null; sku: string | null; stock: number }>()
+  const vInfo = new Map<string, { title: string; variant: string | null; sku: string | null; stock: number; image: string | null }>()
   for (const v of variants ?? []) vInfo.set(String(v.shopify_variant_id), {
-    title: v.product_title ?? '', variant: v.variant_title ?? null, sku: v.sku ?? null, stock: Math.max(0, Number(v.stock_quantity) || 0),
+    title: v.product_title ?? '', variant: v.variant_title ?? null, sku: v.sku ?? null, stock: Math.max(0, Number(v.stock_quantity) || 0), image: v.image_url ?? null,
   })
   for (const s of sales) {
     const id = String(s.variant_id ?? '')
     if (!id) continue
     const cur = vInfo.get(id)
-    if (!cur) vInfo.set(id, { title: s.product_title ?? '', variant: s.variant_title || null, sku: null, stock: 0 })
+    if (!cur) vInfo.set(id, { title: s.product_title ?? '', variant: s.variant_title || null, sku: null, stock: 0, image: null })
     else if (!cur.variant && s.variant_title) cur.variant = s.variant_title
   }
 
   // Variantes → articles usine
-  type Group = { key: string; title: string; variant: string | null; sku: string | null; comp: ItemForecast['composition']; stock: number }
+  type Group = { key: string; title: string; variant: string | null; sku: string | null; image: string | null; comp: ItemForecast['composition']; stock: number }
   const groups = new Map<string, Group>()
   const groupOf = new Map<string, { key: string; mult: number }>()
   for (const [id, v] of vInfo) {
     const { base, mult } = baseOf(v.title)
     const key = slug(`${base} ${v.variant ?? ''}`)
-    const g = groups.get(key) ?? { key, title: base, variant: v.variant, sku: null, comp: [], stock: 0 }
+    const g = groups.get(key) ?? { key, title: base, variant: v.variant, sku: null, image: null, comp: [], stock: 0 }
     g.comp.push({ title: v.title, variant: v.variant, mult, variantId: id })
     g.stock += v.stock * mult
     if (mult === 1 && v.sku && !FREE_RE.test(v.title)) g.sku = g.sku ?? v.sku
+    if (v.image && (!g.image || (mult === 1 && !FREE_RE.test(v.title)))) g.image = v.image
     groups.set(key, g)
     groupOf.set(id, { key, mult })
   }
@@ -259,8 +261,10 @@ export async function computeForecast(sb: SupabaseClient, brand: string, config:
   const arrival = addDays(batchDate, config.transitDays)
   const following = [1, 2, 3].map(k => ({ batchDate: atDay(addMonths(bMonth, k), config.batchDay), arrival: arrivalOf(addMonths(bMonth, k)) }))
 
-  const openBatches = config.batches.filter(b => b.status !== 'received')
-  const thisBatch = config.batches.find(b => b.date === batchDate && b.status !== 'received')
+  // Batchs figés (automatiquement à la date limite de commande) : en route tant
+  // qu'ils ne sont pas arrivés ; une fois arrivés, ils sont dans le stock Shopify.
+  const thisBatch = config.batches.find(b => b.date === batchDate)
+  const openBatches = config.batches.filter(b => b !== thisBatch && addDays(b.date, config.transitDays) > today)
   const yesterday = addDays(today, -1)
   const histMonths = Array.from({ length: 12 }, (_, i) => addMonths(monthOf(today), i - 11))
 
@@ -277,11 +281,11 @@ export async function computeForecast(sb: SupabaseClient, brand: string, config:
     }
     const sold90 = f ? sumRange(addDays(today, -90), today) : 0
     const cfg = config.items[g.key]
-    const include = cfg?.include ?? sold90 > 0
+    const include = cfg?.include ?? sold90 / 3 >= MIN_MONTHLY
     const perDay = 0.6 * rateOver(30) + 0.4 * rateOver(90)
     const pack = Math.max(1, Math.round(cfg?.pack ?? 1))
     const moq = Math.max(0, Math.round(cfg?.moq ?? 0))
-    const incoming = openBatches.filter(b => b !== thisBatch).reduce((s, b) => s + (b.lines[g.key] ?? 0), 0)
+    const incoming = openBatches.reduce((s, b) => s + (b.lines[g.key] ?? 0), 0)
 
     // Commande ferme : couvrir jusqu'à l'arrivée du batch suivant (+ sécurité)
     const need = demand(config, perDay, today, following[0].arrival) + perDay * config.safetyDays - g.stock - incoming
@@ -304,7 +308,7 @@ export async function computeForecast(sb: SupabaseClient, brand: string, config:
     items.push({
       key: g.key,
       name: cfg?.name || translate(fr, EN), nameZh: cfg?.nameZh || translate(fr, ZH), nameFr: fr,
-      sku: cfg?.sku || g.sku,
+      sku: cfg?.sku || g.sku, image: g.image,
       composition: g.comp.sort((a, b) => a.mult - b.mult || a.title.localeCompare(b.title)),
       include, pack, moq,
       history: histMonths.filter(m => !f || m >= monthOf(f)).map(m => ({
@@ -330,4 +334,19 @@ export async function computeForecast(sb: SupabaseClient, brand: string, config:
     items,
     lateWarning: items.some(i => i.include && i.stockoutDate != null && i.stockoutDate < arrival),
   }
+}
+
+// Sans action de l'user : à la date limite de commande, la quantité du prochain batch
+// est figée (l'usine voit « Confirmed ») ; elle ne bouge plus ensuite.
+export async function forecastWithAutoFreeze(sb: SupabaseClient, brand: string, config: SupplierConfig, now = new Date()): Promise<Forecast> {
+  const f = await computeForecast(sb, brand, config, now)
+  const s = f.schedule
+  if (f.today < s.orderBy || config.batches.some(b => b.date === s.batchDate)) return f
+  const lines = Object.fromEntries(f.items.filter(i => i.include && i.nextBatch > 0).map(i => [i.key, i.nextBatch]))
+  config.batches = [
+    { id: Math.random().toString(36).slice(2, 10), date: s.batchDate, status: 'confirmed' as const, lines, createdAt: now.toISOString() },
+    ...config.batches,
+  ].sort((a, b) => b.date.localeCompare(a.date))
+  await saveConfig(sb, brand, config)
+  return computeForecast(sb, brand, config, now)
 }
