@@ -11,7 +11,7 @@ import { BRAND_LABELS } from '@/lib/access'
 import type { Forecast, ItemConfig, Lang, SupplierConfig } from '@/lib/supplierForecast'
 
 type Data = { forecast: Forecast; canEdit: boolean; shareUrl: string | null }
-type Settings = Pick<SupplierConfig, 'factoryName' | 'lang' | 'productionDays' | 'transitDays' | 'batchDay' | 'nextBatchDate' | 'safetyDays' | 'bufferPct' | 'showStock' | 'seasonality' | 'note' | 'items'>
+type Settings = Pick<SupplierConfig, 'factoryName' | 'lang' | 'productionDays' | 'transitDays' | 'horizonMonths' | 'safetyDays' | 'showStock' | 'seasonality' | 'note' | 'items'>
 
 const MONTHS = ['01', '02', '03', '04', '05', '06', '07', '08', '09', '10', '11', '12']
 const MONTH_FR = ['janv.', 'févr.', 'mars', 'avr.', 'mai', 'juin', 'juil.', 'août', 'sept.', 'oct.', 'nov.', 'déc.']
@@ -39,11 +39,10 @@ export default function SupplierPage() {
         const c = d.forecast.config
         setS({
           factoryName: c.factoryName, lang: c.lang, productionDays: c.productionDays, transitDays: c.transitDays,
-          batchDay: c.batchDay, nextBatchDate: c.nextBatchDate ?? '', safetyDays: c.safetyDays, bufferPct: c.bufferPct,
-          showStock: c.showStock, seasonality: c.seasonality, note: c.note,
+          horizonMonths: c.horizonMonths, safetyDays: c.safetyDays, showStock: c.showStock, seasonality: c.seasonality, note: c.note,
           items: Object.fromEntries(d.forecast.items.map(i => [i.key, {
             include: i.include, name: c.items[i.key]?.name ?? '', nameZh: c.items[i.key]?.nameZh ?? '',
-            sku: c.items[i.key]?.sku ?? '', pack: i.pack, moq: i.moq,
+            sku: c.items[i.key]?.sku ?? '', pack: i.pack,
           } satisfies ItemConfig])),
         })
         setDirty(false)
@@ -78,8 +77,8 @@ export default function SupplierPage() {
       <div>
         <h1 className="text-xl font-bold text-[#1a1a2e]">Usine</h1>
         <p className="mt-1 max-w-3xl text-sm text-[#6b6b63]">
-          Envoie le lien une fois à l&apos;usine. Elle voit chaque mois quoi envoyer et quoi garder prêt.
-          Rien à valider : les quantités se figent seules avant la fabrication.
+          Envoie le lien une fois à l&apos;usine : elle suit tes ventes en direct, la tendance par modèle et le stock à te préparer.
+          Rien à gérer : tout se met à jour avec Shopify.
         </p>
       </div>
 
@@ -119,17 +118,14 @@ export default function SupplierPage() {
                 <option value="en">English</option><option value="zh">中文</option><option value="fr">Français</option>
               </select>
             </label>
-            <label className="text-xs text-[#6b6b63]">Envoi chaque mois le<input type="number" min={1} max={28} className={`${input} mt-1 w-full`} value={s.batchDay} onChange={e => set({ batchDay: Number(e.target.value) })} /></label>
-            <label className="text-xs text-[#6b6b63]" title="Pour un premier envoi plus tôt que le calendrier mensuel. Vide = calendrier normal.">Avancer le prochain envoi au
-              <input type="date" className={`${input} mt-1 w-full`} value={s.nextBatchDate ?? ''} onChange={e => set({ nextBatchDate: e.target.value })} />
-            </label>
+            <label className="text-xs text-[#6b6b63]" title="Le « stock à préparer » couvre la fabrication + le transport + ce nombre de mois de ventes">Stock à préparer : mois de ventes<input type="number" step="0.5" min={0.5} max={6} className={`${input} mt-1 w-full`} value={s.horizonMonths} onChange={e => set({ horizonMonths: Number(e.target.value) })} /></label>
+            <label className="text-xs text-[#6b6b63]">Sécurité (jours de ventes)<input type="number" className={`${input} mt-1 w-full`} value={s.safetyDays} onChange={e => set({ safetyDays: Number(e.target.value) })} /></label>
             <label className="text-xs text-[#6b6b63]">Fabrication (jours)<input type="number" className={`${input} mt-1 w-full`} value={s.productionDays} onChange={e => set({ productionDays: Number(e.target.value) })} /></label>
-            <label className="text-xs text-[#6b6b63]">Transport usine → France (jours)<input type="number" className={`${input} mt-1 w-full`} value={s.transitDays} onChange={e => set({ transitDays: Number(e.target.value) })} /></label>
-            <label className="text-xs text-[#6b6b63]">Marge sur le stock prêt (%)<input type="number" className={`${input} mt-1 w-full`} value={s.bufferPct} onChange={e => set({ bufferPct: Number(e.target.value) })} /></label>
-            <label className="flex items-center gap-2 pt-5 text-xs text-[#6b6b63]"><input type="checkbox" checked={s.showStock} onChange={e => set({ showStock: e.target.checked })} /> Montrer le stock France</label>
+            <label className="text-xs text-[#6b6b63]">Transport usine → Forrest (jours)<input type="number" className={`${input} mt-1 w-full`} value={s.transitDays} onChange={e => set({ transitDays: Number(e.target.value) })} /></label>
+            <label className="flex items-center gap-2 pt-5 text-xs text-[#6b6b63]"><input type="checkbox" checked={s.showStock} onChange={e => set({ showStock: e.target.checked })} /> Montrer le stock Forrest</label>
           </div>
 
-          <p className="mt-5 text-xs font-semibold text-[#6b6b63]">Saisonnalité (1 = normal, 1,5 = +50 %)</p>
+          <p className="mt-5 text-xs font-semibold text-[#6b6b63]">Saisonnalité (1 = normal, 1,3 = +30 % ; Black Friday / Noël à 1,3 par défaut)</p>
           <div className="mt-1 grid grid-cols-4 gap-2 sm:grid-cols-6 lg:grid-cols-12">
             {MONTHS.map((m, i) => (
               <label key={m} className="text-[11px] text-[#9b9b93]">{MONTH_FR[i]}

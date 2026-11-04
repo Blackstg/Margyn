@@ -4,7 +4,7 @@ import type { Metadata } from 'next'
 import { notFound } from 'next/navigation'
 import { createClient } from '@supabase/supabase-js'
 import FactoryView from '@/components/supplier/FactoryView'
-import { forecastWithAutoFreeze, loadConfig, tokenMatches, type Lang } from '@/lib/supplierForecast'
+import { computeForecast, loadConfig, tokenMatches, type Lang } from '@/lib/supplierForecast'
 import { BRANDS, BRAND_LABELS, type Brand } from '@/lib/access'
 
 export const dynamic = 'force-dynamic'
@@ -22,7 +22,7 @@ export default async function FactoryPage({ params, searchParams }: { params: { 
   const config = await loadConfig(db, brand)
   if (!config || !tokenMatches(config.token, token)) notFound()
 
-  const forecast = await forecastWithAutoFreeze(db, brand, config)
+  const forecast = await computeForecast(db, brand, config)
   const lang: Lang = searchParams.lang === 'en' || searchParams.lang === 'zh' || searchParams.lang === 'fr' ? searchParams.lang : config.lang
 
   return (

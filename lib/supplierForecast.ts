@@ -1,15 +1,16 @@
-// Prévision usine (Krom) : un batch par mois, l'usine garde un stock tampon prêt.
-// Partagé entre la page interne /[brand]/supplier et la page publique /factory/[token]
-// (lien secret pour l'usine : ventes en unités, prévisions, batchs — jamais de prix,
-// de CA ni de clients).
+// Page « usine » (Krom) : rassurer le fabricant avec les ventes en direct, la
+// progression par produit et les prévisions, pour qu'il prépare du stock pour nous
+// sans que Krom avance la marchandise. Partagé entre la page interne /[brand]/supplier
+// et la page publique /factory/[token] (lien secret ; unités seulement — jamais de
+// prix, de CA ni de clients).
 //
-// Modèle (réappro périodique « order-up-to ») :
-//   rythme   = 60 % ventes/jour des 30 derniers jours + 40 % des 90 derniers (lisse les pics)
-//   batch N  = ventes prévues d'aujourd'hui jusqu'à l'arrivée du batch N+1
-//              + sécurité (jours) − stock France − batchs déjà commandés non reçus
-//   tampon   = ventes prévues pendant le temps de fabrication × (1 + marge %) :
-//              l'usine l'a toujours prêt, donc un pic se rattrape sans attendre 15–20 j,
-//              et Krom n'avance pas ce stock (payé quand il est expédié).
+// Modèle :
+//   rythme      = 60 % ventes/jour des 30 derniers jours + 40 % des 90 derniers,
+//                 × coefficient du mois (Black Friday, Noël…)
+//   délai       = fabrication + transport jusqu'à l'entrepôt Forrest
+//   urgent      = ventes prévues pendant ce délai + sécurité − stock Forrest
+//                 (ce qui manquera avant qu'une nouvelle production puisse arriver)
+//   à préparer  = ventes prévues sur délai + N mois + sécurité − stock Forrest
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { randomBytes, timingSafeEqual } from 'crypto'
 
@@ -24,17 +25,6 @@ export type ItemConfig = {
   nameZh?: string
   sku?: string         // référence usine (sinon SKU Shopify)
   pack?: number        // multiple de commande (carton), 1 par défaut
-  moq?: number         // minimum par batch quand on en commande
-}
-
-export type BatchStatus = 'confirmed' | 'shipped' | 'received'
-export type Batch = {
-  id: string
-  date: string                    // date d'expédition prévue (YYYY-MM-DD)
-  status: BatchStatus
-  lines: Record<string, number>   // itemKey → quantité
-  note?: string
-  createdAt: string
 }
 
 export type SupplierConfig = {
@@ -42,22 +32,19 @@ export type SupplierConfig = {
   factoryName: string
   lang: Lang
   productionDays: number   // fabrication à l'usine
-  transitDays: number      // usine → stock France
-  batchDay: number         // jour du mois où part le batch
-  nextBatchDate?: string   // date forcée du prochain batch (ex. batch d'amorçage), YYYY-MM-DD
-  safetyDays: number       // sécurité côté Krom en plus du tampon usine
-  bufferPct: number        // marge sur le tampon usine
-  showStock: boolean       // montrer le stock France à l'usine
+  transitDays: number      // usine → entrepôt Forrest
+  horizonMonths: number    // mois de ventes couverts par le stock à préparer, après le délai
+  safetyDays: number
+  showStock: boolean       // montrer le stock Forrest à l'usine
   seasonality: Record<string, number>  // 'MM' → coefficient (1 = normal)
   items: Record<string, ItemConfig>
-  note: string             // message libre affiché à l'usine (en plus des 3 étapes)
-  batches: Batch[]
+  note: string             // message libre affiché à l'usine
 }
 
 const DEFAULTS: Omit<SupplierConfig, 'token'> = {
   factoryName: '', lang: 'en',
-  productionDays: 20, transitDays: 10, batchDay: 5, safetyDays: 7, bufferPct: 30,
-  showStock: true, seasonality: {}, items: {}, note: '', batches: [],
+  productionDays: 20, transitDays: 10, horizonMonths: 2, safetyDays: 7,
+  showStock: true, seasonality: { '11': 1.3, '12': 1.3 }, items: {}, note: '',
 }
 
 export const newToken = (brand: string) => `${brand}-${randomBytes(16).toString('hex')}`
@@ -66,8 +53,15 @@ export async function loadConfig(sb: SupabaseClient, brand: string): Promise<Sup
   const { data, error } = await sb.storage.from(BUCKET).download(configPath(brand))
   if (error || !data) return null
   try {
-    const saved = JSON.parse(await data.text()) as Partial<SupplierConfig>
-    return { ...DEFAULTS, token: '', ...saved, seasonality: saved.seasonality ?? {}, items: saved.items ?? {}, batches: saved.batches ?? [] }
+    // (les anciens réglages « batch mensuel » sont ignorés)
+    const { batches: _b, batchDay: _d, nextBatchDate: _n, bufferPct: _p, ...saved } = JSON.parse(await data.text()) as Partial<SupplierConfig> & Record<string, unknown>
+    void _b; void _d; void _n; void _p
+    return {
+      ...DEFAULTS, token: '', ...saved,
+      // pas encore de saisonnalité enregistrée → Black Friday / Noël par défaut
+      seasonality: saved.seasonality && Object.keys(saved.seasonality).length ? saved.seasonality : DEFAULTS.seasonality,
+      items: saved.items ?? {},
+    }
   } catch { return null }
 }
 
@@ -139,27 +133,24 @@ const addDays = (day: string, n: number) => { const d = new Date(day + 'T12:00:0
 const diffDays = (a: string, b: string) => Math.round((new Date(b + 'T12:00:00Z').getTime() - new Date(a + 'T12:00:00Z').getTime()) / 86400_000)
 const monthOf = (day: string) => day.slice(0, 7)
 const addMonths = (month: string, n: number) => { const [y, m] = month.split('-').map(Number); const d = new Date(Date.UTC(y, m - 1 + n, 1)); return d.toISOString().slice(0, 7) }
-const daysInMonth = (month: string) => { const [y, m] = month.split('-').map(Number); return new Date(Date.UTC(y, m, 0)).getUTCDate() }
-const atDay = (month: string, day: number) => `${month}-${String(Math.min(day, daysInMonth(month))).padStart(2, '0')}`
 
 // ─── Calcul ──────────────────────────────────────────────────────────────────
 export type ItemForecast = {
   key: string
   name: string; nameZh: string; nameFr: string; sku: string | null
   image: string | null
+  machine: boolean
   composition: { title: string; variant: string | null; mult: number; variantId: string }[]
-  include: boolean; pack: number; moq: number
-  history: { month: string; units: number; partial: boolean }[]
-  perDay: number            // rythme retenu
-  perMonth: number          // = perDay × 30,4
-  stock: number             // stock France (Shopify), packs × contenu
-  incoming: number          // batchs commandés non reçus
+  include: boolean; pack: number
+  history: { month: string; units: number; partial: boolean; estimate: number | null }[]  // estimate = mois en cours projeté
+  forecast: { month: string; units: number }[]  // 3 mois suivants
+  perMonth: number          // rythme actuel, ventes / mois
+  last7: number; last30: number; monthToDate: number
+  growth: number | null     // 30 derniers jours vs 30 précédents
+  stock: number             // stock Forrest (Shopify), lots × contenu
   stockoutDate: string | null
-  nextBatch: number         // commande ferme proposée par le calcul
-  confirmed: number | null  // quantité validée pour ce batch (prime sur le calcul)
-  buffer: number            // tampon à garder prêt à l'usine
-  forecast: { month: string; units: number }[]  // ventes prévues M+1..M+3
-  following: number[]       // batchs suivants (indicatifs)
+  urgent: number            // à envoyer au plus vite (rupture avant une nouvelle production)
+  suggested: number         // stock à préparer pour nous (inclut l'urgent)
 }
 
 export type Forecast = {
@@ -167,9 +158,9 @@ export type Forecast = {
   generatedAt: string
   today: string
   config: Omit<SupplierConfig, 'token'>
-  schedule: { batchDate: string; orderBy: string; arrival: string; following: { batchDate: string; arrival: string }[] }
+  leadDays: number
+  coverUntil: string        // le stock à préparer couvre jusqu'à cette date
   items: ItemForecast[]
-  lateWarning: boolean      // rupture avant l'arrivée du prochain batch sur au moins un article
 }
 
 const coefOf = (c: SupplierConfig, day: string) => Number(c.seasonality[day.slice(5, 7)] ?? 1) || 1
@@ -179,24 +170,23 @@ function demand(c: SupplierConfig, r: number, from: string, to: string) {
   for (let d = from; d < to; d = addDays(d, 1)) s += r * coefOf(c, d)
   return s
 }
-// Quantités « rondes » pour l'usine : au carton si renseigné, sinon par 5 (< 50),
-// 10 (< 200) ou 50 — jamais « 48 bouteilles » ou « 2 pcs »
+// Quantités « rondes » : au carton si renseigné, sinon par 5 (< 50), 10 (< 200) ou 50
 const step = (q: number) => q < 50 ? 5 : q < 200 ? 10 : 50
-const roundUp = (q: number, pack: number, moq: number) => {
+const roundUp = (q: number, pack: number) => {
   if (q <= 0.5) return 0
-  const v = Math.max(q, moq)
-  const unit = pack > 1 ? pack : step(v)
-  return Math.ceil(v / unit) * unit
+  const unit = pack > 1 ? pack : step(q)
+  return Math.ceil(q / unit) * unit
 }
-// En dessous de ce volume (unités / mois), l'article n'entre pas dans le plan par défaut
+// En dessous de ce volume (unités / mois), l'article n'est pas montré par défaut
 export const MIN_MONTHLY = 5
+const isMachine = (title: string) => /machine|maker/i.test(title)
 
 export async function computeForecast(sb: SupabaseClient, brand: string, config: SupplierConfig, now = new Date()): Promise<Forecast> {
   const today = parisDay(now)
-  const histFrom = atDay(addMonths(monthOf(today), -11), 1)
+  const histFrom = `${addMonths(monthOf(today), -11)}-01`
 
   const { data: variants } = await sb.from('product_variants')
-    .select('shopify_variant_id, product_title, variant_title, sku, stock_quantity, product_status, image_url')
+    .select('shopify_variant_id, product_title, variant_title, sku, stock_quantity, image_url')
     .eq('brand', brand)
   const sales: { date: string; variant_id: string | null; quantity: number | null; product_title: string | null; variant_title: string | null }[] = []
   for (let p = 0; ; p++) {
@@ -250,23 +240,12 @@ export async function computeForecast(sb: SupabaseClient, brand: string, config:
     if (!first.has(g.key) || s.date < first.get(g.key)!) first.set(g.key, s.date)
   }
 
-  // Calendrier : batch le `batchDay` du mois, commande ferme `productionDays` avant
-  // (ou à la date forcée, tant qu'elle n'est pas passée)
-  let bMonth = monthOf(today)
-  while (diffDays(today, atDay(bMonth, config.batchDay)) < config.productionDays) bMonth = addMonths(bMonth, 1)
-  const forced = config.nextBatchDate && config.nextBatchDate >= today ? config.nextBatchDate : null
-  if (forced) bMonth = monthOf(forced)
-  const batchDate = forced ?? atDay(bMonth, config.batchDay)
-  const arrivalOf = (m: string) => addDays(atDay(m, config.batchDay), config.transitDays)
-  const arrival = addDays(batchDate, config.transitDays)
-  const following = [1, 2, 3].map(k => ({ batchDate: atDay(addMonths(bMonth, k), config.batchDay), arrival: arrivalOf(addMonths(bMonth, k)) }))
-
-  // Batchs figés (automatiquement à la date limite de commande) : en route tant
-  // qu'ils ne sont pas arrivés ; une fois arrivés, ils sont dans le stock Shopify.
-  const thisBatch = config.batches.find(b => b.date === batchDate)
-  const openBatches = config.batches.filter(b => b !== thisBatch && addDays(b.date, config.transitDays) > today)
+  const leadDays = config.productionDays + config.transitDays
+  const leadEnd = addDays(today, leadDays)
+  const coverUntil = addDays(leadEnd, Math.round(config.horizonMonths * 30.4))
   const yesterday = addDays(today, -1)
-  const histMonths = Array.from({ length: 12 }, (_, i) => addMonths(monthOf(today), i - 11))
+  const curMonth = monthOf(today)
+  const nextMonthStart = `${addMonths(curMonth, 1)}-01`
 
   const items: ItemForecast[] = []
   for (const g of groups.values()) {
@@ -279,26 +258,17 @@ export async function computeForecast(sb: SupabaseClient, brand: string, config:
       const span = Math.max(1, Math.min(days, diffDays(f, today)))
       return sumRange(from > f ? from : f, yesterday) / span
     }
-    const sold90 = f ? sumRange(addDays(today, -90), today) : 0
     const cfg = config.items[g.key]
-    const include = cfg?.include ?? sold90 / 3 >= MIN_MONTHLY
     const perDay = 0.6 * rateOver(30) + 0.4 * rateOver(90)
+    const include = cfg?.include ?? perDay * 30.4 >= MIN_MONTHLY
     const pack = Math.max(1, Math.round(cfg?.pack ?? 1))
-    const moq = Math.max(0, Math.round(cfg?.moq ?? 0))
-    const incoming = openBatches.reduce((s, b) => s + (b.lines[g.key] ?? 0), 0)
+    const safety = perDay * config.safetyDays
 
-    // Commande ferme : couvrir jusqu'à l'arrivée du batch suivant (+ sécurité)
-    const need = demand(config, perDay, today, following[0].arrival) + perDay * config.safetyDays - g.stock - incoming
-    const nextBatch = roundUp(need, pack, moq)
-    const confirmed = thisBatch ? thisBatch.lines[g.key] ?? 0 : null
-    // Batchs suivants : un mois de ventes chacun (entre deux arrivées)
-    const arrivals = following.map(x => x.arrival)
-    const followingQty = arrivals.slice(0, 2).map((a, i) => roundUp(demand(config, perDay, a, arrivals[i + 1]), pack, 0))
-    // Tampon usine : ventes pendant la fabrication, au rythme du mois du batch
-    const buffer = perDay > 0 ? roundUp(perDay * coefOf(config, batchDate) * config.productionDays * (1 + config.bufferPct / 100), pack, 0) : 0
+    const last30 = sumRange(addDays(today, -30), yesterday)
+    const prev30 = sumRange(addDays(today, -60), addDays(today, -31))
+    const monthToDate = sumRange(`${curMonth}-01`, today)
 
-    // Rupture (stock + commandé) au rythme prévu
-    let left = g.stock + incoming, stockoutDate: string | null = null
+    let left = g.stock, stockoutDate: string | null = null
     if (perDay > 0) for (let day = today, i = 0; i < 400; i++, day = addDays(day, 1)) {
       left -= perDay * coefOf(config, day)
       if (left < 0) { stockoutDate = day; break }
@@ -308,45 +278,32 @@ export async function computeForecast(sb: SupabaseClient, brand: string, config:
     items.push({
       key: g.key,
       name: cfg?.name || translate(fr, EN), nameZh: cfg?.nameZh || translate(fr, ZH), nameFr: fr,
-      sku: cfg?.sku || g.sku, image: g.image,
+      sku: cfg?.sku || g.sku, image: g.image, machine: isMachine(g.title),
       composition: g.comp.sort((a, b) => a.mult - b.mult || a.title.localeCompare(b.title)),
-      include, pack, moq,
-      history: histMonths.filter(m => !f || m >= monthOf(f)).map(m => ({
-        month: m, units: sumRange(`${m}-01`, `${m}-31`), partial: m === monthOf(today),
-      })),
-      perDay, perMonth: perDay * 30.4,
-      stock: g.stock, incoming, stockoutDate,
-      nextBatch, confirmed, buffer,
+      include, pack,
+      history: Array.from({ length: 12 }, (_, i) => addMonths(curMonth, i - 11))
+        .filter(m => f && m >= monthOf(f))
+        .map(m => {
+          const units = sumRange(`${m}-01`, `${m}-31`)
+          const partial = m === curMonth
+          return { month: m, units, partial, estimate: partial ? Math.round(monthToDate + demand(config, perDay, today, nextMonthStart)) : null }
+        }),
       forecast: [1, 2, 3].map(k => {
-        const m = addMonths(monthOf(today), k)
+        const m = addMonths(curMonth, k)
         return { month: m, units: Math.round(demand(config, perDay, `${m}-01`, `${addMonths(m, 1)}-01`)) }
       }),
-      following: followingQty,
+      perMonth: perDay * 30.4,
+      last7: sumRange(addDays(today, -7), today), last30, monthToDate,
+      growth: prev30 >= 3 ? last30 / prev30 - 1 : null,
+      stock: g.stock, stockoutDate,
+      urgent: roundUp(demand(config, perDay, today, leadEnd) + safety - g.stock, pack),
+      suggested: roundUp(demand(config, perDay, today, coverUntil) + safety - g.stock, pack),
     })
   }
-  items.sort((a, b) => Number(b.include) - Number(a.include) || b.perDay - a.perDay)
+  // Machines d'abord, puis le reste ; chacun par volume de ventes
+  items.sort((a, b) => Number(b.include) - Number(a.include) || Number(b.machine) - Number(a.machine) || b.perMonth - a.perMonth)
 
   const { token: _t, ...publicConfig } = config
   void _t
-  return {
-    brand, generatedAt: now.toISOString(), today, config: publicConfig,
-    schedule: { batchDate, orderBy: [addDays(batchDate, -config.productionDays), today].sort()[1], arrival, following },
-    items,
-    lateWarning: items.some(i => i.include && i.stockoutDate != null && i.stockoutDate < arrival),
-  }
-}
-
-// Sans action de l'user : à la date limite de commande, la quantité du prochain batch
-// est figée (l'usine voit « Confirmed ») ; elle ne bouge plus ensuite.
-export async function forecastWithAutoFreeze(sb: SupabaseClient, brand: string, config: SupplierConfig, now = new Date()): Promise<Forecast> {
-  const f = await computeForecast(sb, brand, config, now)
-  const s = f.schedule
-  if (f.today < s.orderBy || config.batches.some(b => b.date === s.batchDate)) return f
-  const lines = Object.fromEntries(f.items.filter(i => i.include && i.nextBatch > 0).map(i => [i.key, i.nextBatch]))
-  config.batches = [
-    { id: Math.random().toString(36).slice(2, 10), date: s.batchDate, status: 'confirmed' as const, lines, createdAt: now.toISOString() },
-    ...config.batches,
-  ].sort((a, b) => b.date.localeCompare(a.date))
-  await saveConfig(sb, brand, config)
-  return computeForecast(sb, brand, config, now)
+  return { brand, generatedAt: now.toISOString(), today, config: publicConfig, leadDays, coverUntil, items }
 }
