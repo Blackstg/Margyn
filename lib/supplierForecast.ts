@@ -39,12 +39,30 @@ export type SupplierConfig = {
   seasonality: Record<string, number>  // 'MM' → coefficient (1 = normal)
   items: Record<string, ItemConfig>
   note: string             // message libre affiché à l'usine
+  factory: FactoryState    // ce que l'usine déclare elle-même sur sa page
+}
+
+// Déclaré par l'usine sur sa page (lien secret) : son stock prêt pour nous et ses envois.
+// Un envoi compte « en route » jusqu'à ce que le stock Forrest remonte (réception dans
+// Shopify), ou au plus tard quelques jours après l'arrivée prévue.
+export type FactoryShipment = {
+  id: string
+  date: string                       // date d'envoi (YYYY-MM-DD)
+  lines: Record<string, number>      // itemKey → quantité
+  stockAt: Record<string, number>    // stock Forrest au moment de la déclaration
+  createdAt: string
+}
+export type FactoryState = {
+  ready: Record<string, number>      // itemKey → pièces prêtes pour nous à l'usine
+  readyAt: Record<string, string>    // itemKey → date de mise à jour
+  shipments: FactoryShipment[]
 }
 
 const DEFAULTS: Omit<SupplierConfig, 'token'> = {
   factoryName: '', lang: 'en',
-  productionDays: 20, transitDays: 10, horizonMonths: 2, safetyDays: 7,
+  productionDays: 20, transitDays: 3, horizonMonths: 2, safetyDays: 7,
   showStock: true, seasonality: { '11': 1.3, '12': 1.3 }, items: {}, note: '',
+  factory: { ready: {}, readyAt: {}, shipments: [] },
 }
 
 export const newToken = (brand: string) => `${brand}-${randomBytes(16).toString('hex')}`
@@ -61,6 +79,7 @@ export async function loadConfig(sb: SupabaseClient, brand: string): Promise<Sup
       // pas encore de saisonnalité enregistrée → Black Friday / Noël par défaut
       seasonality: saved.seasonality && Object.keys(saved.seasonality).length ? saved.seasonality : DEFAULTS.seasonality,
       items: saved.items ?? {},
+      factory: { ready: saved.factory?.ready ?? {}, readyAt: saved.factory?.readyAt ?? {}, shipments: saved.factory?.shipments ?? [] },
     }
   } catch { return null }
 }
@@ -151,6 +170,10 @@ export type ItemForecast = {
   stockoutDate: string | null
   urgent: number            // à envoyer au plus vite (rupture avant une nouvelle production)
   suggested: number         // stock à préparer pour nous (inclut l'urgent)
+  incoming: number          // envoyé par l'usine, pas encore reçu chez Forrest
+  incomingArrival: string | null
+  ready: number | null      // stock prêt pour nous déclaré par l'usine
+  readyAt: string | null
 }
 
 export type Forecast = {
@@ -263,12 +286,17 @@ export async function computeForecast(sb: SupabaseClient, brand: string, config:
     const include = cfg?.include ?? perDay * 30.4 >= MIN_MONTHLY
     const pack = Math.max(1, Math.round(cfg?.pack ?? 1))
     const safety = perDay * config.safetyDays
+    // Envois déclarés par l'usine, pas encore entrés dans le stock Forrest
+    const enRoute = config.factory.shipments.filter(sh => (sh.lines[g.key] ?? 0) > 0
+      && addDays(sh.date, config.transitDays + 4) > today && g.stock <= (sh.stockAt[g.key] ?? 0))
+    const incoming = enRoute.reduce((a, sh) => a + sh.lines[g.key], 0)
+    const have = g.stock + incoming
 
     const last30 = sumRange(addDays(today, -30), yesterday)
     const prev30 = sumRange(addDays(today, -60), addDays(today, -31))
     const monthToDate = sumRange(`${curMonth}-01`, today)
 
-    let left = g.stock, stockoutDate: string | null = null
+    let left = have, stockoutDate: string | null = null
     if (perDay > 0) for (let day = today, i = 0; i < 400; i++, day = addDays(day, 1)) {
       left -= perDay * coefOf(config, day)
       if (left < 0) { stockoutDate = day; break }
@@ -296,8 +324,10 @@ export async function computeForecast(sb: SupabaseClient, brand: string, config:
       last7: sumRange(addDays(today, -7), today), last30, monthToDate,
       growth: prev30 >= 3 ? last30 / prev30 - 1 : null,
       stock: g.stock, stockoutDate,
-      urgent: roundUp(demand(config, perDay, today, leadEnd) + safety - g.stock, pack),
-      suggested: roundUp(demand(config, perDay, today, coverUntil) + safety - g.stock, pack),
+      urgent: roundUp(demand(config, perDay, today, leadEnd) + safety - have, pack),
+      suggested: roundUp(demand(config, perDay, today, coverUntil) + safety - have, pack),
+      incoming, incomingArrival: enRoute.length ? addDays(enRoute.map(sh => sh.date).sort().at(-1)!, config.transitDays) : null,
+      ready: config.factory.ready[g.key] ?? null, readyAt: config.factory.readyAt[g.key] ?? null,
     })
   }
   // Machines d'abord, puis le reste ; chacun par volume de ventes

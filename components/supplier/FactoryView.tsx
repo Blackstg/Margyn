@@ -3,6 +3,7 @@
 // But : le rassurer (ventes en direct, progression, prévisions) et lui dire combien
 // préparer par modèle. Unités seulement : jamais de prix, de CA ni de clients.
 import type { Forecast, ItemForecast, Lang } from '@/lib/supplierForecast'
+import { ReadyEditor, ShipPanel } from './FactoryActions'
 
 const T = {
   en: {
@@ -14,11 +15,16 @@ const T = {
     prepare: 'Stock to prepare for us', covers: (d: string) => `covers our sales until ~${d}`,
     urgent: (q: string, d: string) => `${q} pcs needed as soon as possible — Forrest stock runs out ~${d}`,
     nothing: 'Nothing needed for now', pcs: 'pcs', fc: 'forecast',
+    need: 'Stock we need', readyF: 'Ready at your factory', covered: '✓ covers our need', toProduce: (q: string) => `still to produce: ${q} pcs`,
+    onWay: (q: string, d: string) => `+ ${q} on the way · arrives ~${d}`, shipNow: (q: string, d: string) => `Ship ${q} pcs now — Forrest stock runs out ~${d}`,
+    edit: 'edit', set: 'enter', save: 'Save', cancel: 'Cancel',
+    shipBtn: 'I shipped goods', shipTitle: 'What did you ship?', shipDate: 'Shipping date', shipSend: 'Confirm shipment', undo: 'undo',
+    recent: 'Your recent shipments', shipHint: 'Keep your ready stock up to date on each model, and tell us when you ship: it counts as “on the way” right away.',
     how: 'How it works',
     steps: (p: number, t: number, h: number) => [
       'Sales are live from our shop and update several times a day.',
       'Forecasts follow the recent sales trend, with a boost for Black Friday and Christmas.',
-      `“Stock to prepare” = our sales during production (${p} days) + transport (${t} days) + ${h} months, minus our Forrest stock. We order from it every month.`,
+      `“Stock we need” = our sales during production (${p} days) + transport (${t} days) + ${h} months, minus our Forrest stock and what is on the way. We order from your ready stock.`,
     ],
   },
   zh: {
@@ -30,11 +36,16 @@ const T = {
     prepare: '请为我们准备的库存', covers: (d: string) => `可满足我们约到 ${d} 的销量`,
     urgent: (q: string, d: string) => `急需 ${q} 件 — Forrest 库存约 ${d} 售罄`,
     nothing: '暂时无需备货', pcs: '件', fc: '预测',
+    need: '我们需要的库存', readyF: '贵厂已备好', covered: '✓ 已满足需求', toProduce: (q: string) => `仍需生产：${q} 件`,
+    onWay: (q: string, d: string) => `+ ${q} 件运输中 · 约 ${d} 到达`, shipNow: (q: string, d: string) => `请立即发货 ${q} 件 — Forrest 库存约 ${d} 售罄`,
+    edit: '修改', set: '填写', save: '保存', cancel: '取消',
+    shipBtn: '我已发货', shipTitle: '本次发货数量', shipDate: '发货日期', shipSend: '确认发货', undo: '撤销',
+    recent: '最近发货记录', shipHint: '请及时更新每个型号的备货数量，发货后点击“我已发货”：货物会立即计为运输中。',
     how: '合作方式',
     steps: (p: number, t: number, h: number) => [
       '销量数据实时来自我们的网店，每天更新多次。',
       '预测基于近期销售趋势，并考虑黑色星期五和圣诞节的增长。',
-      `“请准备的库存” = 生产期间（${p}天）+ 运输（${t}天）+ ${h}个月的销量，减去我们 Forrest 仓库的库存。我们每月从中下单。`,
+      `“我们需要的库存” = 生产期间（${p}天）+ 运输（${t}天）+ ${h}个月的销量，减去 Forrest 仓库库存和运输中的货物。我们从贵厂的备货中下单。`,
     ],
   },
   fr: {
@@ -46,11 +57,16 @@ const T = {
     prepare: 'Stock à nous préparer', covers: (d: string) => `couvre nos ventes jusqu'au ~${d}`,
     urgent: (q: string, d: string) => `${q} pcs à envoyer au plus vite — rupture Forrest vers le ${d}`,
     nothing: 'Rien à préparer pour l’instant', pcs: 'pcs', fc: 'prévision',
+    need: 'Stock dont on a besoin', readyF: 'Prêt chez l’usine', covered: '✓ couvre notre besoin', toProduce: (q: string) => `reste à produire : ${q} pcs`,
+    onWay: (q: string, d: string) => `+ ${q} en route · arrivée ~${d}`, shipNow: (q: string, d: string) => `Envoyer ${q} pcs maintenant — rupture Forrest vers le ${d}`,
+    edit: 'modifier', set: 'renseigner', save: 'Enregistrer', cancel: 'Annuler',
+    shipBtn: 'J’ai envoyé', shipTitle: 'Qu’avez-vous envoyé ?', shipDate: 'Date d’envoi', shipSend: 'Confirmer l’envoi', undo: 'annuler',
+    recent: 'Envois récents', shipHint: 'L’usine tient à jour son stock prêt par modèle et déclare ses envois : ils comptent tout de suite « en route ».',
     how: 'Fonctionnement',
     steps: (p: number, t: number, h: number) => [
       'Les ventes viennent en direct de notre boutique et se mettent à jour plusieurs fois par jour.',
       'Les prévisions suivent la tendance récente, avec un coup de pouce pour le Black Friday et Noël.',
-      `« Stock à préparer » = nos ventes pendant la fabrication (${p} j) + le transport (${t} j) + ${h} mois, moins notre stock Forrest. On commande dessus chaque mois.`,
+      `« Stock dont on a besoin » = nos ventes pendant la fabrication (${p} j) + le transport (${t} j) + ${h} mois, moins le stock Forrest et ce qui est en route. On commande sur le stock prêt de l'usine.`,
     ],
   },
 } as const
@@ -122,7 +138,7 @@ function SalesBars({ item, lang }: { item: ItemForecast; lang: Lang }) {
   )
 }
 
-function ProductCard({ i, forecast, lang }: { i: ItemForecast; forecast: Forecast; lang: Lang }) {
+function ProductCard({ i, forecast, lang, token }: { i: ItemForecast; forecast: Forecast; lang: Lang; token?: string }) {
   const t = T[lang]
   const c = forecast.config
   const tone = i.urgent > 0 ? 'red' : i.stockoutDate && i.stockoutDate < forecast.coverUntil ? 'amber' : 'green'
@@ -154,31 +170,42 @@ function ProductCard({ i, forecast, lang }: { i: ItemForecast; forecast: Forecas
           <span className="text-right">
             <span className="text-xl font-bold tabular-nums">{n(i.stock)}</span> <span className="text-xs">{t.pcs}</span>
             <span className="block text-[11px] opacity-80">{i.stockoutDate ? t.until(fmtShort(i.stockoutDate, lang)) : t.enough}</span>
+            {i.incoming > 0 && i.incomingArrival && <span className="block text-[11px] font-semibold">{t.onWay(n(i.incoming), fmtShort(i.incomingArrival, lang))}</span>}
           </span>
         </div>
       )}
 
       <div className="px-5 pt-3"><SalesBars item={i} lang={lang} /></div>
 
-      <div className="mt-2 border-t border-[#f3f3f1] bg-[#fafaf8] px-5 py-3.5">
-        {i.suggested > 0 ? (
-          <>
-            <div className="flex items-baseline justify-between gap-3">
-              <span className="text-sm font-semibold text-[#1a1a2e]">📦 {t.prepare}</span>
-              <span className="text-2xl font-bold tabular-nums text-[#1a1a2e]">{n(i.suggested)} <span className="text-sm font-medium text-[#6b6b63]">{t.pcs}</span></span>
-            </div>
-            <p className="text-[11px] text-[#9b9b93]">{t.covers(fmtShort(forecast.coverUntil, lang))}</p>
-            {i.urgent > 0 && i.stockoutDate && (
-              <p className="mt-2 rounded-xl bg-[#fdecec] px-3 py-1.5 text-xs font-semibold text-[#b42318]">⚡ {t.urgent(n(i.urgent), fmtShort(i.stockoutDate, lang))}</p>
-            )}
-          </>
-        ) : <p className="text-sm text-[#1a7f4b]">✓ {t.nothing}</p>}
+      <div className="mt-2 space-y-2 border-t border-[#f3f3f1] bg-[#fafaf8] px-5 py-3.5">
+        {i.urgent > 0 && i.stockoutDate && (
+          <p className="rounded-xl bg-[#fdecec] px-3 py-1.5 text-xs font-semibold text-[#b42318]">⚡ {t.shipNow(n(i.urgent), fmtShort(i.stockoutDate, lang))}</p>
+        )}
+        <div className="flex items-baseline justify-between gap-3">
+          <span className="text-sm font-semibold text-[#1a1a2e]">📦 {t.need}</span>
+          <span className="text-right">
+            <span className="text-2xl font-bold tabular-nums text-[#1a1a2e]">{n(i.suggested)}</span> <span className="text-sm text-[#6b6b63]">{t.pcs}</span>
+            <span className="block text-[11px] text-[#9b9b93]">{i.suggested > 0 ? t.covers(fmtShort(forecast.coverUntil, lang)) : t.nothing}</span>
+          </span>
+        </div>
+        <div className="flex flex-wrap items-center justify-between gap-2 rounded-2xl border border-dashed border-[#c9cde0] bg-white px-3 py-2">
+          <span className="text-sm text-[#1a1a2e]">🏭 {t.readyF}</span>
+          <span className="flex flex-wrap items-center justify-end gap-2">
+            <span className="text-xl font-bold tabular-nums text-[#1a1a2e]">{i.ready == null ? '—' : n(i.ready)}</span>
+            {token && <ReadyEditor token={token} itemKey={i.key} value={i.ready} labels={{ edit: t.edit, save: t.save, cancel: t.cancel, set: t.set }} />}
+          </span>
+          {i.ready != null && i.suggested > 0 && (
+            <span className={`w-full text-right text-[11px] font-semibold ${i.ready >= i.suggested ? 'text-[#1a7f4b]' : 'text-[#a15c07]'}`}>
+              {i.ready >= i.suggested ? t.covered : t.toProduce(n(i.suggested - i.ready))}
+            </span>
+          )}
+        </div>
       </div>
     </div>
   )
 }
 
-export default function FactoryView({ forecast, lang, brandLabel }: { forecast: Forecast; lang: Lang; brandLabel: string }) {
+export default function FactoryView({ forecast, lang, brandLabel, token }: { forecast: Forecast; lang: Lang; brandLabel: string; token?: string }) {
   const t = T[lang]
   const c = forecast.config
   const items = forecast.items.filter(i => i.include)
@@ -189,6 +216,11 @@ export default function FactoryView({ forecast, lang, brandLabel }: { forecast: 
   const prev30 = sum(i => i.growth != null ? i.last30 / (1 + i.growth) : 0)
   const g = prev30 >= 3 ? last30 / prev30 - 1 : null
   const nextMonth = machines[0]?.forecast[0]?.month
+  const nameByKey = new Map(forecast.items.map(i => [i.key, nameOf(i, lang)]))
+  const recent = c.factory.shipments.slice(0, 5).map(sh => ({
+    id: sh.id, createdAt: sh.createdAt, date: fmtShort(sh.date, lang),
+    text: Object.entries(sh.lines).map(([k, q]) => `${n(q)} × ${nameByKey.get(k) ?? k}`).join(' · '),
+  }))
   const updated = new Date(forecast.generatedAt).toLocaleString(LOCALE[lang], { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Paris' })
 
   return (
@@ -221,11 +253,23 @@ export default function FactoryView({ forecast, lang, brandLabel }: { forecast: 
         </div>
       )}
 
+      {token ? (
+        <ShipPanel token={token} today={forecast.today}
+          items={items.map(i => ({ key: i.key, name: nameOf(i, lang), image: i.image, urgent: i.urgent }))}
+          recent={recent.map(sh => ({ ...sh, canUndo: Date.now() - new Date(sh.createdAt).getTime() < 7 * 86400_000 }))}
+          labels={{ button: t.shipBtn, title: t.shipTitle, date: t.shipDate, send: t.shipSend, cancel: t.cancel, undo: t.undo, recent: t.recent, hint: t.shipHint }} />
+      ) : recent.length > 0 && (
+        <div className="rounded-3xl border border-[#e8e8e4] bg-white px-5 py-4">
+          <p className="text-xs font-semibold text-[#6b6b63]">{t.recent}</p>
+          {recent.map(sh => <p key={sh.id} className="mt-1 text-sm text-[#4a4a44]"><span className="font-semibold text-[#1a1a2e]">{sh.date}</span> {sh.text}</p>)}
+        </div>
+      )}
+
       {[{ label: t.machines, list: machines }, { label: t.others, list: others }].filter(sct => sct.list.length > 0).map(sct => (
         <section key={sct.label}>
           <h2 className="mb-3 text-sm font-semibold uppercase tracking-[0.08em] text-[#6b6b63]">{sct.label}</h2>
           <div className="grid gap-4 lg:grid-cols-2">
-            {sct.list.map(i => <ProductCard key={i.key} i={i} forecast={forecast} lang={lang} />)}
+            {sct.list.map(i => <ProductCard key={i.key} i={i} forecast={forecast} lang={lang} token={token} />)}
           </div>
         </section>
       ))}

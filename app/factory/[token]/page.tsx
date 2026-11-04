@@ -36,7 +36,7 @@ export default async function FactoryPage({ params, searchParams }: { params: { 
             </a>
           ))}
         </nav>
-        <FactoryView forecast={forecast} lang={lang} brandLabel={BRAND_LABELS[brand]} />
+        <FactoryView forecast={forecast} lang={lang} brandLabel={BRAND_LABELS[brand]} token={token} />
       </div>
     </main>
   )
