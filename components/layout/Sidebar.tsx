@@ -4,7 +4,7 @@ import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
 import {
   Compass,
-  LayoutDashboard, BarChart2, PackageOpen, Settings, LogOut,
+  LayoutDashboard, BarChart2, PackageOpen, Factory, Settings, LogOut,
   Boxes, FileText, Tag, Truck, Headphones, ChevronLeft, ChevronRight, ChevronDown, Sparkles, Receipt, PackageX, Users, Percent, Ticket, Coins,
 } from 'lucide-react'
 import { createBrowserClient } from '@supabase/auth-helpers-nextjs'
@@ -53,6 +53,7 @@ const NAV_SECTIONS: { label: string; items: NavItem[] }[] = [
     label: 'Opérations',
     items: [
       { key: 'reorder',   icon: PackageOpen, label: 'Réappro',      brandLock: null   },
+      { key: 'supplier',  icon: Factory,     label: 'Usine',        brandLock: 'krom' },
       { key: 'billing',   icon: Receipt,      label: 'Facturation clients', brandLock: null   },
       { key: 'delivery',  icon: Truck,        label: 'Delivery',    brandLock: 'bowa' },
       { key: 'delivery-costs', icon: Coins,   label: 'Coûts livraison', brandLock: 'bowa' },
@@ -82,7 +83,7 @@ const NAV_SECTIONS: { label: string; items: NavItem[] }[] = [
 const BRAND_PAGES: Record<string, string[]> = {
   bowa: ['dashboard', 'pilot', 'campaigns', 'creatives', 'margins', 'settings', 'reorder', 'billing', 'delivery', 'delivery-costs', 'sav'],
   moom: ['dashboard', 'campaigns', 'creatives', 'margins', 'settings', 'reorder', 'billing', 'invoices', 'stock', 'products', 'ventes-privees', 'sav', 'sav-defects'],
-  krom: ['dashboard', 'campaigns', 'creatives', 'margins', 'settings', 'reorder', 'billing', 'sav-krom'],
+  krom: ['dashboard', 'campaigns', 'creatives', 'margins', 'settings', 'reorder', 'supplier', 'billing', 'sav-krom'],
 }
 
 // ─── Component ────────────────────────────────────────────────────────────────

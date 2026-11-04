@@ -12,6 +12,7 @@ export default function ConditionalLayout({ children }: { children: React.ReactN
   const isAuthPage = pathname === '/login' || pathname === '/reconciliation'
     || pathname === '/tracking' || pathname.startsWith('/tracking/')
     || pathname.startsWith('/facture/')
+    || pathname.startsWith('/factory/')
     || pathname.startsWith('/rapport-defauts/')
     || pathname.startsWith('/install')
 
