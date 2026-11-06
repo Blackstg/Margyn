@@ -24,7 +24,7 @@ function getSupabase() {
 
 // ─── Store configs ────────────────────────────────────────────────────────────
 
-const BRANDS = ['bowa', 'moom', 'krom']
+const BRANDS = ['bowa', 'moom', 'krom', 'yone']
 
 // Construit les configs Shopify depuis tenant_integrations (DB-first + fallback env).
 async function buildStores(brands: string[]): Promise<ShopifyConfig[]> {

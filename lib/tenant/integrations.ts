@@ -125,3 +125,22 @@ export async function resendFrom(tenant: string, key = 'from'): Promise<string |
   const integ = await getIntegration(tenant, 'resend')
   return cfgStr(integ, key)
 }
+
+// Installation Shopify : retrouve le tenant d'une boutique pré-enregistrée
+// (tenant_integrations type 'shopify', config.shop) et y range le jeton chiffré.
+export async function tenantForShop(shop: string): Promise<string | null> {
+  const { data } = await admin().from('tenant_integrations').select('tenant_slug')
+    .eq('type', 'shopify').eq('config->>shop', shop).maybeSingle()
+  return (data?.tenant_slug as string | undefined) ?? null
+}
+
+export async function saveShopifyToken(tenant: string, shop: string, token: string): Promise<string | null> {
+  const secret_enc = encryptSecret(token)
+  if (!secret_enc) return 'TENANT_SECRETS_KEY manquante'
+  const { error } = await admin().from('tenant_integrations').upsert(
+    { tenant_slug: tenant, type: 'shopify', config: { shop }, secret_enc, enabled: true },
+    { onConflict: 'tenant_slug,type' },
+  )
+  cache.delete(`${tenant}:shopify`)
+  return error?.message ?? null
+}

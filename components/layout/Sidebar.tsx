@@ -14,7 +14,7 @@ import { effectiveFeatures, effectiveBrands, isAdminRole, isOwner, BRAND_LOCK } 
 
 // ─── Brand config ─────────────────────────────────────────────────────────────
 
-const VALID_BRANDS = ['bowa', 'moom', 'krom']
+const VALID_BRANDS = ['bowa', 'moom', 'krom', 'yone']
 
 const BRAND_LOGOS: Record<string, string> = {
   bowa: 'https://cdn.shopify.com/s/files/1/0617/2806/3648/files/profil.png?v=1693451968',
@@ -26,6 +26,7 @@ const BRAND_LABELS: Record<string, string> = {
   bowa: 'Bowa',
   moom: 'Mōom Paris',
   krom: 'Krom Water',
+  yone: 'Yone',
 }
 
 // Pages accessible to all brands — link uses current brand
@@ -84,6 +85,7 @@ const BRAND_PAGES: Record<string, string[]> = {
   bowa: ['dashboard', 'pilot', 'campaigns', 'creatives', 'margins', 'settings', 'reorder', 'billing', 'delivery', 'delivery-costs', 'sav'],
   moom: ['dashboard', 'campaigns', 'creatives', 'margins', 'settings', 'reorder', 'billing', 'invoices', 'stock', 'products', 'ventes-privees', 'sav', 'sav-defects'],
   krom: ['dashboard', 'campaigns', 'creatives', 'margins', 'settings', 'reorder', 'supplier', 'billing', 'sav-krom'],
+  yone: ['dashboard', 'campaigns', 'creatives', 'margins', 'settings', 'reorder', 'billing'],
 }
 
 // ─── Component ────────────────────────────────────────────────────────────────

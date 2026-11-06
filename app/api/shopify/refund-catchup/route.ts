@@ -11,7 +11,7 @@ import { shopifyCreds } from '@/lib/tenant/integrations'
 export const maxDuration = 300
 export const dynamic = 'force-dynamic'
 
-const BRANDS = ['bowa', 'moom', 'krom']
+const BRANDS = ['bowa', 'moom', 'krom', 'yone']
 const MAX_DATES = 25
 
 function isAuthorized(req: NextRequest): boolean {

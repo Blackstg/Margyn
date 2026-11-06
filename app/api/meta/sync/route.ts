@@ -13,7 +13,7 @@ import { metaCreds } from '@/lib/tenant/integrations'
 
 // ─── Store configs (DB-first + fallback env) ─────────────────────────────────
 
-const BRANDS = ['bowa', 'moom', 'krom']
+const BRANDS = ['bowa', 'moom', 'krom', 'yone']
 
 async function buildStores(brands: string[]): Promise<MetaAdsConfig[]> {
   const list = await Promise.all(brands.map(async (brand) => {

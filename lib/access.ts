@@ -9,12 +9,13 @@
 // Both the Sidebar (client) and the middleware (edge) import this module so the
 // rules never diverge.
 
-export type Brand = 'bowa' | 'moom' | 'krom'
-export const BRANDS: Brand[] = ['bowa', 'moom', 'krom']
+export type Brand = 'bowa' | 'moom' | 'krom' | 'yone'
+export const BRANDS: Brand[] = ['bowa', 'moom', 'krom', 'yone']
 export const BRAND_LABELS: Record<Brand, string> = {
   bowa: 'Bowa',
   moom: 'Mōom Paris',
   krom: 'Krom Water',
+  yone: 'Yone',
 }
 
 export type FeatureKey =

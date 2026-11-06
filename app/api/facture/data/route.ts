@@ -8,7 +8,7 @@ import { loadBillingOverride, applyBillingOverride } from '@/lib/billing/overrid
 
 export const dynamic = 'force-dynamic'
 
-const KNOWN_BRANDS = ['bowa', 'moom', 'krom']
+const KNOWN_BRANDS = ['bowa', 'moom', 'krom', 'yone']
 
 const FIELDS = 'id,name,created_at,customer,total_price,subtotal_price,total_tax,total_discounts,financial_status,billing_address,currency,line_items,gateway,payment_gateway_names,refunds'
 

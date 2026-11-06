@@ -16,7 +16,7 @@ const supabase = createBrowserClient(
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-type BrandTab = 'bowa' | 'moom' | 'krom'
+type BrandTab = 'bowa' | 'moom' | 'krom' | 'yone'
 type SaveState = 'idle' | 'saving' | 'saved' | 'error'
 
 interface CostRow {
@@ -39,6 +39,7 @@ const BRAND_LABELS: Record<BrandTab, string> = {
   bowa: 'Bowa Concept',
   moom: 'Mōom Paris',
   krom: 'Krom',
+  yone: 'Yone',
 }
 
 const DEFAULT_BOWA_TEAM: Omit<CostRow, 'id'>[] = [
@@ -1039,8 +1040,8 @@ export default function SettingsPage() {
   const [suppLoading, setSuppLoading]       = useState(false)
 
   // ── Shipping (moom / krom) ───────────────────────────────────────────────
-  const [shippingCosts, setShippingCosts]   = useState<Record<BrandTab, string>>({ bowa: '17', moom: '17', krom: '27.21' })
-  const [shippingSave, setShippingSave]     = useState<Record<BrandTab, SaveState>>({ bowa: 'idle', moom: 'idle', krom: 'idle' })
+  const [shippingCosts, setShippingCosts]   = useState<Record<BrandTab, string>>({ bowa: '17', moom: '17', krom: '27.21', yone: '0' })
+  const [shippingSave, setShippingSave]     = useState<Record<BrandTab, SaveState>>({ bowa: 'idle', moom: 'idle', krom: 'idle', yone: 'idle' })
 
   // ── Config ───────────────────────────────────────────────────────────────
   const [config, setConfig]                 = useState<Config>({ roasTarget: '3.0', stockThreshold: '20' })

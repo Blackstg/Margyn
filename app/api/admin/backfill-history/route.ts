@@ -14,7 +14,7 @@ import { shopifyCreds } from '@/lib/tenant/integrations'
 export const dynamic = 'force-dynamic'
 export const maxDuration = 300
 
-const KNOWN_BRANDS = ['bowa', 'moom', 'krom']
+const KNOWN_BRANDS = ['bowa', 'moom', 'krom', 'yone']
 
 function getSupabase() {
   return createClient(

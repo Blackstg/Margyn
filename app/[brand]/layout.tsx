@@ -1,7 +1,7 @@
 import { notFound } from 'next/navigation'
 import { BrandProvider, type Brand } from '@/context/BrandContext'
 
-const VALID_BRANDS: Brand[] = ['bowa', 'moom', 'krom']
+const VALID_BRANDS: Brand[] = ['bowa', 'moom', 'krom', 'yone']
 
 export default function BrandLayout({
   children,

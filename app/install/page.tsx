@@ -7,7 +7,7 @@ import { Suspense } from 'react'
 function InstallHandler() {
   const params  = useSearchParams()
   const [status, setStatus] = useState<'loading' | 'success' | 'error' | 'debug'>('loading')
-  const [token,  setToken]  = useState<string | null>(null)
+  const [brand,  setBrand]  = useState<string | null>(null)
   const [debug,  setDebug]  = useState<Record<string, string>>({})
 
   useEffect(() => {
@@ -33,8 +33,8 @@ function InstallHandler() {
       })
         .then((r) => r.json())
         .then((data) => {
-          if (data.access_token) {
-            setToken(data.access_token)
+          if (data.ok) {
+            setBrand(data.brand)
             setStatus('success')
           } else {
             setStatus('debug')
@@ -48,14 +48,11 @@ function InstallHandler() {
     setStatus('debug')
   }, [params])
 
-  if (status === 'success' && token) {
+  if (status === 'success' && brand) {
     return (
       <div style={{ fontFamily: 'monospace', padding: 40, background: '#faf9f8' }}>
-        <h2 style={{ color: '#1a7f4b' }}>✓ Token obtenu</h2>
-        <p>Ajoute dans Vercel env vars :</p>
-        <pre style={{ background: '#1a1a2e', color: '#dcf5e7', padding: 20, borderRadius: 12, wordBreak: 'break-all' }}>
-          SHOPIFY_KROM_ACCESS_TOKEN={token}
-        </pre>
+        <h2 style={{ color: '#1a7f4b' }}>✓ Boutique connectée à Steero</h2>
+        <p>Le jeton est enregistré chiffré. <a href={`/${brand}/dashboard`}>Ouvrir le dashboard</a></p>
       </div>
     )
   }

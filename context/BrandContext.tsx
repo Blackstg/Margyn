@@ -2,7 +2,7 @@
 
 import { createContext, useContext } from 'react'
 
-export type Brand = 'bowa' | 'moom' | 'krom'
+export type Brand = 'bowa' | 'moom' | 'krom' | 'yone'
 
 const BrandContext = createContext<Brand>('bowa')
 
