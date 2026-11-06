@@ -4,8 +4,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { saveShopifyToken, tenantForShop } from '@/lib/tenant/integrations'
 
-const CLIENT_ID     = process.env.SHOPIFY_CLIENT_ID!
-const CLIENT_SECRET = process.env.SHOPIFY_CLIENT_SECRET!
+const CLIENT_ID     = (process.env.SHOPIFY_CLIENT_ID ?? '').trim()
+const CLIENT_SECRET = (process.env.SHOPIFY_CLIENT_SECRET ?? '').trim()
 const SHOP_RE       = /^[a-z0-9][a-z0-9-]*\.myshopify\.com$/
 
 export async function POST(req: NextRequest) {

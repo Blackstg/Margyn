@@ -6,8 +6,8 @@ import crypto from 'crypto'
 import { BRANDS, BRAND_LABELS, type Brand } from '@/lib/access'
 import { saveShopifyToken } from '@/lib/tenant/integrations'
 
-const CLIENT_ID     = process.env.SHOPIFY_CLIENT_ID!
-const CLIENT_SECRET = process.env.SHOPIFY_CLIENT_SECRET!
+const CLIENT_ID     = (process.env.SHOPIFY_CLIENT_ID ?? '').trim()
+const CLIENT_SECRET = (process.env.SHOPIFY_CLIENT_SECRET ?? '').trim()
 
 function validateHmac(params: URLSearchParams): boolean {
   const hmac = params.get('hmac')

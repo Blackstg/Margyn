@@ -7,7 +7,7 @@ import crypto from 'crypto'
 import { BRANDS, effectiveBrands, isAdminRole } from '@/lib/access'
 import { cfgStr, getIntegration } from '@/lib/tenant/integrations'
 
-const CLIENT_ID = process.env.SHOPIFY_CLIENT_ID!
+const CLIENT_ID = (process.env.SHOPIFY_CLIENT_ID ?? '').trim()
 const SCOPES    = 'read_orders,read_products,read_inventory'
 const SHOP_RE   = /^[a-z0-9][a-z0-9-]*\.myshopify\.com$/
 
