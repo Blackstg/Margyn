@@ -2,6 +2,7 @@
 
 export const dynamic = 'force-dynamic'
 
+import ShopifyConnectCard from '@/components/settings/ShopifyConnectCard'
 import React, { useState, useEffect, useCallback, useRef } from 'react'
 import { createBrowserClient } from '@supabase/auth-helpers-nextjs'
 import { Plus, Trash2, Check, Loader2, ChevronLeft, ChevronRight, Search, X, Pencil, FileText } from 'lucide-react'
@@ -1335,6 +1336,8 @@ export default function SettingsPage() {
             </span>
           )}
         </div>
+
+        <ShopifyConnectCard brand={activeBrand} />
 
         {loading ? (
           <div className="space-y-3">
