@@ -144,3 +144,23 @@ export async function saveShopifyToken(tenant: string, shop: string, token: stri
   cache.delete(`${tenant}:shopify`)
   return error?.message ?? null
 }
+
+// Désinstallation de l'app : on oublie le jeton (la boutique reste rattachée).
+export async function clearShopifyToken(tenant: string): Promise<void> {
+  await admin().from('tenant_integrations').update({ secret_enc: null })
+    .eq('tenant_slug', tenant).eq('type', 'shopify')
+  cache.delete(`${tenant}:shopify`)
+}
+
+// App Shopify dédiée à une marque (app custom, en attendant l'app publique) :
+// client_id en config, secret client chiffré.
+export async function saveShopifyApp(tenant: string, clientId: string, clientSecret: string): Promise<string | null> {
+  const secret_enc = encryptSecret(clientSecret)
+  if (!secret_enc) return 'TENANT_SECRETS_KEY manquante'
+  const { error } = await admin().from('tenant_integrations').upsert(
+    { tenant_slug: tenant, type: 'shopify_app', config: { client_id: clientId }, secret_enc, enabled: true },
+    { onConflict: 'tenant_slug,type' },
+  )
+  cache.delete(`${tenant}:shopify_app`)
+  return error?.message ?? null
+}

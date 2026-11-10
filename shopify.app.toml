@@ -1,0 +1,34 @@
+# Configuration de l'app Shopify publique « Steero » (organisation partenaire Steero).
+# Publier une modification : npx @shopify/cli@latest app deploy
+# Le secret client ne va JAMAIS ici : il est dans Vercel (SHOPIFY_CLIENT_SECRET).
+
+client_id = "fa44ebc775345cb67f3c64b6195b593d"
+name = "Steero"
+application_url = "https://www.steero.io/install"
+embedded = false
+
+[access_scopes]
+scopes = "read_orders,read_products,read_inventory"
+# Installation classique : Shopify ouvre /install, qui demande l'autorisation OAuth.
+use_legacy_install_flow = true
+
+[auth]
+redirect_urls = [ "https://www.steero.io/api/shopify/oauth/callback" ]
+
+[webhooks]
+api_version = "2025-10"
+
+  [[webhooks.subscriptions]]
+  topics = [ "app/uninstalled" ]
+  uri = "https://www.steero.io/api/shopify/webhooks"
+
+  [[webhooks.subscriptions]]
+  compliance_topics = [ "customers/data_request", "customers/redact", "shop/redact" ]
+  uri = "https://www.steero.io/api/shopify/webhooks"
+
+[pos]
+embedded = false
+
+[build]
+include_config_on_deploy = true
+automatically_update_urls_on_dev = false
