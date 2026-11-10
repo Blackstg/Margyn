@@ -9,8 +9,8 @@ embedded = false
 
 [access_scopes]
 scopes = "read_orders,read_products,read_inventory"
-# Installation classique : Shopify ouvre /install, qui demande l'autorisation OAuth.
-use_legacy_install_flow = true
+# Installation gérée par Shopify (accès ci-dessus) ; il ouvre ensuite /install,
+# qui obtient le jeton par autorisation OAuth (app non embarquée).
 
 [auth]
 redirect_urls = [ "https://www.steero.io/api/shopify/oauth/callback" ]
@@ -30,5 +30,4 @@ api_version = "2025-10"
 embedded = false
 
 [build]
-include_config_on_deploy = true
 automatically_update_urls_on_dev = false
