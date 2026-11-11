@@ -197,7 +197,7 @@ export async function uploadLogo(brand: string, file: File): Promise<{ url?: str
 
 // Meta : on cherche, parmi les accès Meta déjà branchés sur Steero, celui qui voit
 // ce compte pub, puis on le range (chiffré) pour la marque. Le jeton ne sort jamais du serveur.
-export async function connectMeta(brand: string, raw: string): Promise<{ name?: string; error?: string }> {
+export async function connectMeta(origin: string, brand: string, raw: string): Promise<{ name?: string; error?: string }> {
   const id = raw.replace(/\D/g, '')
   if (id.length < 6) return { error: 'ID de compte pub invalide (act_…)' }
   const tokens = new Set<string>()
@@ -207,19 +207,41 @@ export async function connectMeta(brand: string, raw: string): Promise<{ name?: 
     if (!r.ok) continue
     const a = await r.json() as { name?: string; currency?: string }
     const err = await saveIntegration(brand, 'meta', { ad_account_id: `act_${id}` }, token)
-    return err ? { error: err } : { name: `${a.name ?? id}${a.currency ? ` · ${a.currency}` : ''}` }
+    if (err) return { error: err }
+    await backfillAds(origin, brand, 'meta')
+    return { name: `${a.name ?? id}${a.currency ? ` · ${a.currency}` : ''}` }
   }
   return { error: 'Aucun accès Meta de Steero ne voit ce compte : ajoute-le au Business Manager (partenaire) puis réessaie' }
 }
 
+// Historique pub : la synchro quotidienne ne prend que les derniers jours ; à la
+// connexion d'un compte on remonte au début des ventes (mois par mois, ≤ 60 s chacun).
+export async function backfillAds(origin: string, brand: string, platform: 'meta' | 'google-ads') {
+  const { data } = await db().from('daily_snapshots').select('date').eq('brand', brand).order('date').limit(1)
+  const today = new Date().toISOString().slice(0, 10)
+  const start = data?.[0]?.date ?? new Date(Date.now() - 90 * 864e5).toISOString().slice(0, 10)
+  let cur = new Date(start.slice(0, 7) + '-01T00:00:00Z')
+  while (cur.toISOString().slice(0, 10) <= today) {
+    const next = new Date(Date.UTC(cur.getUTCFullYear(), cur.getUTCMonth() + 1, 1))
+    const from = cur.toISOString().slice(0, 10)
+    const end = new Date(next.getTime() - 864e5).toISOString().slice(0, 10)
+    await fetch(`${origin}/api/${platform}/sync?brand=${brand}&from=${from}&to=${end < today ? end : today}`, {
+      method: 'POST', headers: { authorization: `Bearer ${process.env.CRON_SECRET}` }, cache: 'no-store',
+    }).catch(() => {})
+    cur = next
+  }
+}
+
 // Google Ads : le compte doit être rattaché au MCC de Steero.
-export async function connectGoogle(brand: string, raw: string): Promise<{ name?: string; error?: string }> {
+export async function connectGoogle(origin: string, brand: string, raw: string): Promise<{ name?: string; error?: string }> {
   const id = raw.replace(/\D/g, '')
   if (id.length !== 10) return { error: 'ID client Google Ads : 10 chiffres (123-456-7890)' }
   try {
     const c = await fetchCustomerName(id)
     const err = await saveIntegration(brand, 'google_ads', { customer_id: id })
-    return err ? { error: err } : { name: `${c.name}${c.currency ? ` · ${c.currency}` : ''}` }
+    if (err) return { error: err }
+    await backfillAds(origin, brand, 'google-ads')
+    return { name: `${c.name}${c.currency ? ` · ${c.currency}` : ''}` }
   } catch {
     return { error: 'Compte inaccessible : accepte l’invitation du compte gestionnaire Steero dans Google Ads, puis réessaie' }
   }

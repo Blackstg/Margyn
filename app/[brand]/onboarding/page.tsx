@@ -57,6 +57,20 @@ export default function OnboardingPage() {
   }, [brand])
   useEffect(() => { load(true) }, [load])
 
+  // Boutique tout juste branchée sans aucune vente importée : on récupère l'historique
+  // tout de suite (2 ans max, Shopify limite à 60 jours sans l'accès historique complet).
+  const autoImport = useRef(false)
+  const [importing, setImporting] = useState(false)
+  useEffect(() => {
+    const shop = status?.steps.find(x => x.key === 'shopify')
+    if (!shop?.done || shop.detail.firstDate || autoImport.current) return
+    autoImport.current = true
+    setImporting(true)
+    const from = new Date(Date.now() - 730 * 864e5).toISOString().slice(0, 10)
+    fetch('/api/onboarding', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ brand, action: 'history', from }) })
+      .finally(() => { setImporting(false); load(false) })
+  }, [status, brand, load])
+
   const act: Act = async (body) => {
     const isForm = body instanceof FormData
     if (isForm) body.set('brand', brand)
@@ -94,6 +108,7 @@ export default function OnboardingPage() {
             {pct === 100 ? 'Steero voit tout ton business.' : <>Steero voit <span className="tabular-nums">{pct} %</span> de ton business.</>}
           </h1>
           {pct < 100 && <p className="mt-2 text-[15px] text-[#6b6b63]">Chaque mission débloque une partie de ton tableau de bord, avec tes vrais chiffres.</p>}
+          {importing && <p className="mt-3 inline-flex items-center gap-2 rounded-full bg-white px-3 py-1.5 text-[14px] text-[#1a1a2e] shadow-[0_1px_0_#e8e6e0]"><Loader2 size={14} className="animate-spin" /> On récupère tes ventes passées, ça prend une minute…</p>}
 
           {/* Parcours des missions */}
           <ol className="mt-6 flex items-center overflow-x-auto pb-2" aria-label="Missions">
@@ -324,7 +339,7 @@ function Body({ step, status, run, busy, skip }: { step: Step; status: Status; r
     case 'google': {
       const isMeta = step.key === 'meta'
       const connected = (isMeta ? d.adAccount : d.customerId) as string | null
-      if (step.done && !step.skipped) return <p className="text-[15px] text-[#1a1a18]">Compte <strong className="tabular-nums">{connected}</strong> connecté. Les chiffres arrivent à la prochaine synchro.</p>
+      if (step.done && !step.skipped) return <p className="text-[15px] text-[#1a1a18]">Compte <strong className="tabular-nums">{connected}</strong> connecté, avec tes dépenses depuis ta première vente.</p>
       if (!yes && !step.skipped) return (
         <div className="flex flex-wrap gap-2">
           <button className={btn} onClick={() => setYes(true)}>Oui</button>
@@ -346,7 +361,7 @@ function Body({ step, status, run, busy, skip }: { step: Step; status: Status; r
             <input value={a} onChange={e => setA(e.target.value)} placeholder={isMeta ? '1234567890' : '123-456-7890'} inputMode="numeric"
               className={`${field} w-full max-w-[260px] tabular-nums`} aria-label="Numéro du compte publicitaire" />
             <button disabled={busy || !a.trim()} className={btn}
-              onClick={() => run(isMeta ? { action: 'meta', adAccount: a } : { action: 'google', customerId: a }, r => `Connecté : ${r.name}`)}>{spin} Connecter</button>
+              onClick={() => run(isMeta ? { action: 'meta', adAccount: a } : { action: 'google', customerId: a }, r => `Connecté : ${r.name}. Dépenses passées récupérées.`)}>{spin} Connecter</button>
           </div>
         </div>
       )

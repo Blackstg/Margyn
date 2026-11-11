@@ -46,8 +46,8 @@ export async function POST(req: NextRequest) {
       if (!(file instanceof File)) return reply({ error: 'Fichier manquant' })
       return reply(await uploadLogo(brand, file))
     }
-    case 'meta':   return reply(await connectMeta(brand, String(body.adAccount ?? '')))
-    case 'google': return reply(await connectGoogle(brand, String(body.customerId ?? '')))
+    case 'meta':   return reply(await connectMeta(req.nextUrl.origin, brand, String(body.adAccount ?? '')))
+    case 'google': return reply(await connectGoogle(req.nextUrl.origin, brand, String(body.customerId ?? '')))
     case 'refreshCosts': {
       const r = await refreshCostsFromShopify(req.nextUrl.origin, brand)
       return reply(r.error ? { error: r.error } : { added: r.after - r.before, total: r.after })
