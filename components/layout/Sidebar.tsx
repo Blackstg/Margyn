@@ -107,6 +107,11 @@ export default function Sidebar({ isOpen, collapsed, onToggleCollapse }: Sidebar
 
   const [pendingCount, setPendingCount]   = useState(0)
   const [brandMenuOpen, setBrandMenuOpen] = useState(false)
+  // Logos/noms des marques depuis la base (tenants) — complète les valeurs codées en dur
+  const [branding, setBranding] = useState<Record<string, { name: string; logo: string | null }>>({})
+  useEffect(() => { fetch('/api/branding').then(r => (r.ok ? r.json() : {})).then(setBranding).catch(() => {}) }, [])
+  const logoOf  = (b: string) => BRAND_LOGOS[b] ?? branding[b]?.logo ?? null
+  const labelOf = (b: string) => BRAND_LABELS[b] ?? branding[b]?.name ?? b
   const [metaBrands, setMetaBrands]       = useState<string[] | null>(null)
   const [metaFeatures, setMetaFeatures]   = useState<string[] | null>(null)
   const [role, setRole] = useState<string | null>(() => {
@@ -212,13 +217,13 @@ export default function Sidebar({ isOpen, collapsed, onToggleCollapse }: Sidebar
                   <div className={`w-9 h-9 rounded-xl overflow-hidden ring-2 transition-all ${
                     currentBrand === b ? 'ring-[#aeb0c9] opacity-100' : 'ring-transparent opacity-30 hover:opacity-60'
                   }`}>
-                    {BRAND_LOGOS[b]
-                      ? <img src={BRAND_LOGOS[b]} alt={b} className="w-full h-full object-cover" />
+                    {logoOf(b)
+                      ? <img src={logoOf(b)!} alt={b} className="w-full h-full object-cover" />
                       : <span className="w-full h-full bg-[#aeb0c9]/30 flex items-center justify-center text-white text-xs font-bold">{b[0].toUpperCase()}</span>
                     }
                   </div>
                   <span className="pointer-events-none absolute left-full ml-3 px-2.5 py-1.5 bg-[#1a1a2e] border border-white/10 text-white text-xs font-medium rounded-lg opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap shadow-lg z-50">
-                    {BRAND_LABELS[b] ?? b}
+                    {labelOf(b)}
                   </span>
                 </button>
               ))}
@@ -229,8 +234,8 @@ export default function Sidebar({ isOpen, collapsed, onToggleCollapse }: Sidebar
               const cur = currentBrand && (allowedBrands as string[]).includes(currentBrand) ? currentBrand : allowedBrands[0]
               const logo = (b: string, size: string) => (
                 <div className={`${size} rounded-md overflow-hidden shrink-0 ring-1 ring-[#aeb0c9]/40`}>
-                  {BRAND_LOGOS[b]
-                    ? <img src={BRAND_LOGOS[b]} alt={b} className="w-full h-full object-cover" />
+                  {logoOf(b)
+                    ? <img src={logoOf(b)!} alt={b} className="w-full h-full object-cover" />
                     : <span className="w-full h-full bg-[#aeb0c9]/30 flex items-center justify-center text-white text-[10px] font-bold">{b[0].toUpperCase()}</span>}
                 </div>
               )
@@ -241,7 +246,7 @@ export default function Sidebar({ isOpen, collapsed, onToggleCollapse }: Sidebar
                     className="w-full flex items-center gap-2 px-2.5 py-2 rounded-xl bg-white/5 ring-1 ring-white/10 hover:bg-white/10 transition-colors"
                   >
                     {logo(cur, 'w-6 h-6')}
-                    <span className="flex-1 min-w-0 text-left text-sm font-medium text-white truncate">{BRAND_LABELS[cur] ?? cur}</span>
+                    <span className="flex-1 min-w-0 text-left text-sm font-medium text-white truncate">{labelOf(cur)}</span>
                     <ChevronDown size={15} className={`text-white/40 shrink-0 transition-transform ${brandMenuOpen ? 'rotate-180' : ''}`} />
                   </button>
                   {brandMenuOpen && (
@@ -257,7 +262,7 @@ export default function Sidebar({ isOpen, collapsed, onToggleCollapse }: Sidebar
                             }`}
                           >
                             {logo(b, 'w-6 h-6')}
-                            <span className="flex-1 min-w-0 text-sm font-medium truncate">{BRAND_LABELS[b] ?? b}</span>
+                            <span className="flex-1 min-w-0 text-sm font-medium truncate">{labelOf(b)}</span>
                             {b === cur && <span className="w-1.5 h-1.5 rounded-full bg-[#aeb0c9] shrink-0" />}
                           </button>
                         ))}

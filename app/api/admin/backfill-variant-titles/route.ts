@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
+import { isCron } from '@/lib/cronAuth'
 
 // One-time admin script — raise limit to handle batched Shopify calls
 export const maxDuration = 60
@@ -92,7 +93,8 @@ async function fetchSkusByProduct(
   return map
 }
 
-export async function POST() {
+export async function POST(req: Request) {
+  if (!isCron(req)) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   try {
     const shop  = process.env.SHOPIFY_BOWA_SHOP!
     const token = process.env.SHOPIFY_BOWA_ACCESS_TOKEN!

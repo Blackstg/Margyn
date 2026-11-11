@@ -11,10 +11,10 @@ import {
   type GoogleAdsConfig,
 } from '@/lib/google-ads'
 import { googleAdsCustomerId } from '@/lib/tenant/integrations'
+import { BRANDS } from '@/lib/access'
 
 // ─── Store configs ────────────────────────────────────────────────────────────
 
-const BRANDS = ['bowa', 'moom']
 
 // customer_id depuis tenant_integrations (DB-first + fallback env). OAuth global en env.
 async function buildStores(brands: string[]): Promise<GoogleAdsConfig[]> {

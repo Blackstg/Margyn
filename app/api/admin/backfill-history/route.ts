@@ -10,6 +10,7 @@ import {
   type ShopifyConfig,
 } from '@/lib/shopify'
 import { shopifyCreds } from '@/lib/tenant/integrations'
+import { isCron } from '@/lib/cronAuth'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 300
@@ -47,6 +48,7 @@ function monthChunks(from: string, to: string): Array<{ from: string; to: string
 //   GET /api/admin/backfill-history?brand=moom&from=2026-01-01
 //   GET /api/admin/backfill-history?brand=moom&from=2026-01-01&to=2026-03-31
 export async function GET(req: NextRequest) {
+  if (!isCron(req)) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   const { searchParams } = new URL(req.url)
   const brand = searchParams.get('brand') ?? 'moom'
   const from  = searchParams.get('from')  ?? '2026-01-01'

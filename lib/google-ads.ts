@@ -137,6 +137,16 @@ async function gaqlSearch(
   return rows
 }
 
+// ─── fetchCustomerName ────────────────────────────────────────────────────────
+// Vérifie qu'un compte est accessible via le MCC (onboarding) et renvoie son nom.
+
+export async function fetchCustomerName(customerId: string): Promise<{ name: string; currency: string }> {
+  const rows = await gaqlSearch(await getGoogleAccessToken(), customerId,
+    'SELECT customer.descriptive_name, customer.currency_code FROM customer')
+  const c = (rows[0] as { customer?: { descriptiveName?: string; currencyCode?: string } } | undefined)?.customer
+  return { name: c?.descriptiveName ?? customerId, currency: c?.currencyCode ?? '' }
+}
+
 // ─── fetchCampaigns ───────────────────────────────────────────────────────────
 
 export async function fetchCampaigns(

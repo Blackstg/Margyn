@@ -3,10 +3,12 @@
 
 import { NextRequest, NextResponse } from 'next/server'
 import { getMostRecentOrder } from '@/lib/sav/shopify'
+import { isCron } from '@/lib/cronAuth'
 
 export const dynamic = 'force-dynamic'
 
 export async function GET(req: NextRequest) {
+  if (!isCron(req)) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   const email   = req.nextUrl.searchParams.get('email') ?? ''
   const message = req.nextUrl.searchParams.get('message') ?? ''
 

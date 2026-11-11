@@ -164,3 +164,17 @@ export async function saveShopifyApp(tenant: string, clientId: string, clientSec
   cache.delete(`${tenant}:shopify_app`)
   return error?.message ?? null
 }
+
+// Écriture générique d'une intégration (onboarding) : config non-secrète + secret
+// optionnel chiffré (null = on garde le secret existant).
+export async function saveIntegration(tenant: string, type: string, config: Record<string, unknown>, secret?: string | null): Promise<string | null> {
+  const row: Record<string, unknown> = { tenant_slug: tenant, type, config, enabled: true }
+  if (secret) {
+    const enc = encryptSecret(secret)
+    if (!enc) return 'TENANT_SECRETS_KEY manquante'
+    row.secret_enc = enc
+  }
+  const { error } = await admin().from('tenant_integrations').upsert(row, { onConflict: 'tenant_slug,type' })
+  cache.delete(`${tenant}:${type}`)
+  return error?.message ?? null
+}

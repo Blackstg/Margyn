@@ -2,10 +2,12 @@
 
 import { NextResponse } from 'next/server'
 import { getRawThreadList } from '@/lib/sav-krom/orchestrator'
+import { isCron } from '@/lib/cronAuth'
 
 export const dynamic = 'force-dynamic'
 
-export async function GET() {
+export async function GET(req: Request) {
+  if (!isCron(req)) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   try {
     const threads = await getRawThreadList()
     return NextResponse.json({ ok: true, count: threads.length, threads })

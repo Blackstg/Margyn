@@ -1,9 +1,11 @@
 import { NextResponse } from 'next/server'
+import { isCron } from '@/lib/cronAuth'
 export const dynamic = 'force-dynamic'
 
 const META_BASE = 'https://graph.facebook.com/v21.0'
 
-export async function GET() {
+export async function GET(req: Request) {
+  if (!isCron(req)) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   const token    = process.env.META_BOWA_ACCESS_TOKEN!
   const account  = process.env.META_BOWA_AD_ACCOUNT_ID!
 

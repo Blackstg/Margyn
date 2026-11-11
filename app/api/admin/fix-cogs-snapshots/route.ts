@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
+import { isCron } from '@/lib/cronAuth'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 60
@@ -14,6 +15,7 @@ export const maxDuration = 60
 // shopify_product_id is null (common for historical orders whose variants
 // are no longer in the current Shopify catalog).
 export async function GET(req: NextRequest) {
+  if (!isCron(req)) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   const { searchParams } = new URL(req.url)
   const brand   = searchParams.get('brand') ?? 'moom'
   const from    = searchParams.get('from')  ?? '2026-01-01'

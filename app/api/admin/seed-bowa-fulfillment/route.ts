@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
+import { isCron } from '@/lib/cronAuth'
 
 function getAdmin() {
   return createClient(
@@ -13,6 +14,7 @@ function getAdmin() {
 // Call with: POST /api/admin/seed-bowa-fulfillment?secret=<SETUP_SECRET>
 // Optionally pass JSON body: { khalid: 5000, enzo: 0, essence: 0 }
 export async function POST(req: NextRequest) {
+  if (!isCron(req)) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   const secret = req.nextUrl.searchParams.get('secret')
   if (!secret || secret !== process.env.SETUP_SECRET) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })

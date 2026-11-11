@@ -11,7 +11,7 @@ const VALID_BRANDS = BRANDS
 
 // All pages that live under /[brand]/ (features + the admin-only pages)
 const ALL_BRAND_PAGES = [
-  'settings', 'users',
+  'settings', 'users', 'onboarding',
   ...FEATURES.map(f => f.key),
 ]
 

@@ -36,7 +36,7 @@ export async function GET(req: NextRequest) {
        <p>Ta boutique est connectée. L’équipe Steero active ton espace et te contacte.</p>`
     : `<h2 style="color:#1a7f4b">✓ ${label} connecté à Steero</h2>
        <p>Boutique : <strong>${shop}</strong><br>Accès : <strong>${scope ?? ''}</strong></p>
-       <p>Le jeton est enregistré chiffré. <a href="/${tenant}/dashboard">Ouvrir le dashboard ${label}</a></p>`)
+       <p>Le jeton est enregistré chiffré. <a href="/${tenant}/onboarding">Continuer la configuration de ${label} →</a></p>`)
   res.headers.append('Set-Cookie', 'shopify_oauth_state=; Path=/; Max-Age=0')
   res.headers.append('Set-Cookie', 'shopify_oauth_brand=; Path=/; Max-Age=0')
   return res

@@ -4,6 +4,7 @@
 
 import { NextRequest, NextResponse } from 'next/server'
 import { getTicketComments, fetchTicketContext } from '@/lib/sav/zendesk'
+import { isCron } from '@/lib/cronAuth'
 
 export const dynamic = 'force-dynamic'
 
@@ -14,6 +15,7 @@ function extractRefs(text: string): number[] {
 }
 
 export async function GET(req: NextRequest) {
+  if (!isCron(req)) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   const secret   = req.nextUrl.searchParams.get('secret')
   const ticketId = Number(req.nextUrl.searchParams.get('ticket_id'))
 

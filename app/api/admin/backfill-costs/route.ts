@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
+import { isCron } from '@/lib/cronAuth'
 
 export const maxDuration = 300
 
@@ -30,6 +31,7 @@ function sleep(ms: number) {
 }
 
 export async function GET(req: NextRequest) {
+  if (!isCron(req)) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   const { searchParams } = new URL(req.url)
   const brand = searchParams.get('brand') ?? 'moom'
   const store = STORE_CONFIG[brand]
