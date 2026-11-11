@@ -152,7 +152,7 @@ export async function GET(req: NextRequest) {
   line(y); y -= 20
 
   // Tableau — en-têtes
-  const cQty = 380, cPU = 450, cTVA = 500, cTot = R
+  const cQty = 350, cPU = 425, cTVA = 470, cTot = R
   text('ARTICLE', L, y, { size: 8, font: bold, color: grey })
   text('QUANTITE', cQty, y, { size: 8, font: bold, color: grey, align: 'right' })
   text(tvaEnabled ? 'PU TTC' : 'PU HT', cPU, y, { size: 8, font: bold, color: grey, align: 'right' })
