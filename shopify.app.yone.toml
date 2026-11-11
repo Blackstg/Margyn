@@ -1,0 +1,29 @@
+# App Shopify custom « Steero Yone » (distribution custom, boutique Yone uniquement),
+# en attendant la validation de l'app publique Steero (shopify.app.toml).
+# Publier : npx @shopify/cli@latest app deploy --config yone
+# Le secret client est rangé chiffré dans Steero (Paramètres → App Shopify dédiée), jamais ici.
+
+client_id = "dcd7fe14641f600c929867bd1d534858"
+name = "Steero Yone"
+application_url = "https://www.steero.io/install"
+embedded = false
+
+[access_scopes]
+# read_all_orders : accordé par Shopify pour cette app (historique depuis la 1re vente)
+scopes = "read_orders,read_all_orders,read_products,read_inventory"
+
+[auth]
+redirect_urls = [ "https://www.steero.io/api/shopify/oauth/callback" ]
+
+[webhooks]
+api_version = "2025-10"
+
+  [[webhooks.subscriptions]]
+  topics = [ "app/uninstalled" ]
+  uri = "https://www.steero.io/api/shopify/webhooks"
+
+[pos]
+embedded = false
+
+[build]
+automatically_update_urls_on_dev = false
