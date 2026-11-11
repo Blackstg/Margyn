@@ -66,6 +66,8 @@ export interface ZendeskTicket {
   requester_id: number
   created_at:   string
   updated_at:   string   // dernière mise à jour du ticket (réponse client = updated_at avance)
+  requester_name?:  string   // rempli par getNewTickets (utilisateurs joints à la recherche)
+  requester_email?: string
 }
 
 interface ZendeskAttachment {
@@ -100,17 +102,18 @@ export async function getNewTickets(brand: SavBrand = 'moom'): Promise<ZendeskTi
   // "pending" is included — agents sometimes set tickets to pending while awaiting info
   const query = encodeURIComponent('type:ticket status:new status:open status:pending')
   const res = await fetchWithRetry(
-    `${await base(brand)}/search.json?query=${query}&sort_by=created_at&sort_order=asc`,
+    `${await base(brand)}/search.json?query=${query}&sort_by=created_at&sort_order=asc&include=tickets(users)`,
     { headers: await authHeaders(brand), cache: 'no-store' },
     3,
     1000,
   )
   if (!res.ok) throw new Error(`[Zendesk] getNewTickets ${res.status}: ${await res.text()}`)
 
-  const data = await res.json() as { results?: ZendeskTicket[] }
-  return (data.results ?? []).filter(
-    (t) => !t.tags.includes('vip') && !t.tags.includes('litige')
-  )
+  const data = await res.json() as { results?: ZendeskTicket[]; users?: { id: number; name: string; email: string }[] }
+  const users = new Map((data.users ?? []).map(u => [u.id, u]))
+  return (data.results ?? [])
+    .filter((t) => !t.tags.includes('vip') && !t.tags.includes('litige'))
+    .map(t => ({ ...t, requester_name: users.get(t.requester_id)?.name, requester_email: users.get(t.requester_id)?.email }))
 }
 
 // Recherche libre de tickets (n'importe quel statut, y compris résolus) — pour
@@ -376,6 +379,7 @@ export interface CommentItem {
   id:          number
   body:        string
   author_type: 'client' | 'agent'
+  author_name?: string
   created_at:  string
   attachments: ZendeskFileAttachment[]
 }
@@ -386,7 +390,7 @@ export async function getTicketComments(
   requesterId: number,
   brand: SavBrand = 'moom',
 ): Promise<CommentItem[]> {
-  const url = `${await base(brand)}/tickets/${ticketId}/comments.json`
+  const url = `${await base(brand)}/tickets/${ticketId}/comments.json?include=users`
   console.log(`[Zendesk] getTicketComments — fetching #${ticketId} (requesterId=${requesterId})`)
 
   // Use fetchWithRetry so 429s are handled with a minimum 1s delay
@@ -398,9 +402,10 @@ export async function getTicketComments(
     throw new Error(`[Zendesk] getTicketComments ${res.status}: ${body}`)
   }
 
-  const data = await res.json() as { comments?: ZendeskComment[] }
+  const data = await res.json() as { comments?: ZendeskComment[]; users?: { id: number; name: string }[] }
   const all = data.comments ?? []
   const publicComments = all.filter(c => c.public)
+  const userNames = new Map((data.users ?? []).map(u => [u.id, u.name]))
 
   console.log(
     `[Zendesk] getTicketComments #${ticketId} — ${all.length} total, ${publicComments.length} public`
@@ -455,6 +460,7 @@ export async function getTicketComments(
       id:          c.id,
       body:        c.body,
       author_type: c.author_id === requesterId && !isOutboundOpener(c, i) ? 'client' : 'agent',
+      author_name: isOutboundOpener(c, i) ? undefined : userNames.get(c.author_id),
       created_at:  c.created_at,
       attachments: mapAttachments(c),
     }))
@@ -465,6 +471,7 @@ export async function getTicketComments(
     id:          c.id,
     body:        c.body,
     author_type: (i === 0 && !isOutboundOpener(c, i) ? 'client' : 'agent') as 'client' | 'agent',
+    author_name: isOutboundOpener(c, i) ? undefined : userNames.get(c.author_id),
     created_at:  c.created_at,
     attachments: mapAttachments(c),
   }))

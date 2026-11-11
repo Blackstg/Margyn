@@ -3,9 +3,10 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { createBrowserClient } from '@supabase/auth-helpers-nextjs'
 import {
-  RefreshCw, Send, ArrowUpRight, Archive, Package, ExternalLink,
+  RefreshCw, Send, ArrowUpRight, Archive, ExternalLink,
   Inbox, CheckCheck, ChevronDown, ChevronUp, Search,
   Settings, Trash2, Plus, X, Download, RotateCcw, Paperclip, ArrowRight, Forward,
+  Clock, ChevronLeft, ChevronRight, UserPlus, Tag, Check, Mail, Copy, Sparkles, MoreHorizontal, PenSquare, Wand2,
 } from 'lucide-react'
 import { useUrlState } from '@/lib/useUrlState'
 import { signatureFirstName } from '@/lib/sav/signature'
@@ -88,11 +89,14 @@ interface FileAttachment {
 
 interface CommentItem {
   id: number; body: string; author_type: 'client' | 'agent'; created_at: string
+  author_name?: string
   attachments: FileAttachment[]
 }
 
 // Minimal ticket from the fast list endpoint (no AI data)
 interface RawTicket {
+  requester_name?:  string
+  requester_email?: string
   ticket_id:    number
   subject:      string
   description:  string
@@ -148,15 +152,6 @@ const CAT_COLORS: Record<TicketCategory, { bg: string; text: string }> = {
   autre:                 { bg: '#f3f3f1', text: '#6b6b63' },
 }
 
-function catBadge(category: TicketCategory) {
-  const { bg, text } = CAT_COLORS[category]
-  return (
-    <span className="inline-flex px-2 py-0.5 rounded-full text-[10px] font-semibold shrink-0" style={{ backgroundColor: bg, color: text }}>
-      {CAT_LABELS[category]}
-    </span>
-  )
-}
-
 // ─── Balises manuelles (identification rapide du souci) ─────────────────────────
 // L'agent pose une balise sur un ticket pour voir d'un coup d'œil de quoi il s'agit.
 const TICKET_TAGS: { key: string; label: string; bg: string; text: string }[] = [
@@ -171,52 +166,6 @@ const TICKET_TAGS: { key: string; label: string; bg: string; text: string }[] = 
 ]
 const TAG_BY_KEY: Record<string, { label: string; bg: string; text: string }> =
   Object.fromEntries(TICKET_TAGS.map(t => [t.key, t]))
-
-function tagBadge(tagKey: string, selected?: boolean) {
-  const t = TAG_BY_KEY[tagKey]
-  if (!t) return null
-  return (
-    <span
-      className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold shrink-0"
-      style={selected ? { background: 'rgba(255,255,255,0.18)', color: '#fff' } : { backgroundColor: t.bg, color: t.text }}
-    >
-      🏷️ {t.label}
-    </span>
-  )
-}
-
-// Barre de sélection de balises (détail du ticket) — multi-sélection.
-function TagBar({ ticketId, tags, onToggle }: {
-  ticketId: number
-  tags: string[]
-  onToggle: (ticketId: number, tag: string) => void
-}) {
-  return (
-    <div className="shrink-0 border-b border-[#eeede9] bg-white">
-      <div className="flex items-center gap-3 px-6 py-2.5 flex-wrap">
-        <span className="text-[11px] font-bold uppercase tracking-[0.1em] text-[#9b9b93]">Balises</span>
-        <div className="flex items-center gap-1.5 flex-wrap">
-          {TICKET_TAGS.map(t => {
-            const active = tags.includes(t.key)
-            return (
-              <button
-                key={t.key}
-                onClick={() => onToggle(ticketId, t.key)}
-                className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-semibold border transition-colors"
-                style={active
-                  ? { background: t.text, color: '#fff', borderColor: t.text }
-                  : { background: t.bg, color: t.text, borderColor: 'transparent' }}
-              >
-                {active && <span className="text-[12px] leading-none">✓</span>}
-                {t.label}
-              </button>
-            )
-          })}
-        </div>
-      </div>
-    </div>
-  )
-}
 
 function fmtTime(iso: string) {
   const d = new Date(iso), now = new Date()
@@ -242,76 +191,59 @@ const ASSIGNEE_COLORS: Record<string, [string, string]> = {
   Léa:     ['#fce7f3', '#be185d'],
 }
 
-function AssigneePill({ name, selected }: { name: string; selected?: boolean }) {
-  const [bg, fg] = ASSIGNEE_COLORS[name] ?? ['#f0f0ee', '#6b6b63']
+// ─── Personnes (avatars, noms) ──────────────────────────────────────────────────
+
+// « marine-besson » / « marine.besson@… » → « Marine Besson ». Un vrai nom saisi
+// (avec espace) est gardé tel quel.
+function prettyName(name?: string | null, email?: string | null): string {
+  const raw = (name ?? '').trim()
+  if (raw && !raw.includes('@') && /\s/.test(raw)) return raw
+  const base = raw && !raw.includes('@') ? raw : (email ?? '').split('@')[0]
+  if (!base) return 'Client'
+  return base.split(/[._\-+]+/).filter(Boolean).map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ')
+}
+
+function initials(name: string): string {
+  const parts = name.split(/\s+/).filter(Boolean)
+  return ((parts[0]?.[0] ?? '') + (parts.length > 1 ? parts[parts.length - 1][0] : parts[0]?.[1] ?? '')).toUpperCase()
+}
+
+const AVATAR_TONES: [string, string][] = [
+  ['#fde2e4', '#c0264b'], ['#e0ecff', '#1d4ed8'], ['#e6f4ea', '#1a7f4b'],
+  ['#fff1db', '#b45309'], ['#efe6ff', '#6d28d9'], ['#dff5f3', '#0f766e'],
+]
+function toneFor(key: string): [string, string] {
+  let h = 0
+  for (const ch of key) h = (h * 31 + ch.charCodeAt(0)) >>> 0
+  return AVATAR_TONES[h % AVATAR_TONES.length]
+}
+
+function Avatar({ name, size = 28, tone, solid }: { name: string; size?: number; tone?: [string, string]; solid?: boolean }) {
+  const [bg, fg] = tone ?? ASSIGNEE_COLORS[name] ?? toneFor(name)
   return (
     <span
-      className="inline-flex items-center px-1.5 py-0.5 rounded-full text-[9px] font-bold shrink-0"
-      style={selected ? { background: 'rgba(255,255,255,0.18)', color: '#fff' } : { background: bg, color: fg }}
-      title={`Attribué à ${name}`}
+      className="inline-flex items-center justify-center rounded-full font-semibold shrink-0 select-none"
+      style={{ width: size, height: size, fontSize: Math.round(size * 0.38), background: solid ? fg : bg, color: solid ? '#fff' : fg }}
+      aria-hidden
     >
-      {name}
+      {initials(name)}
     </span>
   )
 }
 
-// Barre d'attribution au-dessus du détail d'un ticket — « Qui répond ? »
-function AssignBar({ ticketId, assignee, onAssign, myName, by, at }: {
-  ticketId: number
-  assignee?: string
-  onAssign: (ticketId: number, assignee: string | null) => void
-  myName?: string
-  by?: string | null
-  at?: string | null
-}) {
-  const options: { val: string | null; label: string; color: string }[] = [
-    { val: null, label: 'Non attribué', color: '#9b9b93' },
-    ...savAssignees().map(a => ({ val: a as string | null, label: a, color: ASSIGNEE_COLORS[a]?.[1] ?? '#6b6b63' })),
-  ]
-  // Ticket pris par un AUTRE agent → avertissement (le blocage réel est à l'envoi).
-  const takenByOther = !!assignee && !!myName && assignee !== myName
-  return (
-    <div className="shrink-0 border-b border-[#eeede9] bg-[#faf9f7]">
-      <div className="flex items-center gap-3 px-6 py-2.5 flex-wrap">
-        <span className="text-[11px] font-bold uppercase tracking-[0.1em] text-[#9b9b93]">Affecter à</span>
-        <div className="flex items-center gap-1.5">
-          {options.map(opt => {
-            const active = (assignee ?? null) === opt.val
-            return (
-              <button
-                key={opt.label}
-                onClick={() => onAssign(ticketId, opt.val)}
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold border transition-colors"
-                style={active
-                  ? { background: opt.color, color: '#fff', borderColor: opt.color }
-                  : { background: '#fff', color: '#6b6b63', borderColor: '#e8e8e4' }}
-              >
-                <span className="text-[13px] leading-none" style={{ opacity: active ? 1 : 0 }}>✓</span>
-                {opt.label}
-              </button>
-            )
-          })}
-        </div>
-        {assignee && by && !by.includes('@') && (
-          <span className="text-[10px] text-[#9b9b93] w-full">
-            Affecté à <b className="text-[#6b6b63]">{assignee}</b> par {by}{at ? ` · ${fmtTime(at)}` : ''}
-          </span>
-        )}
-      </div>
-      {takenByOther && (
-        <div className="px-6 pb-2.5 -mt-1">
-          <p className="text-[12px] font-semibold text-[#b45309] bg-[#fffbeb] border border-[#fcd34d] rounded-lg px-3 py-2">
-            ⚠️ Ticket déjà pris en charge par <b>{assignee}</b>. Ne réponds pas en double — l&apos;envoi sera bloqué. Reprends-le seulement si nécessaire (bouton {myName}).
-          </p>
-        </div>
-      )}
-    </div>
-  )
+// « 42 min », « 3 h », « 2 j »
+function ago(iso: string): string {
+  const m = Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 60000))
+  if (m < 60) return `${m} min`
+  const h = Math.round(m / 60)
+  return h < 24 ? `${h} h` : `${Math.round(h / 24)} j`
 }
 
-// ─── Left column ──────────────────────────────────────────────────────────────
+function oneLine(text: string): string {
+  return (text ?? '').replace(/\s+/g, ' ').trim()
+}
 
-function TicketRow({ raw, processed, selected, doneAction, isProcessing, onClick, assignee, tags, handoffFrom, agents, menuOpen, onOpenMenu, onAssignPick }: {
+function TicketRow({ raw, processed, selected, doneAction, isProcessing, onClick, assignee, tags, handoffFrom, agents, menuOpen, onOpenMenu, onAssignPick, compact }: {
   raw: RawTicket
   processed?: ProcessedTicket
   selected: boolean
@@ -325,119 +257,124 @@ function TicketRow({ raw, processed, selected, doneAction, isProcessing, onClick
   menuOpen?: boolean
   onOpenMenu?: () => void
   onAssignPick?: (name: string | null) => void
+  compact?: boolean   // « En attente client » : sujet + date + dernière action
 }) {
-  const email     = processed?.customer_email ?? `#${raw.requester_id}`
-  const isPending = raw.status === 'pending'
-  // Barre latérale : couleur de l'agent si attribué, orange sinon (= à attribuer)
-  const accent    = assignee ? (ASSIGNEE_COLORS[assignee]?.[1] ?? '#6b6b63') : '#f59e0b'
+  const name   = prettyName(raw.requester_name, raw.requester_email ?? processed?.customer_email)
+  const unread = raw.is_reopened || raw.status === 'new'
+  const waitMin = (Date.now() - new Date(raw.updated_at ?? raw.created_at).getTime()) / 60000
+  const urgent = !compact && !doneAction && waitMin > 120
   const stop = (e: React.MouseEvent) => { e.preventDefault(); e.stopPropagation() }
+  const muted = selected ? 'text-white/75' : 'text-[#6e6e73]'
+  const chip = 'inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium shrink-0'
+
+  const assigneeBadge = (
+    <span
+      role={onOpenMenu ? 'button' : undefined}
+      tabIndex={onOpenMenu ? 0 : undefined}
+      onClick={onOpenMenu ? (e) => { stop(e); onOpenMenu() } : undefined}
+      title={assignee ? `Attribué à ${assignee}${onOpenMenu ? ' — changer' : ''}` : onOpenMenu ? 'Attribuer' : 'Non attribué'}
+      className="shrink-0 rounded-full"
+      style={selected ? { boxShadow: '0 0 0 2px rgba(255,255,255,.9)' } : undefined}
+    >
+      {assignee
+        ? <Avatar name={assignee} size={22} />
+        : <span className={`inline-flex items-center justify-center w-[22px] h-[22px] rounded-full border border-dashed text-[11px] ${selected ? 'border-white/60 text-white/80' : 'border-[#c7c7cc] text-[#8e8e93]'}`}>–</span>}
+    </span>
+  )
 
   return (
     <button
       onClick={onClick}
-      style={{ borderLeft: `4px solid ${accent}` }}
-      className={`relative w-full text-left pl-3 pr-4 py-3 border-b border-[#eeede9] transition-colors ${
-        raw.is_reopened ? 'bg-[#fffbeb]' : selected ? 'bg-[#1a1a2e]' : !assignee ? 'bg-[#fffaf3] hover:bg-[#fff4e6]' : 'hover:bg-[#f0efec]'
+      className={`relative w-full text-left px-3 py-2.5 rounded-xl transition-colors ${
+        selected ? 'bg-[#0a66f5] text-white' : raw.is_reopened ? 'bg-[#fff8e6] hover:bg-[#fff1cc]' : 'hover:bg-[#ececef]'
       }`}
     >
-      <div className="flex items-center justify-between gap-2 mb-1">
-        <span className={`text-[11px] font-semibold truncate flex-1 ${selected ? 'text-white' : 'text-[#1a1a2e]'}`}>
-          {raw.subject}
-        </span>
-        {handoffFrom && (
-          <span className="shrink-0 inline-flex items-center gap-0.5 text-[9px] font-bold text-[#6d28d9] bg-[#ede9fe] px-1.5 py-0.5 rounded-full">
-            ➡️ de {handoffFrom}
-          </span>
-        )}
-        <span className={`text-[10px] shrink-0 ${selected ? 'text-white/50' : 'text-[#9b9b93]'}`}>
-          {fmtTime(raw.updated_at ?? raw.created_at ?? new Date().toISOString())}
-        </span>
-      </div>
-      <div className="flex items-center gap-2">
-        <span className={`text-[10px] truncate flex-1 ${selected ? 'text-white/60' : 'text-[#6b6b63]'}`}>
-          {email}
-        </span>
-        {(tags ?? []).map(t => <span key={t}>{tagBadge(t, selected)}</span>)}
-        {assignee
-          ? <AssigneePill name={assignee} selected={selected} />
-          : <span
-              className="inline-flex items-center px-1.5 py-0.5 rounded-full text-[9px] font-bold shrink-0"
-              style={selected ? { background: 'rgba(255,255,255,0.18)', color: '#fff' } : { background: '#fef3c7', color: '#b45309' }}
-            >
-              À attribuer
-            </span>}
-        {/* Affecter depuis la liste (menu rapide) */}
-        {agents && agents.length > 0 && onOpenMenu && (
-          <span
-            role="button"
-            tabIndex={0}
-            onClick={(e) => { stop(e); onOpenMenu() }}
-            className={`shrink-0 inline-flex items-center justify-center w-5 h-5 rounded-full text-[11px] ${selected ? 'text-white/70 hover:bg-white/15' : 'text-[#9b9b93] hover:bg-[#e8e8e4]'}`}
-            title="Affecter à une collègue"
-          >
-            ⋯
-          </span>
-        )}
-        {raw.is_reopened && (
-          <span className="inline-flex items-center gap-1 text-[10px] font-bold shrink-0 bg-[#fef3c7] text-[#b45309] px-1.5 py-0.5 rounded-full border border-[#fcd34d]">
-            💬 Nouveau message
-          </span>
-        )}
-        {!raw.is_reopened && doneAction === 'sent' && (
-          <span className={`inline-flex items-center gap-1 text-[10px] font-semibold shrink-0 ${selected ? 'text-white/60' : 'text-[#1a7f4b]'}`}>
-            <CheckCheck size={10} /> Envoyé
-          </span>
-        )}
-        {!raw.is_reopened && doneAction === 'escalated' && (
-          <span className={`inline-flex items-center gap-1 text-[10px] font-semibold shrink-0 ${selected ? 'text-white/60' : 'text-[#b45309]'}`}>
-            <ArrowUpRight size={10} /> Escaladé
-          </span>
-        )}
-        {!raw.is_reopened && doneAction === 'archived' && (
-          <span className={`inline-flex items-center gap-1 text-[10px] font-semibold shrink-0 ${selected ? 'text-white/60' : 'text-[#6b6b63]'}`}>
-            <Archive size={10} /> Archivé
-          </span>
-        )}
-        {!doneAction && isPending && (
-          <span className={`inline-flex items-center gap-1 text-[10px] font-semibold shrink-0`}
-            style={selected ? { color: 'rgba(255,255,255,.6)' } : { backgroundColor: '#f0efec', color: '#6b6b63', padding: '1px 6px', borderRadius: 99 }}>
-            En attente
-          </span>
-        )}
-        {processed?.is_phishing && (
-          <span className="inline-flex items-center gap-1 text-[10px] font-bold shrink-0 bg-[#fee2e2] text-[#c7293a] px-1.5 py-0.5 rounded-full">
-            🎣 Phishing
-          </span>
-        )}
-        {!doneAction && !isPending && processed && !processed.is_phishing && catBadge(processed.category)}
-        {!doneAction && !isPending && !processed && isProcessing && (
-          <RefreshCw size={10} strokeWidth={1.8} className={`animate-spin shrink-0 ${selected ? 'text-white/40' : 'text-[#aeb0c9]'}`} />
-        )}
-      </div>
+      {compact ? (
+        <>
+          <div className="flex items-center gap-2">
+            <span className={`text-[13px] font-medium truncate flex-1 ${selected ? 'text-white' : 'text-[#1d1d1f]'}`}>{raw.subject || '(sans objet)'}</span>
+            <span className={`text-[11px] shrink-0 ${muted}`}>{fmtTime(raw.created_at)}</span>
+          </div>
+          <div className="flex items-center gap-2 mt-0.5">
+            <span className={`text-[12px] truncate flex-1 ${muted}`}>
+              {[
+                processed && !processed.is_phishing && processed.category !== 'autre' ? CAT_LABELS[processed.category] : null,
+                ...(tags ?? []).map(t => TAG_BY_KEY[t]?.label).filter(Boolean),
+                `relancé il y a ${ago(raw.updated_at ?? raw.created_at)}`,
+              ].filter(Boolean).join(' · ')}
+            </span>
+            {assigneeBadge}
+          </div>
+        </>
+      ) : (
+        <>
+          <div className="flex items-center gap-1.5">
+            <span className={`w-2 h-2 rounded-full shrink-0 ${unread ? (selected ? 'bg-white' : 'bg-[#0a66f5]') : 'bg-transparent'}`} />
+            <span className={`text-[13px] font-semibold truncate flex-1 ${selected ? 'text-white' : 'text-[#1d1d1f]'}`}>{name}</span>
+            <span className={`text-[11px] shrink-0 ${muted}`}>{fmtTime(raw.updated_at ?? raw.created_at)}</span>
+          </div>
+          <p className={`text-[13px] font-medium truncate mt-0.5 pl-3.5 ${selected ? 'text-white' : 'text-[#1d1d1f]'}`}>{raw.subject || '(sans objet)'}</p>
+          <p className={`text-[12px] leading-snug mt-0.5 pl-3.5 line-clamp-2 ${muted}`}>{oneLine(raw.description)}</p>
+          <div className="flex items-center gap-1.5 mt-2 pl-3.5">
+            <div className="flex items-center gap-1.5 flex-1 min-w-0 overflow-hidden">
+              {!doneAction && (
+                <span className={chip} style={selected ? { background: 'rgba(255,255,255,.2)', color: '#fff' } : urgent ? { background: '#fde8e8', color: '#c81e1e' } : { background: '#ececef', color: '#48484a' }}>
+                  <Clock size={10} strokeWidth={2} /> {ago(raw.updated_at ?? raw.created_at)}
+                </span>
+              )}
+              {raw.is_reopened && (
+                <span className={chip} style={selected ? { background: 'rgba(255,255,255,.2)', color: '#fff' } : { background: '#fdecc8', color: '#a15c07' }}>Nouvelle réponse</span>
+              )}
+              {handoffFrom && (
+                <span className={chip} style={selected ? { background: 'rgba(255,255,255,.2)', color: '#fff' } : { background: '#efe6ff', color: '#6d28d9' }}>de {handoffFrom}</span>
+              )}
+              {processed?.is_phishing && (
+                <span className={chip} style={{ background: '#fde8e8', color: '#c81e1e' }}>Phishing</span>
+              )}
+              {processed && !processed.is_phishing && (
+                <span className={chip} style={selected ? { background: 'rgba(255,255,255,.2)', color: '#fff' } : { background: CAT_COLORS[processed.category].bg, color: CAT_COLORS[processed.category].text }}>
+                  {CAT_LABELS[processed.category]}
+                </span>
+              )}
+              {(tags ?? []).map(t => TAG_BY_KEY[t] && (
+                <span key={t} className={chip} style={selected ? { background: 'rgba(255,255,255,.2)', color: '#fff' } : { background: TAG_BY_KEY[t].bg, color: TAG_BY_KEY[t].text }}>{TAG_BY_KEY[t].label}</span>
+              ))}
+              {doneAction && (
+                <span className={`${chip} ${selected ? 'text-white' : doneAction === 'escalated' ? 'text-[#b45309]' : 'text-[#1a7f4b]'}`}>
+                  {doneAction === 'sent' ? <><CheckCheck size={11} /> Envoyé</> : doneAction === 'escalated' ? <><ArrowUpRight size={11} /> Escaladé</> : <><Archive size={11} /> Résolu</>}
+                </span>
+              )}
+              {!processed && isProcessing && (
+                <RefreshCw size={11} strokeWidth={1.8} className={`animate-spin shrink-0 ${selected ? 'text-white/60' : 'text-[#8e8e93]'}`} />
+              )}
+            </div>
+            {assigneeBadge}
+          </div>
+        </>
+      )}
 
       {/* Menu d'affectation rapide (depuis la liste) */}
       {menuOpen && agents && onAssignPick && (
-        <span className="absolute right-3 top-9 z-30 flex flex-col min-w-[130px] rounded-xl border border-[#e8e8e4] bg-white shadow-lg overflow-hidden py-1">
-          <span className="px-3 py-1 text-[9px] font-bold uppercase tracking-wide text-[#9b9b93]">Affecter à</span>
+        <span className="absolute right-2 top-full -mt-2 z-30 flex flex-col min-w-[150px] rounded-xl border border-[#e5e5ea] bg-white shadow-lg overflow-hidden py-1 text-[#1d1d1f]">
+          <span className="px-3 py-1 text-[11px] text-[#8e8e93]">Attribuer à</span>
           {agents.map(a => (
             <span
               key={a}
               role="button"
               tabIndex={0}
               onClick={(e) => { stop(e); onAssignPick(a) }}
-              className="flex items-center gap-2 px-3 py-1.5 text-xs font-medium text-[#1a1a2e] hover:bg-[#f5f5f3]"
+              className="flex items-center gap-2 px-3 py-1.5 text-[13px] hover:bg-[#f2f2f7]"
             >
-              <span className="w-2 h-2 rounded-full" style={{ background: ASSIGNEE_COLORS[a]?.[1] ?? '#6b6b63' }} />
-              {a}{assignee === a ? ' ✓' : ''}
+              <Avatar name={a} size={18} /> {a}{assignee === a ? ' ✓' : ''}
             </span>
           ))}
           <span
             role="button"
             tabIndex={0}
             onClick={(e) => { stop(e); onAssignPick(null) }}
-            className="px-3 py-1.5 text-xs font-medium text-[#9b9b93] hover:bg-[#f5f5f3] border-t border-[#f0efec]"
+            className="px-3 py-1.5 text-[13px] text-[#8e8e93] hover:bg-[#f2f2f7] border-t border-[#f2f2f7]"
           >
-            Retirer l&apos;affectation
+            Retirer l&apos;attribution
           </span>
         </span>
       )}
@@ -446,54 +383,6 @@ function TicketRow({ raw, processed, selected, doneAction, isProcessing, onClick
 }
 
 // ─── Center column ────────────────────────────────────────────────────────────
-
-function OrderBlock({ order }: { order: MoomOrder }) {
-  return (
-    <div className="bg-[#f8f7f5] rounded-xl p-4 space-y-3">
-      <p className="text-[10px] font-semibold uppercase tracking-[0.1em] text-[#aeb0c9] flex items-center gap-1.5">
-        <Package size={11} strokeWidth={1.8} /> Commande Shopify
-      </p>
-      <div className="grid grid-cols-[auto_1fr] gap-x-6 gap-y-1.5 text-xs">
-        <span className="text-[#6b6b63]">Numéro</span>
-        <span className="font-medium text-[#1a1a2e]">{order.order_number}</span>
-        <span className="text-[#6b6b63]">Statut</span>
-        <span className="font-medium text-[#1a1a2e]">{order.status_fr}</span>
-        <span className="text-[#6b6b63]">Paiement</span>
-        <span className="font-medium text-[#1a1a2e]">{order.financial_status_fr}</span>
-        {order.carrier && <>
-          <span className="text-[#6b6b63]">Transporteur</span>
-          <span className="font-medium text-[#1a1a2e]">{order.carrier}</span>
-        </>}
-        {order.tracking_number && <>
-          <span className="text-[#6b6b63]">Suivi</span>
-          <span className="font-medium text-[#1a1a2e] flex items-center gap-1">
-            {order.tracking_number}
-            {order.tracking_url && (
-              <a href={order.tracking_url} target="_blank" rel="noopener noreferrer" className="text-[#1565c0]">
-                <ExternalLink size={10} />
-              </a>
-            )}
-          </span>
-        </>}
-        {order.estimated_delivery && <>
-          <span className="text-[#6b6b63]">Livraison est.</span>
-          <span className="font-medium text-[#1a1a2e]">{order.estimated_delivery}</span>
-        </>}
-      </div>
-      {order.order_number && <OrderReceivedLine order={order.order_number} />}
-      {order.products.length > 0 && (
-        <div className="border-t border-[#eeede9] pt-2 space-y-1">
-          {order.products.map((p, i) => (
-            <div key={i} className="flex justify-between text-xs text-[#6b6b63]">
-              <span>{p.quantity}× {p.name}</span>
-              <span>{p.price} €</span>
-            </div>
-          ))}
-        </div>
-      )}
-    </div>
-  )
-}
 
 // ─── Customer history ─────────────────────────────────────────────────────────
 
@@ -539,17 +428,15 @@ function CustomerHistory({ email, currentTicketId }: { email: string; currentTic
     s === 'open' ? 'text-blue-500' : s === 'solved' || s === 'closed' ? 'text-[#1a7f4b]' : 'text-[#9b9b93]'
 
   return (
-    <div className="border-t border-[#e8e8e4] pt-4">
+    <div className="pt-3">
       <button
         onClick={() => setOpen(v => !v)}
-        className="flex items-center gap-2 w-full text-left group"
+        className="flex items-center gap-2 w-full text-left"
       >
-        <p className="text-[10px] font-semibold uppercase tracking-[0.1em] text-[#aeb0c9] group-hover:text-[#6b6b63] transition-colors flex-1">
-          Historique cliente
-        </p>
+        <h3 className="text-[14px] font-semibold text-[#1d1d1f] flex-1">Échanges précédents</h3>
         {open
-          ? <ChevronUp size={12} className="text-[#aeb0c9]" />
-          : <ChevronDown size={12} className="text-[#aeb0c9]" />}
+          ? <ChevronUp size={14} className="text-[#8e8e93]" />
+          : <ChevronDown size={14} className="text-[#8e8e93]" />}
       </button>
 
       {open && (
@@ -628,7 +515,8 @@ function parseZipchatTranscript(body: string): ZipchatLine[] | null {
     .filter(m => m.text.length > 0)
 }
 
-function ConversationThread({ ticket, refreshKey }: { ticket: ProcessedTicket; refreshKey: number }) {
+function ConversationThread({ ticket, refreshKey, customerName }: { ticket: ProcessedTicket; refreshKey: number; customerName: string }) {
+  const endRef = useRef<HTMLDivElement>(null)
   const [comments, setComments]     = useState<CommentItem[]>([])
   const [loadingCom, setLoadingCom] = useState(true)
 
@@ -663,6 +551,10 @@ function ConversationThread({ ticket, refreshKey }: { ticket: ProcessedTicket; r
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ticket.ticket_id, ticket.requester_id, refreshKey])
 
+  useEffect(() => {
+    if (!loadingCom && comments.length > 1) endRef.current?.scrollIntoView({ block: 'end' })
+  }, [loadingCom, comments.length])
+
   if (loadingCom) {
     return (
       <div className="space-y-3 py-2">
@@ -678,23 +570,24 @@ function ConversationThread({ ticket, refreshKey }: { ticket: ProcessedTicket; r
 
   if (comments.length === 0) {
     return (
-      <p className="text-sm text-[#1a1a2e] leading-relaxed whitespace-pre-wrap">
+      <p className="rounded-2xl border border-[#e5e5ea] bg-white px-5 py-4 text-[14px] text-[#1d1d1f] leading-[1.6] whitespace-pre-wrap">
         {ticket.description ?? '—'}
       </p>
     )
   }
 
   return (
-    <div className="space-y-3">
-      {[...comments].reverse().map((c, i) => {
+    <div className="space-y-4">
+      {comments.map((c, i) => {
         const isAgent  = c.author_type === 'agent'
         const d        = new Date(c.created_at)
-        const now      = new Date()
-        const sameDay  = d.toDateString() === now.toDateString()
+        const sameDay  = d.toDateString() === new Date().toDateString()
         const dateStr  = sameDay
           ? d.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })
-          : d.toLocaleDateString('fr-FR', { day: '2-digit', month: 'short' }) + ' ' +
+          : d.toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' }) + ' · ' +
             d.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })
+        const author   = isAgent ? (c.author_name?.trim() || `Équipe ${savBrandLabel()}`) : customerName
+        const subline  = isAgent ? `Service client ${savBrandLabel()}` : ticket.customer_email
 
         const attachments = c.attachments ?? []
 
@@ -702,18 +595,16 @@ function ConversationThread({ ticket, refreshKey }: { ticket: ProcessedTicket; r
         const zipchatMessages = c.body ? parseZipchatTranscript(c.body) : null
         if (zipchatMessages && zipchatMessages.length >= 2) {
           return (
-            <div key={c.id ?? i} className="rounded-xl border border-[#e8e8e4] overflow-hidden">
-              <div className="flex items-center gap-2 px-4 py-2 bg-[#f5f4f2] border-b border-[#e8e8e4]">
-                <span className="text-[10px] font-bold uppercase tracking-[0.08em] text-[#6b6b63]">💬 Conversation Zipchat</span>
-                <span className="text-[10px] text-[#aeb0c9]">· {dateStr}</span>
+            <div key={c.id ?? i} className="rounded-2xl border border-[#e5e5ea] bg-white overflow-hidden">
+              <div className="flex items-center gap-2 px-5 py-3 border-b border-[#f2f2f7]">
+                <span className="text-[13px] font-semibold text-[#1d1d1f]">Conversation chat</span>
+                <span className="text-[12px] text-[#8e8e93] ml-auto">{dateStr}</span>
               </div>
-              <div className="px-4 py-3 space-y-2 bg-white">
+              <div className="px-5 py-4 space-y-2">
                 {zipchatMessages.map((bubble, bi) => (
                   <div key={bi} className={`flex ${bubble.role === 'customer' ? 'justify-end' : 'justify-start'}`}>
-                    <div className={`max-w-[80%] px-3 py-2 rounded-2xl text-xs leading-relaxed ${
-                      bubble.role === 'customer'
-                        ? 'bg-[#f0f0f0] text-[#1a1a2e]'
-                        : 'bg-[#3c81f5] text-white'
+                    <div className={`max-w-[80%] px-3 py-2 rounded-2xl text-[13px] leading-relaxed ${
+                      bubble.role === 'customer' ? 'bg-[#f2f2f7] text-[#1d1d1f]' : 'bg-[#0a66f5] text-white'
                     }`}>
                       {bubble.text}
                     </div>
@@ -725,66 +616,58 @@ function ConversationThread({ ticket, refreshKey }: { ticket: ProcessedTicket; r
         }
 
         return (
-          <div key={c.id ?? i} className={`flex flex-col gap-1 ${isAgent ? 'items-start' : 'items-end'}`}>
-            <span className="text-[10px] text-[#aeb0c9] px-1">{isAgent ? 'Agent' : 'Client'} · {dateStr}</span>
-            <div className={`max-w-[82%] px-3.5 py-2.5 rounded-2xl text-xs leading-relaxed ${
-              isAgent
-                ? 'bg-[#eeeeff] text-[#1a1a2e] rounded-tl-sm'
-                : 'bg-[#1a1a2e] text-white rounded-tr-sm'
-            }`}>
-              {c.body && (
-                <p className="whitespace-pre-wrap break-words">{c.body}</p>
-              )}
-              {attachments.length > 0 && (
-                <div className={`flex flex-col gap-2 ${c.body ? 'mt-2.5' : ''}`}>
-                  {attachments.map(a => {
-                    const isImage = a.content_type.startsWith('image/')
-                    const isPdf   = a.content_type === 'application/pdf'
-                    const sizeKb  = Math.round(a.size / 1024)
-                    // Proxy authentifié : certains Zendesk (Bowa) exigent l'auth pour
-                    // afficher les pièces jointes → on passe par notre serveur.
-                    const proxied = `/api/sav/attachment?brand=${savBrand()}&url=${encodeURIComponent(a.content_url)}`
-                    return (
-                      <div key={a.id}>
-                        {isImage ? (
-                          <a href={proxied} target="_blank" rel="noopener noreferrer" title={a.file_name}>
-                            {/* eslint-disable-next-line @next/next/no-img-element */}
-                            <img
-                              src={proxied}
-                              alt={a.file_name}
-                              className="max-w-full max-h-48 rounded-lg object-contain border border-[#e8e8e4] cursor-pointer hover:opacity-90 transition-opacity"
-                            />
-                            <p className="text-[10px] text-[#9b9b93] mt-1">{a.file_name} · {sizeKb} Ko</p>
-                          </a>
-                        ) : (
-                          <a
-                            href={proxied}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            download={a.file_name}
-                            className="inline-flex items-center gap-2 px-3 py-2 rounded-lg bg-white/20 border border-white/30 hover:bg-white/30 transition-colors group"
-                          >
-                            <span className="text-base leading-none">
-                              {isPdf ? '📄' : '📎'}
-                            </span>
-                            <div className="min-w-0">
-                              <p className="text-[11px] font-medium truncate">
-                                {a.file_name}
-                              </p>
-                              <p className="text-[10px] opacity-70">{sizeKb} Ko</p>
-                            </div>
-                            <ExternalLink size={11} strokeWidth={1.8} className="opacity-50 shrink-0 ml-1" />
-                          </a>
-                        )}
-                      </div>
-                    )
-                  })}
-                </div>
-              )}
-            </div>
-          </div>
+          <article
+            key={c.id ?? i}
+            className={`rounded-2xl border px-5 py-4 ${isAgent ? 'bg-[#f7f8fc] border-[#e6e8f2]' : 'bg-white border-[#e5e5ea]'}`}
+          >
+            <header className="flex items-start gap-3 mb-3">
+              <Avatar name={author} size={34} tone={isAgent ? ['#e3e1fb', '#5b4fd6'] : undefined} />
+              <div className="min-w-0 flex-1">
+                <p className="text-[14px] font-semibold text-[#1d1d1f] leading-tight truncate">{author}</p>
+                <p className="text-[12px] text-[#8e8e93] truncate">{subline}</p>
+              </div>
+              <time className="text-[12px] text-[#8e8e93] shrink-0" dateTime={c.created_at}>{dateStr}</time>
+            </header>
+            {c.body && (
+              <p className="text-[14px] leading-[1.6] text-[#1d1d1f] whitespace-pre-wrap break-words pl-[46px]">{c.body.replace(/\n{3,}/g, '\n\n').trim()}</p>
+            )}
+            {attachments.length > 0 && (
+              <div className={`flex flex-wrap gap-2 pl-[46px] ${c.body ? 'mt-3' : ''}`}>
+                {attachments.map(a => {
+                  const isImage = a.content_type.startsWith('image/')
+                  const isPdf   = a.content_type === 'application/pdf'
+                  const sizeKb  = Math.round(a.size / 1024)
+                  // Proxy authentifié : certains Zendesk (Bowa) exigent l'auth pour
+                  // afficher les pièces jointes → on passe par notre serveur.
+                  const proxied = `/api/sav/attachment?brand=${savBrand()}&url=${encodeURIComponent(a.content_url)}`
+                  return isImage ? (
+                    <a key={a.id} href={proxied} target="_blank" rel="noopener noreferrer" title={a.file_name}>
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img src={proxied} alt={a.file_name} className="max-h-40 rounded-xl object-contain border border-[#e5e5ea] hover:opacity-90 transition-opacity" />
+                    </a>
+                  ) : (
+                    <a
+                      key={a.id}
+                      href={proxied}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      download={a.file_name}
+                      className="inline-flex items-center gap-2 px-3 py-2 rounded-xl bg-white border border-[#e5e5ea] hover:bg-[#f2f2f7] transition-colors"
+                    >
+                      <span className="text-base leading-none">{isPdf ? '📄' : '📎'}</span>
+                      <span className="min-w-0">
+                        <span className="block text-[12px] font-medium text-[#1d1d1f] truncate max-w-[220px]">{a.file_name}</span>
+                        {sizeKb > 0 && <span className="block text-[11px] text-[#8e8e93]">{sizeKb} Ko</span>}
+                      </span>
+                    </a>
+                  )
+                })}
+              </div>
+            )}
+          </article>
         )
       })}
+      <div ref={endRef} />
     </div>
   )
 }
@@ -888,78 +771,162 @@ function BowaDeliveryProof({ email, order }: { email: string; order?: string | n
   )
 }
 
-function TicketDetail({ ticket, refreshKey }: { ticket: ProcessedTicket; refreshKey: number }) {
+const PILL = 'inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[12px] font-medium'
+
+function TicketDetail({ ticket, refreshKey, customerName, assignee, tags }: {
+  ticket: ProcessedTicket; refreshKey: number; customerName: string; assignee?: string; tags: string[]
+}) {
+  const statusPill = ticket.status === 'pending'
+    ? <span className={PILL} style={{ background: '#ececef', color: '#48484a' }}>En attente client</span>
+    : <span className={PILL} style={{ background: '#e0ecff', color: '#0a58d0' }}><span className="w-1.5 h-1.5 rounded-full bg-current" />{ticket.status === 'new' ? 'Nouveau' : 'Ouvert'}</span>
   return (
-    <div className="flex flex-col h-full overflow-hidden">
-      {/* Detail header */}
-      <div className="px-6 py-4 border-b border-[#e8e8e4] shrink-0">
-        <p className="text-[10px] font-semibold uppercase tracking-[0.1em] text-[#aeb0c9] mb-1">
-          #{ticket.ticket_id}
-        </p>
-        <h2 className="text-base font-semibold text-[#1a1a2e] leading-snug mb-2">{ticket.subject}</h2>
-        <div className="flex items-center gap-2 flex-wrap">
-          <span className="text-xs text-[#6b6b63]">{ticket.customer_email}</span>
-          <span className="text-[#d0cfc9]">·</span>
-          {ticket.is_phishing
-            ? <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-[#fee2e2] text-[#c7293a]">🎣 Phishing</span>
-            : catBadge(ticket.category)
-          }
-          {ticket.action === 'auto_reply'
-            ? <span className="inline-flex px-2 py-0.5 rounded-full text-[10px] font-semibold bg-[#dcf5e7] text-[#1a7f4b]">Réponse auto</span>
-            : <span className="inline-flex px-2 py-0.5 rounded-full text-[10px] font-semibold bg-[#fef3c7] text-[#b45309]">À escalader</span>
-          }
-          {ticket.partnership_email_sent === true && (
-            <span className="inline-flex px-2 py-0.5 rounded-full text-[10px] font-semibold bg-[#fdf4ff] text-[#7e22ce]">✉ Transmis à Pauline</span>
-          )}
-          {ticket.partnership_email_sent === false && (
-            <span className="inline-flex px-2 py-0.5 rounded-full text-[10px] font-semibold bg-[#fce8ea] text-[#c7293a]">⚠ Email partenariat échoué</span>
-          )}
-        </div>
+    <div className="max-w-[760px] mx-auto px-8 pt-6 pb-8">
+      <h1 className="text-[24px] font-semibold text-[#1d1d1f] leading-tight tracking-[-0.01em]">{ticket.subject || '(sans objet)'}</h1>
+      <div className="flex items-center gap-1.5 flex-wrap mt-3">
+        {statusPill}
+        {ticket.is_phishing
+          ? <span className={PILL} style={{ background: '#fde8e8', color: '#c81e1e' }}>Phishing</span>
+          : <span className={PILL} style={{ background: CAT_COLORS[ticket.category].bg, color: CAT_COLORS[ticket.category].text }}>{CAT_LABELS[ticket.category]}</span>}
+        {ticket.action === 'escalate' && <span className={PILL} style={{ background: '#fff1db', color: '#b45309' }}>À escalader</span>}
+        {tags.map(t => TAG_BY_KEY[t] && (
+          <span key={t} className={PILL} style={{ background: TAG_BY_KEY[t].bg, color: TAG_BY_KEY[t].text }}>{TAG_BY_KEY[t].label}</span>
+        ))}
+        {ticket.partnership_email_sent === true && <span className={PILL} style={{ background: '#fdf4ff', color: '#7e22ce' }}>Transmis à Pauline</span>}
+        {ticket.partnership_email_sent === false && <span className={PILL} style={{ background: '#fde8e8', color: '#c81e1e' }}>Email partenariat échoué</span>}
+        {assignee
+          ? <span className={`${PILL} pl-1 border border-[#e5e5ea] bg-white text-[#1d1d1f]`}><Avatar name={assignee} size={20} /> {assignee}</span>
+          : <span className={`${PILL} border border-dashed border-[#c7c7cc] text-[#8e8e93]`}>Non attribué</span>}
       </div>
 
-      {/* Scrollable body */}
-      <div className="flex-1 overflow-y-auto px-6 py-5 space-y-5">
-
-        {/* Phishing warning */}
-        {ticket.is_phishing && (
-          <div className="rounded-xl bg-[#fef2f2] border border-[#fecaca] px-4 py-3 flex gap-3">
-            <span className="text-xl shrink-0">🎣</span>
-            <div>
-              <p className="text-sm font-bold text-[#c7293a] mb-0.5">Tentative de phishing détectée</p>
-              <p className="text-xs font-semibold text-[#c7293a] mb-1">⚠ Ne pas cliquer sur les liens de ce message</p>
-              {ticket.phishing_signals && ticket.phishing_signals.length > 0 && (
-                <ul className="text-xs text-[#7f1d1d] space-y-0.5 list-disc list-inside">
-                  {ticket.phishing_signals.map((s, i) => <li key={i}>{s}</li>)}
-                </ul>
-              )}
-            </div>
-          </div>
-        )}
-
-        {/* Conversation thread */}
-        <div>
-          <p className="text-[10px] font-semibold uppercase tracking-[0.1em] text-[#aeb0c9] mb-3">
-            Conversation
-          </p>
-          <ConversationThread ticket={ticket} refreshKey={refreshKey} />
+      {ticket.is_phishing && (
+        <div className="mt-5 rounded-2xl bg-[#fef2f2] border border-[#fecaca] px-5 py-4">
+          <p className="text-[14px] font-semibold text-[#c81e1e]">Tentative de phishing : ne clique sur aucun lien de ce message.</p>
+          {ticket.phishing_signals && ticket.phishing_signals.length > 0 && (
+            <ul className="text-[13px] text-[#7f1d1d] mt-1.5 space-y-0.5 list-disc list-inside">
+              {ticket.phishing_signals.map((s, i) => <li key={i}>{s}</li>)}
+            </ul>
+          )}
         </div>
+      )}
 
-        {/* Preuve de livraison (Bowa) */}
-        <BowaDeliveryProof email={ticket.customer_email} order={ticket.order?.order_number} />
+      <div className="mt-6">
+        <ConversationThread ticket={ticket} refreshKey={refreshKey} customerName={customerName} />
+      </div>
+    </div>
+  )
+}
 
-        {/* Order */}
-        {ticket.order && (
-          <div>
-            <p className="text-[10px] font-semibold uppercase tracking-[0.1em] text-[#aeb0c9] mb-3">
-              Commande associée
-            </p>
-            <OrderBlock order={ticket.order} />
+// Étapes de la commande (Shopify) : Payée → Préparation → Expédiée → Livrée.
+function orderStep(order: MoomOrder): number {
+  const f = order.status_fr.toLowerCase()
+  if (/livr/.test(f)) return 3
+  if (/expédi/.test(f)) return 2
+  if (/paiement|annul/.test(order.financial_status_fr.toLowerCase())) return -1
+  return 1
+}
+
+function OrderCard({ order }: { order: MoomOrder }) {
+  const step = orderStep(order)
+  const steps = ['Payée', 'Préparation', 'Expédiée', 'Livrée']
+  const row = (label: string, value: React.ReactNode) => (
+    <div className="flex items-baseline justify-between gap-3 py-1.5 text-[13px]">
+      <span className="text-[#8e8e93] shrink-0">{label}</span>
+      <span className="text-[#1d1d1f] font-medium text-right min-w-0 truncate">{value}</span>
+    </div>
+  )
+  return (
+    <section className="rounded-2xl bg-white border border-[#e5e5ea] p-4">
+      <div className="flex items-center justify-between mb-3">
+        <h3 className="text-[14px] font-semibold text-[#1d1d1f]">Commande {order.order_number?.startsWith('#') ? order.order_number : `#${order.order_number}`}</h3>
+        <span className="text-[12px] text-[#8e8e93]">{new Date(order.created_at).toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' })}</span>
+      </div>
+      {step >= 0 && (
+        <ol className="grid grid-cols-4 mb-3" aria-label="Avancement de la commande">
+          {steps.map((label, i) => (
+            <li key={label} className="relative flex flex-col items-center gap-1.5">
+              {i > 0 && <span className={`absolute top-[5px] right-1/2 w-full h-[2px] ${i <= step ? 'bg-[#34c759]' : 'bg-[#e5e5ea]'}`} />}
+              <span className={`relative w-3 h-3 rounded-full ${i < step ? 'bg-[#34c759]' : i === step ? 'bg-white border-2 border-[#34c759]' : 'bg-[#e5e5ea]'}`} />
+              <span className={`text-[11px] ${i === step ? 'font-semibold text-[#1d1d1f]' : 'text-[#8e8e93]'}`}>{label}</span>
+            </li>
+          ))}
+        </ol>
+      )}
+      <div className="divide-y divide-[#f2f2f7]">
+        {row('Paiement', order.financial_status_fr)}
+        {row('Statut', order.status_fr)}
+        {order.carrier && row('Transporteur', order.carrier)}
+        {order.tracking_number && row('Suivi', order.tracking_url
+          ? <a href={order.tracking_url} target="_blank" rel="noopener noreferrer" className="text-[#0a66f5] inline-flex items-center gap-1">{order.tracking_number}<ExternalLink size={11} /></a>
+          : order.tracking_number)}
+        {order.estimated_delivery && row('Livraison prévue', order.estimated_delivery)}
+      </div>
+      {order.order_number && <OrderReceivedLine order={order.order_number} />}
+      {order.products.length > 0 && (
+        <ul className="mt-2 pt-2 border-t border-[#f2f2f7] space-y-1">
+          {order.products.map((p, i) => (
+            <li key={i} className="flex justify-between gap-3 text-[13px]">
+              <span className="text-[#1d1d1f] min-w-0"><span className="text-[#8e8e93]">{p.quantity}×</span> {p.name}</span>
+              <span className="text-[#48484a] shrink-0 tabular-nums">{Number(p.price).toFixed(2).replace('.', ',')} €</span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
+  )
+}
+
+// Colonne de droite : la cliente, ce que Claude a compris, la commande, l'historique.
+function ContextPanel({ ticket, customerName }: { ticket: ProcessedTicket; customerName: string }) {
+  const [copied, setCopied] = useState(false)
+  const [showReason, setShowReason] = useState(false)
+  useEffect(() => { setCopied(false); setShowReason(false) }, [ticket.ticket_id])
+  const pct = Math.round(ticket.confidence * 100)
+  const confColor = ticket.confidence >= 0.85 ? '#1a7f4b' : ticket.confidence >= 0.6 ? '#b45309' : '#c81e1e'
+  return (
+    <div className="p-4 space-y-3">
+      <section className="flex flex-col items-center text-center pt-3 pb-1">
+        <Avatar name={customerName} size={64} solid tone={toneFor(customerName)} />
+        <h2 className="mt-2.5 text-[17px] font-semibold text-[#1d1d1f]">{customerName}</h2>
+        <p className="text-[12px] text-[#8e8e93] truncate max-w-full">{ticket.customer_email}</p>
+        <div className="flex gap-2 mt-3">
+          <a href={`mailto:${ticket.customer_email}`} title="Écrire un e-mail" className="w-9 h-9 rounded-full bg-white border border-[#e5e5ea] flex items-center justify-center text-[#0a66f5] hover:bg-[#f2f2f7]">
+            <Mail size={15} strokeWidth={1.8} />
+          </a>
+          <button
+            onClick={() => { navigator.clipboard?.writeText(ticket.customer_email).then(() => setCopied(true)).catch(() => {}) }}
+            title="Copier l'adresse e-mail"
+            className="w-9 h-9 rounded-full bg-white border border-[#e5e5ea] flex items-center justify-center text-[#0a66f5] hover:bg-[#f2f2f7]"
+          >
+            {copied ? <Check size={15} strokeWidth={2} /> : <Copy size={15} strokeWidth={1.8} />}
+          </button>
+        </div>
+      </section>
+
+      {(ticket.situation_detectee || ticket.reason) && (
+        <section className="rounded-2xl bg-white border border-[#e5e5ea] p-4">
+          <div className="flex items-center justify-between mb-2">
+            <h3 className="text-[14px] font-semibold text-[#1d1d1f] flex items-center gap-1.5"><Sparkles size={14} className="text-[#7c3aed]" /> Claude</h3>
+            <span className="text-[12px] font-medium" style={{ color: confColor }}>Confiance {pct} %</span>
           </div>
-        )}
+          <p className="text-[13px] leading-relaxed text-[#1d1d1f]">{ticket.situation_detectee || ticket.reason}</p>
+          {ticket.situation_detectee && ticket.reason && (
+            <>
+              <button onClick={() => setShowReason(v => !v)} className="mt-2 text-[12px] text-[#0a66f5] inline-flex items-center gap-0.5">
+                {showReason ? 'Masquer' : 'Pourquoi cette réponse'} {showReason ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
+              </button>
+              {showReason && <p className="mt-1.5 text-[12px] leading-relaxed text-[#48484a]">{ticket.reason}</p>}
+            </>
+          )}
+        </section>
+      )}
 
-        {/* Customer history */}
+      {ticket.order && <OrderCard order={ticket.order} />}
+
+      <BowaDeliveryProof email={ticket.customer_email} order={ticket.order?.order_number} />
+
+      <section className="rounded-2xl bg-white border border-[#e5e5ea] px-4 pb-3">
         <CustomerHistory email={ticket.customer_email} currentTicketId={ticket.ticket_id} />
-      </div>
+      </section>
     </div>
   )
 }
@@ -1040,7 +1007,6 @@ function ReplyPanel({ ticket, draft, solved, onDraftChange, onSolvedChange, onSe
   const [improving, setImproving]         = useState(false)
   const [previousDraft, setPreviousDraft] = useState<string | null>(null)
   const [error, setError]                 = useState<string | null>(null)
-  const [showReason, setShowReason]       = useState(false)
   const [attachments, setAttachments]     = useState<AttachmentState[]>([])
   const [uploading, setUploading]         = useState(false)
   const fileInputRef                      = useRef<HTMLInputElement>(null)
@@ -1050,6 +1016,7 @@ function ReplyPanel({ ticket, draft, solved, onDraftChange, onSolvedChange, onSe
   const openedAtRef                       = useRef<number>(Date.now())
   useEffect(() => { openedAtRef.current = Date.now() }, [ticket.ticket_id])
   const [showForward, setShowForward]     = useState(false)
+  const [showMore, setShowMore]           = useState(false)
   const [forwardTo, setForwardTo]         = useState('')
   const [forwardNote, setForwardNote]     = useState('')
   const [forwarding, setForwarding]       = useState(false)
@@ -1222,83 +1189,42 @@ function ReplyPanel({ ticket, draft, solved, onDraftChange, onSolvedChange, onSe
   const showDecisionPanel = ticket.needs_decision && !draft
 
   return (
-    <div className="flex flex-col h-full overflow-hidden">
-      {/* Header */}
-      <div className="px-5 py-4 border-b border-[#e8e8e4] shrink-0 space-y-2">
-        <div className="flex items-center justify-between gap-2">
-          <p className="text-[10px] font-semibold uppercase tracking-[0.1em] text-[#aeb0c9]">
-            Réponse Claude
-          </p>
-          <div className="flex items-center gap-1.5">
-            <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${
-              ticket.confidence >= 0.85 ? 'bg-[#dcf5e7] text-[#1a7f4b]'
-              : ticket.confidence >= 0.6  ? 'bg-[#fef3c7] text-[#b45309]'
-              : 'bg-[#fce8ea] text-[#c7293a]'
-            }`}>
-              {Math.round(ticket.confidence * 100)}% confiance
-            </span>
-            <button
-              onClick={regenerate}
-              disabled={regenerating || sending || archiving}
-              title="Régénérer la réponse"
-              className="w-6 h-6 flex items-center justify-center rounded-md text-[#9b9b93] hover:text-[#1a1a2e] hover:bg-[#f0efec] transition-colors disabled:opacity-40"
-            >
-              <RotateCcw size={12} strokeWidth={1.8} className={regenerating ? 'animate-spin' : ''} />
-            </button>
-          </div>
-        </div>
-
-        {/* Situation détectée — ce que Claude a compris du dernier message */}
-        {ticket.situation_detectee && (
-          <div className="flex gap-2 items-start px-3 py-2 rounded-lg bg-[#f0f4ff] border border-[#c7d2fe]">
-            <span className="text-[10px] shrink-0 mt-px">🎯</span>
-            <p className="text-[11px] text-[#3730a3] leading-snug font-medium">
-              {ticket.situation_detectee}
-            </p>
-          </div>
-        )}
-
-        <button
-          onClick={() => setShowReason(v => !v)}
-          className="flex items-center gap-1 text-[10px] text-[#9b9b93] hover:text-[#6b6b63] transition-colors"
-        >
-          {showReason ? <ChevronUp size={11} /> : <ChevronDown size={11} />}
-          Justification
-        </button>
-        {showReason && (
-          <p className="text-[11px] text-[#6b6b63] bg-[#f8f7f5] rounded-lg px-3 py-2 leading-relaxed">
-            {ticket.reason}
-          </p>
-        )}
+    <div className="rounded-2xl bg-white border border-[#e5e5ea] shadow-[0_6px_24px_rgba(0,0,0,0.06)]">
+      {/* En-tête du composeur */}
+      <div className="flex items-center gap-3 px-4 pt-3 pb-2 flex-wrap">
+        <span className="inline-flex rounded-lg bg-[#f2f2f7] p-0.5 text-[12px] font-medium">
+          <span className="px-2.5 py-1 rounded-md bg-white shadow-sm text-[#1d1d1f]">Répondre</span>
+        </span>
+        <span className="text-[12px] text-[#8e8e93] truncate">À : <span className="text-[#48484a]">{ticket.customer_email}</span></span>
+        <span className="ml-auto inline-flex items-center gap-1 text-[12px] text-[#7c3aed]">
+          <Sparkles size={13} /> Rédigé par Claude
+        </span>
       </div>
 
-      {/* Decision panel OR Textarea */}
-      <div className="flex-1 overflow-hidden px-5 py-4 flex flex-col gap-3">
+      {/* Décision OU texte */}
+      <div className="px-4">
         {showDecisionPanel ? (
-          <div className="flex flex-col gap-2 h-full justify-center">
-            <p className="text-[11px] text-[#6b6b63] text-center font-medium mb-1">
-              Quelle décision prenez-vous ?
-            </p>
+          <div className="py-2 space-y-2">
+            <p className="text-[13px] text-[#48484a]">Quelle décision prends-tu ? Claude rédige ensuite la réponse.</p>
             {deciding ? (
-              <div className="flex items-center justify-center gap-2 py-6">
-                <RefreshCw size={14} className="animate-spin text-[#9b9b93]" />
-                <span className="text-xs text-[#9b9b93]">Rédaction en cours…</span>
+              <div className="flex items-center gap-2 py-4 text-[13px] text-[#8e8e93]">
+                <RefreshCw size={14} className="animate-spin" /> Rédaction en cours…
               </div>
             ) : (
               <>
-                {(ticket.decision_options ?? []).map(opt => (
-                  <button
-                    key={opt.key}
-                    onClick={() => decide(opt)}
-                    className="flex items-center gap-2.5 px-4 py-3 rounded-xl border border-[#e8e8e4] bg-white hover:bg-[#f0efec] hover:border-[#aeb0c9] text-[12px] font-medium text-[#1a1a2e] transition-colors text-left"
-                  >
-                    <span className="text-base leading-none">{opt.emoji}</span>
-                    {opt.label}
-                  </button>
-                ))}
-
-                {/* Custom decision */}
-                <div className="mt-1 flex gap-2">
+                <div className="flex flex-wrap gap-2">
+                  {(ticket.decision_options ?? []).map(opt => (
+                    <button
+                      key={opt.key}
+                      onClick={() => decide(opt)}
+                      className="inline-flex items-center gap-2 px-3 py-2 rounded-xl border border-[#e5e5ea] bg-white hover:bg-[#f2f2f7] text-[13px] font-medium text-[#1d1d1f] transition-colors"
+                    >
+                      <span className="leading-none">{opt.emoji}</span>
+                      {opt.label}
+                    </button>
+                  ))}
+                </div>
+                <div className="flex gap-2">
                   <input
                     type="text"
                     value={customDecision}
@@ -1310,7 +1236,7 @@ function ReplyPanel({ ticket, draft, solved, onDraftChange, onSolvedChange, onSe
                       }
                     }}
                     placeholder="Autre décision… (Entrée pour valider)"
-                    className="flex-1 px-3 py-2.5 rounded-xl border border-[#e8e8e4] bg-white text-[12px] text-[#1a1a2e] placeholder-[#9b9b93] focus:outline-none focus:border-[#aeb0c9]"
+                    className="flex-1 px-3 py-2 rounded-xl border border-[#e5e5ea] bg-white text-[13px] text-[#1d1d1f] placeholder-[#8e8e93] focus:outline-none focus:border-[#0a66f5]"
                   />
                   <button
                     disabled={!customDecision.trim()}
@@ -1318,7 +1244,8 @@ function ReplyPanel({ ticket, draft, solved, onDraftChange, onSolvedChange, onSe
                       decide({ key: 'custom', label: customDecision.trim(), emoji: '✏️' })
                       setCustomDecision('')
                     }}
-                    className="px-3 py-2 rounded-xl border border-[#e8e8e4] bg-white hover:bg-[#f0efec] disabled:opacity-30 text-[#1a1a2e] transition-colors"
+                    className="px-3 py-2 rounded-xl border border-[#e5e5ea] bg-white hover:bg-[#f2f2f7] disabled:opacity-30 text-[#1d1d1f] transition-colors"
+                    aria-label="Valider la décision"
                   >
                     <ArrowRight size={14} />
                   </button>
@@ -1331,168 +1258,144 @@ function ReplyPanel({ ticket, draft, solved, onDraftChange, onSolvedChange, onSe
             value={draft}
             onFocus={() => onStartAnswer?.()}
             onChange={e => { onStartAnswer?.(); onDraftChange(e.target.value); setPreviousDraft(null) }}
-            className="w-full flex-1 text-xs text-[#1a1a2e] bg-[#f8f7f5] rounded-xl px-3 py-3 leading-relaxed resize-none border border-transparent focus:border-[#aeb0c9] focus:outline-none transition-colors font-[inherit]"
-            style={{ minHeight: 0 }}
+            rows={7}
+            aria-label="Réponse"
+            className="w-full text-[14px] leading-[1.6] text-[#1d1d1f] bg-transparent resize-y min-h-[120px] max-h-[45vh] focus:outline-none font-[inherit] py-1"
           />
         )}
       </div>
 
-      {/* Footer */}
-      <div className="px-5 pb-5 shrink-0 space-y-3">
-        {error && (
-          <p className="text-[11px] text-[#c7293a] bg-[#fce8ea] rounded-lg px-3 py-2">{error}</p>
-        )}
-
-        {/* Attachment + Améliorer — toolbar row */}
-        <input
-          ref={fileInputRef}
-          type="file"
-          multiple
-          className="hidden"
-          onChange={handleFileChange}
-          accept=".pdf,.jpg,.jpeg,.png,.gif,.webp,.zip,.doc,.docx,.xls,.xlsx"
-        />
-
-        {/* Attached files chips */}
-        {attachments.length > 0 && (
-          <div className="flex flex-col gap-1.5">
-            {attachments.map(att => (
-              <div key={att.token} className="flex items-center gap-2 px-3 py-2 rounded-lg bg-[#f0efec] border border-[#e0deda]">
-                <Paperclip size={12} strokeWidth={1.8} className="text-[#6b6b63] shrink-0" />
-                <span className="text-[11px] text-[#1a1a2e] truncate flex-1 font-medium">{att.filename}</span>
-                <button onClick={() => removeAttachment(att.token)} className="shrink-0 text-[#9b9b93] hover:text-[#c7293a] transition-colors">
-                  <X size={13} strokeWidth={2} />
-                </button>
-              </div>
-            ))}
-          </div>
-        )}
-
-        {/* Action buttons row */}
-        <div className="flex items-center gap-2">
-          {/* Joindre un fichier */}
-          <button
-            onClick={() => fileInputRef.current?.click()}
-            disabled={uploading || sending || archiving}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-[#e0deda] bg-white text-[11px] font-medium text-[#6b6b63] hover:bg-[#f0efec] hover:border-[#c8c6c0] transition-colors disabled:opacity-40"
-          >
-            {uploading
-              ? <RefreshCw size={11} strokeWidth={1.8} className="animate-spin" />
-              : <Paperclip size={11} strokeWidth={1.8} />}
-            {uploading ? 'Upload…' : 'Joindre'}
-          </button>
-
-          {/* Améliorer ma réponse */}
-          {!showDecisionPanel && draft.trim() && (
-            <button
-              onClick={improve}
-              disabled={improving || sending || archiving || deciding}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-[#e0d4f7] bg-[#faf5ff] text-[11px] font-medium text-[#7c3aed] hover:bg-[#f3e8ff] hover:border-[#c4b5fd] transition-colors disabled:opacity-40"
-            >
-              {improving
-                ? <RefreshCw size={11} strokeWidth={1.8} className="animate-spin" />
-                : <span className="text-[12px] leading-none">✨</span>}
-              {improving ? 'Amélioration…' : 'Améliorer'}
-            </button>
+      {/* Pièces jointes + rappels */}
+      {(attachments.length > 0 || ticket.category === 'retour_remboursement' || error) && (
+        <div className="px-4 pb-2 flex flex-wrap gap-2">
+          {error && <p className="w-full text-[12px] text-[#c81e1e] bg-[#fde8e8] rounded-lg px-3 py-2">{error}</p>}
+          {attachments.map(att => (
+            <span key={att.token} className="inline-flex items-center gap-1.5 pl-2.5 pr-1.5 py-1 rounded-lg bg-[#f2f2f7] text-[12px] text-[#1d1d1f]">
+              <Paperclip size={12} className="text-[#8e8e93]" />
+              <span className="truncate max-w-[180px]">{att.filename}</span>
+              <button onClick={() => removeAttachment(att.token)} className="text-[#8e8e93] hover:text-[#c81e1e]" aria-label={`Retirer ${att.filename}`}><X size={13} /></button>
+            </span>
+          ))}
+          {ticket.category === 'retour_remboursement' && (
+            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-[#e0ecff] text-[12px] text-[#0a58d0]">📎 Bon de retour joint automatiquement</span>
           )}
-
-          {/* Undo amélioration */}
-          {previousDraft !== null && !improving && (
-            <button
-              onClick={undoImprove}
-              className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-[#e0deda] bg-white text-[11px] font-medium text-[#9b9b93] hover:bg-[#f0efec] hover:text-[#6b6b63] transition-colors"
-            >
-              ↩ Annuler
-            </button>
+          {ticket.category === 'retour_remboursement' && /échange|echange|avoir/i.test(draft) && (
+            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-[#fff1db] text-[12px] text-[#b45309]">Pense à joindre l&apos;étiquette Colissimo</span>
           )}
         </div>
+      )}
 
-        {/* Bon de retour — auto-attach indicator */}
-        {ticket.category === 'retour_remboursement' && (
-          <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-[#e8f4fd] border border-[#bfdbfe]">
-            <span className="text-[11px]">📎</span>
-            <p className="text-[11px] text-[#1e40af] font-medium leading-snug">
-              Bon de retour joint automatiquement
-            </p>
+      {/* Transfert à un tiers */}
+      {showForward && (
+        <div className="mx-4 mb-2 rounded-xl border border-[#e5e5ea] bg-[#f9f9fb] p-3 space-y-2">
+          <div className="flex items-center justify-between">
+            <span className="text-[13px] font-semibold text-[#1d1d1f]">Transférer le ticket</span>
+            <button onClick={() => { setShowForward(false); setForwardOk(false) }} className="text-[#8e8e93] hover:text-[#1d1d1f]" aria-label="Fermer"><X size={14} /></button>
           </div>
-        )}
-
-        {/* Colissimo reminder — shown when draft mentions exchange or credit note */}
-        {ticket.category === 'retour_remboursement' && /échange|echange|avoir/i.test(draft) && (
-          <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-[#fff7ed] border border-[#fed7aa]">
-            <span className="text-[11px]">⚠️</span>
-            <p className="text-[11px] text-[#c2410c] font-medium leading-snug">
-              Pensez à joindre l&apos;étiquette Colissimo
-            </p>
-          </div>
-        )}
-
-        <label className="flex items-center gap-2 text-xs text-[#6b6b63] cursor-pointer">
           <input
-            type="checkbox" checked={solved} onChange={e => onSolvedChange(e.target.checked)}
-            className="accent-[#1a7f4b] w-3.5 h-3.5"
+            type="email" value={forwardTo} onChange={e => setForwardTo(e.target.value)}
+            placeholder="email@destinataire.com"
+            className="w-full px-3 py-2 rounded-lg border border-[#e5e5ea] bg-white text-[13px] text-[#1d1d1f] outline-none focus:border-[#0a66f5]"
           />
-          Marquer comme résolu
-        </label>
-        <div className="flex gap-2">
-          <button
-            onClick={() => send('auto_reply')} disabled={sending || archiving || regenerating}
-            className="flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-xl bg-[#1a1a2e] text-white text-xs font-semibold hover:bg-[#2a2a4e] transition-colors disabled:opacity-50"
-          >
-            {sending ? <RefreshCw size={13} className="animate-spin" /> : <Send size={13} strokeWidth={1.8} />}
-            Envoyer
-          </button>
-          <button
-            onClick={() => send('escalate')} disabled={sending || archiving || regenerating}
-            className="flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-xl border border-[#e8e8e4] text-[#6b6b63] text-xs font-semibold hover:bg-[#f0efec] transition-colors disabled:opacity-50"
-          >
-            <ArrowUpRight size={13} strokeWidth={1.8} />
-            Escalader
-          </button>
-        </div>
-        {/* Transférer à un tiers (collègue, entrepôt, fournisseur…) */}
-        {!showForward ? (
-          <button
-            onClick={() => setShowForward(true)} disabled={sending || archiving || regenerating}
-            className="w-full flex items-center justify-center gap-1.5 py-2 rounded-xl border border-[#e8e8e4] text-[#6b6b63] text-xs font-medium hover:bg-[#f0efec] transition-colors disabled:opacity-50"
-          >
-            <Forward size={13} strokeWidth={1.8} />
-            Transférer à quelqu&apos;un
-          </button>
-        ) : (
-          <div className="rounded-xl border border-[#e8e8e4] bg-[#faf9f7] p-3 space-y-2">
-            <div className="flex items-center justify-between">
-              <span className="text-[11px] font-bold uppercase tracking-[0.1em] text-[#9b9b93]">Transférer le ticket</span>
-              <button onClick={() => { setShowForward(false); setForwardOk(false) }} className="text-[#9b9b93] hover:text-[#6b6b63]"><X size={13} /></button>
-            </div>
-            <input
-              type="email" value={forwardTo} onChange={e => setForwardTo(e.target.value)}
-              placeholder="email@destinataire.com"
-              className="w-full px-3 py-2 rounded-lg border border-[#e8e8e4] text-xs text-[#1a1a2e] outline-none focus:border-[#aeb0c9]"
-            />
-            <textarea
-              value={forwardNote} onChange={e => setForwardNote(e.target.value)} rows={2}
-              placeholder="Message pour le destinataire (optionnel)"
-              className="w-full px-3 py-2 rounded-lg border border-[#e8e8e4] text-xs text-[#1a1a2e] outline-none focus:border-[#aeb0c9] resize-none"
-            />
-            <p className="text-[10px] text-[#9b9b93] leading-snug">La conversation du ticket est jointe. Le destinataire peut répondre directement au client.</p>
+          <textarea
+            value={forwardNote} onChange={e => setForwardNote(e.target.value)} rows={2}
+            placeholder="Message pour le destinataire (optionnel)"
+            className="w-full px-3 py-2 rounded-lg border border-[#e5e5ea] bg-white text-[13px] text-[#1d1d1f] outline-none focus:border-[#0a66f5] resize-none"
+          />
+          <div className="flex items-center gap-3">
+            <p className="text-[12px] text-[#8e8e93] leading-snug flex-1">La conversation est jointe. Le destinataire peut répondre directement au client.</p>
             <button
               onClick={forwardTicket} disabled={forwarding || forwardOk}
-              className="w-full flex items-center justify-center gap-1.5 py-2 rounded-lg bg-[#1a1a2e] text-white text-xs font-semibold hover:bg-[#2a2a4e] transition-colors disabled:opacity-50"
+              className="shrink-0 inline-flex items-center gap-1.5 px-3 py-2 rounded-lg bg-[#1d1d1f] text-white text-[13px] font-medium disabled:opacity-50"
             >
-              {forwardOk ? <CheckCheck size={13} /> : forwarding ? <RefreshCw size={13} className="animate-spin" /> : <Forward size={13} strokeWidth={1.8} />}
-              {forwardOk ? 'Transféré ✓' : forwarding ? 'Envoi…' : 'Transférer'}
+              {forwardOk ? <CheckCheck size={13} /> : forwarding ? <RefreshCw size={13} className="animate-spin" /> : <Forward size={13} />}
+              {forwardOk ? 'Transféré' : forwarding ? 'Envoi…' : 'Transférer'}
             </button>
           </div>
+        </div>
+      )}
+
+      {/* Barre d'outils */}
+      <input
+        ref={fileInputRef}
+        type="file"
+        multiple
+        className="hidden"
+        onChange={handleFileChange}
+        accept=".pdf,.jpg,.jpeg,.png,.gif,.webp,.zip,.doc,.docx,.xls,.xlsx"
+      />
+      <div className="flex items-center gap-1 px-2 pb-2 pt-1 border-t border-[#f2f2f7]">
+        <button
+          onClick={() => fileInputRef.current?.click()}
+          disabled={uploading || sending || archiving}
+          title="Joindre un fichier"
+          className="w-9 h-9 rounded-lg flex items-center justify-center text-[#48484a] hover:bg-[#f2f2f7] disabled:opacity-40"
+        >
+          {uploading ? <RefreshCw size={16} className="animate-spin" /> : <Paperclip size={16} strokeWidth={1.8} />}
+        </button>
+        <button
+          onClick={regenerate}
+          disabled={regenerating || sending || archiving}
+          title="Faire réécrire la réponse par Claude"
+          className="h-9 px-2.5 rounded-lg inline-flex items-center gap-1.5 text-[13px] text-[#7c3aed] hover:bg-[#f5f0ff] disabled:opacity-40"
+        >
+          <RotateCcw size={14} className={regenerating ? 'animate-spin' : ''} /> {regenerating ? 'Réécriture…' : 'Réécrire'}
+        </button>
+        {!showDecisionPanel && draft.trim() && (
+          <button
+            onClick={improve}
+            disabled={improving || sending || archiving || deciding}
+            title="Corriger et améliorer ce que tu as écrit"
+            className="h-9 px-2.5 rounded-lg inline-flex items-center gap-1.5 text-[13px] text-[#7c3aed] hover:bg-[#f5f0ff] disabled:opacity-40"
+          >
+            {improving ? <RefreshCw size={14} className="animate-spin" /> : <Wand2 size={14} />} {improving ? 'Amélioration…' : 'Améliorer'}
+          </button>
+        )}
+        {previousDraft !== null && !improving && (
+          <button onClick={undoImprove} className="h-9 px-2.5 rounded-lg text-[13px] text-[#8e8e93] hover:bg-[#f2f2f7]">Annuler l&apos;amélioration</button>
         )}
 
-        <button
-          onClick={archive} disabled={sending || archiving || regenerating}
-          className="w-full flex items-center justify-center gap-1.5 py-2 rounded-xl border border-[#e8e8e4] text-[#9b9b93] text-xs font-medium hover:bg-[#f8f7f5] hover:text-[#6b6b63] transition-colors disabled:opacity-50"
-        >
-          {archiving ? <RefreshCw size={12} className="animate-spin" /> : <Archive size={12} strokeWidth={1.8} />}
-          {archiving ? 'Archivage…' : 'Archiver sans répondre'}
-        </button>
+        <div className="ml-auto flex items-center gap-2">
+          <label className="hidden sm:flex items-center gap-1.5 text-[13px] text-[#48484a] cursor-pointer select-none">
+            <input type="checkbox" checked={solved} onChange={e => onSolvedChange(e.target.checked)} className="accent-[#0a66f5] w-3.5 h-3.5" />
+            Résolu après envoi
+          </label>
+          <div className="relative">
+            <button
+              onClick={() => setShowMore(v => !v)}
+              disabled={sending || archiving || regenerating}
+              title="Autres actions"
+              aria-expanded={showMore}
+              className="w-9 h-9 rounded-full flex items-center justify-center text-[#48484a] hover:bg-[#f2f2f7] disabled:opacity-40"
+            >
+              <MoreHorizontal size={18} />
+            </button>
+            {showMore && (
+              <>
+                <div className="fixed inset-0 z-30" onClick={() => setShowMore(false)} />
+                <div className="absolute right-0 bottom-full mb-2 z-40 w-[230px] rounded-xl border border-[#e5e5ea] bg-white shadow-lg py-1 text-[13px] text-[#1d1d1f]">
+                  <button onClick={() => { setShowMore(false); send('escalate') }} className="w-full flex items-center gap-2 px-3 py-2 hover:bg-[#f2f2f7] text-left">
+                    <ArrowUpRight size={14} className="text-[#b45309]" /> Escalader
+                  </button>
+                  <button onClick={() => { setShowMore(false); setShowForward(true) }} className="w-full flex items-center gap-2 px-3 py-2 hover:bg-[#f2f2f7] text-left">
+                    <Forward size={14} className="text-[#48484a]" /> Transférer à quelqu&apos;un
+                  </button>
+                  <button onClick={() => { setShowMore(false); archive() }} className="w-full flex items-center gap-2 px-3 py-2 hover:bg-[#f2f2f7] text-left">
+                    <Archive size={14} className="text-[#48484a]" /> Clore sans répondre
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+          <button
+            onClick={() => send('auto_reply')} disabled={sending || archiving || regenerating || showDecisionPanel}
+            className="h-9 pl-4 pr-3 rounded-full bg-[#0a66f5] text-white text-[13px] font-semibold inline-flex items-center gap-1.5 hover:bg-[#0858d6] disabled:opacity-50"
+          >
+            {sending ? <RefreshCw size={14} className="animate-spin" /> : null}
+            {sending ? 'Envoi…' : archiving ? 'Clôture…' : 'Envoyer'}
+            {!sending && <Send size={13} strokeWidth={2} />}
+          </button>
+        </div>
       </div>
     </div>
   )
@@ -1567,79 +1470,70 @@ function FollowUpPanel({ ticket, onSent }: {
   }
 
   return (
-    <div className="flex flex-col h-full overflow-hidden">
-      {/* Header */}
-      <div className="px-5 py-4 border-b border-[#e8e8e4] shrink-0 space-y-1">
-        <div className="flex items-center gap-2">
-          <span className="inline-flex px-2 py-0.5 rounded-full text-[10px] font-semibold bg-[#f0efec] text-[#6b6b63]">
-            En attente client
-          </span>
-        </div>
-        <p className="text-[11px] text-[#9b9b93] leading-relaxed">
-          Ce ticket est en attente de réponse du client. Relance optionnelle ci-dessous.
-        </p>
+    <div className="rounded-2xl bg-white border border-[#e5e5ea] shadow-[0_6px_24px_rgba(0,0,0,0.06)]">
+      <div className="flex items-center gap-3 px-4 pt-3 pb-2 flex-wrap">
+        <span className="inline-flex rounded-lg bg-[#f2f2f7] p-0.5 text-[12px] font-medium">
+          <span className="px-2.5 py-1 rounded-md bg-white shadow-sm text-[#1d1d1f]">Relancer</span>
+        </span>
+        <span className="text-[12px] text-[#8e8e93] truncate">À : <span className="text-[#48484a]">{ticket.customer_email}</span></span>
+        <span className="ml-auto text-[12px] text-[#8e8e93]">En attente de la réponse du client · relance facultative</span>
       </div>
-
-      {/* Textarea */}
-      <div className="flex-1 overflow-hidden px-5 py-4">
+      <div className="px-4">
         <textarea
           value={body}
           onChange={e => setBody(e.target.value)}
+          rows={5}
+          aria-label="Message de relance"
           placeholder="Bonjour, nous revenons vers vous suite à votre demande. Avez-vous des nouvelles ?"
-          className="w-full h-full text-xs text-[#1a1a2e] bg-[#f8f7f5] rounded-xl px-3 py-3 leading-relaxed resize-none border border-transparent focus:border-[#aeb0c9] focus:outline-none transition-colors font-[inherit] placeholder:text-[#c9c9c9]"
+          className="w-full text-[14px] leading-[1.6] text-[#1d1d1f] bg-transparent resize-y min-h-[96px] max-h-[45vh] focus:outline-none font-[inherit] py-1 placeholder:text-[#aeaeb2]"
         />
       </div>
-
-      {/* Footer */}
-      <div className="px-5 pb-5 shrink-0 space-y-3">
-        {error && (
-          <p className="text-[11px] text-[#c7293a] bg-[#fce8ea] rounded-lg px-3 py-2">{error}</p>
-        )}
-
-        {/* Pièces jointes (ex. facture) */}
-        <input
-          ref={fileInputRef}
-          type="file"
-          multiple
-          className="hidden"
-          onChange={handleFileChange}
-          accept=".pdf,.jpg,.jpeg,.png,.gif,.webp,.zip,.doc,.docx,.xls,.xlsx"
-        />
-        {attachments.length > 0 && (
-          <div className="flex flex-col gap-1.5">
-            {attachments.map(att => (
-              <div key={att.token} className="flex items-center gap-2 px-3 py-2 rounded-lg bg-[#f0efec] border border-[#e0deda]">
-                <Paperclip size={12} strokeWidth={1.8} className="text-[#6b6b63] shrink-0" />
-                <span className="text-[11px] text-[#1a1a2e] truncate flex-1 font-medium">{att.filename}</span>
-                <button onClick={() => removeAttachment(att.token)} className="shrink-0 text-[#9b9b93] hover:text-[#c7293a] transition-colors">
-                  <X size={13} strokeWidth={2} />
-                </button>
-              </div>
-            ))}
-          </div>
-        )}
+      {(attachments.length > 0 || error) && (
+        <div className="px-4 pb-2 flex flex-wrap gap-2">
+          {error && <p className="w-full text-[12px] text-[#c81e1e] bg-[#fde8e8] rounded-lg px-3 py-2">{error}</p>}
+          {attachments.map(att => (
+            <span key={att.token} className="inline-flex items-center gap-1.5 pl-2.5 pr-1.5 py-1 rounded-lg bg-[#f2f2f7] text-[12px] text-[#1d1d1f]">
+              <Paperclip size={12} className="text-[#8e8e93]" />
+              <span className="truncate max-w-[180px]">{att.filename}</span>
+              <button onClick={() => removeAttachment(att.token)} className="text-[#8e8e93] hover:text-[#c81e1e]" aria-label={`Retirer ${att.filename}`}><X size={13} /></button>
+            </span>
+          ))}
+        </div>
+      )}
+      <input
+        ref={fileInputRef}
+        type="file"
+        multiple
+        className="hidden"
+        onChange={handleFileChange}
+        accept=".pdf,.jpg,.jpeg,.png,.gif,.webp,.zip,.doc,.docx,.xls,.xlsx"
+      />
+      <div className="flex items-center gap-1 px-2 pb-2 pt-1 border-t border-[#f2f2f7]">
         <button
           onClick={() => fileInputRef.current?.click()}
           disabled={uploading || sending || archiving}
-          className="w-full flex items-center justify-center gap-1.5 py-2 rounded-xl border border-[#e0deda] bg-white text-[11px] font-medium text-[#6b6b63] hover:bg-[#f0efec] hover:border-[#c8c6c0] transition-colors disabled:opacity-40"
+          title="Joindre un fichier (facture…)"
+          className="w-9 h-9 rounded-lg flex items-center justify-center text-[#48484a] hover:bg-[#f2f2f7] disabled:opacity-40"
         >
-          {uploading ? <RefreshCw size={12} strokeWidth={1.8} className="animate-spin" /> : <Paperclip size={12} strokeWidth={1.8} />}
-          {uploading ? 'Upload…' : 'Joindre un fichier (facture…)'}
+          {uploading ? <RefreshCw size={16} className="animate-spin" /> : <Paperclip size={16} strokeWidth={1.8} />}
         </button>
-        <button
-          onClick={send} disabled={sending || archiving || uploading || !body.trim()}
-          className="w-full flex items-center justify-center gap-1.5 py-2.5 rounded-xl bg-[#1a1a2e] text-white text-xs font-semibold hover:bg-[#2a2a4e] transition-colors disabled:opacity-50"
-        >
-          {sending ? <RefreshCw size={13} className="animate-spin" /> : <Send size={13} strokeWidth={1.8} />}
-          {sending ? 'Envoi…' : 'Relancer le client'}
-        </button>
-        <button
-          onClick={archive} disabled={sending || archiving}
-          className="w-full flex items-center justify-center gap-1.5 py-2 rounded-xl border border-[#e8e8e4] text-[#9b9b93] text-xs font-medium hover:bg-[#f8f7f5] hover:text-[#6b6b63] transition-colors disabled:opacity-50"
-        >
-          {archiving ? <RefreshCw size={12} className="animate-spin" /> : <Archive size={12} strokeWidth={1.8} />}
-          {archiving ? 'Archivage…' : 'Archiver sans répondre'}
-        </button>
+        <div className="ml-auto flex items-center gap-2">
+          <button
+            onClick={archive} disabled={sending || archiving}
+            className="h-9 px-3 rounded-full text-[13px] text-[#48484a] hover:bg-[#f2f2f7] disabled:opacity-50 inline-flex items-center gap-1.5"
+          >
+            {archiving ? <RefreshCw size={13} className="animate-spin" /> : <Archive size={13} />}
+            {archiving ? 'Clôture…' : 'Clore sans répondre'}
+          </button>
+          <button
+            onClick={send} disabled={sending || archiving || uploading || !body.trim()}
+            className="h-9 pl-4 pr-3 rounded-full bg-[#0a66f5] text-white text-[13px] font-semibold inline-flex items-center gap-1.5 hover:bg-[#0858d6] disabled:opacity-50"
+          >
+            {sending ? <RefreshCw size={14} className="animate-spin" /> : null}
+            {sending ? 'Envoi…' : 'Relancer'}
+            {!sending && <Send size={13} strokeWidth={2} />}
+          </button>
+        </div>
       </div>
     </div>
   )
@@ -2358,6 +2252,9 @@ export default function SavPage() {
   const [solvedMap, setSolvedMap]           = useState<Record<number, boolean>>({})
   const [tab, setTab]                       = useUrlState<'pending' | 'done' | 'qualite'>('tab', 'pending')
   const [showRules, setShowRules]           = useState(false)
+  const [toolMenu, setToolMenu]             = useState<'assign' | 'tags' | null>(null)
+  const [resolving, setResolving]           = useState(false)
+  const [resolveError, setResolveError]     = useState<string | null>(null)
   const [importing, setImporting]           = useState(false)
   const [importMsg, setImportMsg]           = useState<string | null>(null)
   const [commentRefreshKey, setCommentRefreshKey] = useState(0)
@@ -2770,6 +2667,36 @@ export default function SavPage() {
 
   const selectedProcessed = selectedId != null ? (processedCache[selectedId] ?? null) : null
   const isProcessing      = processingId === selectedId && selectedId !== null
+  const selectedRaw       = selectedId != null ? rawTickets.find(t => t.ticket_id === selectedId) : undefined
+  const selectedName      = prettyName(selectedRaw?.requester_name, selectedRaw?.requester_email ?? selectedProcessed?.customer_email)
+  const selectedAssignee  = selectedId != null ? assignments[selectedId] : undefined
+
+  // Précédent / suivant dans la liste affichée
+  const navList   = tab === 'done' ? donelist : [...actionable, ...waitingClient]
+  const navIndex  = navList.findIndex(t => t.ticket_id === selectedId)
+  const prevTicket = navIndex > 0 ? navList[navIndex - 1] : undefined
+  const nextTicket = navIndex >= 0 && navIndex < navList.length - 1 ? navList[navIndex + 1] : undefined
+  function stepTicket(dir: -1 | 1) {
+    const t = dir < 0 ? prevTicket : nextTicket
+    if (t) handleTicketClick(t)
+  }
+
+  // « Résoudre » : clôt le ticket dans Zendesk sans réponse publique.
+  async function resolveSelected() {
+    if (!selectedProcessed) return
+    setResolving(true); setResolveError(null)
+    try {
+      const res = await savFetch('/api/sav/archive', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ticket_id: selectedProcessed.ticket_id, category: selectedProcessed.category }),
+      })
+      if (!res.ok) { const d = await savJson<{ error?: string }>(res); throw new Error(d.error ?? `HTTP ${res.status}`) }
+      handleArchive()
+    } catch (e) {
+      setResolveError(e instanceof Error ? e.message : 'Erreur inconnue')
+    } finally { setResolving(false) }
+  }
 
   return (
     <div className="h-screen overflow-hidden flex relative">
@@ -2884,144 +2811,97 @@ export default function SavPage() {
       )}
 
       {/* ── LEFT — ticket list ── */}
-      <div className="w-[280px] shrink-0 flex flex-col border-r border-[#e8e8e4] bg-[#f8f7f5] overflow-hidden">
+      <div className="w-[320px] shrink-0 flex flex-col border-r border-[#e5e5ea] bg-[#f5f5f7] overflow-hidden">
 
-        {/* Left header */}
-        <div className="px-4 pt-4 border-b border-[#eeede9] shrink-0">
-          <div className="flex items-center justify-between mb-3">
+        <div className="px-4 pt-5 pb-2 shrink-0 space-y-3">
+          <div className="flex items-start justify-between">
             <div>
-              <p className="text-[9px] font-semibold uppercase tracking-[0.12em] text-[#aeb0c9]">{savBrandLabel()}</p>
-              <p className="text-sm font-bold text-[#1a1a2e] mt-0.5">SAV</p>
+              <h1 className="text-[22px] font-bold text-[#1d1d1f] leading-none tracking-[-0.01em]">SAV</h1>
+              <p className="text-[12px] text-[#8e8e93] mt-1.5">
+                {listLoading ? 'Chargement…' : `${actionable.length} à traiter · ${waitingClient.length} en attente`}
+              </p>
             </div>
-            <div className="flex items-center gap-1">
-              <button
-                onClick={() => { setShowNewMsg(true); setNewMsgSent(false); setNewMsgError(null) }}
-                className="h-7 px-2.5 rounded-lg flex items-center gap-1.5 text-[11px] font-semibold text-white bg-[#1a1a2e] hover:bg-[#2d2d4a] transition-colors"
-                title="Nouveau message"
-              >
-                <Plus size={12} strokeWidth={2.5} />
-                Nouveau
-              </button>
+            <div className="flex items-center gap-0.5">
               <button
                 onClick={() => load()} disabled={listLoading}
-                className="w-7 h-7 rounded-lg flex items-center justify-center text-[#6b6b63] hover:bg-[#eeede9] transition-colors disabled:opacity-40"
+                className="w-8 h-8 rounded-lg flex items-center justify-center text-[#0a66f5] hover:bg-[#e8e8ed] disabled:opacity-40"
                 title="Actualiser"
               >
-                <RefreshCw size={13} strokeWidth={1.8} className={listLoading ? 'animate-spin' : ''} />
+                <RefreshCw size={16} strokeWidth={1.8} className={listLoading ? 'animate-spin' : ''} />
+              </button>
+              <button
+                onClick={() => { setShowNewMsg(true); setNewMsgSent(false); setNewMsgError(null) }}
+                className="w-8 h-8 rounded-lg flex items-center justify-center text-[#0a66f5] hover:bg-[#e8e8ed]"
+                title="Nouveau message à un client"
+              >
+                <PenSquare size={17} strokeWidth={1.8} />
               </button>
             </div>
           </div>
 
-          {/* Tabs */}
-          <div className="flex">
-            <button
-              onClick={() => setTab('pending')}
-              className={`flex-1 flex items-center justify-center gap-1.5 py-2 text-[11px] font-semibold border-b-2 transition-colors ${
-                tab === 'pending'
-                  ? 'border-[#1a1a2e] text-[#1a1a2e]'
-                  : 'border-transparent text-[#9b9b93] hover:text-[#6b6b63]'
-              }`}
-            >
-              En attente
-              {!listLoading && (
-                <span className={`inline-flex items-center justify-center min-w-[16px] h-4 px-1 rounded-full text-[9px] font-bold ${
-                  allPending.length > 0 ? 'bg-[#c7293a] text-white' : 'bg-[#e0e0da] text-[#9b9b93]'
-                }`}>
-                  {allPending.length}
-                </span>
-              )}
-            </button>
-            <button
-              onClick={() => setTab('done')}
-              className={`flex-1 flex items-center justify-center gap-1.5 py-2 text-[11px] font-semibold border-b-2 transition-colors ${
-                tab === 'done'
-                  ? 'border-[#1a1a2e] text-[#1a1a2e]'
-                  : 'border-transparent text-[#9b9b93] hover:text-[#6b6b63]'
-              }`}
-            >
-              Traités
-              {donelist.length > 0 && (
-                <span className="inline-flex items-center justify-center min-w-[16px] h-4 px-1 rounded-full text-[9px] font-bold bg-[#e0e0da] text-[#6b6b63]">
-                  {donelist.length}
-                </span>
-              )}
-            </button>
-            {role === 'admin' && (
-              <button
-                onClick={() => setTab('qualite')}
-                className={`flex-1 flex items-center justify-center gap-1.5 py-2 text-[11px] font-semibold border-b-2 transition-colors ${
-                  tab === 'qualite'
-                    ? 'border-[#7e22ce] text-[#7e22ce]'
-                    : 'border-transparent text-[#9b9b93] hover:text-[#6b6b63]'
-                }`}
-              >
-                Qualité
-              </button>
-            )}
-          </div>
-
-          {/* Barre de recherche — file en cours (instantané) + tout Zendesk (bouton) */}
+          {/* Recherche — file en cours (instantané) + tout Zendesk (Entrée) */}
           {tab !== 'qualite' && (
-            <div className="pt-2">
+            <div>
               <div className="relative">
-                <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-[#9b9b93]" />
+                <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-[#8e8e93]" />
                 <input
                   value={search}
                   onChange={e => { setSearch(e.target.value); if (!e.target.value.trim()) { setZdResults(null); setZdOrder(null); setZdError(null) } }}
                   onKeyDown={e => { if (e.key === 'Enter') runZendeskSearch() }}
-                  placeholder="Rechercher : n° commande, email, sujet, #ticket…"
-                  className="w-full pl-8 pr-24 py-1.5 rounded-lg border border-[#e8e8e4] text-xs focus:outline-none focus:border-[#1a1a2e]"
+                  placeholder="Rechercher (Entrée : tout Zendesk)"
+                  aria-label="Rechercher un ticket, un e-mail ou une commande"
+                  className="w-full pl-8 pr-8 py-2 rounded-xl bg-[#e8e8ed] text-[13px] text-[#1d1d1f] placeholder-[#8e8e93] focus:outline-none focus:ring-2 focus:ring-[#0a66f5]/40"
                 />
                 {search && (
                   <button onClick={() => { setSearch(''); setZdResults(null); setZdOrder(null); setZdError(null) }}
-                    className="absolute right-[68px] top-1/2 -translate-y-1/2 text-[#9b9b93] hover:text-[#1a1a2e]"><X size={13} /></button>
+                    className="absolute right-2 top-1/2 -translate-y-1/2 text-[#8e8e93] hover:text-[#1d1d1f]" aria-label="Effacer"><X size={14} /></button>
                 )}
-                <button onClick={runZendeskSearch} disabled={zdSearching || search.trim().length < 2}
-                  className="absolute right-1 top-1/2 -translate-y-1/2 px-2.5 py-1 rounded-md bg-[#1a1a2e] text-white text-[10px] font-semibold disabled:opacity-40">
-                  {zdSearching ? '…' : 'Zendesk'}
-                </button>
               </div>
+              {search.trim().length >= 2 && !zdResults && !zdOrder && (
+                <button onClick={runZendeskSearch} disabled={zdSearching} className="mt-1.5 text-[12px] text-[#0a66f5] disabled:opacity-50">
+                  {zdSearching ? 'Recherche dans Zendesk…' : 'Chercher aussi dans tout Zendesk (résolus compris)'}
+                </button>
+              )}
               {(zdResults || zdOrder) && (
-                <div className="mt-2 border border-[#e8e8e4] rounded-lg overflow-hidden bg-white">
-                  <div className="px-3 py-1.5 bg-[#f5f4f2] text-[10px] font-semibold text-[#6b6b63] flex items-center justify-between">
-                    <span>Résultats{zdResults?.length ? ` · ${zdResults.length} ticket${zdResults.length > 1 ? 's' : ''}` : ''}</span>
-                    <button onClick={() => { setZdResults(null); setZdOrder(null) }} className="text-[#9b9b93] hover:text-[#1a1a2e]"><X size={12} /></button>
+                <div className="mt-2 border border-[#e5e5ea] rounded-xl overflow-hidden bg-white">
+                  <div className="px-3 py-2 text-[12px] font-medium text-[#48484a] flex items-center justify-between border-b border-[#f2f2f7]">
+                    <span>Résultats Zendesk{zdResults?.length ? ` · ${zdResults.length}` : ''}</span>
+                    <button onClick={() => { setZdResults(null); setZdOrder(null) }} className="text-[#8e8e93] hover:text-[#1d1d1f]" aria-label="Fermer"><X size={13} /></button>
                   </div>
-                  {zdError && <p className="px-3 py-2 text-[11px] text-[#c7293a]">{zdError}</p>}
-                  {/* Commande Shopify trouvée (même sans ticket) */}
+                  {zdError && <p className="px-3 py-2 text-[12px] text-[#c81e1e]">{zdError}</p>}
                   {zdOrder && (
-                    <div className="px-3 py-2 border-t border-[#f0efec] bg-[#f8fafc]">
+                    <div className="px-3 py-2 border-b border-[#f2f2f7] bg-[#f9f9fb]">
                       <div className="flex items-center justify-between gap-2">
-                        <span className="text-[11px] font-bold text-[#1a1a2e]">📦 Commande {zdOrder.order_number?.startsWith('#') ? zdOrder.order_number : `#${zdOrder.order_number}`}</span>
-                        <span className="text-[9px] font-semibold text-[#6b6b63] shrink-0">{zdOrder.status_fr}</span>
+                        <span className="text-[13px] font-semibold text-[#1d1d1f]">Commande {zdOrder.order_number?.startsWith('#') ? zdOrder.order_number : `#${zdOrder.order_number}`}</span>
+                        <span className="text-[11px] text-[#8e8e93] shrink-0">{zdOrder.status_fr}</span>
                       </div>
-                      <div className="text-[10px] text-[#6b6b63] mt-0.5 leading-snug">
+                      <div className="text-[12px] text-[#8e8e93] mt-0.5">
                         {zdOrder.created_at ? new Date(zdOrder.created_at).toLocaleDateString('fr-FR') : ''}
                         {zdOrder.financial_status_fr ? ` · ${zdOrder.financial_status_fr}` : ''}
                         {zdOrder.carrier ? ` · ${zdOrder.carrier}` : ''}
                       </div>
                       {zdOrder.order_number && <OrderReceivedLine order={zdOrder.order_number} />}
                       {zdOrder.tracking_url && (
-                        <a href={zdOrder.tracking_url} target="_blank" rel="noopener noreferrer" className="text-[10px] text-[#1d4ed8] underline">Suivi{zdOrder.tracking_number ? ` : ${zdOrder.tracking_number}` : ''}</a>
+                        <a href={zdOrder.tracking_url} target="_blank" rel="noopener noreferrer" className="text-[12px] text-[#0a66f5]">Suivi{zdOrder.tracking_number ? ` : ${zdOrder.tracking_number}` : ''}</a>
                       )}
                       {(zdOrder.products?.length ?? 0) > 0 && (
-                        <p className="text-[10px] text-[#9b9b93] mt-0.5 leading-snug truncate">{zdOrder.products.map(p => `${p.quantity}× ${p.name}`).join(', ')}</p>
+                        <p className="text-[12px] text-[#8e8e93] mt-0.5 truncate">{zdOrder.products.map(p => `${p.quantity}× ${p.name}`).join(', ')}</p>
                       )}
                     </div>
                   )}
-                  {!zdError && (zdResults?.length ?? 0) === 0 && !zdOrder && <p className="px-3 py-2 text-[11px] text-[#9b9b93]">Aucun ticket trouvé.</p>}
-                  {!zdError && (zdResults?.length ?? 0) === 0 && zdOrder && <p className="px-3 py-2 text-[11px] text-[#9b9b93]">Commande trouvée, mais aucun ticket SAV pour ce client.</p>}
+                  {!zdError && (zdResults?.length ?? 0) === 0 && !zdOrder && <p className="px-3 py-2 text-[12px] text-[#8e8e93]">Aucun ticket trouvé.</p>}
+                  {!zdError && (zdResults?.length ?? 0) === 0 && zdOrder && <p className="px-3 py-2 text-[12px] text-[#8e8e93]">Commande trouvée, mais aucun ticket SAV pour ce client.</p>}
                   <div className="max-h-64 overflow-y-auto">
                     {(zdResults ?? []).map(r => (
                       <button key={r.ticket_id} onClick={() => openSearchedTicket(r)}
-                        className="w-full text-left px-3 py-2 border-t border-[#f0efec] hover:bg-[#faf9f7]">
+                        className="w-full text-left px-3 py-2 border-t border-[#f2f2f7] first:border-t-0 hover:bg-[#f9f9fb]">
                         <div className="flex items-center justify-between gap-2">
-                          <span className="text-[11px] font-semibold text-[#1a1a2e] truncate">{r.subject || '(sans objet)'}</span>
-                          <span className="text-[9px] font-bold text-[#6b6b63] shrink-0">#{r.ticket_id}</span>
+                          <span className="text-[13px] font-medium text-[#1d1d1f] truncate">{r.subject || '(sans objet)'}</span>
+                          <span className="text-[11px] text-[#8e8e93] shrink-0">#{r.ticket_id}</span>
                         </div>
-                        <div className="flex items-center gap-2 text-[10px] text-[#9b9b93] mt-0.5">
+                        <div className="flex items-center gap-2 text-[12px] text-[#8e8e93] mt-0.5">
                           <span className="truncate flex-1">{r.requester_email || '—'}</span>
-                          <span className="shrink-0 uppercase tracking-wide">{STATUS_FR[r.status] ?? r.status}</span>
+                          <span className="shrink-0">{STATUS_FR[r.status] ?? r.status}</span>
                         </div>
                       </button>
                     ))}
@@ -3031,50 +2911,62 @@ export default function SavPage() {
             </div>
           )}
 
-          {/* Filtre par personne — « mes tickets » */}
+          {/* Vue : file / traités / qualité */}
+          <div className="flex items-center gap-4 text-[13px]">
+            {([['pending', 'File'], ['done', `Traités${donelist.length ? ` (${donelist.length})` : ''}`], ...(role === 'admin' ? [['qualite', 'Qualité']] : [])] as [typeof tab, string][]).map(([k, label]) => (
+              <button
+                key={k}
+                onClick={() => setTab(k)}
+                className={`pb-1 border-b-2 transition-colors ${tab === k ? 'border-[#1d1d1f] text-[#1d1d1f] font-semibold' : 'border-transparent text-[#8e8e93] hover:text-[#48484a]'}`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+
+          {/* Filtre par personne — segmenté */}
           {tab !== 'qualite' && (
-            <div className="flex items-center gap-1 pb-2 pt-2 overflow-x-auto">
-              {([['', 'Tous'], ...savAssignees().map(a => [a, a] as [string, string]), ['unassigned', 'Non attribué']] as [string, string][]).map(([val, label]) => {
-                const active = assigneeFilter === val
-                const isMine = !!val && val === myName
-                return (
-                  <button
-                    key={val || 'all'}
-                    onClick={() => setAssigneeFilter(val)}
-                    className={`shrink-0 px-2.5 py-1 rounded-full text-[10px] font-semibold border transition-colors ${
-                      active ? 'bg-[#1a1a2e] text-white border-[#1a1a2e]' : 'bg-white text-[#6b6b63] border-[#e8e8e4] hover:bg-[#f0efec]'
-                    }`}
-                  >
-                    {label}{isMine ? ' (moi)' : ''}
-                  </button>
-                )
-              })}
+            <div className="flex rounded-lg bg-[#e8e8ed] p-0.5 text-[12px] font-medium overflow-x-auto">
+              {([
+                ['', 'Tous'],
+                ...(savAssignees().includes(myName) ? [[myName, 'Moi']] : []),
+                ['unassigned', 'Non attribués'],
+                ...savAssignees().filter(a => a !== myName).map(a => [a, a]),
+              ] as [string, string][]).map(([val, label]) => (
+                <button
+                  key={val || 'all'}
+                  onClick={() => setAssigneeFilter(val)}
+                  className={`flex-1 shrink-0 px-2 py-1 rounded-md whitespace-nowrap transition-colors ${assigneeFilter === val ? 'bg-white text-[#1d1d1f] shadow-sm' : 'text-[#48484a] hover:text-[#1d1d1f]'}`}
+                >
+                  {label}
+                </button>
+              ))}
             </div>
           )}
         </div>
 
         {/* Ticket list */}
-        <div className="flex-1 overflow-y-auto">
+        <div className="flex-1 overflow-y-auto px-2 pb-3">
           {listLoading && (
-            <div className="p-4 space-y-3">
+            <div className="p-2 space-y-4">
               {[1,2,3,4].map(i => (
                 <div key={i} className="space-y-1.5">
-                  <div className="h-3 w-3/4 bg-[#e8e8e4] rounded-full animate-pulse" />
-                  <div className="h-2.5 w-1/2 bg-[#e8e8e4] rounded-full animate-pulse" />
+                  <div className="h-3 w-3/4 bg-[#e5e5ea] rounded-full animate-pulse" />
+                  <div className="h-2.5 w-1/2 bg-[#e5e5ea] rounded-full animate-pulse" />
                 </div>
               ))}
             </div>
           )}
 
-          {/* En attente tab */}
           {!listLoading && tab === 'pending' && (
             <>
               {actionable.length === 0 && waitingClient.length === 0 && (
                 <div className="flex flex-col items-center justify-center h-full gap-2 text-center p-4">
-                  <CheckCheck size={24} strokeWidth={1.4} className="text-[#1a7f4b]" />
-                  <p className="text-xs text-[#9b9b93]">File vide</p>
+                  <CheckCheck size={24} strokeWidth={1.4} className="text-[#34c759]" />
+                  <p className="text-[13px] text-[#8e8e93]">Rien à traiter.</p>
                 </div>
               )}
+              {actionable.length > 0 && <h2 className="px-2 pt-2 pb-1 text-[12px] font-semibold text-[#8e8e93]">À traiter</h2>}
               {actionable.map(t => (
                 <TicketRow
                   key={t.ticket_id}
@@ -3095,40 +2987,31 @@ export default function SavPage() {
               ))}
               {waitingClient.length > 0 && (
                 <>
-                  {/* Visual separator for "En attente client" section */}
-                  <div className="flex items-center gap-2 px-4 py-2 mt-1">
-                    <div className="flex-1 h-px bg-[#e8e8e4]" />
-                    <span className="text-[9px] font-semibold uppercase tracking-[0.12em] text-[#aeb0c9] shrink-0 whitespace-nowrap">
-                      En attente client
-                    </span>
-                    <div className="flex-1 h-px bg-[#e8e8e4]" />
-                  </div>
-                  <div className="opacity-60">
-                    {waitingClient.map(t => (
-                      <TicketRow
-                        key={t.ticket_id}
-                        raw={t}
-                        assignee={assignments[t.ticket_id]}
-                  tags={ticketTags[t.ticket_id]}
-                        processed={processedCache[t.ticket_id]}
-                        selected={t.ticket_id === selectedId}
-                        isProcessing={processingId === t.ticket_id}
-                        onClick={() => handleTicketClick(t)}
-                      />
-                    ))}
-                  </div>
+                  <h2 className="px-2 pt-4 pb-1 text-[12px] font-semibold text-[#8e8e93]">En attente client</h2>
+                  {waitingClient.map(t => (
+                    <TicketRow
+                      key={t.ticket_id}
+                      compact
+                      raw={t}
+                      assignee={assignments[t.ticket_id]}
+                      tags={ticketTags[t.ticket_id]}
+                      processed={processedCache[t.ticket_id]}
+                      selected={t.ticket_id === selectedId}
+                      isProcessing={processingId === t.ticket_id}
+                      onClick={() => handleTicketClick(t)}
+                    />
+                  ))}
                 </>
               )}
             </>
           )}
 
-          {/* Traités tab */}
           {!listLoading && tab === 'done' && (
             <>
               {donelist.length === 0 && (
                 <div className="flex flex-col items-center justify-center h-full gap-2 text-center p-4">
-                  <Inbox size={24} strokeWidth={1.4} className="text-[#d0cfc9]" />
-                  <p className="text-xs text-[#9b9b93]">Aucun ticket traité</p>
+                  <Inbox size={24} strokeWidth={1.4} className="text-[#c7c7cc]" />
+                  <p className="text-[13px] text-[#8e8e93]">Aucun ticket traité pendant cette session.</p>
                 </div>
               )}
               {donelist.map(t => (
@@ -3146,37 +3029,34 @@ export default function SavPage() {
             </>
           )}
 
-          {/* Qualité tab (admin only) */}
-          {tab === 'qualite' && role === 'admin' && (
-            <QualitePanel />
-          )}
+          {tab === 'qualite' && role === 'admin' && <QualitePanel />}
         </div>
 
-        {/* Left footer — tools */}
-        <div className="px-3 py-3 border-t border-[#eeede9] flex gap-1.5 shrink-0">
+        {/* Outils */}
+        <div className="px-3 py-2 border-t border-[#e5e5ea] flex gap-1 shrink-0">
           <button
             onClick={() => setShowRules(true)}
-            className="flex-1 flex items-center justify-center gap-1.5 py-1.5 rounded-lg text-[10px] font-semibold text-[#6b6b63] hover:bg-[#eeede9] transition-colors"
+            className="flex-1 flex items-center justify-center gap-1.5 py-1.5 rounded-lg text-[12px] text-[#48484a] hover:bg-[#e8e8ed]"
           >
-            <Settings size={12} strokeWidth={1.8} /> Règles
+            <Settings size={13} strokeWidth={1.8} /> Règles
           </button>
           <button
             onClick={handleImport} disabled={importing}
             title={importMsg ?? 'Importer les tickets résolus comme exemples pour Claude'}
-            className={`flex-1 flex items-center justify-center gap-1.5 py-1.5 rounded-lg text-[10px] font-semibold transition-colors ${
-              importMsg?.startsWith('✓') ? 'bg-[#dcf5e7] text-[#1a7f4b]'
-              : importMsg ? 'bg-[#fce8ea] text-[#c7293a]'
-              : 'text-[#6b6b63] hover:bg-[#eeede9]'
+            className={`flex-1 flex items-center justify-center gap-1.5 py-1.5 rounded-lg text-[12px] ${
+              importMsg?.startsWith('✓') ? 'bg-[#e6f4ea] text-[#1a7f4b]'
+              : importMsg ? 'bg-[#fde8e8] text-[#c81e1e]'
+              : 'text-[#48484a] hover:bg-[#e8e8ed]'
             }`}
           >
-            {importing ? <RefreshCw size={12} className="animate-spin" /> : <Download size={12} strokeWidth={1.8} />}
+            {importing ? <RefreshCw size={13} className="animate-spin" /> : <Download size={13} strokeWidth={1.8} />}
             {importing ? 'Import…' : importMsg?.startsWith('✓') ? importMsg : 'Historique'}
           </button>
         </div>
       </div>
 
-      {/* ── CENTER — ticket detail or qualite dashboard ── */}
-      <div className="flex-1 flex flex-col overflow-hidden border-r border-[#e8e8e4] bg-white">
+      {/* ── CENTER — conversation + réponse ── */}
+      <div className="flex-1 min-w-0 flex flex-col overflow-hidden bg-[#fbfbfd]">
         {tab === 'qualite' && role === 'admin'
           ? <QualiteDashboard />
           : selectedId === null
@@ -3185,40 +3065,126 @@ export default function SavPage() {
               ? <CenterSkeleton />
               : selectedProcessed
                 ? <>
-                    <AssignBar ticketId={selectedProcessed.ticket_id} assignee={assignments[selectedProcessed.ticket_id]} onAssign={assignTicket} myName={myName} by={assignMeta[selectedProcessed.ticket_id]?.by} at={assignMeta[selectedProcessed.ticket_id]?.at} />
-                    <TagBar ticketId={selectedProcessed.ticket_id} tags={ticketTags[selectedProcessed.ticket_id] ?? []} onToggle={toggleTag} />
-                    <TicketDetail ticket={selectedProcessed} refreshKey={commentRefreshKey} />
+                    {/* Barre d'outils du ticket */}
+                    <div className="h-14 shrink-0 flex items-center gap-1 px-4 border-b border-[#e5e5ea] bg-white/90 backdrop-blur">
+                      <button onClick={() => stepTicket(-1)} disabled={!prevTicket} title="Ticket précédent" className="w-8 h-8 rounded-lg flex items-center justify-center text-[#48484a] hover:bg-[#f2f2f7] disabled:opacity-30"><ChevronLeft size={18} /></button>
+                      <button onClick={() => stepTicket(1)} disabled={!nextTicket} title="Ticket suivant" className="w-8 h-8 rounded-lg flex items-center justify-center text-[#48484a] hover:bg-[#f2f2f7] disabled:opacity-30"><ChevronRight size={18} /></button>
+                      <span className="ml-2 text-[13px] text-[#8e8e93]">Ticket #{selectedProcessed.ticket_id}</span>
+
+                      <div className="ml-auto flex items-center gap-1">
+                        {/* Attribuer */}
+                        <div className="relative">
+                          <button onClick={() => setToolMenu(m => m === 'assign' ? null : 'assign')} title="Attribuer" aria-expanded={toolMenu === 'assign'}
+                            className="h-8 px-2 rounded-lg inline-flex items-center gap-1.5 text-[13px] text-[#48484a] hover:bg-[#f2f2f7]">
+                            {selectedAssignee ? <Avatar name={selectedAssignee} size={20} /> : <UserPlus size={17} strokeWidth={1.8} />}
+                            <span className="hidden xl:inline">{selectedAssignee ?? 'Attribuer'}</span>
+                          </button>
+                          {toolMenu === 'assign' && (
+                            <>
+                              <div className="fixed inset-0 z-30" onClick={() => setToolMenu(null)} />
+                              <div className="absolute right-0 top-full mt-1 z-40 w-[200px] rounded-xl border border-[#e5e5ea] bg-white shadow-lg py-1 text-[13px]">
+                                {savAssignees().map(a => (
+                                  <button key={a} onClick={() => { assignTicket(selectedProcessed.ticket_id, a); setToolMenu(null) }} className="w-full flex items-center gap-2 px-3 py-2 hover:bg-[#f2f2f7] text-left">
+                                    <Avatar name={a} size={20} /> <span className="flex-1">{a}{a === myName ? ' (moi)' : ''}</span>
+                                    {selectedAssignee === a && <Check size={14} className="text-[#0a66f5]" />}
+                                  </button>
+                                ))}
+                                <button onClick={() => { assignTicket(selectedProcessed.ticket_id, null); setToolMenu(null) }} className="w-full px-3 py-2 hover:bg-[#f2f2f7] text-left text-[#8e8e93] border-t border-[#f2f2f7]">Retirer l&apos;attribution</button>
+                                {selectedAssignee && assignMeta[selectedProcessed.ticket_id]?.by && !assignMeta[selectedProcessed.ticket_id]!.by!.includes('@') && (
+                                  <p className="px-3 pt-1 pb-1.5 text-[11px] text-[#8e8e93]">Attribué par {assignMeta[selectedProcessed.ticket_id]!.by}{assignMeta[selectedProcessed.ticket_id]?.at ? ` · ${fmtTime(assignMeta[selectedProcessed.ticket_id]!.at!)}` : ''}</p>
+                                )}
+                              </div>
+                            </>
+                          )}
+                        </div>
+                        {/* Balises */}
+                        <div className="relative">
+                          <button onClick={() => setToolMenu(m => m === 'tags' ? null : 'tags')} title="Balises" aria-expanded={toolMenu === 'tags'}
+                            className="w-8 h-8 rounded-lg flex items-center justify-center text-[#48484a] hover:bg-[#f2f2f7] relative">
+                            <Tag size={16} strokeWidth={1.8} />
+                            {(ticketTags[selectedProcessed.ticket_id]?.length ?? 0) > 0 && <span className="absolute top-1 right-1 w-2 h-2 rounded-full bg-[#0a66f5]" />}
+                          </button>
+                          {toolMenu === 'tags' && (
+                            <>
+                              <div className="fixed inset-0 z-30" onClick={() => setToolMenu(null)} />
+                              <div className="absolute right-0 top-full mt-1 z-40 w-[230px] rounded-xl border border-[#e5e5ea] bg-white shadow-lg py-1 text-[13px]">
+                                {TICKET_TAGS.map(t => {
+                                  const on = (ticketTags[selectedProcessed.ticket_id] ?? []).includes(t.key)
+                                  return (
+                                    <button key={t.key} onClick={() => toggleTag(selectedProcessed.ticket_id, t.key)} className="w-full flex items-center gap-2 px-3 py-2 hover:bg-[#f2f2f7] text-left">
+                                      <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ background: t.text }} />
+                                      <span className="flex-1">{t.label}</span>
+                                      {on && <Check size={14} className="text-[#0a66f5]" />}
+                                    </button>
+                                  )
+                                })}
+                              </div>
+                            </>
+                          )}
+                        </div>
+                        <button
+                          onClick={resolveSelected} disabled={resolving}
+                          title="Clore le ticket sans envoyer de réponse"
+                          className="ml-2 h-8 pl-3 pr-3.5 rounded-full bg-[#1d1d1f] text-white text-[13px] font-semibold inline-flex items-center gap-1.5 hover:bg-black disabled:opacity-50"
+                        >
+                          {resolving ? <RefreshCw size={13} className="animate-spin" /> : <Check size={14} strokeWidth={2.5} />} Résoudre
+                        </button>
+                      </div>
+                    </div>
+                    {resolveError && <p className="shrink-0 px-6 py-2 text-[12px] text-[#c81e1e] bg-[#fde8e8]">{resolveError}</p>}
+                    {selectedAssignee && myName && selectedAssignee !== myName && (
+                      <p className="shrink-0 px-6 py-2 text-[13px] text-[#a15c07] bg-[#fff8e6] border-b border-[#fdecc8]">
+                        Ce ticket est pris en charge par <b>{selectedAssignee}</b>. L&apos;envoi d&apos;une réponse sera bloqué pour éviter un doublon ; réattribue-le d&apos;abord si besoin.
+                      </p>
+                    )}
+
+                    <div className="flex-1 overflow-y-auto">
+                      <TicketDetail
+                        ticket={selectedProcessed}
+                        refreshKey={commentRefreshKey}
+                        customerName={selectedName}
+                        assignee={selectedAssignee}
+                        tags={ticketTags[selectedProcessed.ticket_id] ?? []}
+                      />
+                    </div>
+
+                    <div className="shrink-0 px-6 pb-4 pt-2">
+                      <div className="max-w-[760px] mx-auto">
+                        {selectedProcessed.status === 'pending' ? (
+                          <FollowUpPanel ticket={selectedProcessed} onSent={handleSent} />
+                        ) : (
+                          <ReplyPanel
+                            ticket={selectedProcessed}
+                            draft={drafts[selectedProcessed.ticket_id] ?? ''}
+                            solved={solvedMap[selectedProcessed.ticket_id] ?? false}
+                            onDraftChange={v => setDrafts(prev => ({ ...prev, [selectedProcessed.ticket_id]: v }))}
+                            onSolvedChange={v => setSolvedMap(prev => ({ ...prev, [selectedProcessed.ticket_id]: v }))}
+                            onSent={handleSent}
+                            onArchive={handleArchive}
+                            onStartAnswer={() => claimForAnswer(selectedProcessed.ticket_id)}
+                          />
+                        )}
+                      </div>
+                    </div>
                   </>
                 : <CenterEmpty />
         }
       </div>
 
-      {/* ── RIGHT — reply panel or follow-up panel ── */}
-      <div className="w-[380px] shrink-0 flex flex-col overflow-hidden bg-[#fafaf9]">
-        {tab === 'qualite' ? null
-        : selectedId === null ? (
-          <div className="flex items-center justify-center h-full">
-            <p className="text-xs text-[#9b9b93]">Aucun ticket sélectionné</p>
-          </div>
-        ) : isProcessing && !selectedProcessed ? (
-          <RightPanelSkeleton />
-        ) : selectedProcessed ? (
-          selectedProcessed.status === 'pending' ? (
-            <FollowUpPanel ticket={selectedProcessed} onSent={handleSent} />
-          ) : (
-            <ReplyPanel
-              ticket={selectedProcessed}
-              draft={drafts[selectedProcessed.ticket_id] ?? ''}
-              solved={solvedMap[selectedProcessed.ticket_id] ?? false}
-              onDraftChange={v => setDrafts(prev => ({ ...prev, [selectedProcessed.ticket_id]: v }))}
-              onSolvedChange={v => setSolvedMap(prev => ({ ...prev, [selectedProcessed.ticket_id]: v }))}
-              onSent={handleSent}
-              onArchive={handleArchive}
-              onStartAnswer={() => claimForAnswer(selectedProcessed.ticket_id)}
-            />
-          )
-        ) : null}
-      </div>
+      {/* ── RIGHT — la cliente, Claude, la commande ── */}
+      {tab !== 'qualite' && (
+        <div className="w-[320px] shrink-0 hidden lg:flex flex-col overflow-y-auto border-l border-[#e5e5ea] bg-[#f5f5f7]">
+          {selectedId === null ? (
+            <div className="flex items-center justify-center h-full">
+              <p className="text-[13px] text-[#8e8e93]">Aucun ticket sélectionné</p>
+            </div>
+          ) : isProcessing && !selectedProcessed ? (
+            <RightPanelSkeleton />
+          ) : selectedProcessed ? (
+            <ContextPanel ticket={selectedProcessed} customerName={selectedName} />
+          ) : null}
+        </div>
+      )}
     </div>
   )
 }
