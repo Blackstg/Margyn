@@ -8,6 +8,7 @@ import { ArrowLeft, Download, Loader2, AlertCircle, UserPen } from 'lucide-react
 import { useBrand } from '@/context/BrandContext'
 
 import { Invoice, type ShopifyOrder, type InvoiceSettings } from '@/components/billing/Invoice'
+import { parseLang, invoiceText } from '@/lib/billing/invoiceI18n'
 import { BillingContactEditor } from '@/components/billing/BillingContactEditor'
 
 
@@ -19,6 +20,15 @@ export default function InvoicePage({ params }: { params: { orderId: string } })
   const searchParams = useSearchParams()
   const mode: 'facture' | 'avoir' = searchParams.get('type') === 'avoir' ? 'avoir' : 'facture'
   const isAvoir = mode === 'avoir'
+  const lang = parseLang(searchParams.get('lang'))
+  // Garde la langue et le type (facture/avoir) en changeant l'un ou l'autre
+  const hrefFor = (type: 'facture' | 'avoir', l: string) => {
+    const q = new URLSearchParams()
+    if (type === 'avoir') q.set('type', 'avoir')
+    if (l === 'en') q.set('lang', 'en')
+    const qs = q.toString()
+    return `/${brand}/billing/${params.orderId}${qs ? `?${qs}` : ''}`
+  }
 
   const [order, setOrder]       = useState<ShopifyOrder | null>(null)
   const [settings, setSettings] = useState<InvoiceSettings | null>(null)
@@ -38,8 +48,9 @@ export default function InvoicePage({ params }: { params: { orderId: string } })
     if (!el) return
     const win = window.open('', '_blank', 'width=900,height=1200')
     if (!win) return
-    const prefix   = isAvoir ? 'Avoir' : 'Facture'
-    const filename = order ? `${prefix}-${order.name.replace('#', '')}` : `${prefix}-${params.orderId}`
+    // Nom du fichier = titre de la fenêtre imprimée : Facture-1430 / invoice_1430
+    const prefix   = lang === 'en' ? (isAvoir ? invoiceText('en').creditFilePrefix : invoiceText('en').filePrefix) : (isAvoir ? 'Avoir-' : 'Facture-')
+    const filename = `${prefix}${order ? order.name.replace('#', '') : params.orderId}`
     win.document.write(`<!DOCTYPE html><html><head>
       <meta charset="utf-8"/>
       <title>${filename}</title>
@@ -100,18 +111,28 @@ export default function InvoicePage({ params }: { params: { orderId: string } })
               {/* Sélecteur segmenté Facture / Avoir — les deux vues restent accessibles */}
               <div className="flex items-center rounded-xl border border-[#e8e8e4] bg-[#f3f3f1] p-0.5">
                 <button
-                  onClick={() => router.push(`/${brand}/billing/${params.orderId}`)}
+                  onClick={() => router.push(hrefFor('facture', lang))}
                   className={`px-3.5 py-1.5 rounded-[9px] text-sm font-medium transition-colors ${!isAvoir ? 'bg-white text-[#1a1a2e] shadow-sm' : 'text-[#6b6b63] hover:text-[#1a1a2e]'}`}
                 >
                   Facture
                 </button>
                 <button
-                  onClick={() => router.push(`/${brand}/billing/${params.orderId}?type=avoir`)}
+                  onClick={() => router.push(hrefFor('avoir', lang))}
                   className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-[9px] text-sm font-medium transition-colors ${isAvoir ? 'bg-[#c7293a] text-white shadow-sm' : 'text-[#6b6b63] hover:text-[#c7293a]'}`}
                 >
                   Avoir
                   {orderHasRefund && !isAvoir && <span className="w-1.5 h-1.5 rounded-full bg-[#c7293a]" />}
                 </button>
+              </div>
+
+              {/* Langue du document */}
+              <div className="flex items-center rounded-xl border border-[#e8e8e4] bg-[#f3f3f1] p-0.5" title="Langue de la facture">
+                {(['fr', 'en'] as const).map(l => (
+                  <button key={l} onClick={() => router.push(hrefFor(mode, l))}
+                    className={`px-3 py-1.5 rounded-[9px] text-sm font-semibold transition-colors ${lang === l ? 'bg-white text-[#1a1a2e] shadow-sm' : 'text-[#6b6b63] hover:text-[#1a1a2e]'}`}>
+                    {l.toUpperCase()}
+                  </button>
+                ))}
               </div>
 
               <button
@@ -149,7 +170,7 @@ export default function InvoicePage({ params }: { params: { orderId: string } })
             </div>
           ) : order ? (
             <div className="max-w-[210mm] mx-auto shadow-[0_8px_40px_rgba(0,0,0,0.14)] rounded-sm overflow-hidden bg-white">
-              <Invoice order={order} settings={settings} mode={mode} />
+              <Invoice order={order} settings={settings} mode={mode} lang={lang} />
             </div>
           ) : null}
         </div>

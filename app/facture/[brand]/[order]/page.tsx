@@ -4,12 +4,15 @@ export const dynamic = 'force-dynamic'
 
 import { useState, useEffect } from 'react'
 import { Invoice, type ShopifyOrder, type InvoiceSettings } from '@/components/billing/Invoice'
+import { invoiceText, type InvoiceLang } from '@/lib/billing/invoiceI18n'
 
-export default function FacturePubliquePage({ params }: { params: { brand: string; order: string } }) {
+export default function FacturePubliquePage({ params, searchParams }: { params: { brand: string; order: string }; searchParams: { lang?: string } }) {
   const [order, setOrder]       = useState<ShopifyOrder | null>(null)
   const [settings, setSettings] = useState<InvoiceSettings | null>(null)
   const [loading, setLoading]   = useState(true)
   const [error, setError]       = useState<string | null>(null)
+  const [lang, setLang]         = useState<InvoiceLang>(searchParams.lang === 'en' ? 'en' : 'fr')
+  const t = invoiceText(lang)
 
   useEffect(() => {
     fetch(`/api/facture/data?brand=${encodeURIComponent(params.brand)}&order=${encodeURIComponent(params.order)}`)
@@ -22,7 +25,7 @@ export default function FacturePubliquePage({ params }: { params: { brand: strin
       .finally(() => setLoading(false))
   }, [params.brand, params.order])
 
-  const pdfUrl = `/api/facture/pdf?brand=${encodeURIComponent(params.brand)}&order=${encodeURIComponent(params.order)}`
+  const pdfUrl = `/api/facture/pdf?brand=${encodeURIComponent(params.brand)}&order=${encodeURIComponent(params.order)}${lang === 'en' ? '&lang=en' : ''}`
 
   return (
     <div style={{ minHeight: '100vh', background: '#f0f0ee' }}>
@@ -31,11 +34,19 @@ export default function FacturePubliquePage({ params }: { params: { brand: strin
         {/* Vrai PDF téléchargeable en 1 clic (généré côté serveur, pas d'impression navigateur) */}
         <a
           href={order ? pdfUrl : undefined}
-          download={`facture-${params.order.replace('#', '')}.pdf`}
+          download={`${t.filePrefix}${params.order.replace('#', '')}.pdf`}
           style={{ background: '#1a1a2e', color: '#fff', borderRadius: 12, padding: '11px 22px', fontSize: 14, fontWeight: 600, textDecoration: 'none', opacity: order ? 1 : 0.4, pointerEvents: order ? 'auto' : 'none' }}
         >
-          ⬇︎ Télécharger la facture (PDF)
+          {lang === 'en' ? '⬇︎ Download invoice (PDF)' : '⬇︎ Télécharger la facture (PDF)'}
         </a>
+        <div style={{ display: 'flex', borderRadius: 12, border: '1px solid #e8e8e4', background: '#f3f3f1', padding: 2 }}>
+          {(['fr', 'en'] as const).map(l => (
+            <button key={l} onClick={() => setLang(l)}
+              style={{ border: 0, borderRadius: 10, padding: '8px 14px', fontSize: 13, fontWeight: 600, cursor: 'pointer', background: lang === l ? '#fff' : 'transparent', color: lang === l ? '#1a1a2e' : '#6b6b63' }}>
+              {l.toUpperCase()}
+            </button>
+          ))}
+        </div>
       </div>
 
       <div style={{ padding: '24px 12px' }}>
@@ -48,7 +59,7 @@ export default function FacturePubliquePage({ params }: { params: { brand: strin
           </div>
         ) : order ? (
           <div style={{ maxWidth: 820, margin: '0 auto', boxShadow: '0 4px 24px rgba(0,0,0,0.08)' }}>
-            <Invoice order={order} settings={settings} mode="facture" />
+            <Invoice order={order} settings={settings} mode="facture" lang={lang} />
           </div>
         ) : null}
       </div>

@@ -21,15 +21,15 @@ export interface InvoiceOrderLike {
 const n = (v: unknown) => { const x = parseFloat(String(v ?? '0')); return Number.isFinite(x) ? x : 0 }
 const r2 = (x: number) => Math.round(x * 100) / 100
 
-export function discountLabel(order: InvoiceOrderLike): string {
+export function discountLabel(order: InvoiceOrderLike, word = 'Remise'): string {
   const parts = (order.discount_applications ?? []).map(a => {
-    const name = a.code || a.title || 'Remise'
+    const name = a.code || a.title || word
     return a.value_type === 'percentage' && a.value ? `${name} (-${n(a.value)} %)` : name
   })
-  return parts.length ? `Remise ${Array.from(new Set(parts)).join(', ')}` : 'Remise'
+  return parts.length ? `${word} ${Array.from(new Set(parts)).join(', ')}` : word
 }
 
-export function invoiceBreakdown(order: InvoiceOrderLike) {
+export function invoiceBreakdown(order: InvoiceOrderLike, t: { discount: string; shipping: string | null } = { discount: 'Remise', shipping: null }) {
   const lines = order.line_items.map(it => {
     const gross = n(it.price) * it.quantity
     const alloc = (it.discount_allocations ?? []).reduce((s, d) => s + n(d.amount), 0)
@@ -42,17 +42,20 @@ export function invoiceBreakdown(order: InvoiceOrderLike) {
   const shipping = r2(shippingLines.reduce((s, l) => s + n(l.discounted_price ?? l.price), 0))
   const payments = (order.payments ?? []).slice().sort((a, b) => a.date.localeCompare(b.date))
   return {
-    lines, itemsGross, lineDiscounts, discountLabel: discountLabel(order),
-    hasShipping: shippingLines.length > 0, shipping, shippingTitle: shippingLines[0]?.title ?? 'Livraison',
+    lines, itemsGross, lineDiscounts, discountLabel: discountLabel(order, t.discount),
+    hasShipping: shippingLines.length > 0, shipping, shippingTitle: t.shipping ?? shippingLines[0]?.title ?? 'Livraison',
     payments, paidTotal: r2(payments.reduce((s, p) => s + p.amount, 0)),
   }
 }
 
-export function gatewayLabel(gw: string): string {
+type GwText = { card: string; transfer: string; cash: string; giftCard: string }
+const GW_FR: GwText = { card: 'Carte bancaire', transfer: 'Virement bancaire', cash: 'Espèces', giftCard: 'Carte cadeau' }
+
+export function gatewayLabel(gw: string, t: GwText = GW_FR): string {
   const g = gw.toLowerCase()
   if (g.includes('paypal')) return 'PayPal'
-  if (g.includes('virement') || g.includes('bank') || g.includes('wire')) return 'Virement bancaire'
-  if (g.includes('cash') || g.includes('espece')) return 'Espèces'
-  if (g.includes('gift')) return 'Carte cadeau'
-  return 'Carte bancaire'
+  if (g.includes('virement') || g.includes('bank') || g.includes('wire')) return t.transfer
+  if (g.includes('cash') || g.includes('espece')) return t.cash
+  if (g.includes('gift')) return t.giftCard
+  return t.card
 }

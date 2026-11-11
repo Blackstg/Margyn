@@ -1,6 +1,7 @@
 // Composant Facture partagé (page interne /[brand]/billing + page publique /facture).
 import React from 'react'
 import { gatewayLabel, invoiceBreakdown, type InvoicePayment } from '@/lib/billing/invoiceMath'
+import { invoiceText, type InvoiceLang, type InvoiceText } from '@/lib/billing/invoiceI18n'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -87,26 +88,28 @@ export interface InvoiceSettings {
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-function fmtDateLong(iso: string) {
-  return new Date(iso).toLocaleDateString('fr-FR', { day: 'numeric', month: 'long', year: 'numeric' }).toUpperCase()
+function fmtDateLong(iso: string, locale = 'fr-FR') {
+  return new Date(iso).toLocaleDateString(locale, { day: 'numeric', month: 'long', year: 'numeric' }).toUpperCase()
 }
 
-function fmtEur(amount: number) {
-  return new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR' }).format(amount)
+function fmtEurIn(locale: string, amount: number) {
+  return new Intl.NumberFormat(locale, { style: 'currency', currency: 'EUR' }).format(amount)
 }
 
-function paymentLabel(order: ShopifyOrder): string {
+function paymentLabel(order: ShopifyOrder, t: InvoiceText): string {
   const gw = (order.payment_gateway_names?.[0] || order.gateway || '').toLowerCase()
-  if (gw.includes('card') || gw.includes('credit') || gw.includes('shopify_payments') || gw.includes('stripe')) return 'Carte de crédit'
+  if (gw.includes('card') || gw.includes('credit') || gw.includes('shopify_payments') || gw.includes('stripe')) return t.card
   if (gw.includes('paypal')) return 'PayPal'
-  if (gw.includes('virement') || gw.includes('bank') || gw.includes('wire')) return 'Virement bancaire'
-  if (gw.includes('cash') || gw.includes('espece')) return 'Espèces'
-  return 'Carte de crédit'
+  if (gw.includes('virement') || gw.includes('bank') || gw.includes('wire')) return t.transfer
+  if (gw.includes('cash') || gw.includes('espece')) return t.cash
+  return t.card
 }
 
 // ─── Invoice Component ────────────────────────────────────────────────────────
 
-export function Invoice({ order, settings, mode }: { order: ShopifyOrder; settings: InvoiceSettings | null; mode: 'facture' | 'avoir' }) {
+export function Invoice({ order, settings, mode, lang = 'fr' }: { order: ShopifyOrder; settings: InvoiceSettings | null; mode: 'facture' | 'avoir'; lang?: InvoiceLang }) {
+  const t = invoiceText(lang)
+  const fmtEur = (amount: number) => fmtEurIn(t.locale, amount)
   const isAvoir    = mode === 'avoir'
   const primary    = settings?.color_primary || '#1a1a2e'
   const tvaEnabled = settings?.tva_enabled ?? true
@@ -120,7 +123,7 @@ export function Invoice({ order, settings, mode }: { order: ShopifyOrder; settin
   const isPaid     = order.financial_status === 'paid' || order.financial_status === 'partially_paid'
   const amountDue  = isPaid ? 0 : totalPrice
   // Remises (discount_allocations), livraison et paiements reçus — cf. lib/billing/invoiceMath
-  const bd = invoiceBreakdown(order)
+  const bd = invoiceBreakdown(order, t)
 
   // ── Avoir basé sur les remboursements Shopify ──────────────────────────────
   // L'avoir ne porte QUE sur les articles réellement remboursés (refund_line_items),
@@ -160,7 +163,7 @@ export function Invoice({ order, settings, mode }: { order: ShopifyOrder; settin
     : refItems.length > 0
       ? refItems.map((li, i) => ({
           id:            i,
-          title:         li.line_item?.title ?? 'Article remboursé',
+          title:         li.line_item?.title ?? t.refundedItem,
           variant_title: li.line_item?.variant_title ?? null,
           sku:           li.line_item?.sku ?? null,
           quantity:      li.quantity,
@@ -170,7 +173,7 @@ export function Invoice({ order, settings, mode }: { order: ShopifyOrder; settin
         }))
       : [{
           id:            0,
-          title:         `Remboursement commande ${order.name}`,
+          title:         t.refundOrder(order.name),
           variant_title: null,
           sku:           null,
           quantity:      1,
@@ -258,21 +261,21 @@ export function Invoice({ order, settings, mode }: { order: ShopifyOrder; settin
           {/* Invoice ref + date */}
           <div style={S.headerRight}>
             <div>
-              <div style={{ ...S.invoiceLabel, ...(isAvoir ? { color: '#c7293a', fontWeight: 700 } : {}) }}>{isAvoir ? "FACTURE D'AVOIR" : 'FACTURE'}</div>
-              <div style={S.invoiceNum} data-invoice-number>N° {docNumber}</div>
+              <div style={{ ...S.invoiceLabel, ...(isAvoir ? { color: '#c7293a', fontWeight: 700 } : {}) }}>{isAvoir ? t.creditNote : t.invoice}</div>
+              <div style={S.invoiceNum} data-invoice-number>{t.no} {docNumber}</div>
               {isAvoir && (
                 <div style={{ fontSize: 10, color: '#c7293a', marginTop: 2, textAlign: 'right' }}>
-                  Avoir sur facture n° {invoiceNumber}
+                  {t.creditFor(invoiceNumber)}
                   {hasRefund && refunds[0]?.created_at && (
-                    <div style={{ color: '#888' }}>Remboursement du {fmtDateLong(refunds[0].created_at)}</div>
+                    <div style={{ color: '#888' }}>{t.refundOf} {fmtDateLong(refunds[0].created_at, t.locale)}</div>
                   )}
-                  {!hasRefund && <div style={{ color: '#b45309' }}>Aucun remboursement Shopify — avoir sur la totalité</div>}
+                  {!hasRefund && <div style={{ color: '#b45309' }}>{t.noRefund}</div>}
                 </div>
               )}
             </div>
             <div style={S.dateBadge}>
-              <div style={S.dateLabel}>DATE D&apos;ÉMISSION</div>
-              <div style={S.dateVal}>{fmtDateLong(order.created_at)}</div>
+              <div style={S.dateLabel}>{t.issueDate}</div>
+              <div style={S.dateVal}>{fmtDateLong(order.created_at, t.locale)}</div>
             </div>
           </div>
         </div>
@@ -280,7 +283,7 @@ export function Invoice({ order, settings, mode }: { order: ShopifyOrder; settin
         {/* ── Addresses ──────────────────────────────────────────────────────── */}
         <div style={S.addrRow}>
           <div>
-            <div style={S.addrLabel}>Fournisseur</div>
+            <div style={S.addrLabel}>{t.supplier}</div>
             <div style={S.addrName}>{settings?.company_name || '—'}</div>
             {settings?.address_line1 && <p style={S.addrLine}>{settings.address_line1}</p>}
             {settings?.address_line2 && <p style={S.addrLine}>{settings.address_line2}</p>}
@@ -288,10 +291,10 @@ export function Invoice({ order, settings, mode }: { order: ShopifyOrder; settin
               <p style={S.addrLine}>{[settings.zip, settings.city].filter(Boolean).join(' ')}</p>
             )}
             {settings?.country && <p style={S.addrLine}>{settings.country}</p>}
-            {settings?.vat_number && <p style={{ ...S.addrLine, marginTop: 6 }}>N° de TVA : {settings.vat_number}</p>}
+            {settings?.vat_number && <p style={{ ...S.addrLine, marginTop: 6 }}>{t.vatNo} : {settings.vat_number}</p>}
           </div>
           <div>
-            <div style={S.addrLabel}>Client</div>
+            <div style={S.addrLabel}>{t.client}</div>
             {billingAddr?.company && <div style={S.addrName}>{billingAddr.company}</div>}
             <div style={{ ...S.addrName, fontWeight: billingAddr?.company ? 400 : 700 }}>{clientName}</div>
             {billingAddr?.address1 && <p style={S.addrLine}>{billingAddr.address1}</p>}
@@ -300,7 +303,7 @@ export function Invoice({ order, settings, mode }: { order: ShopifyOrder; settin
               <p style={S.addrLine}>{[billingAddr.zip, billingAddr.city].filter(Boolean).join(' ')}</p>
             )}
             {billingAddr?.country && <p style={S.addrLine}>{billingAddr.country}</p>}
-            {billingAddr?.vat_number && <p style={{ ...S.addrLine, marginTop: 6 }}>N° de TVA : {billingAddr.vat_number}</p>}
+            {billingAddr?.vat_number && <p style={{ ...S.addrLine, marginTop: 6 }}>{t.vatNo} : {billingAddr.vat_number}</p>}
           </div>
         </div>
 
@@ -308,16 +311,16 @@ export function Invoice({ order, settings, mode }: { order: ShopifyOrder; settin
         <div style={S.metaRow}>
           <div style={S.metaBlock}>
             <div style={S.metaItem}>
-              <span style={S.metaKey}>Mode de paiement</span>
-              <span style={S.metaVal}>{paymentLabel(order).toUpperCase()}</span>
+              <span style={S.metaKey}>{t.paymentMethod}</span>
+              <span style={S.metaVal}>{paymentLabel(order, t).toUpperCase()}</span>
             </div>
             <div style={S.metaItem}>
-              <span style={S.metaKey}>Numéro de commande</span>
+              <span style={S.metaKey}>{t.orderNumber}</span>
               <span style={S.metaVal}>{order.name}</span>
             </div>
           </div>
           <div style={{ display: 'flex', alignItems: 'center' }}>
-            <div style={S.thankyou}>MERCI POUR<br />VOTRE ACHAT.</div>
+            <div style={S.thankyou}>{t.thanks[0]}<br />{t.thanks[1]}</div>
           </div>
         </div>
 
@@ -325,12 +328,12 @@ export function Invoice({ order, settings, mode }: { order: ShopifyOrder; settin
         <table style={S.table}>
           <thead>
             <tr>
-              <th style={S.th}>Article</th>
-              <th style={S.th}>Description</th>
-              <th style={{ ...S.thR }}>Quantité</th>
-              <th style={{ ...S.thR }}>{tvaEnabled ? 'Prix unitaire TTC' : 'Prix unitaire HT'}</th>
-              <th style={{ ...S.thR }}>TVA</th>
-              <th style={{ ...S.thR }}>Total</th>
+              <th style={S.th}>{t.item}</th>
+              <th style={S.th}>{t.description}</th>
+              <th style={{ ...S.thR }}>{t.quantity}</th>
+              <th style={{ ...S.thR }}>{tvaEnabled ? t.unitTTC : t.unitHT}</th>
+              <th style={{ ...S.thR }}>{t.vat}</th>
+              <th style={{ ...S.thR }}>{t.total}</th>
             </tr>
           </thead>
           <tbody>
@@ -361,7 +364,7 @@ export function Invoice({ order, settings, mode }: { order: ShopifyOrder; settin
             {!hasRefund && bd.lineDiscounts > 0 ? (
               <>
                 <div style={S.totalRow}>
-                  <span>Sous-total articles</span>
+                  <span>{t.itemsSubtotal}</span>
                   <span style={{ fontWeight: 600 }}>{fmtEur(bd.itemsGross)}</span>
                 </div>
                 <div style={{ ...S.totalRow, color: '#1a7f4b' }}>
@@ -371,39 +374,39 @@ export function Invoice({ order, settings, mode }: { order: ShopifyOrder; settin
               </>
             ) : (
               <div style={S.totalRow}>
-                <span>{hasRefund ? 'Sous-total remboursé' : 'Sous-total'}</span>
+                <span>{hasRefund ? t.refundedSubtotal : t.subtotal}</span>
                 <span style={{ fontWeight: 600 }}>{fmtEur(hasRefund ? dispHt : subtotal)}</span>
               </div>
             )}
             {!hasRefund && bd.hasShipping && (
               <div style={S.totalRow}>
                 <span>{bd.shippingTitle}</span>
-                <span style={{ fontWeight: 600 }}>{bd.shipping > 0 ? fmtEur(bd.shipping) : 'Offerte'}</span>
+                <span style={{ fontWeight: 600 }}>{bd.shipping > 0 ? fmtEur(bd.shipping) : t.free}</span>
               </div>
             )}
             {tvaEnabled ? (
               <>
                 <div style={S.totalRow}>
-                  <span>Total HT</span>
+                  <span>{t.totalHT}</span>
                   <span style={{ fontWeight: 600 }}>{fmtEur(dispHt)}</span>
                 </div>
                 <div style={S.totalRow}>
-                  <span>TVA (FR TVA) {tvaRate}%</span>
+                  <span>{t.vatLine(tvaRate)}</span>
                   <span style={{ fontWeight: 600 }}>{fmtEur(dispTva)}</span>
                 </div>
                 <div style={S.totalRow}>
-                  <span>Total TTC</span>
+                  <span>{t.totalTTC}</span>
                   <span style={{ fontWeight: 700, color: '#1a1a18' }}>{fmtEur(dispTtc)}</span>
                 </div>
               </>
             ) : (
               <>
                 <div style={S.totalRow}>
-                  <span style={{ color: '#888', fontSize: 11 }}>TVA — Non applicable</span>
+                  <span style={{ color: '#888', fontSize: 11 }}>{t.vatNA}</span>
                   <span style={{ color: '#888', fontSize: 11 }}>—</span>
                 </div>
                 <div style={S.totalRow}>
-                  <span>Total HT</span>
+                  <span>{t.totalHT}</span>
                   <span style={{ fontWeight: 700, color: '#1a1a18' }}>{fmtEur(dispTtc)}</span>
                 </div>
               </>
@@ -412,25 +415,25 @@ export function Invoice({ order, settings, mode }: { order: ShopifyOrder; settin
               <>
                 {bd.payments.map((p, i) => (
                   <div key={i} style={S.totalRow}>
-                    <span>Payé le {new Date(p.date).toLocaleDateString('fr-FR', { day: 'numeric', month: 'short', year: 'numeric' })} ({gatewayLabel(p.gateway)})</span>
+                    <span>{t.paidOn} {new Date(p.date).toLocaleDateString(t.locale, { day: 'numeric', month: 'short', year: 'numeric' })} ({gatewayLabel(p.gateway, t)})</span>
                     <span style={{ fontWeight: 600 }}>{fmtEur(p.amount)}</span>
                   </div>
                 ))}
                 {bd.payments.length > 1 && (
                   <div style={S.totalRow}>
-                    <span>Total payé</span>
+                    <span>{t.totalPaid}</span>
                     <span style={{ fontWeight: 700 }}>{fmtEur(bd.paidTotal)}</span>
                   </div>
                 )}
               </>
             ) : !isAvoir && isPaid && (
               <div style={S.totalRow}>
-                <span>Montant payé</span>
+                <span>{t.amountPaid}</span>
                 <span style={{ fontWeight: 600 }}>{fmtEur(totalPrice)}</span>
               </div>
             )}
             <div style={{ ...S.totalRowBig, ...(isAvoir ? { backgroundColor: '#c7293a' } : {}) }}>
-              <span>{isAvoir ? 'TOTAL AVOIR TTC' : 'MONTANT DÛ'}</span>
+              <span>{isAvoir ? t.creditTotal : t.amountDue}</span>
               <span>{isAvoir ? `− ${fmtEur(dispTtc)}` : fmtEur(amountDue)}</span>
             </div>
           </div>
@@ -443,9 +446,9 @@ export function Invoice({ order, settings, mode }: { order: ShopifyOrder; settin
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', gap: 24 }}>
           <div style={{ fontSize: 10, color: '#888', lineHeight: 1.7 }}>
             {settings?.company_name && <div style={{ fontWeight: 600, color: '#444' }}>{settings.company_name}</div>}
-            {settings?.email && <span>E-mail : {settings.email}</span>}
+            {settings?.email && <span>{t.email} : {settings.email}</span>}
             {settings?.email && settings?.phone && <span>  ·  </span>}
-            {settings?.phone && <span>Tél : {settings.phone}</span>}
+            {settings?.phone && <span>{t.phone} : {settings.phone}</span>}
           </div>
           <div style={{ fontSize: 10, color: '#888', textAlign: 'right' as const, lineHeight: 1.7 }}>
             {settings?.bank_iban && <div>IBAN : {settings.bank_iban}{settings.bank_bic ? ` · BIC : ${settings.bank_bic}` : ''}</div>}
