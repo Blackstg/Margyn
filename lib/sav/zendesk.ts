@@ -84,6 +84,14 @@ interface ZendeskComment {
   public:      boolean
   created_at:  string
   attachments: ZendeskAttachment[]
+  via?:        { channel?: string }
+}
+
+// Les messages sortants Steero (« Nouveau message ») créent un ticket via l'API
+// avec le client en demandeur : Zendesk attribue alors ce 1er commentaire au
+// client. Un 1er commentaire arrivé par l'API est donc le nôtre (agent).
+function isOutboundOpener(c: { via?: { channel?: string } }, index: number) {
+  return index === 0 && c.via?.channel === 'api'
 }
 
 // Returns all new/open/pending tickets, excluding vip and litige
@@ -443,10 +451,10 @@ export async function getTicketComments(
   }
 
   if (requesterId) {
-    return publicComments.map(c => ({
+    return publicComments.map((c, i) => ({
       id:          c.id,
       body:        c.body,
-      author_type: c.author_id === requesterId ? 'client' : 'agent',
+      author_type: c.author_id === requesterId && !isOutboundOpener(c, i) ? 'client' : 'agent',
       created_at:  c.created_at,
       attachments: mapAttachments(c),
     }))
@@ -456,7 +464,7 @@ export async function getTicketComments(
   return publicComments.map((c, i) => ({
     id:          c.id,
     body:        c.body,
-    author_type: (i === 0 ? 'client' : 'agent') as 'client' | 'agent',
+    author_type: (i === 0 && !isOutboundOpener(c, i) ? 'client' : 'agent') as 'client' | 'agent',
     created_at:  c.created_at,
     attachments: mapAttachments(c),
   }))
@@ -488,7 +496,7 @@ export async function fetchTicketContext(ticketId: number, brand: SavBrand = 'mo
     1000,
   ).catch(() => null)
 
-  const publicComments: Array<{ author_id: number; body: string; created_at: string }> = []
+  const publicComments: Array<{ author_id: number; body: string; created_at: string; via?: { channel?: string } }> = []
   if (commentsRes?.ok) {
     const data = await commentsRes.json() as { comments?: ZendeskComment[] }
     publicComments.push(...(data.comments ?? []).filter(c => c.public))
@@ -501,8 +509,8 @@ export async function fetchTicketContext(ticketId: number, brand: SavBrand = 'mo
 
   if (publicComments.length > 0) {
     lines.push('Historique :')
-    for (const c of publicComments) {
-      const isRequester = c.author_id === ticket.requester_id
+    for (const [i, c] of publicComments.entries()) {
+      const isRequester = c.author_id === ticket.requester_id && !isOutboundOpener(c, i)
       const role = isRequester ? 'Client' : 'Agent'
       const date = new Date(c.created_at).toLocaleDateString('fr-FR', {
         day: 'numeric', month: 'short', year: 'numeric',
