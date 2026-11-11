@@ -2281,6 +2281,7 @@ export default function SavPage() {
   const [showRules, setShowRules]           = useState(false)
   const [toolMenu, setToolMenu]             = useState<'assign' | 'tags' | null>(null)
   const [showWaiting, setShowWaiting]       = useState(false)
+  const [processFailed, setProcessFailed]   = useState<Record<number, string>>({})
   const [resolving, setResolving]           = useState(false)
   const [resolveError, setResolveError]     = useState<string | null>(null)
   const [importing, setImporting]           = useState(false)
@@ -2399,6 +2400,7 @@ export default function SavPage() {
     if (fetchingRef.current.has(raw.ticket_id)) return
     fetchingRef.current.add(raw.ticket_id)
     setProcessingId(raw.ticket_id)
+    setProcessFailed(prev => { if (!(raw.ticket_id in prev)) return prev; const n = { ...prev }; delete n[raw.ticket_id]; return n })
     try {
       const res = await savFetch('/api/sav/process', {
         method:  'POST',
@@ -2413,7 +2415,11 @@ export default function SavPage() {
         }),
       })
       const ticket = await savJson<ProcessedTicket & { error?: string }>(res, 'La génération de réponse')
-      if (!res.ok) { console.error('[SAV] /api/sav/process failed:', ticket.error); return }
+      if (!res.ok) {
+        console.error('[SAV] /api/sav/process failed:', ticket.error)
+        setProcessFailed(prev => ({ ...prev, [raw.ticket_id]: ticket.error ?? `Erreur ${res.status}` }))
+        return
+      }
       // Signature par agent : le brouillon contient le marqueur {{PRÉNOM}} (ex. intro
       // « Je suis {{PRÉNOM}} »). On le remplace par le prénom de l'agent connecté, des
       // DEUX côtés (brouillon éditable ET baseline draft_reply pour l'ampleur de modif)
@@ -2427,6 +2433,7 @@ export default function SavPage() {
       setSolvedMap(prev => { if (raw.ticket_id in prev) return prev; return { ...prev, [raw.ticket_id]: ticket.solved } })
     } catch (err) {
       console.error('[SAV] processTicket error:', err)
+      setProcessFailed(prev => ({ ...prev, [raw.ticket_id]: err instanceof Error ? err.message : 'Erreur inconnue' }))
     } finally {
       fetchingRef.current.delete(raw.ticket_id)
       setProcessingId(prev => prev === raw.ticket_id ? null : prev)
@@ -2694,7 +2701,6 @@ export default function SavPage() {
   const waitingClient = allPending.filter(t => t.status === 'pending')
 
   const selectedProcessed = selectedId != null ? (processedCache[selectedId] ?? null) : null
-  const isProcessing      = processingId === selectedId && selectedId !== null
   const selectedRaw       = selectedId != null ? rawTickets.find(t => t.ticket_id === selectedId) : undefined
   const selectedName      = prettyName(selectedRaw?.requester_name, selectedRaw?.requester_email ?? selectedProcessed?.customer_email)
   const selectedAssignee  = selectedId != null ? assignments[selectedId] : undefined
@@ -3100,8 +3106,21 @@ export default function SavPage() {
           ? <QualiteDashboard />
           : selectedId === null
             ? <CenterEmpty />
-            : isProcessing && !selectedProcessed
-              ? <CenterSkeleton />
+            : !selectedProcessed
+              ? (selectedId in processFailed
+                  ? (
+                    <div className="flex flex-col items-center justify-center h-full gap-3 text-center px-6">
+                      <p className="text-[14px] text-[#1d1d1f]">Impossible de préparer ce ticket.</p>
+                      <p className="text-[12px] text-[#8e8e93] max-w-[420px]">{processFailed[selectedId]}</p>
+                      <button
+                        onClick={() => { const r = rawTickets.find(t => t.ticket_id === selectedId); if (r) processTicket(r) }}
+                        className="h-9 px-4 rounded-full bg-[#0a66f5] text-white text-[13px] font-semibold"
+                      >
+                        Réessayer
+                      </button>
+                    </div>
+                  )
+                  : <CenterSkeleton />)
               : selectedProcessed
                 ? <>
                     {/* Barre d'outils du ticket */}
@@ -3199,8 +3218,8 @@ export default function SavPage() {
             <div className="flex items-center justify-center h-full">
               <p className="text-[13px] text-[#8e8e93]">Aucun ticket sélectionné</p>
             </div>
-          ) : isProcessing && !selectedProcessed ? (
-            <RightPanelSkeleton />
+          ) : !selectedProcessed ? (
+            selectedId in processFailed ? null : <RightPanelSkeleton />
           ) : selectedProcessed ? (
             <div className="flex-1 min-h-0 flex flex-col gap-3 p-3">
               <ClaudeSummary ticket={selectedProcessed} />
