@@ -1,20 +1,17 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { hasBrandAccess } from '@/lib/brandAccess'
+import { shopifyCreds } from '@/lib/tenant/integrations'
 
-const SHOPIFY: Record<string, { shop: string; token: string }> = {
-  bowa: { shop: process.env.SHOPIFY_BOWA_SHOP!, token: process.env.SHOPIFY_BOWA_ACCESS_TOKEN! },
-  moom: { shop: process.env.SHOPIFY_MOOM_SHOP!, token: process.env.SHOPIFY_MOOM_ACCESS_TOKEN! },
-  krom: { shop: process.env.SHOPIFY_KROM_SHOP!, token: process.env.SHOPIFY_KROM_ACCESS_TOKEN! },
-}
 
 export async function GET(req: NextRequest) {
   const brand  = req.nextUrl.searchParams.get('brand') ?? 'bowa'
+  if (!(await hasBrandAccess(req, brand))) return NextResponse.json({ error: 'Non autorisé' }, { status: 401 })
   const search = req.nextUrl.searchParams.get('search') ?? ''
   const limit  = Math.min(parseInt(req.nextUrl.searchParams.get('limit') ?? '50'), 100)
 
-  const creds = SHOPIFY[brand]
-  if (!creds?.shop || !creds?.token) {
-    return NextResponse.json({ error: 'Brand non configurée' }, { status: 400 })
-  }
+  const c = await shopifyCreds(brand)
+  if (!c.shop || !c.token) return NextResponse.json({ error: 'Brand non configurée' }, { status: 400 })
+  const creds = { shop: c.shop, token: c.token }
 
   const fields = 'id,name,created_at,customer,total_price,subtotal_price,total_tax,financial_status,billing_address,currency'
 

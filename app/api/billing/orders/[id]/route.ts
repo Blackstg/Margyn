@@ -1,27 +1,26 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { hasBrandAccess } from '@/lib/brandAccess'
+import { shopifyCreds } from '@/lib/tenant/integrations'
+import { INVOICE_FIELDS, attachPayments } from '@/lib/billing/shopifyInvoiceOrder'
 import { createServerClient } from '@supabase/auth-helpers-nextjs'
 import { cookies } from 'next/headers'
 import { loadBillingOverride, saveBillingOverride, deleteBillingOverride, applyBillingOverride } from '@/lib/billing/overrides'
 
-const SHOPIFY: Record<string, { shop: string; token: string }> = {
-  bowa: { shop: process.env.SHOPIFY_BOWA_SHOP!, token: process.env.SHOPIFY_BOWA_ACCESS_TOKEN! },
-  moom: { shop: process.env.SHOPIFY_MOOM_SHOP!, token: process.env.SHOPIFY_MOOM_ACCESS_TOKEN! },
-  krom: { shop: process.env.SHOPIFY_KROM_SHOP!, token: process.env.SHOPIFY_KROM_ACCESS_TOKEN! },
-}
+import { BRANDS } from '@/lib/access'
+const SHOPIFY = Object.fromEntries(BRANDS.map(b => [b, true])) as Record<string, boolean>
 
 export async function GET(
   req: NextRequest,
   { params }: { params: { id: string } }
 ) {
   const brand = req.nextUrl.searchParams.get('brand') ?? 'bowa'
+  if (!(await hasBrandAccess(req, brand))) return NextResponse.json({ error: 'Non autorisé' }, { status: 401 })
   const { id } = params
 
-  const creds = SHOPIFY[brand]
-  if (!creds?.shop || !creds?.token) {
-    return NextResponse.json({ error: 'Brand non configurée' }, { status: 400 })
-  }
-
-  const fields = 'id,name,created_at,customer,total_price,subtotal_price,total_tax,total_discounts,financial_status,billing_address,currency,line_items,gateway,payment_gateway_names,refunds'
+  const c = await shopifyCreds(brand)
+  if (!c.shop || !c.token) return NextResponse.json({ error: 'Brand non configurée' }, { status: 400 })
+  const creds = { shop: c.shop, token: c.token }
+  const fields = INVOICE_FIELDS
 
   try {
     const res = await fetch(
@@ -32,7 +31,8 @@ export async function GET(
       }
     )
     if (!res.ok) return NextResponse.json({ error: `Shopify ${res.status}` }, { status: res.status })
-    const { order } = await res.json()
+    const { order: raw } = await res.json()
+    const order = await attachPayments(creds.shop, creds.token, raw)
     const override = await loadBillingOverride(brand, id)
     return NextResponse.json({ order: applyBillingOverride(order, override), shopify_billing: order.billing_address ?? null })
   } catch (e) {
@@ -59,6 +59,7 @@ async function currentUserEmail(): Promise<string | null> {
 export async function PUT(req: NextRequest, { params }: { params: { id: string } }) {
   const brand = req.nextUrl.searchParams.get('brand') ?? 'bowa'
   if (!SHOPIFY[brand]) return NextResponse.json({ error: 'Brand non configurée' }, { status: 400 })
+  if (!(await hasBrandAccess(req, brand))) return NextResponse.json({ error: 'Non autorisé' }, { status: 401 })
   const email = await currentUserEmail()
   if (!email) return NextResponse.json({ error: 'Non connecté' }, { status: 401 })
   const body = await req.json().catch(() => ({}))
@@ -74,7 +75,7 @@ export async function PUT(req: NextRequest, { params }: { params: { id: string }
 export async function DELETE(req: NextRequest, { params }: { params: { id: string } }) {
   const brand = req.nextUrl.searchParams.get('brand') ?? 'bowa'
   if (!SHOPIFY[brand]) return NextResponse.json({ error: 'Brand non configurée' }, { status: 400 })
-  if (!(await currentUserEmail())) return NextResponse.json({ error: 'Non connecté' }, { status: 401 })
+  if (!(await hasBrandAccess(req, brand))) return NextResponse.json({ error: 'Non autorisé' }, { status: 401 })
   await deleteBillingOverride(brand, params.id)
   return NextResponse.json({ ok: true })
 }

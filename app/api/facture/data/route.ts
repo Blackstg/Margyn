@@ -5,12 +5,13 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 import { shopifyCreds } from '@/lib/tenant/integrations'
 import { loadBillingOverride, applyBillingOverride } from '@/lib/billing/overrides'
+import { INVOICE_FIELDS, attachPayments } from '@/lib/billing/shopifyInvoiceOrder'
 
 export const dynamic = 'force-dynamic'
 
 const KNOWN_BRANDS = ['bowa', 'moom', 'krom', 'yone']
 
-const FIELDS = 'id,name,created_at,customer,total_price,subtotal_price,total_tax,total_discounts,financial_status,billing_address,currency,line_items,gateway,payment_gateway_names,refunds'
+const FIELDS = INVOICE_FIELDS
 
 export async function GET(req: NextRequest) {
   const brand = (req.nextUrl.searchParams.get('brand') ?? 'bowa').toLowerCase()
@@ -42,6 +43,7 @@ export async function GET(req: NextRequest) {
       if (byId.ok) order = (await byId.json()).order ?? null
     }
     if (!order) return NextResponse.json({ error: 'Commande introuvable' }, { status: 404 })
+    order = await attachPayments(creds.shop, creds.token, order as { id?: number })
 
     const sb = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!, { auth: { persistSession: false } })
     const { data: settings } = await sb.from('invoice_settings').select('*').eq('brand', brand).maybeSingle()

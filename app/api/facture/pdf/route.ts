@@ -5,16 +5,20 @@
 // reprises du composant components/billing/Invoice.tsx (chemin mode='facture').
 import { NextRequest, NextResponse } from 'next/server'
 import { PDFDocument, StandardFonts, rgb, type PDFFont, type RGB } from 'pdf-lib'
+import { gatewayLabel, invoiceBreakdown, type InvoiceOrderLike } from '@/lib/billing/invoiceMath'
 
 export const dynamic = 'force-dynamic'
 
-interface LineItem { title: string; variant_title?: string | null; sku?: string | null; quantity: number; price: string; total_discount: string }
+interface LineItem { title: string; variant_title?: string | null; sku?: string | null; quantity: number; price: string; total_discount: string; discount_allocations?: { amount: string }[] }
 interface Order {
   name: string; created_at: string; total_price: string; subtotal_price: string; total_tax: string
   financial_status: string; gateway?: string; payment_gateway_names?: string[]
   customer: { first_name?: string; last_name?: string } | null
   billing_address: { name?: string; company?: string; address1?: string; address2?: string; city?: string; zip?: string; country?: string; vat_number?: string } | null
   line_items: LineItem[]
+  discount_applications?: InvoiceOrderLike['discount_applications']
+  shipping_lines?: InvoiceOrderLike['shipping_lines']
+  payments?: InvoiceOrderLike['payments']
 }
 interface Settings {
   company_name?: string; address_line1?: string; address_line2?: string; city?: string; zip?: string; country?: string
@@ -76,10 +80,12 @@ export async function GET(req: NextRequest) {
   const subtotal   = parseFloat(order.subtotal_price)
   const isPaid     = order.financial_status === 'paid' || order.financial_status === 'partially_paid'
   const amountDue  = isPaid ? 0 : totalPrice
-  const items = order.line_items.map(it => ({
+  const bd = invoiceBreakdown(order)
+  const items = order.line_items.map((it, i) => ({
     title: it.title, variant: it.variant_title, sku: it.sku, qty: it.quantity,
     unit: parseFloat(it.price),
-    total: parseFloat(it.price) * it.quantity - parseFloat(it.total_discount || '0'),
+    total: bd.lines[i].net,
+    discount: bd.lines[i].discount,
   }))
   const invoiceNumber = order.name.replace('#', '')
   const billing = order.billing_address
@@ -165,6 +171,7 @@ export async function GET(req: NextRequest) {
     y -= 13
     const desc = [it.variant && it.variant !== 'Default Title' ? it.variant : '', it.sku ? `SKU : ${it.sku}` : ''].filter(Boolean).join('   ')
     if (desc) { text(desc, L, y, { size: 8, color: grey }); y -= 13 }
+    if (it.discount > 0) { text(`${bd.discountLabel} : -${money(it.discount)}`, L, y, { size: 8, color: rgb(0.1, 0.5, 0.29) }); y -= 13 }
     y -= 6
     line(y)          // séparateur SOUS la ligne (ne barre plus le texte)
     y -= 15
@@ -178,7 +185,13 @@ export async function GET(req: NextRequest) {
     text(v, R, y, { size: 10, font: opt.bold ? bold : font, align: 'right' })   // aligné à droite → plus de valeur coupée
     y -= 16
   }
-  totRow('Sous-total', money(subtotal))
+  if (bd.lineDiscounts > 0) {
+    totRow('Sous-total articles', money(bd.itemsGross))
+    totRow(bd.discountLabel, `-${money(bd.lineDiscounts)}`)
+  } else {
+    totRow('Sous-total', money(subtotal))
+  }
+  if (bd.hasShipping) totRow(bd.shippingTitle, bd.shipping > 0 ? money(bd.shipping) : 'Offerte')
   if (tvaEnabled) {
     totRow('Total HT', money(htAmount))
     totRow(`TVA ${tvaRate}%`, money(tvaAmount))
@@ -187,7 +200,10 @@ export async function GET(req: NextRequest) {
     totRow('TVA - Non applicable', '-')
     totRow('Total HT', money(totalPrice), { bold: true })
   }
-  if (isPaid) totRow('Montant paye', money(totalPrice))
+  if (bd.payments.length > 0) {
+    for (const p of bd.payments) totRow(`Paye le ${new Date(p.date).toLocaleDateString('fr-FR', { day: 'numeric', month: 'short', year: 'numeric' })} (${gatewayLabel(p.gateway)})`, money(p.amount))
+    if (bd.payments.length > 1) totRow('Total paye', money(bd.paidTotal), { bold: true })
+  } else if (isPaid) totRow('Montant paye', money(totalPrice))
   // Bande montant dû (gap suffisant pour ne pas recouvrir la ligne précédente)
   y -= 6
   page.drawRectangle({ x: tbL - 10, y: y - 6, width: R - tbL + 14, height: 24, color: primary })
