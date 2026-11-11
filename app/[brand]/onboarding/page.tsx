@@ -12,9 +12,9 @@ import { useBrand } from '@/context/BrandContext'
 
 type StepKey = 'shopify' | 'identity' | 'meta' | 'google' | 'products' | 'shipping' | 'team'
 type Step = { key: StepKey; done: boolean; skipped: boolean; detail: Record<string, unknown> }
-type Product = { id: string; title: string; image: string | null; price: number | null; cost: number | null }
+type Missing = { productId: string; title: string; image: string | null; revenue: number }
 type Preview = { sales30: number; orders30: number; cogs30: number; metaSpend30: number; googleSpend30: number }
-type Status = { brand: string; name: string; logoUrl: string | null; steps: Step[]; doneCount: number; total: number; preview: Preview; products: Product[] }
+type Status = { brand: string; name: string; logoUrl: string | null; steps: Step[]; doneCount: number; total: number; preview: Preview; missingCosts: Missing[] }
 type Act = (body: Record<string, unknown> | FormData) => Promise<{ error?: string } & Record<string, unknown>>
 
 const MISSIONS: Record<StepKey, { icon: typeof Store; short: string; question: string; why: string }> = {
@@ -22,14 +22,13 @@ const MISSIONS: Record<StepKey, { icon: typeof Store; short: string; question: s
   identity: { icon: ImageIcon, short: 'Logo',     question: 'À quoi ressemble ta marque ?',              why: 'Pour la reconnaître d’un coup d’œil dans Steero.' },
   meta:     { icon: Megaphone, short: 'Meta',     question: 'Tu fais de la pub sur Facebook ou Instagram ?', why: 'On compare ce que tu dépenses à ce que ça te rapporte.' },
   google:   { icon: Search,    short: 'Google',   question: 'Tu fais de la pub sur Google ?',            why: 'Même chose pour Google : dépense contre ventes.' },
-  products: { icon: Package,   short: 'Coûts',    question: 'Combien te coûte chaque produit ?',         why: 'Le prix que tu paies pour un article. Sans lui, impossible de savoir si tu gagnes de l’argent.' },
+  products: { icon: Package,   short: 'Coûts',    question: 'Combien te coûte chaque produit ?',         why: 'Le prix que tu paies pour un article. Sans lui, impossible de savoir si tu gagnes de l’argent. Il se renseigne dans Shopify, Steero le lit tout seul.' },
   shipping: { icon: Truck,     short: 'Envoi',    question: 'Combien te coûte l’envoi d’une commande ?', why: 'L’envoi et les frais de paiement mangent une partie de chaque vente.' },
   team:     { icon: Users,     short: 'Équipe',   question: 'Tu travailles avec quelqu’un ?',            why: 'Chaque personne ne voit que ce que tu lui ouvres.' },
 }
 const ORDER: StepKey[] = ['shopify', 'identity', 'meta', 'google', 'products', 'shipping', 'team']
 
 const eur = (n: number) => new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR', maximumFractionDigits: 0 }).format(n)
-const price = (n: number) => new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR' }).format(n)
 const fmtDate = (d: string | null) => d ? new Date(d + 'T00:00:00').toLocaleDateString('fr-FR', { day: 'numeric', month: 'long' }) : '—'
 
 const btn = 'inline-flex items-center justify-center gap-2 rounded-2xl bg-[#1a1a2e] px-5 py-3 text-[15px] font-semibold text-white transition active:scale-[.98] disabled:opacity-40 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#1a1a2e]'
@@ -354,7 +353,7 @@ function Body({ step, status, run, busy, skip }: { step: Step; status: Status; r
     }
 
     case 'products':
-      return <ProductCosts products={status.products} run={run} busy={busy} />
+      return <CostsInShopify step={step} missing={status.missingCosts} run={run} busy={busy} />
 
     case 'shipping':
       return <ShippingChoice step={step} run={run} busy={busy} />
@@ -370,48 +369,66 @@ function Body({ step, status, run, busy, skip }: { step: Step; status: Status; r
   }
 }
 
-function ProductCosts({ products, run, busy }: { products: Product[]; run: Run; busy: boolean }) {
-  const [costs, setCosts] = useState<Record<string, string>>(() =>
-    Object.fromEntries(products.map(p => [p.id, p.cost != null && p.cost > 0 ? String(p.cost).replace('.', ',') : ''])))
-  const num = (v: string) => Number(v.replace(',', '.'))
-  const filled = products.filter(p => num(costs[p.id] ?? '') > 0).length
+function CostsInShopify({ step, missing, run, busy }: { step: Step; missing: Missing[]; run: Run; busy: boolean }) {
+  const d = step.detail
+  const handle = d.shopHandle as string | null
+  const admin = handle ? `https://admin.shopify.com/store/${handle}` : 'https://admin.shopify.com'
+  const coverage = Number(d.coverage ?? 0)
+  const many = Number(d.variants) > 50
 
-  if (!products.length) return <p className="text-[15px] text-[#6b6b63]">Tes produits arrivent avec la prochaine synchro Shopify.</p>
   return (
-    <div>
-      <ul className="divide-y divide-[#f0efeb]">
-        {products.map(p => {
-          const c = num(costs[p.id] ?? '')
-          const m = p.price && c > 0 ? Math.round(((p.price - c) / p.price) * 100) : null
-          return (
-            <li key={p.id} className="flex items-center gap-3 py-3">
-              <span className="h-14 w-14 shrink-0 overflow-hidden rounded-xl bg-[#f3f2ee]">
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                {p.image && <img src={p.image} alt="" className="h-full w-full object-cover" />}
-              </span>
-              <span className="min-w-0 flex-1">
-                <span className="block truncate text-[15px] font-semibold text-[#1a1a18]">{p.title}</span>
-                <span className="text-[13px] text-[#6b6b63]">
-                  {p.price != null ? `Vendu ${price(p.price)}` : ''}{m != null && <span className={`ml-2 font-semibold ${m >= 50 ? 'text-[#1a7f4b]' : m >= 25 ? 'text-[#a15c07]' : 'text-[#b42318]'}`}>{m} % de marge</span>}
-                </span>
-              </span>
-              <label className="relative">
-                <span className="sr-only">Coût d’achat de {p.title}</span>
-                <input inputMode="decimal" value={costs[p.id] ?? ''} placeholder="0" onChange={e => setCosts(prev => ({ ...prev, [p.id]: e.target.value }))}
-                  className={`${field} w-28 pr-8 text-right tabular-nums`} />
-                <span className="pointer-events-none absolute right-3.5 top-1/2 -translate-y-1/2 text-[15px] text-[#8a887f]">€</span>
-              </label>
-            </li>
-          )
-        })}
-      </ul>
-      <div className="mt-5 flex flex-wrap items-center gap-3">
-        <button disabled={busy || filled === 0} className={btn}
-          onClick={() => run({ action: 'productCosts', costs: Object.fromEntries(Object.entries(costs).filter(([, v]) => num(v) > 0)) }, () => 'Coûts enregistrés, tes marges sont recalculées')}>
-          {busy && <Loader2 size={16} className="animate-spin" />} Enregistrer {filled}/{products.length}
-        </button>
-        <span className="text-[13px] text-[#8a887f]">Le prix que tu paies ton fournisseur, pour un article.</span>
+    <div className="space-y-6">
+      {/* Jauge : part des ventes dont on connaît le coût */}
+      <div>
+        <div className="flex items-baseline justify-between">
+          <p className="text-[15px] font-semibold text-[#1a1a2e]">{coverage} % de tes ventes ont un coût</p>
+          <p className="text-[13px] text-[#8a887f]">objectif 90 %</p>
+        </div>
+        <div className="relative mt-2 h-3 overflow-hidden rounded-full bg-[#ecebe7]">
+          <div className={`h-full rounded-full transition-all ${coverage >= 90 ? 'bg-[#1a7f4b]' : 'bg-[#1a1a2e]'}`} style={{ width: `${Math.min(100, coverage)}%` }} />
+          <span className="absolute inset-y-0 left-[90%] w-0.5 bg-white" aria-hidden />
+        </div>
+        <p className="mt-1.5 text-[13px] text-[#6b6b63]">{String(d.costed)} produit{Number(d.costed) > 1 ? 's' : ''} sur {String(d.variants)} ont déjà un coût dans Shopify. On compte surtout ceux qui se vendent.</p>
       </div>
+
+      {missing.length > 0 && (
+        <div>
+          <p className="mb-2 text-[15px] font-semibold text-[#1a1a2e]">Commence par {missing.length > 1 ? `ces ${missing.length}` : 'celui-ci'}, ce sont tes meilleures ventes</p>
+          <ul className="divide-y divide-[#f0efeb] rounded-2xl border-2 border-[#f0efeb]">
+            {missing.map(m => (
+              <li key={m.productId}>
+                <a href={`${admin}/products/${m.productId}`} target="_blank" rel="noreferrer" className="flex items-center gap-3 px-3 py-2.5 transition hover:bg-[#faf9f8]">
+                  <span className="h-11 w-11 shrink-0 overflow-hidden rounded-xl bg-[#f3f2ee]">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    {m.image && <img src={m.image} alt="" className="h-full w-full object-cover" />}
+                  </span>
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-[15px] font-semibold text-[#1a1a18]">{m.title}</span>
+                    <span className="text-[13px] text-[#6b6b63]">{eur(m.revenue)} de ventes sur 3 mois</span>
+                  </span>
+                  <span className="inline-flex shrink-0 items-center gap-1 text-[14px] font-semibold text-[#1a1a2e]">Ajouter le coût <ExternalLink size={13} /></span>
+                </a>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      <HowTo items={many ? [
+        <>Dans Shopify, ouvre <OutLink href={`${admin}/products`}>Produits</OutLink>, coche tout, puis <strong>Modifier les produits</strong>.</>,
+        <>Ajoute la colonne <strong>Coût par article</strong> et remplis-la comme un tableur.</>,
+        <>Gros catalogue ? <strong>Exporter</strong> les produits en CSV, remplis la colonne <em>Cost per item</em>, puis <strong>Importer</strong>.</>,
+        <>Reviens ici et clique sur Vérifier.</>,
+      ] : [
+        <>Clique sur un produit ci-dessus (ou ouvre <OutLink href={`${admin}/products`}>tes produits</OutLink>).</>,
+        <>Dans <strong>Prix</strong>, remplis <strong>Coût par article</strong> et enregistre.</>,
+        <>Reviens ici et clique sur Vérifier.</>,
+      ]} />
+
+      <button disabled={busy} className={btn}
+        onClick={() => run({ action: 'refreshCosts' }, r => Number(r.added) > 0 ? `${r.added} nouveau${Number(r.added) > 1 ? 'x' : ''} coût${Number(r.added) > 1 ? 's' : ''} récupéré${Number(r.added) > 1 ? 's' : ''}, marges recalculées` : 'Aucun nouveau coût trouvé dans Shopify pour l’instant')}>
+        {busy && <Loader2 size={16} className="animate-spin" />} Vérifier mes coûts Shopify
+      </button>
     </div>
   )
 }

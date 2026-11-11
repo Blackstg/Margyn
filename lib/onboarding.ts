@@ -17,7 +17,8 @@ export interface OnboardingStep {
   detail: Record<string, unknown>
 }
 
-export interface OnboardingProduct { id: string; title: string; image: string | null; price: number | null; cost: number | null }
+// Produit sans coût qui pèse dans les ventes (mission Coûts → lien vers sa fiche Shopify).
+export interface MissingCost { productId: string; title: string; image: string | null; revenue: number }
 
 // Aperçu « ton Steero » : les vrais chiffres des 30 derniers jours, débloqués étape par étape.
 export interface OnboardingPreview {
@@ -33,10 +34,21 @@ export interface OnboardingStatus {
   doneCount: number
   total: number
   preview: OnboardingPreview
-  products: OnboardingProduct[]
+  missingCosts: MissingCost[]
 }
 
 const db = () => createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!, { auth: { autoRefreshToken: false, persistSession: false } })
+
+// PostgREST plafonne à 1 000 lignes par requête : on pagine.
+async function allRows<T>(page: (from: number, to: number) => PromiseLike<{ data: T[] | null }>, max = 50_000): Promise<T[]> {
+  const out: T[] = []
+  for (let from = 0; from < max; from += 1000) {
+    const { data } = await page(from, from + 999)
+    out.push(...(data ?? []))
+    if (!data || data.length < 1000) break
+  }
+  return out
+}
 
 export async function skippedSteps(brand: string): Promise<StepKey[]> {
   const integ = await getIntegration(brand, 'onboarding')
@@ -61,24 +73,39 @@ export async function onboardingStatus(brand: string): Promise<OnboardingStatus>
     sb.from('tenants').select('name, logo_url').eq('slug', brand).maybeSingle(),
     sb.from('brand_settings').select('shipping_cost_per_order, transaction_fee_rate').eq('brand', brand).maybeSingle(),
     sb.from('daily_snapshots').select('date').eq('brand', brand).order('date').limit(1),
-    sb.from('product_variants').select('shopify_variant_id, product_title, variant_title, image_url, sell_price, cost_price, product_status')
-      .eq('brand', brand).order('product_title').limit(200),
+    allRows<{ shopify_variant_id: string | number; shopify_product_id: string | number | null; product_title: string; variant_title: string | null; image_url: string | null; cost_price: number | null; product_status: string | null }>(
+      (a, b) => sb.from('product_variants').select('shopify_variant_id, shopify_product_id, product_title, variant_title, image_url, cost_price, product_status').eq('brand', brand).range(a, b)),
     sb.auth.admin.listUsers({ perPage: 1000 }),
     sb.from('daily_snapshots').select('total_sales, order_count, cogs').eq('brand', brand).gte('date', since),
     sb.from('ad_spends').select('platform, spend').eq('brand', brand).gte('date', since),
   ])
+  const since90 = new Date(Date.now() - 90 * 864e5).toISOString().slice(0, 10)
+  const sales = await allRows<{ variant_id: string | number | null; revenue: number | null }>(
+    (a, b) => sb.from('product_sales').select('variant_id, revenue').eq('brand', brand).gte('date', since90).range(a, b))
 
-  const products: OnboardingProduct[] = (variantsRes.data ?? [])
-    .filter(v => (v.product_status ?? 'active') === 'active')
-    .map(v => ({
-      id: String(v.shopify_variant_id),
-      title: v.variant_title && v.variant_title !== 'Default Title' ? `${v.product_title} · ${v.variant_title}` : String(v.product_title),
-      image: v.image_url ?? null,
-      price: v.sell_price != null ? Number(v.sell_price) : null,
-      cost: v.cost_price != null ? Number(v.cost_price) : null,
-    }))
-  const variants = products.length
-  const costed   = products.filter(p => p.cost != null && p.cost > 0).length
+  // Couverture pondérée par les ventes 90 j : avec 1 500 références, seuls les
+  // produits qui se vendent comptent vraiment pour la marge.
+  const live = variantsRes.filter(v => (v.product_status ?? 'active') === 'active')
+  const byVariant = new Map(variantsRes.map(v => [String(v.shopify_variant_id), v]))
+  const hasCost = (v?: { cost_price: number | null }) => v?.cost_price != null && Number(v.cost_price) > 0
+  const revByVariant = new Map<string, number>()
+  for (const r of sales) if (r.variant_id != null) revByVariant.set(String(r.variant_id), (revByVariant.get(String(r.variant_id)) ?? 0) + Number(r.revenue ?? 0))
+  const totalRev = Array.from(revByVariant.values()).reduce((a, b) => a + b, 0)
+  const coveredRev = Array.from(revByVariant.entries()).filter(([id]) => hasCost(byVariant.get(id))).reduce((a, [, r]) => a + r, 0)
+  const variants = live.length
+  const costed   = live.filter(hasCost).length
+  const coverage = totalRev > 0 ? coveredRev / totalRev : variants > 0 ? costed / variants : 0
+  const missingByProduct = new Map<string, MissingCost>()
+  for (const [id, rev] of Array.from(revByVariant.entries())) {
+    const v = byVariant.get(id)
+    if (!v || hasCost(v) || v.shopify_product_id == null) continue
+    const k = String(v.shopify_product_id)
+    const cur = missingByProduct.get(k) ?? { productId: k, title: v.product_title, image: v.image_url, revenue: 0 }
+    cur.revenue += rev
+    missingByProduct.set(k, cur)
+  }
+  const missingCosts = Array.from(missingByProduct.values()).filter(m => m.revenue >= 1).sort((a, b) => b.revenue - a.revenue).slice(0, 8)
+    .map(m => ({ ...m, revenue: Math.round(m.revenue) }))
   const shipping = Number(settingsRes.data?.shipping_cost_per_order ?? 0)
   const feeRate  = settingsRes.data?.transaction_fee_rate != null ? Number(settingsRes.data.transaction_fee_rate) : null
   const team = (usersRes.data?.users ?? []).filter(u => {
@@ -105,12 +132,12 @@ export async function onboardingStatus(brand: string): Promise<OnboardingStatus>
     step('identity', !!logoUrl, { name, logoUrl }),
     step('meta', !!(meta.token && meta.adAccount), { adAccount: meta.adAccount ?? null }),
     step('google', !!googleId, { customerId: googleId ?? null }),
-    step('products', variants > 0 && costed / variants >= 0.9, { variants, costed }),
+    step('products', variants > 0 && coverage >= 0.9, { variants, costed, coverage: Math.round(coverage * 100), shopHandle: shop.shop?.replace(/\.myshopify\.com$/, '') ?? null, missingCount: missingByProduct.size }),
     step('shipping', shipping > 0, { shipping, feeRate }),
     step('team', team > 0, { members: team }),
   ]
   const doneCount = steps.filter(s => s.done).length
-  return { brand, name, logoUrl, steps, doneCount, total: steps.length, preview, products }
+  return { brand, name, logoUrl, steps, doneCount, total: steps.length, preview, missingCosts }
 }
 
 // ─── Actions ──────────────────────────────────────────────────────────────────
@@ -198,17 +225,20 @@ export async function connectGoogle(brand: string, raw: string): Promise<{ name?
   }
 }
 
-// Coûts d'achat saisis dans l'onboarding (la synchro Shopify ne les écrase que si
-// Shopify a lui-même un coût), puis recalcul des marges passées.
-export async function saveProductCosts(brand: string, costs: Record<string, number>) {
-  const sb = db()
-  for (const [id, cost] of Object.entries(costs)) {
-    if (!(cost >= 0)) continue
-    const { error } = await sb.from('product_variants').update({ cost_price: Math.round(cost * 100) / 100 })
-      .eq('brand', brand).eq('shopify_variant_id', id)
-    if (error) return error.message
+// « Vérifier » : relit produits + coûts Shopify maintenant (synchro de la marque) ;
+// si de nouveaux coûts arrivent, recalcule les marges passées.
+export async function refreshCostsFromShopify(origin: string, brand: string): Promise<{ before: number; after: number; error?: string }> {
+  const count = async () => (await db().from('product_variants').select('shopify_variant_id', { count: 'exact', head: true })
+    .eq('brand', brand).gt('cost_price', 0)).count ?? 0
+  const before = await count()
+  const r = await fetch(`${origin}/api/shopify/sync?brand=${brand}`, { headers: { authorization: `Bearer ${process.env.CRON_SECRET}` }, cache: 'no-store' })
+  if (!r.ok) return { before, after: before, error: `Synchro Shopify impossible (${r.status})` }
+  const after = await count()
+  if (after > before) {
+    const { data } = await db().from('daily_snapshots').select('date').eq('brand', brand).order('date').limit(1)
+    if (data?.[0]?.date) await backfillHistory(origin, brand, data[0].date)
   }
-  return null
+  return { before, after }
 }
 
 export async function saveCosts(brand: string, shipping: number, feeRatePct: number | null) {
