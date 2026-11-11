@@ -273,11 +273,10 @@ function TicketRow({ raw, processed, selected, doneAction, isProcessing, onClick
       tabIndex={onOpenMenu ? 0 : undefined}
       onClick={onOpenMenu ? (e) => { stop(e); onOpenMenu() } : undefined}
       title={assignee ? `Attribué à ${assignee}${onOpenMenu ? ' — changer' : ''}` : onOpenMenu ? 'Attribuer' : 'Non attribué'}
-      className="shrink-0 rounded-full"
-      style={selected ? { boxShadow: '0 0 0 2px rgba(255,255,255,.9)' } : undefined}
+      className="shrink-0 inline-flex rounded-full"
     >
       {assignee
-        ? <Avatar name={assignee} size={22} />
+        ? <Avatar name={assignee} size={22} tone={selected ? ['#ffffff', '#0a66f5'] : undefined} />
         : <span className={`inline-flex items-center justify-center w-[22px] h-[22px] rounded-full border border-dashed text-[11px] ${selected ? 'border-white/60 text-white/80' : 'border-[#c7c7cc] text-[#8e8e93]'}`}>–</span>}
     </span>
   )
@@ -826,48 +825,72 @@ function orderStep(order: MoomOrder): number {
 function OrderCard({ order }: { order: MoomOrder }) {
   const step = orderStep(order)
   const steps = ['Payée', 'Préparation', 'Expédiée', 'Livrée']
-  const row = (label: string, value: React.ReactNode) => (
-    <div className="flex items-baseline justify-between gap-3 py-1.5 text-[13px]">
-      <span className="text-[#8e8e93] shrink-0">{label}</span>
-      <span className="text-[#1d1d1f] font-medium text-right min-w-0 truncate">{value}</span>
-    </div>
-  )
+  const num = order.order_number?.startsWith('#') ? order.order_number : `#${order.order_number}`
+  const total = order.products.reduce((sum, p) => sum + (Number(p.price) || 0) * (p.quantity || 1), 0)
+  const eur = (n: number) => `${n.toFixed(2).replace('.', ',')} €`
+  const facts: [string, React.ReactNode][] = [
+    ['Passée le', new Date(order.created_at).toLocaleDateString('fr-FR', { day: 'numeric', month: 'long', year: 'numeric' })],
+    ['Paiement', order.financial_status_fr],
+    ['Expédition', order.status_fr],
+    ...(order.carrier && order.carrier !== 'other' ? [['Transporteur', order.carrier] as [string, React.ReactNode]] : []),
+    ...(order.tracking_number ? [['Suivi', order.tracking_url
+      ? <a href={order.tracking_url} target="_blank" rel="noopener noreferrer" className="text-[#0a66f5] inline-flex items-center gap-1 break-all">{order.tracking_number}<ExternalLink size={12} className="shrink-0" /></a>
+      : order.tracking_number] as [string, React.ReactNode]] : []),
+    ...(order.estimated_delivery ? [['Livraison prévue', order.estimated_delivery] as [string, React.ReactNode]] : []),
+  ]
   return (
-    <section className="rounded-2xl bg-white border border-[#e5e5ea] p-4">
-      <div className="flex items-center justify-between mb-3">
-        <h3 className="text-[14px] font-semibold text-[#1d1d1f]">Commande {order.order_number?.startsWith('#') ? order.order_number : `#${order.order_number}`}</h3>
-        <span className="text-[12px] text-[#8e8e93]">{new Date(order.created_at).toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' })}</span>
+    <section className="rounded-2xl bg-white border border-[#e5e5ea]">
+      <div className="flex items-baseline justify-between gap-3 px-5 pt-4">
+        <h3 className="text-[16px] font-semibold text-[#1d1d1f]">Commande {num}</h3>
+        <span className="text-[13px] text-[#8e8e93]">Shopify</span>
       </div>
+
       {step >= 0 && (
-        <ol className="grid grid-cols-4 mb-3" aria-label="Avancement de la commande">
+        <ol className="grid grid-cols-4 px-5 pt-4 pb-1" aria-label="Avancement de la commande">
           {steps.map((label, i) => (
-            <li key={label} className="relative flex flex-col items-center gap-1.5">
-              {i > 0 && <span className={`absolute top-[5px] right-1/2 w-full h-[2px] ${i <= step ? 'bg-[#34c759]' : 'bg-[#e5e5ea]'}`} />}
-              <span className={`relative w-3 h-3 rounded-full ${i < step ? 'bg-[#34c759]' : i === step ? 'bg-white border-2 border-[#34c759]' : 'bg-[#e5e5ea]'}`} />
-              <span className={`text-[11px] ${i === step ? 'font-semibold text-[#1d1d1f]' : 'text-[#8e8e93]'}`}>{label}</span>
+            <li key={label} className="relative flex flex-col items-center gap-2">
+              {i > 0 && <span className={`absolute top-[6px] right-1/2 w-full h-[2px] ${i <= step ? 'bg-[#34c759]' : 'bg-[#e5e5ea]'}`} />}
+              <span className={`relative w-3.5 h-3.5 rounded-full ${i < step ? 'bg-[#34c759]' : i === step ? 'bg-white border-2 border-[#34c759]' : 'bg-[#e5e5ea]'}`} />
+              <span className={`text-[12px] ${i === step ? 'font-semibold text-[#1d1d1f]' : 'text-[#8e8e93]'}`}>{label}</span>
             </li>
           ))}
         </ol>
       )}
-      <div className="divide-y divide-[#f2f2f7]">
-        {row('Paiement', order.financial_status_fr)}
-        {row('Statut', order.status_fr)}
-        {order.carrier && row('Transporteur', order.carrier)}
-        {order.tracking_number && row('Suivi', order.tracking_url
-          ? <a href={order.tracking_url} target="_blank" rel="noopener noreferrer" className="text-[#0a66f5] inline-flex items-center gap-1">{order.tracking_number}<ExternalLink size={11} /></a>
-          : order.tracking_number)}
-        {order.estimated_delivery && row('Livraison prévue', order.estimated_delivery)}
-      </div>
-      {order.order_number && <OrderReceivedLine order={order.order_number} />}
+
+      <dl className="grid grid-cols-1 sm:grid-cols-2 gap-x-8 gap-y-3 px-5 py-4">
+        {facts.map(([label, value]) => (
+          <div key={label} className="min-w-0">
+            <dt className="text-[12px] text-[#8e8e93]">{label}</dt>
+            <dd className="text-[14px] text-[#1d1d1f] font-medium mt-0.5">{value}</dd>
+          </div>
+        ))}
+      </dl>
+      {order.order_number && <div className="px-5 -mt-2 pb-3"><OrderReceivedLine order={order.order_number} /></div>}
+
       {order.products.length > 0 && (
-        <ul className="mt-2 pt-2 border-t border-[#f2f2f7] space-y-1">
-          {order.products.map((p, i) => (
-            <li key={i} className="flex justify-between gap-3 text-[13px]">
-              <span className="text-[#1d1d1f] min-w-0"><span className="text-[#8e8e93]">{p.quantity}×</span> {p.name}</span>
-              <span className="text-[#48484a] shrink-0 tabular-nums">{Number(p.price).toFixed(2).replace('.', ',')} €</span>
-            </li>
-          ))}
-        </ul>
+        <div className="border-t border-[#f2f2f7] px-5 py-3">
+          <table className="w-full text-[14px]">
+            <caption className="sr-only">Articles de la commande</caption>
+            <tbody>
+              {order.products.map((p, i) => (
+                <tr key={i} className="border-b border-[#f2f2f7] last:border-0">
+                  <td className="py-2 pr-3 w-10 text-[#8e8e93] tabular-nums align-top">{p.quantity}×</td>
+                  <td className="py-2 pr-3 text-[#1d1d1f] align-top">{p.name}</td>
+                  <td className="py-2 text-right text-[#48484a] tabular-nums whitespace-nowrap align-top">{Number(p.price) === 0 ? 'Offert' : eur(Number(p.price))}</td>
+                </tr>
+              ))}
+            </tbody>
+            {order.products.length > 1 && (
+              <tfoot>
+                <tr>
+                  <td />
+                  <td className="pt-2 text-[13px] text-[#8e8e93]">Total des articles</td>
+                  <td className="pt-2 text-right font-semibold text-[#1d1d1f] tabular-nums whitespace-nowrap">{eur(total)}</td>
+                </tr>
+              </tfoot>
+            )}
+          </table>
+        </div>
       )}
     </section>
   )
@@ -906,33 +929,31 @@ function CustomerSection({ ticket, customerName }: { ticket: ProcessedTicket; cu
   return (
     <div className="mt-8 pt-6 border-t border-[#e5e5ea]">
       <h2 className="text-[15px] font-semibold text-[#1d1d1f] mb-3">Client et commande</h2>
-      <div className="grid gap-3 md:grid-cols-2 items-start">
-        <div className="space-y-3">
-          <section className="rounded-2xl bg-white border border-[#e5e5ea] p-4 flex items-center gap-3">
-            <Avatar name={customerName} size={44} solid tone={toneFor(customerName)} />
-            <div className="min-w-0 flex-1">
-              <p className="text-[15px] font-semibold text-[#1d1d1f] truncate">{customerName}</p>
-              <p className="text-[12px] text-[#8e8e93] truncate">{ticket.customer_email}</p>
-            </div>
-            <a href={`mailto:${ticket.customer_email}`} title="Écrire un e-mail" className="w-8 h-8 rounded-full bg-[#f2f2f7] flex items-center justify-center text-[#0a66f5] hover:bg-[#e8e8ed]">
-              <Mail size={14} strokeWidth={1.8} />
-            </a>
-            <button
-              onClick={() => { navigator.clipboard?.writeText(ticket.customer_email).then(() => setCopied(true)).catch(() => {}) }}
-              title="Copier l'adresse e-mail"
-              className="w-8 h-8 rounded-full bg-[#f2f2f7] flex items-center justify-center text-[#0a66f5] hover:bg-[#e8e8ed]"
-            >
-              {copied ? <Check size={14} strokeWidth={2} /> : <Copy size={14} strokeWidth={1.8} />}
-            </button>
-          </section>
-          <section className="rounded-2xl bg-white border border-[#e5e5ea] px-4 pb-3">
-            <CustomerHistory email={ticket.customer_email} currentTicketId={ticket.ticket_id} />
-          </section>
-          <BowaDeliveryProof email={ticket.customer_email} order={ticket.order?.order_number} />
-        </div>
+      <div className="space-y-3">
+        <section className="rounded-2xl bg-white border border-[#e5e5ea] p-4 flex items-center gap-3">
+          <Avatar name={customerName} size={44} solid tone={toneFor(customerName)} />
+          <div className="min-w-0 flex-1">
+            <p className="text-[15px] font-semibold text-[#1d1d1f] truncate">{customerName}</p>
+            <p className="text-[13px] text-[#8e8e93] truncate">{ticket.customer_email}</p>
+          </div>
+          <a href={`mailto:${ticket.customer_email}`} title="Écrire un e-mail" className="w-9 h-9 rounded-full bg-[#f2f2f7] flex items-center justify-center text-[#0a66f5] hover:bg-[#e8e8ed]">
+            <Mail size={15} strokeWidth={1.8} />
+          </a>
+          <button
+            onClick={() => { navigator.clipboard?.writeText(ticket.customer_email).then(() => setCopied(true)).catch(() => {}) }}
+            title="Copier l'adresse e-mail"
+            className="w-9 h-9 rounded-full bg-[#f2f2f7] flex items-center justify-center text-[#0a66f5] hover:bg-[#e8e8ed]"
+          >
+            {copied ? <Check size={15} strokeWidth={2} /> : <Copy size={15} strokeWidth={1.8} />}
+          </button>
+        </section>
         {ticket.order
           ? <OrderCard order={ticket.order} />
           : <section className="rounded-2xl border border-dashed border-[#d1d1d6] p-4 text-[13px] text-[#8e8e93]">Aucune commande Shopify trouvée pour ce client.</section>}
+        <BowaDeliveryProof email={ticket.customer_email} order={ticket.order?.order_number} />
+        <section className="rounded-2xl bg-white border border-[#e5e5ea] px-4 pb-3">
+          <CustomerHistory email={ticket.customer_email} currentTicketId={ticket.ticket_id} />
+        </section>
       </div>
     </div>
   )
