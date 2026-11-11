@@ -7,13 +7,16 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import Link from 'next/link'
 import {
   Check, Loader2, Lock, Store, Image as ImageIcon, Megaphone, Search, Package, Truck, Users, Upload, ExternalLink, PartyPopper,
+  Receipt, Home, Monitor, Mail, Calculator, Landmark, Shield, Phone, Plus, X,
 } from 'lucide-react'
 import { useBrand } from '@/context/BrandContext'
 
-type StepKey = 'shopify' | 'identity' | 'meta' | 'google' | 'products' | 'shipping' | 'team'
+type StepKey = 'shopify' | 'identity' | 'meta' | 'google' | 'products' | 'shipping' | 'fixed' | 'team'
 type Step = { key: StepKey; done: boolean; skipped: boolean; detail: Record<string, unknown> }
 type Missing = { productId: string; title: string; image: string | null; revenue: number }
-type Preview = { sales30: number; orders30: number; cogs30: number; metaSpend30: number; googleSpend30: number }
+type Preview = { sales30: number; orders30: number; cogs30: number; metaSpend30: number; googleSpend30: number; fixedMonthly: number }
+type FixedCategory = 'team' | 'infra' | 'app'
+type FixedRow = { label: string; amount: number; category: FixedCategory }
 type Status = { brand: string; name: string; logoUrl: string | null; steps: Step[]; doneCount: number; total: number; preview: Preview; missingCosts: Missing[] }
 type Act = (body: Record<string, unknown> | FormData) => Promise<{ error?: string } & Record<string, unknown>>
 
@@ -24,9 +27,10 @@ const MISSIONS: Record<StepKey, { icon: typeof Store; short: string; question: s
   google:   { icon: Search,    short: 'Google',   question: 'Tu fais de la pub sur Google ?',            why: 'Même chose pour Google : dépense contre ventes.' },
   products: { icon: Package,   short: 'Coûts',    question: 'Combien te coûte chaque produit ?',         why: 'Le prix que tu paies pour un article. Sans lui, impossible de savoir si tu gagnes de l’argent. Il se renseigne dans Shopify, Steero le lit tout seul.' },
   shipping: { icon: Truck,     short: 'Envoi',    question: 'Combien te coûte l’envoi d’une commande ?', why: 'L’envoi et les frais de paiement mangent une partie de chaque vente.' },
+  fixed:    { icon: Receipt,   short: 'Charges',  question: 'Qu’est-ce que tu paies chaque mois, même sans vendre ?', why: 'Loyer, salaires, logiciels… Ce sont tes charges fixes. Steero les retire pour te dire ce qu’il te reste vraiment.' },
   team:     { icon: Users,     short: 'Équipe',   question: 'Tu travailles avec quelqu’un ?',            why: 'Chaque personne ne voit que ce que tu lui ouvres.' },
 }
-const ORDER: StepKey[] = ['shopify', 'identity', 'meta', 'google', 'products', 'shipping', 'team']
+const ORDER: StepKey[] = ['shopify', 'identity', 'meta', 'google', 'products', 'shipping', 'fixed', 'team']
 
 const eur = (n: number) => new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR', maximumFractionDigits: 0 }).format(n)
 const fmtDate = (d: string | null) => d ? new Date(d + 'T00:00:00').toLocaleDateString('fr-FR', { day: 'numeric', month: 'long' }) : '—'
@@ -165,7 +169,8 @@ function Unlocks({ status, byKey, fresh, onPick }: { status: Status; byKey: Reco
   const p = status.preview
   const shipping = Number(byKey.shipping.detail.shipping ?? 0)
   const fee = byKey.shipping.detail.feeRate != null ? Number(byKey.shipping.detail.feeRate) : 0.017
-  const margin = p.sales30 - p.cogs30 - shipping * p.orders30 - fee * p.sales30 - p.metaSpend30 - p.googleSpend30
+  const withFixed = byKey.fixed.done && !byKey.fixed.skipped
+  const margin = p.sales30 - p.cogs30 - shipping * p.orders30 - fee * p.sales30 - p.metaSpend30 - p.googleSpend30 - (withFixed ? p.fixedMonthly : 0)
   const marginReady = byKey.products.done && !byKey.products.skipped && byKey.shipping.done && !byKey.shipping.skipped
 
   const tiles: { key: StepKey; label: string; render: () => React.ReactNode; wide?: boolean; ready?: boolean }[] = [
@@ -177,7 +182,7 @@ function Unlocks({ status, byKey, fresh, onPick }: { status: Status; byKey: Reco
       <><Big>{eur(p.googleSpend30)}</Big><Small>{p.googleSpend30 ? 'dépensés en 30 jours' : 'Chiffres d’ici la prochaine synchro'}</Small></>) },
     { key: 'products', label: 'Ce qu’il te reste · 30 jours', wide: true, ready: marginReady, render: () => (
       <><Big tone={margin >= 0 ? 'good' : 'bad'}>{eur(margin)}</Big>
-        <Small>après produits, envois, frais et pub{p.sales30 > 0 ? ` · ${Math.round((margin / p.sales30) * 100)} % des ventes` : ''}</Small></>) },
+        <Small>après produits, envois, frais, pub{withFixed ? ' et charges fixes' : ''}{p.sales30 > 0 ? ` · ${Math.round((margin / p.sales30) * 100)} % des ventes` : ''}</Small></>) },
     { key: 'team', label: 'Équipe', render: () => byKey.team.skipped ? <Small>Seul·e pour l’instant</Small> : (
       <><Big>{Number(byKey.team.detail.members)}</Big><Small>personne{Number(byKey.team.detail.members) > 1 ? 's' : ''} avec accès</Small></>) },
   ]
@@ -373,6 +378,9 @@ function Body({ step, status, run, busy, skip }: { step: Step; status: Status; r
     case 'shipping':
       return <ShippingChoice step={step} run={run} busy={busy} />
 
+    case 'fixed':
+      return <FixedCosts step={step} status={status} run={run} busy={busy} skip={skip} />
+
     case 'team':
       if (step.done && !step.skipped) return <Link href={`/${status.brand}/users`} className={btnSoft}>Gérer l’équipe</Link>
       return (
@@ -444,6 +452,99 @@ function CostsInShopify({ step, missing, run, busy }: { step: Step; missing: Mis
         onClick={() => run({ action: 'refreshCosts' }, r => Number(r.added) > 0 ? `${r.added} nouveau${Number(r.added) > 1 ? 'x' : ''} coût${Number(r.added) > 1 ? 's' : ''} récupéré${Number(r.added) > 1 ? 's' : ''}, marges recalculées` : 'Aucun nouveau coût trouvé dans Shopify pour l’instant')}>
         {busy && <Loader2 size={16} className="animate-spin" />} Vérifier mes coûts Shopify
       </button>
+    </div>
+  )
+}
+
+const PRESETS: { label: string; category: FixedCategory; icon: typeof Home }[] = [
+  { label: 'Loyer', category: 'infra', icon: Home },
+  { label: 'Salaire', category: 'team', icon: Users },
+  { label: 'Abonnement Shopify', category: 'app', icon: Monitor },
+  { label: 'Emailing', category: 'app', icon: Mail },
+  { label: 'Comptable', category: 'infra', icon: Calculator },
+  { label: 'Banque', category: 'infra', icon: Landmark },
+  { label: 'Assurance', category: 'infra', icon: Shield },
+  { label: 'Téléphone & internet', category: 'infra', icon: Phone },
+]
+const CAT_ICON: Record<FixedCategory, typeof Home> = { team: Users, infra: Home, app: Monitor }
+
+function FixedCosts({ step, status, run, busy, skip }: { step: Step; status: Status; run: Run; busy: boolean; skip: (l: string) => React.ReactNode }) {
+  const [rows, setRows] = useState<{ label: string; amount: string; category: FixedCategory }[]>(() =>
+    ((step.detail.rows as FixedRow[] | undefined) ?? []).map(r => ({ label: r.label, amount: String(r.amount).replace('.', ','), category: r.category })))
+  const num = (v: string) => Number(v.replace(',', '.')) || 0
+  const total = rows.reduce((a, r) => a + num(r.amount), 0)
+  const add = (label: string, category: FixedCategory) => setRows(p => [...p, { label, amount: '', category }])
+
+  // Commandes à faire chaque mois pour couvrir les charges (marge par commande, hors pub).
+  const p = status.preview
+  const ship = Number(status.steps.find(x => x.key === 'shipping')?.detail.shipping ?? 0)
+  const fee = Number(status.steps.find(x => x.key === 'shipping')?.detail.feeRate ?? 0.017)
+  const costsKnown = p.cogs30 > 0 && p.orders30 > 0
+  const perOrder = costsKnown ? (p.sales30 - p.cogs30 - ship * p.orders30 - fee * p.sales30) / p.orders30 : 0
+  const ordersNeeded = perOrder > 0 ? Math.ceil(total / perOrder) : null
+
+  return (
+    <div className="space-y-6">
+      <div>
+        <p className="mb-3 text-[15px] font-semibold text-[#1a1a2e]">Touche ce que tu paies, puis mets le montant par mois</p>
+        <div className="flex flex-wrap gap-2">
+          {PRESETS.map(pr => (
+            <button key={pr.label} type="button" onClick={() => add(pr.label, pr.category)}
+              className="inline-flex items-center gap-2 rounded-2xl border-2 border-[#e4e2dc] bg-white px-3.5 py-2.5 text-[14px] font-semibold text-[#1a1a2e] transition hover:border-[#1a1a2e] active:scale-[.97]">
+              <pr.icon size={15} /> {pr.label}
+            </button>
+          ))}
+          <button type="button" onClick={() => add('', 'infra')}
+            className="inline-flex items-center gap-2 rounded-2xl border-2 border-dashed border-[#d9d7d0] px-3.5 py-2.5 text-[14px] font-semibold text-[#6b6b63] hover:border-[#1a1a2e]">
+            <Plus size={15} /> Autre
+          </button>
+        </div>
+      </div>
+
+      {rows.length > 0 && (
+        <ul className="space-y-2">
+          {rows.map((r, i) => {
+            const Icon = CAT_ICON[r.category]
+            return (
+              <li key={i} className="flex items-center gap-2">
+                <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-[#f3f2ee] text-[#1a1a2e]"><Icon size={17} /></span>
+                <input value={r.label} placeholder="Nom (ex. Salaire Julie)" aria-label="Nom de la charge"
+                  onChange={e => setRows(p => p.map((x, j) => j === i ? { ...x, label: e.target.value } : x))}
+                  className={`${field} min-w-0 flex-1`} />
+                <label className="relative shrink-0">
+                  <span className="sr-only">Montant par mois</span>
+                  <input inputMode="decimal" value={r.amount} placeholder="0" autoFocus={!r.amount && i === rows.length - 1}
+                    onChange={e => setRows(p => p.map((x, j) => j === i ? { ...x, amount: e.target.value } : x))}
+                    className={`${field} w-32 pr-16 text-right tabular-nums`} />
+                  <span className="pointer-events-none absolute right-3.5 top-1/2 -translate-y-1/2 text-[13px] text-[#8a887f]">€/mois</span>
+                </label>
+                <button type="button" title="Retirer" onClick={() => setRows(p => p.filter((_, j) => j !== i))}
+                  className="rounded-xl p-2 text-[#8a887f] hover:bg-[#f3f2ee] hover:text-[#b42318]"><X size={16} /></button>
+              </li>
+            )
+          })}
+        </ul>
+      )}
+
+      {total > 0 && (
+        <div className="rounded-2xl bg-[#1a1a2e] p-5 text-white">
+          <p className="text-[13px] text-white/60">Tes charges fixes</p>
+          <p className="mt-1 text-[30px] font-extrabold leading-none tracking-[-0.02em] tabular-nums">{eur(total)} <span className="text-[16px] font-semibold text-white/60">par mois</span></p>
+          <p className="mt-2 text-[14px] text-white/80">
+            {ordersNeeded != null
+              ? <>Il te faut environ <strong className="text-white">{ordersNeeded} commandes par mois</strong> juste pour les payer (avant la pub).</>
+              : <>Soit {eur(total / 30)} par jour, que tu vendes ou non.</>}
+          </p>
+        </div>
+      )}
+
+      <div className="flex flex-wrap gap-2">
+        <button disabled={busy || rows.length === 0 || rows.some(r => !r.label.trim() || num(r.amount) <= 0)} className={btn}
+          onClick={() => run({ action: 'fixed', rows: rows.map(r => ({ label: r.label, amount: num(r.amount), category: r.category })) }, () => 'Charges enregistrées')}>
+          {busy && <Loader2 size={16} className="animate-spin" />} Enregistrer mes charges
+        </button>
+        {!step.done && skip('Je n’ai pas de charges fixes')}
+      </div>
     </div>
   )
 }

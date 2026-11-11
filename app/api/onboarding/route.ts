@@ -6,13 +6,13 @@ import { BRANDS } from '@/lib/access'
 import { adminSession, withCookies } from '@/lib/shopify/app'
 import {
   backfillHistory, connectGoogle, connectMeta, importShopifyBranding, onboardingStatus,
-  refreshCostsFromShopify, saveCosts, saveIdentity, setSkipped, uploadLogo, type StepKey,
+  refreshCostsFromShopify, saveCosts, saveFixedCosts, saveIdentity, type FixedRow, setSkipped, uploadLogo, type StepKey,
 } from '@/lib/onboarding'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 300
 
-const STEPS: StepKey[] = ['shopify', 'identity', 'meta', 'google', 'products', 'shipping', 'team']
+const STEPS: StepKey[] = ['shopify', 'identity', 'meta', 'google', 'products', 'shipping', 'fixed', 'team']
 
 export async function GET(req: NextRequest) {
   const brand = req.nextUrl.searchParams.get('brand') ?? ''
@@ -51,6 +51,10 @@ export async function POST(req: NextRequest) {
     case 'refreshCosts': {
       const r = await refreshCostsFromShopify(req.nextUrl.origin, brand)
       return reply(r.error ? { error: r.error } : { added: r.after - r.before, total: r.after })
+    }
+    case 'fixed': {
+      if (!Array.isArray(body.rows)) return reply({ error: 'Lignes manquantes' })
+      return reply({ error: await saveFixedCosts(brand, body.rows as FixedRow[]) })
     }
     case 'costs': {
       const shipping = Number(String(body.shipping ?? '').replace(',', '.'))

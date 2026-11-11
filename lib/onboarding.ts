@@ -7,8 +7,9 @@ import { createClient } from '@supabase/supabase-js'
 import { BRANDS, effectiveBrands } from '@/lib/access'
 import { cfgStr, getIntegration, googleAdsCustomerId, metaCreds, saveIntegration, shopifyCreds } from '@/lib/tenant/integrations'
 import { fetchCustomerName } from '@/lib/google-ads'
+import { activeIn, loadValidity } from '@/lib/fixedCostValidity'
 
-export type StepKey = 'shopify' | 'identity' | 'meta' | 'google' | 'products' | 'shipping' | 'team'
+export type StepKey = 'shopify' | 'identity' | 'meta' | 'google' | 'products' | 'shipping' | 'fixed' | 'team'
 
 export interface OnboardingStep {
   key: StepKey
@@ -24,7 +25,14 @@ export interface MissingCost { productId: string; title: string; image: string |
 export interface OnboardingPreview {
   sales30: number; orders30: number; cogs30: number
   metaSpend30: number; googleSpend30: number
+  fixedMonthly: number
 }
+
+// Charges fixes récurrentes (mêmes lignes « sentinelle » que Paramètres) :
+// team = salaires, infra = locaux & services, app = logiciels.
+export type FixedCategory = 'team' | 'infra' | 'app'
+export interface FixedRow { label: string; amount: number; category: FixedCategory }
+const SENTINEL = '1900-01-01'
 
 export interface OnboardingStatus {
   brand: string
@@ -65,7 +73,7 @@ export async function setSkipped(brand: string, step: StepKey, skip: boolean) {
 export async function onboardingStatus(brand: string): Promise<OnboardingStatus> {
   const sb = db()
   const since = new Date(Date.now() - 30 * 864e5).toISOString().slice(0, 10)
-  const [skipped, shop, meta, googleId, tenantRes, settingsRes, firstRes, variantsRes, usersRes, snapsRes, adsRes] = await Promise.all([
+  const [skipped, shop, meta, googleId, tenantRes, settingsRes, firstRes, variantsRes, usersRes, snapsRes, adsRes, fixedRes] = await Promise.all([
     skippedSteps(brand),
     shopifyCreds(brand),
     metaCreds(brand),
@@ -78,6 +86,7 @@ export async function onboardingStatus(brand: string): Promise<OnboardingStatus>
     sb.auth.admin.listUsers({ perPage: 1000 }),
     sb.from('daily_snapshots').select('total_sales, order_count, cogs').eq('brand', brand).gte('date', since),
     sb.from('ad_spends').select('platform, spend').eq('brand', brand).gte('date', since),
+    sb.from('fixed_costs').select('label, amount, category').eq('brand', brand).eq('month', SENTINEL),
   ])
   const since90 = new Date(Date.now() - 90 * 864e5).toISOString().slice(0, 10)
   const sales = await allRows<{ variant_id: string | number | null; revenue: number | null }>(
@@ -122,7 +131,15 @@ export async function onboardingStatus(brand: string): Promise<OnboardingStatus>
     cogs30:   Math.round(sum(snapsRes.data, r => Number(r.cogs))),
     metaSpend30:   Math.round(sum((adsRes.data ?? []).filter(a => a.platform === 'meta'), r => Number(r.spend))),
     googleSpend30: Math.round(sum((adsRes.data ?? []).filter(a => a.platform === 'google'), r => Number(r.spend))),
+    fixedMonthly:  0,
   }
+  // Seulement les lignes en cours ce mois-ci (un salarié parti a une date de fin).
+  const validity = await loadValidity(sb, brand)
+  const month = new Date().toISOString().slice(0, 7)
+  const fixedRows: FixedRow[] = (fixedRes.data ?? [])
+    .filter(r => activeIn(validity, r.category, r.label, month))
+    .map(r => ({ label: r.label, amount: Number(r.amount), category: r.category as FixedCategory }))
+  preview.fixedMonthly = Math.round(fixedRows.reduce((a, r) => a + r.amount, 0))
 
   const step = (key: StepKey, done: boolean, detail: Record<string, unknown>): OnboardingStep =>
     ({ key, done: done || skipped.includes(key), skipped: !done && skipped.includes(key), detail })
@@ -134,6 +151,7 @@ export async function onboardingStatus(brand: string): Promise<OnboardingStatus>
     step('google', !!googleId, { customerId: googleId ?? null }),
     step('products', variants > 0 && coverage >= 0.9, { variants, costed, coverage: Math.round(coverage * 100), shopHandle: shop.shop?.replace(/\.myshopify\.com$/, '') ?? null, missingCount: missingByProduct.size }),
     step('shipping', shipping > 0, { shipping, feeRate }),
+    step('fixed', fixedRows.length > 0, { rows: fixedRows, total: preview.fixedMonthly }),
     step('team', team > 0, { members: team }),
   ]
   const doneCount = steps.filter(s => s.done).length
@@ -261,6 +279,25 @@ export async function refreshCostsFromShopify(origin: string, brand: string): Pr
     if (data?.[0]?.date) await backfillHistory(origin, brand, data[0].date)
   }
   return { before, after }
+}
+
+export async function saveFixedCosts(brand: string, rows: FixedRow[]): Promise<string | null> {
+  const clean = rows
+    .map(r => ({ label: String(r.label ?? '').trim().slice(0, 80), amount: Math.round(Number(r.amount) * 100) / 100, category: r.category }))
+    .filter(r => r.label && r.amount > 0 && ['team', 'infra', 'app'].includes(r.category))
+  const sb = db()
+  // On remplace les lignes en cours ce mois-ci ; les lignes terminées (historique) restent.
+  const validity = await loadValidity(sb, brand)
+  const month = new Date().toISOString().slice(0, 7)
+  const { data: existing } = await sb.from('fixed_costs').select('id, label, category').eq('brand', brand).eq('month', SENTINEL).in('category', ['team', 'infra', 'app'])
+  const ids = (existing ?? []).filter(r => activeIn(validity, r.category, r.label, month)).map(r => r.id)
+  if (ids.length) {
+    const { error: delErr } = await sb.from('fixed_costs').delete().in('id', ids)
+    if (delErr) return delErr.message
+  }
+  if (!clean.length) return null
+  const { error } = await sb.from('fixed_costs').insert(clean.map(r => ({ ...r, brand, month: SENTINEL })))
+  return error?.message ?? null
 }
 
 export async function saveCosts(brand: string, shipping: number, feeRatePct: number | null) {

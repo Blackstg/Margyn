@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
+import { createServerClient } from '@supabase/auth-helpers-nextjs'
 import { loadValidity, validityKey } from '@/lib/fixedCostValidity'
+import { effectiveBrands } from '@/lib/access'
 
 function getAdmin() {
   return createClient(
@@ -13,6 +15,13 @@ function getAdmin() {
 export async function GET(req: NextRequest) {
   const brand = req.nextUrl.searchParams.get('brand')
   if (!brand) return NextResponse.json({ error: 'Missing brand' }, { status: 400 })
+  // Salaires & loyers : réservé aux comptes qui ont accès à la marque.
+  const sb = createServerClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    { cookies: { getAll() { return req.cookies.getAll() }, setAll() {} } })
+  const { data: { user } } = await sb.auth.getUser().catch(() => ({ data: { user: null } }))
+  if (!user || !(effectiveBrands(user.user_metadata?.role, user.user_metadata?.brands) as string[]).includes(brand)) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  }
 
   const { data, error } = await getAdmin()
     .from('fixed_costs')
