@@ -3,7 +3,7 @@ import { NextResponse } from 'next/server'
 import type { NextRequest } from 'next/server'
 import {
   BRANDS, BRAND_LOCK as BRAND_LOCKED, FEATURES,
-  effectiveFeatures, effectiveBrands, homePath, isOwner,
+  effectiveFeatures, effectiveBrands, homePath, isAdminRole,
   type Brand, type FeatureKey,
 } from '@/lib/access'
 
@@ -26,6 +26,7 @@ export async function middleware(req: NextRequest) {
     pathname.startsWith('/rapport-defauts/') ||
     pathname.startsWith('/facture/') ||
     pathname.startsWith('/factory/') ||
+    pathname.startsWith('/join/') ||
     pathname === '/install'
   ) {
     return NextResponse.next()
@@ -198,8 +199,8 @@ export async function middleware(req: NextRequest) {
   const userBrands = effectiveBrands(role, brands)
   const home       = homePath(feats, userBrands, defaultBrand)
 
-  // ── Access management (Accès) is owner-only ───────────────────────────────
-  if (pageSeg === 'users' && !isOwner(role, brands)) {
+  // ── Équipe : réservée aux admins de la marque (chacun ne voit que sa marque) ──
+  if (pageSeg === 'users' && !isAdminRole(role)) {
     return redirect(new URL(home, req.url))
   }
 

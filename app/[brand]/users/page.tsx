@@ -2,202 +2,235 @@
 
 export const dynamic = 'force-dynamic'
 
-import { useEffect, useMemo, useState } from 'react'
-import { Users, Check, Shield, Truck, Headphones, ClipboardList } from 'lucide-react'
-import { BRANDS, BRAND_LABELS, FEATURES, type Brand, type FeatureKey } from '@/lib/access'
+// Équipe de la marque courante : ses membres seulement (jamais ceux des autres
+// marques), invitations par lien personnel, accès complet ou limité à certaines pages.
+import { useCallback, useEffect, useState } from 'react'
+import { Check, Copy, Link2, Loader2, Trash2, UserPlus, X } from 'lucide-react'
+import { useBrand } from '@/context/BrandContext'
 
-interface ApiUser {
-  id: string
-  email: string
-  role: string
-  brands: string[]
-  features: string[] | null
-  owner: boolean
+type Member = { id: string; email: string; role: string; features: string[] | null; otherBrands: boolean; editable: boolean; you: boolean }
+type Invite = { token: string; email: string; role: string; features: string[]; expiresAt: string }
+type Feature = { key: string; label: string; section: string }
+type Data = { members: Member[]; invites: Invite[]; roles: string[]; features: Feature[] }
+
+const ROLE_LABEL: Record<string, { label: string; hint: string }> = {
+  admin:       { label: 'Accès complet', hint: 'Voit et gère tout sur cette marque' },
+  sav:         { label: 'Accès limité',  hint: 'Ne voit que les pages que tu coches' },
+  delivery:    { label: 'Livreur',       hint: 'Application livreur uniquement' },
+  logistician: { label: 'Logisticien',   hint: 'Page de réconciliation uniquement' },
 }
 
-// Roles assignable from the panel. "Owner" (accès complet) is not assignable —
-// it's shown read-only. An "Admin" here = toutes les fonctionnalités MAIS
-// uniquement sur les marques cochées (pas un accès à tout).
-const ROLE_OPTIONS: { value: string; label: string; hint: string; icon: React.ReactNode }[] = [
-  { value: 'admin',       label: 'Admin (marques cochées)', hint: 'Toutes les fonctionnalités, UNIQUEMENT sur les marques cochées ci-dessous', icon: <Shield size={14} /> },
-  { value: 'sav',         label: 'Staff',       hint: 'Accès limité aux marques ET aux fonctionnalités cochées', icon: <Headphones size={14} /> },
-  { value: 'delivery',    label: 'Livreur',     hint: 'Application livreur uniquement (Bowa)',                    icon: <Truck size={14} /> },
-  { value: 'logistician', label: 'Logisticien', hint: 'Page de réconciliation uniquement',                       icon: <ClipboardList size={14} /> },
-]
+const btn = 'inline-flex items-center justify-center gap-2 rounded-2xl bg-[#1a1a2e] px-5 py-3 text-[15px] font-semibold text-white transition active:scale-[.98] disabled:opacity-40'
+const field = 'rounded-2xl border-2 border-[#e4e2dc] bg-white px-4 py-3 text-[15px] text-[#1a1a18] placeholder:text-[#b5b3ab] focus:border-[#1a1a2e] focus:outline-none'
 
-// Group features by section for display
-const SECTIONS = [...new Set(FEATURES.map(f => f.section))]
+export default function TeamPage() {
+  const brand = useBrand()
+  const [data, setData] = useState<Data | null>(null)
+  const [brandName, setBrandName] = useState('')
+  const [error, setError] = useState('')
 
-export default function UsersAccessPage() {
-  const [users, setUsers]   = useState<ApiUser[]>([])
-  const [loading, setLoading] = useState(true)
-  const [error, setError]   = useState('')
-
+  const load = useCallback(async () => {
+    const r = await fetch(`/api/team?brand=${brand}`)
+    const d = await r.json().catch(() => ({}))
+    if (!r.ok) { setError(d.error ?? 'Erreur'); return }
+    setData(d)
+  }, [brand])
+  useEffect(() => { load() }, [load])
   useEffect(() => {
-    fetch('/api/admin/users')
-      .then(async r => {
-        if (!r.ok) throw new Error((await r.json()).error ?? 'Erreur')
-        return r.json()
-      })
-      .then(d => setUsers(d.users ?? []))
-      .catch(e => setError(String(e.message ?? e)))
-      .finally(() => setLoading(false))
-  }, [])
+    fetch('/api/branding').then(r => (r.ok ? r.json() : {})).then((b: Record<string, { name?: string }>) => setBrandName(b[brand]?.name ?? brand)).catch(() => {})
+  }, [brand])
+
+  async function post(body: Record<string, unknown>) {
+    const r = await fetch('/api/team', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ brand, ...body }) })
+    const d = await r.json().catch(() => ({ error: 'Connexion perdue' }))
+    await load()
+    return d as { error?: string; url?: string }
+  }
 
   return (
-    <div className="min-h-screen bg-[#f8f7f5] pl-[72px]">
-      <div className="max-w-4xl mx-auto px-6 py-8 space-y-6">
-        <div className="flex items-center gap-2.5">
-          <Users size={20} className="text-[#1a1a2e]" />
-          <div>
-            <h1 className="text-xl font-bold text-[#1a1a2e]">Gestion des accès</h1>
-            <p className="text-xs text-[#6b6b63] mt-0.5">Choisissez ce que chaque utilisateur voit, par marque et par fonctionnalité.</p>
-          </div>
-        </div>
+    <div className="min-h-screen bg-[#faf9f8]">
+      <main className="mx-auto max-w-3xl px-4 py-10 sm:px-8 space-y-8">
+        <header>
+          <h1 className="text-[clamp(26px,3.5vw,38px)] font-extrabold leading-[1.05] tracking-[-0.03em] text-[#1a1a2e]">L’équipe de {brandName || '…'}</h1>
+          <p className="mt-2 text-[15px] text-[#6b6b63]">Les personnes ici ne voient que {brandName || 'cette marque'}, rien d’autre.</p>
+        </header>
 
-        {error && <div className="rounded-xl bg-[#fff5f5] border border-[#f5d0d0] text-[#c7293a] text-sm px-4 py-3">{error}</div>}
-        {loading ? (
-          <div className="text-sm text-[#9b9b93] py-10 text-center">Chargement…</div>
-        ) : (
-          <div className="space-y-4">
-            {users.map(u => <UserCard key={u.id} user={u} />)}
-          </div>
+        {error && <p className="rounded-2xl bg-[#fff5f5] px-4 py-3 text-[14px] text-[#b42318]">{error}</p>}
+        {!data && !error && <Loader2 className="animate-spin text-[#6b6b63]" size={22} />}
+        {data && (
+          <>
+            <InviteCard data={data} post={post} />
+
+            {data.invites.length > 0 && (
+              <section>
+                <h2 className="mb-3 text-[17px] font-bold text-[#1a1a2e]">En attente</h2>
+                <ul className="space-y-2">
+                  {data.invites.map(i => <PendingRow key={i.token} inv={i} post={post} />)}
+                </ul>
+              </section>
+            )}
+
+            <section>
+              <h2 className="mb-3 text-[17px] font-bold text-[#1a1a2e]">Membres</h2>
+              {data.members.length === 0
+                ? <p className="rounded-2xl border-2 border-dashed border-[#e4e2dc] px-5 py-6 text-[15px] text-[#6b6b63]">Personne pour l’instant. Invite ton premier coéquipier ci-dessus.</p>
+                : <ul className="space-y-2">{data.members.map(m => <MemberRow key={m.id} m={m} data={data} post={post} />)}</ul>}
+            </section>
+          </>
         )}
+      </main>
+    </div>
+  )
+}
+
+function RolePicker({ roles, role, setRole }: { roles: string[]; role: string; setRole: (r: string) => void }) {
+  return (
+    <div className="grid gap-2 sm:grid-cols-2">
+      {roles.map(r => (
+        <button key={r} type="button" onClick={() => setRole(r)}
+          className={`rounded-2xl border-2 p-4 text-left transition ${role === r ? 'border-[#1a1a2e] bg-[#1a1a2e] text-white' : 'border-[#e4e2dc] bg-white text-[#1a1a2e] hover:border-[#1a1a2e]'}`}>
+          <span className="block text-[15px] font-semibold">{ROLE_LABEL[r]?.label ?? r}</span>
+          <span className={`block text-[13px] ${role === r ? 'text-white/70' : 'text-[#6b6b63]'}`}>{ROLE_LABEL[r]?.hint}</span>
+        </button>
+      ))}
+    </div>
+  )
+}
+
+function FeaturePicker({ features, picked, toggle }: { features: Feature[]; picked: string[]; toggle: (k: string) => void }) {
+  return (
+    <div>
+      <p className="mb-2 text-[14px] font-semibold text-[#1a1a2e]">Pages visibles</p>
+      <div className="flex flex-wrap gap-2">
+        {features.map(f => {
+          const on = picked.includes(f.key)
+          return (
+            <button key={f.key} type="button" onClick={() => toggle(f.key)}
+              className={`inline-flex items-center gap-1.5 rounded-xl border-2 px-3 py-2 text-[14px] font-medium transition ${on ? 'border-[#1a7f4b] bg-[#1a7f4b] text-white' : 'border-[#e4e2dc] bg-white text-[#6b6b63] hover:border-[#1a1a2e]'}`}>
+              {on && <Check size={14} strokeWidth={3} />} {f.label}
+            </button>
+          )
+        })}
       </div>
     </div>
   )
 }
 
-function UserCard({ user }: { user: ApiUser }) {
-  const [role, setRole]         = useState(user.role)
-  const [brands, setBrands]     = useState<string[]>(user.brands)
-  const [features, setFeatures] = useState<string[]>(user.features ?? [])
-  const [saving, setSaving]     = useState(false)
-  const [saved, setSaved]       = useState(false)
+function CopyLink({ url }: { url: string }) {
+  const [copied, setCopied] = useState(false)
+  return (
+    <button type="button" onClick={async () => { try { await navigator.clipboard.writeText(url); setCopied(true); setTimeout(() => setCopied(false), 2000) } catch {} }}
+      className="inline-flex items-center gap-1.5 rounded-xl border-2 border-[#e4e2dc] bg-white px-3 py-2 text-[14px] font-semibold text-[#1a1a2e] hover:border-[#1a1a2e]">
+      {copied ? <><Check size={14} strokeWidth={3} /> Copié</> : <><Copy size={14} /> Copier le lien</>}
+    </button>
+  )
+}
 
-  const initial = useMemo(() => JSON.stringify({
-    role: user.role, brands: [...user.brands].sort(), features: [...(user.features ?? [])].sort(),
-  }), [user])
-  const current = JSON.stringify({ role, brands: [...brands].sort(), features: [...features].sort() })
-  const dirty = current !== initial
-
-  const restricted = role === 'sav'
-
-  // The owner is shown read-only and cannot be edited from the panel (anti-lockout)
-  if (user.owner) {
-    return (
-      <div className="bg-white rounded-[18px] shadow-[0_2px_16px_rgba(0,0,0,0.06)] p-5 flex items-center justify-between gap-3 flex-wrap">
-        <span className="font-semibold text-[#1a1a2e] text-sm">{user.email}</span>
-        <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-[#1a7f4b] bg-[#f0faf5] px-3 py-1.5 rounded-lg">
-          <Shield size={14} /> Propriétaire · accès complet à tout
-        </span>
-      </div>
-    )
-  }
-
-  function toggleBrand(b: Brand) {
-    setSaved(false)
-    setBrands(prev => prev.includes(b) ? prev.filter(x => x !== b) : [...prev, b])
-  }
-  function toggleFeature(f: FeatureKey) {
-    setSaved(false)
-    setFeatures(prev => prev.includes(f) ? prev.filter(x => x !== f) : [...prev, f])
-  }
-
-  async function save() {
-    setSaving(true); setSaved(false)
-    try {
-      const res = await fetch('/api/admin/users', {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id: user.id, role, brands, features }),
-      })
-      if (res.ok) { setSaved(true); user.role = role; user.brands = brands; user.features = features }
-    } finally { setSaving(false) }
-  }
+function InviteCard({ data, post }: { data: Data; post: (b: Record<string, unknown>) => Promise<{ error?: string; url?: string }> }) {
+  const [email, setEmail] = useState('')
+  const [role, setRole] = useState('admin')
+  const [features, setFeatures] = useState<string[]>([])
+  const [busy, setBusy] = useState(false)
+  const [res, setRes] = useState<{ error?: string; url?: string; email?: string } | null>(null)
 
   return (
-    <div className="bg-white rounded-[18px] shadow-[0_2px_16px_rgba(0,0,0,0.06)] p-5">
-      {/* Header */}
-      <div className="flex items-center justify-between gap-3 flex-wrap">
-        <span className="font-semibold text-[#1a1a2e] text-sm">{user.email}</span>
-        <div className="flex items-center gap-2">
-          <select value={role} onChange={e => { setRole(e.target.value); setSaved(false) }}
-            className="px-3 py-1.5 rounded-lg bg-[#f8f8f7] border border-[#e8e8e4] text-xs font-medium text-[#1a1a2e] cursor-pointer">
-            {ROLE_OPTIONS.map(r => <option key={r.value} value={r.value}>{r.label}</option>)}
-          </select>
-          <button onClick={save} disabled={!dirty || saving}
-            className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${
-              dirty ? 'bg-[#1a1a2e] text-white hover:bg-[#2a2a3e]' : 'bg-[#f0f0ee] text-[#9b9b93]'
-            } disabled:opacity-60`}>
-            {saving ? '…' : saved ? '✓ Enregistré' : 'Enregistrer'}
-          </button>
+    <section className="rounded-[28px] bg-white p-6 shadow-[0_1px_0_#e8e6e0,0_12px_40px_-24px_rgba(26,26,46,.25)] sm:p-8">
+      <span className="flex h-12 w-12 items-center justify-center rounded-2xl bg-[#f1f0fb] text-[#1a1a2e]"><UserPlus size={22} /></span>
+      <h2 className="mt-4 text-[22px] font-extrabold tracking-[-0.02em] text-[#1a1a2e]">Inviter quelqu’un</h2>
+      <p className="mt-1 text-[15px] text-[#6b6b63]">Tu reçois un lien personnel à lui envoyer, par WhatsApp ou par e-mail. Il choisit son mot de passe et arrive directement ici.</p>
+
+      {res?.url ? (
+        <div className="mt-6 rounded-2xl bg-[#e8f4ee] p-5">
+          <p className="text-[15px] font-semibold text-[#1a7f4b]">Invitation prête pour {res.email}</p>
+          <p className="mt-1 break-all text-[13px] text-[#1a1a2e]">{res.url}</p>
+          <div className="mt-3 flex flex-wrap gap-2">
+            <CopyLink url={res.url} />
+            <button type="button" className="text-[14px] text-[#6b6b63] underline underline-offset-2" onClick={() => { setRes(null); setEmail(''); setFeatures([]) }}>Inviter quelqu’un d’autre</button>
+          </div>
+          <p className="mt-3 text-[13px] text-[#6b6b63]">Le lien marche une seule fois, pendant 7 jours.</p>
         </div>
-      </div>
-
-      <p className="text-[11px] text-[#9b9b93] mt-1">{ROLE_OPTIONS.find(r => r.value === role)?.hint}</p>
-
-      {/* Brands (admin + staff) + features (staff only) */}
-      {(role === 'admin' || role === 'sav') && (
-        <div className="mt-4 space-y-4">
-          {/* Brands */}
-          <div>
-            <p className="text-[10px] font-semibold uppercase tracking-[0.08em] text-[#9b9b93] mb-1.5">Marques accessibles</p>
-            <div className="flex flex-wrap gap-1.5">
-              {BRANDS.map(b => {
-                const on = brands.includes(b)
-                return (
-                  <button key={b} onClick={() => toggleBrand(b)}
-                    className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border transition-all ${
-                      on ? 'bg-[#1a1a2e] text-white border-[#1a1a2e]' : 'bg-white text-[#6b6b63] border-[#e8e8e4] hover:border-[#aeb0c9]'
-                    }`}>
-                    {on && <Check size={12} />} {BRAND_LABELS[b]}
-                  </button>
-                )
-              })}
-            </div>
-          </div>
-
-          {/* Features grouped by section — staff only (admin = toutes) */}
-          {!restricted ? (
-            <p className="text-xs text-[#1a7f4b] bg-[#f0faf5] rounded-lg px-3 py-2">
-              ✓ Toutes les fonctionnalités, mais uniquement sur les marques cochées ci-dessus.
-            </p>
-          ) : (
-          <div>
-            <p className="text-[10px] font-semibold uppercase tracking-[0.08em] text-[#9b9b93] mb-1.5">Fonctionnalités</p>
-            <div className="space-y-2.5">
-              {SECTIONS.map(section => (
-                <div key={section}>
-                  <p className="text-[10px] text-[#aeb0c9] font-medium mb-1">{section}</p>
-                  <div className="flex flex-wrap gap-1.5">
-                    {FEATURES.filter(f => f.section === section).map(f => {
-                      const on = features.includes(f.key)
-                      // Feature verrouillée sur une/des marque(s) : utilisable si AU MOINS
-                      // une de ses marques est sélectionnée pour l'utilisateur.
-                      const lockBrands: Brand[] = f.brandLock == null ? [] : Array.isArray(f.brandLock) ? f.brandLock : [f.brandLock]
-                      const lockedOut = lockBrands.length > 0 && !lockBrands.some(b => brands.includes(b))
-                      return (
-                        <button key={f.key} onClick={() => toggleFeature(f.key)} disabled={lockedOut}
-                          title={lockedOut ? `Nécessite la marque ${lockBrands.map(b => BRAND_LABELS[b]).join(' ou ')}` : ''}
-                          className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border transition-all ${
-                            lockedOut ? 'bg-[#f8f8f7] text-[#cfcfc8] border-[#f0f0ee] cursor-not-allowed'
-                            : on ? 'bg-[#1a7f4b] text-white border-[#1a7f4b]'
-                            : 'bg-white text-[#6b6b63] border-[#e8e8e4] hover:border-[#aeb0c9]'
-                          }`}>
-                          {on && !lockedOut && <Check size={12} />} {f.label}
-                          {lockBrands.length > 0 && <span className="opacity-60">· {lockBrands.map(b => BRAND_LABELS[b]).join('/')}</span>}
-                        </button>
-                      )
-                    })}
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-          )}
+      ) : (
+        <div className="mt-6 space-y-5">
+          <input type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="son-adresse@email.com" className={`${field} w-full`} aria-label="Adresse e-mail" />
+          <RolePicker roles={data.roles} role={role} setRole={setRole} />
+          {role === 'sav' && <FeaturePicker features={data.features} picked={features} toggle={k => setFeatures(p => p.includes(k) ? p.filter(x => x !== k) : [...p, k])} />}
+          <button disabled={busy || !email.trim() || (role === 'sav' && features.length === 0)} className={btn}
+            onClick={async () => { setBusy(true); const r = await post({ action: 'invite', email, role, features }); setRes({ ...r, email }); setBusy(false) }}>
+            {busy ? <Loader2 size={16} className="animate-spin" /> : <Link2 size={16} />} Créer le lien d’invitation
+          </button>
+          {res?.error && <p className="text-[14px] text-[#b42318]">{res.error}</p>}
         </div>
       )}
-    </div>
+    </section>
+  )
+}
+
+function PendingRow({ inv, post }: { inv: Invite; post: (b: Record<string, unknown>) => Promise<unknown> }) {
+  const url = typeof window !== 'undefined' ? `${window.location.origin}/join/${inv.token}` : ''
+  const days = Math.max(0, Math.ceil((new Date(inv.expiresAt).getTime() - Date.now()) / 864e5))
+  return (
+    <li className="flex flex-wrap items-center gap-3 rounded-2xl border-2 border-dashed border-[#e4e2dc] bg-white px-4 py-3">
+      <span className="min-w-0 flex-1">
+        <span className="block truncate text-[15px] font-semibold text-[#1a1a2e]">{inv.email}</span>
+        <span className="text-[13px] text-[#6b6b63]">{ROLE_LABEL[inv.role]?.label ?? inv.role}, lien valable encore {days} jour{days > 1 ? 's' : ''}</span>
+      </span>
+      <CopyLink url={url} />
+      <button type="button" title="Annuler l’invitation" onClick={() => post({ action: 'cancel', token: inv.token })}
+        className="rounded-xl p-2 text-[#8a887f] hover:bg-[#f3f2ee] hover:text-[#b42318]"><X size={16} /></button>
+    </li>
+  )
+}
+
+function MemberRow({ m, data, post }: { m: Member; data: Data; post: (b: Record<string, unknown>) => Promise<{ error?: string }> }) {
+  const [open, setOpen] = useState(false)
+  const [role, setRole] = useState(m.role)
+  const [features, setFeatures] = useState<string[]>((m.features ?? []).filter(f => data.features.some(x => x.key === f)))
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState('')
+  const [confirmRemove, setConfirmRemove] = useState(false)
+  const initial = (m.email[0] ?? '?').toUpperCase()
+
+  return (
+    <li className="rounded-2xl bg-white px-4 py-3 shadow-[0_1px_0_#e8e6e0]">
+      <div className="flex flex-wrap items-center gap-3">
+        <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[#1a1a2e] text-[15px] font-bold text-white">{initial}</span>
+        <span className="min-w-0 flex-1">
+          <span className="block truncate text-[15px] font-semibold text-[#1a1a2e]">{m.email}{m.you && <span className="ml-2 font-normal text-[#8a887f]">(toi)</span>}</span>
+          <span className="text-[13px] text-[#6b6b63]">
+            {ROLE_LABEL[m.role]?.label ?? m.role}
+            {m.role === 'sav' && m.features && `, ${m.features.filter(f => data.features.some(x => x.key === f)).length} page(s)`}
+            {!m.editable && !m.you && ', géré par le propriétaire'}
+          </span>
+        </span>
+        {m.editable && !open && (
+          <button type="button" onClick={() => setOpen(true)} className="rounded-xl border-2 border-[#e4e2dc] px-3 py-2 text-[14px] font-semibold text-[#1a1a2e] hover:border-[#1a1a2e]">Modifier</button>
+        )}
+        {!m.you && (confirmRemove ? (
+          <span className="flex items-center gap-2 text-[14px]">
+            Retirer de l’équipe ?
+            <button type="button" className="font-semibold text-[#b42318] underline" onClick={async () => { const r = await post({ action: 'remove', id: m.id }); if (r.error) setErr(r.error) }}>Oui</button>
+            <button type="button" className="text-[#6b6b63] underline" onClick={() => setConfirmRemove(false)}>Non</button>
+          </span>
+        ) : (
+          <button type="button" title="Retirer de l’équipe" onClick={() => setConfirmRemove(true)} className="rounded-xl p-2 text-[#8a887f] hover:bg-[#f3f2ee] hover:text-[#b42318]"><Trash2 size={16} /></button>
+        ))}
+      </div>
+      {open && (
+        <div className="mt-4 space-y-4 border-t border-[#f0efeb] pt-4">
+          <RolePicker roles={data.roles} role={role} setRole={setRole} />
+          {role === 'sav' && <FeaturePicker features={data.features} picked={features} toggle={k => setFeatures(p => p.includes(k) ? p.filter(x => x !== k) : [...p, k])} />}
+          <div className="flex gap-2">
+            <button disabled={busy} className={btn} onClick={async () => {
+              setBusy(true); setErr('')
+              const r = await post({ action: 'update', id: m.id, role, features })
+              if (r.error) setErr(r.error); else setOpen(false)
+              setBusy(false)
+            }}>{busy && <Loader2 size={16} className="animate-spin" />} Enregistrer</button>
+            <button type="button" className="px-3 text-[14px] text-[#6b6b63] underline" onClick={() => setOpen(false)}>Annuler</button>
+          </div>
+        </div>
+      )}
+      {err && <p className="mt-2 text-[14px] text-[#b42318]">{err}</p>}
+    </li>
   )
 }

@@ -13,6 +13,7 @@ export default function ConditionalLayout({ children }: { children: React.ReactN
     || pathname === '/tracking' || pathname.startsWith('/tracking/')
     || pathname.startsWith('/facture/')
     || pathname.startsWith('/factory/')
+    || pathname.startsWith('/join/')
     || pathname.startsWith('/rapport-defauts/')
     || pathname.startsWith('/install')
 

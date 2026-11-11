@@ -98,7 +98,7 @@ type CookieToSet = { name: string; value: string; options?: Record<string, unkno
 
 // Lit la session ET la renouvelle si le jeton d'accès a expiré : les cookies
 // rafraîchis sont à réécrire sur la réponse (withCookies).
-export async function adminSession(req: NextRequest, brand: string): Promise<{ user: boolean; admin: boolean; refreshed: CookieToSet[] }> {
+export async function adminSession(req: NextRequest, brand: string): Promise<{ user: boolean; admin: boolean; refreshed: CookieToSet[]; caller: { id: string; email: string | null; role?: string; brands?: string[] | null } | null }> {
   const refreshed: CookieToSet[] = []
   try {
     const sb = createServerClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!, {
@@ -106,8 +106,11 @@ export async function adminSession(req: NextRequest, brand: string): Promise<{ u
     })
     const { data: { user } } = await sb.auth.getUser()
     const m = user?.user_metadata ?? {}
-    return { user: !!user, admin: !!user && isAdminRole(m.role) && (effectiveBrands(m.role, m.brands) as string[]).includes(brand), refreshed }
-  } catch { return { user: false, admin: false, refreshed } }
+    return {
+      user: !!user, admin: !!user && isAdminRole(m.role) && (effectiveBrands(m.role, m.brands) as string[]).includes(brand), refreshed,
+      caller: user ? { id: user.id, email: user.email ?? null, role: m.role, brands: Array.isArray(m.brands) ? m.brands : null } : null,
+    }
+  } catch { return { user: false, admin: false, refreshed, caller: null } }
 }
 
 export function withCookies<T extends NextResponse>(res: T, list: CookieToSet[]): T {

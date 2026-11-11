@@ -10,7 +10,7 @@ import {
 import { createBrowserClient } from '@supabase/auth-helpers-nextjs'
 import { useState, useEffect } from 'react'
 import DataFreshness from './DataFreshness'
-import { effectiveFeatures, effectiveBrands, isAdminRole, isOwner, BRAND_LOCK } from '@/lib/access'
+import { effectiveFeatures, effectiveBrands, isAdminRole, BRAND_LOCK } from '@/lib/access'
 
 // ─── Brand config ─────────────────────────────────────────────────────────────
 
@@ -75,7 +75,7 @@ const NAV_SECTIONS: { label: string; items: NavItem[] }[] = [
   {
     label: 'Admin',
     items: [
-      { key: 'users', icon: Users, label: 'Accès', brandLock: null },
+      { key: 'users', icon: Users, label: 'Équipe', brandLock: null },
     ],
   },
 ]
@@ -181,7 +181,6 @@ export default function Sidebar({ isOpen, collapsed, onToggleCollapse }: Sidebar
   if (!isOpen) return null
 
   const isAdmin          = isAdminRole(role)
-  const owner            = isOwner(role, metaBrands)  // only the owner manages access
   const allowedBrands    = effectiveBrands(role, metaBrands)  // scoped to user's brands
   const feats            = effectiveFeatures(role, metaFeatures)  // 'all' for admins
   // Brand selector shows for anyone with access to more than one brand (incl. staff)
@@ -283,8 +282,8 @@ export default function Sidebar({ isOpen, collapsed, onToggleCollapse }: Sidebar
       <nav className="flex-1 overflow-y-auto px-3 space-y-5 pb-4">
         {role === null ? null : NAV_SECTIONS.map(section => {
           const items = section.items.filter(({ key, brandLock }) => {
-            // 'users' (Accès) is owner-only
-            if (key === 'users') return owner
+            // 'users' (Équipe) : admins de la marque
+            if (key === 'users') return isAdminRole(role)
             // Feature gate: restricted roles only see their allowed features
             if (feats !== 'all' && !(feats as string[]).includes(key)) return false
             // Shared pages: always visible
