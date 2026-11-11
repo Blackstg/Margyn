@@ -4,6 +4,7 @@ import {
   fetchOrders,
   fetchProducts,
   computeMetrics,
+  loadSteeroCosts,
   normalizeProducts,
   normalizeVariants,
   aggregateProductSales,
@@ -115,10 +116,11 @@ export async function GET(req: NextRequest) {
     error?: string
   }> = []
 
+  const steeroCosts = await loadSteeroCosts(supabase, brand)
   for (const chunk of chunks) {
     try {
       const orders  = await fetchOrders(store, chunk.from, chunk.to)
-      const metrics = await computeMetrics(store, orders, products, shippingRate)
+      const metrics = await computeMetrics(store, orders, products, shippingRate, steeroCosts)
 
       // Upsert daily_snapshots (overwrites existing rows for these dates)
       if (metrics.length > 0) {

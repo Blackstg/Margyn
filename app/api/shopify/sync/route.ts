@@ -7,6 +7,7 @@ import {
   fetchOrders,
   fetchProducts,
   computeMetrics,
+  loadSteeroCosts,
   normalizeProducts,
   normalizeVariants,
   aggregateProductSales,
@@ -100,8 +101,9 @@ export async function POST(req: NextRequest) {
 
       // ── 2. Compute metrics ─────────────────────────────────────────────────
       const shippingRate = shippingRates[store.brand] ?? 0
+      const steeroCosts  = await loadSteeroCosts(supabase, store.brand)
       const [metrics, normalizedProducts, variantRows] = await Promise.all([
-        computeMetrics(store, orders, products, shippingRate),
+        computeMetrics(store, orders, products, shippingRate, steeroCosts),
         normalizeProducts(store, products),
         normalizeVariants(store, products),
       ])

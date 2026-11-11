@@ -273,7 +273,9 @@ export async function computeMetrics(
   config: ShopifyConfig,
   orders: ShopifyOrder[],
   products: ShopifyProduct[],
-  shippingRatePerOrder = 0
+  shippingRatePerOrder = 0,
+  // Coûts saisis dans Steero (variant_id → coût), utilisés quand Shopify n'en a pas
+  fallbackCosts?: Map<number, number>
 ): Promise<DailyMetrics[]> {
   // Build variant_id → inventory_item_id map from products
   const variantToInventoryItem = new Map<number, number>()
@@ -293,6 +295,7 @@ export async function computeMetrics(
     const cost = costMap.get(inventoryItemId)
     if (cost != null) variantCostMap.set(variantId, cost)
   }
+  fallbackCosts?.forEach((cost, variantId) => { if (!variantCostMap.has(variantId)) variantCostMap.set(variantId, cost) })
 
   // Aggregate by date
   const byDate = new Map<
@@ -578,4 +581,16 @@ export async function normalizeVariants(
 
 function round(n: number, decimals = 2): number {
   return Math.round(n * 10 ** decimals) / 10 ** decimals
+}
+
+// Coûts d'achat enregistrés dans Steero (product_variants.cost_price, ex. saisis à
+// l'onboarding) → repli de computeMetrics quand Shopify n'a pas de coût.
+export async function loadSteeroCosts(
+  supabase: { from: (t: string) => any }, // eslint-disable-line @typescript-eslint/no-explicit-any
+  brand: string,
+): Promise<Map<number, number>> {
+  const { data } = await supabase.from('product_variants').select('shopify_variant_id, cost_price')
+    .eq('brand', brand).not('cost_price', 'is', null)
+  return new Map(((data ?? []) as { shopify_variant_id: string | number; cost_price: number }[])
+    .map(r => [Number(r.shopify_variant_id), Number(r.cost_price)]))
 }

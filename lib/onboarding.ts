@@ -8,13 +8,21 @@ import { BRANDS, effectiveBrands } from '@/lib/access'
 import { cfgStr, getIntegration, googleAdsCustomerId, metaCreds, saveIntegration, shopifyCreds } from '@/lib/tenant/integrations'
 import { fetchCustomerName } from '@/lib/google-ads'
 
-export type StepKey = 'shopify' | 'identity' | 'meta' | 'google' | 'costs' | 'team'
+export type StepKey = 'shopify' | 'identity' | 'meta' | 'google' | 'products' | 'shipping' | 'team'
 
 export interface OnboardingStep {
   key: StepKey
   done: boolean
   skipped: boolean
   detail: Record<string, unknown>
+}
+
+export interface OnboardingProduct { id: string; title: string; image: string | null; price: number | null; cost: number | null }
+
+// Aperçu « ton Steero » : les vrais chiffres des 30 derniers jours, débloqués étape par étape.
+export interface OnboardingPreview {
+  sales30: number; orders30: number; cogs30: number
+  metaSpend30: number; googleSpend30: number
 }
 
 export interface OnboardingStatus {
@@ -24,6 +32,8 @@ export interface OnboardingStatus {
   steps: OnboardingStep[]
   doneCount: number
   total: number
+  preview: OnboardingPreview
+  products: OnboardingProduct[]
 }
 
 const db = () => createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!, { auth: { autoRefreshToken: false, persistSession: false } })
@@ -42,7 +52,8 @@ export async function setSkipped(brand: string, step: StepKey, skip: boolean) {
 
 export async function onboardingStatus(brand: string): Promise<OnboardingStatus> {
   const sb = db()
-  const [skipped, shop, meta, googleId, tenantRes, settingsRes, firstRes, variantsRes, costedRes, usersRes] = await Promise.all([
+  const since = new Date(Date.now() - 30 * 864e5).toISOString().slice(0, 10)
+  const [skipped, shop, meta, googleId, tenantRes, settingsRes, firstRes, variantsRes, usersRes, snapsRes, adsRes] = await Promise.all([
     skippedSteps(brand),
     shopifyCreds(brand),
     metaCreds(brand),
@@ -50,13 +61,24 @@ export async function onboardingStatus(brand: string): Promise<OnboardingStatus>
     sb.from('tenants').select('name, logo_url').eq('slug', brand).maybeSingle(),
     sb.from('brand_settings').select('shipping_cost_per_order, transaction_fee_rate').eq('brand', brand).maybeSingle(),
     sb.from('daily_snapshots').select('date').eq('brand', brand).order('date').limit(1),
-    sb.from('product_variants').select('shopify_variant_id', { count: 'exact', head: true }).eq('brand', brand),
-    sb.from('product_variants').select('shopify_variant_id', { count: 'exact', head: true }).eq('brand', brand).not('cost_price', 'is', null),
+    sb.from('product_variants').select('shopify_variant_id, product_title, variant_title, image_url, sell_price, cost_price, product_status')
+      .eq('brand', brand).order('product_title').limit(200),
     sb.auth.admin.listUsers({ perPage: 1000 }),
+    sb.from('daily_snapshots').select('total_sales, order_count, cogs').eq('brand', brand).gte('date', since),
+    sb.from('ad_spends').select('platform, spend').eq('brand', brand).gte('date', since),
   ])
 
-  const variants = variantsRes.count ?? 0
-  const costed   = costedRes.count ?? 0
+  const products: OnboardingProduct[] = (variantsRes.data ?? [])
+    .filter(v => (v.product_status ?? 'active') === 'active')
+    .map(v => ({
+      id: String(v.shopify_variant_id),
+      title: v.variant_title && v.variant_title !== 'Default Title' ? `${v.product_title} · ${v.variant_title}` : String(v.product_title),
+      image: v.image_url ?? null,
+      price: v.sell_price != null ? Number(v.sell_price) : null,
+      cost: v.cost_price != null ? Number(v.cost_price) : null,
+    }))
+  const variants = products.length
+  const costed   = products.filter(p => p.cost != null && p.cost > 0).length
   const shipping = Number(settingsRes.data?.shipping_cost_per_order ?? 0)
   const feeRate  = settingsRes.data?.transaction_fee_rate != null ? Number(settingsRes.data.transaction_fee_rate) : null
   const team = (usersRes.data?.users ?? []).filter(u => {
@@ -66,6 +88,15 @@ export async function onboardingStatus(brand: string): Promise<OnboardingStatus>
   const name = tenantRes.data?.name ?? brand
   const logoUrl = tenantRes.data?.logo_url ?? null
 
+  const sum = <T,>(rows: T[] | null, f: (r: T) => number) => (rows ?? []).reduce((a, r) => a + (f(r) || 0), 0)
+  const preview: OnboardingPreview = {
+    sales30:  Math.round(sum(snapsRes.data, r => Number(r.total_sales))),
+    orders30: sum(snapsRes.data, r => Number(r.order_count)),
+    cogs30:   Math.round(sum(snapsRes.data, r => Number(r.cogs))),
+    metaSpend30:   Math.round(sum((adsRes.data ?? []).filter(a => a.platform === 'meta'), r => Number(r.spend))),
+    googleSpend30: Math.round(sum((adsRes.data ?? []).filter(a => a.platform === 'google'), r => Number(r.spend))),
+  }
+
   const step = (key: StepKey, done: boolean, detail: Record<string, unknown>): OnboardingStep =>
     ({ key, done: done || skipped.includes(key), skipped: !done && skipped.includes(key), detail })
 
@@ -74,11 +105,12 @@ export async function onboardingStatus(brand: string): Promise<OnboardingStatus>
     step('identity', !!logoUrl, { name, logoUrl }),
     step('meta', !!(meta.token && meta.adAccount), { adAccount: meta.adAccount ?? null }),
     step('google', !!googleId, { customerId: googleId ?? null }),
-    step('costs', variants > 0 && costed / variants >= 0.9 && shipping > 0, { variants, costed, shipping, feeRate }),
+    step('products', variants > 0 && costed / variants >= 0.9, { variants, costed }),
+    step('shipping', shipping > 0, { shipping, feeRate }),
     step('team', team > 0, { members: team }),
   ]
   const doneCount = steps.filter(s => s.done).length
-  return { brand, name, logoUrl, steps, doneCount, total: steps.length }
+  return { brand, name, logoUrl, steps, doneCount, total: steps.length, preview, products }
 }
 
 // ─── Actions ──────────────────────────────────────────────────────────────────
@@ -164,6 +196,19 @@ export async function connectGoogle(brand: string, raw: string): Promise<{ name?
   } catch {
     return { error: 'Compte inaccessible : accepte l’invitation du compte gestionnaire Steero dans Google Ads, puis réessaie' }
   }
+}
+
+// Coûts d'achat saisis dans l'onboarding (la synchro Shopify ne les écrase que si
+// Shopify a lui-même un coût), puis recalcul des marges passées.
+export async function saveProductCosts(brand: string, costs: Record<string, number>) {
+  const sb = db()
+  for (const [id, cost] of Object.entries(costs)) {
+    if (!(cost >= 0)) continue
+    const { error } = await sb.from('product_variants').update({ cost_price: Math.round(cost * 100) / 100 })
+      .eq('brand', brand).eq('shopify_variant_id', id)
+    if (error) return error.message
+  }
+  return null
 }
 
 export async function saveCosts(brand: string, shipping: number, feeRatePct: number | null) {

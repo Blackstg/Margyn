@@ -6,13 +6,13 @@ import { BRANDS } from '@/lib/access'
 import { adminSession, withCookies } from '@/lib/shopify/app'
 import {
   backfillHistory, connectGoogle, connectMeta, importShopifyBranding, onboardingStatus,
-  saveCosts, saveIdentity, setSkipped, uploadLogo, type StepKey,
+  saveCosts, saveIdentity, saveProductCosts, setSkipped, uploadLogo, type StepKey,
 } from '@/lib/onboarding'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 300
 
-const STEPS: StepKey[] = ['shopify', 'identity', 'meta', 'google', 'costs', 'team']
+const STEPS: StepKey[] = ['shopify', 'identity', 'meta', 'google', 'products', 'shipping', 'team']
 
 export async function GET(req: NextRequest) {
   const brand = req.nextUrl.searchParams.get('brand') ?? ''
@@ -48,6 +48,17 @@ export async function POST(req: NextRequest) {
     }
     case 'meta':   return reply(await connectMeta(brand, String(body.adAccount ?? '')))
     case 'google': return reply(await connectGoogle(brand, String(body.customerId ?? '')))
+    case 'productCosts': {
+      const raw = (body.costs ?? {}) as Record<string, unknown>
+      const costs = Object.fromEntries(Object.entries(raw).map(([k, v]) => [k, Number(String(v).replace(',', '.'))]).filter(([, v]) => Number.isFinite(v)))
+      const err = await saveProductCosts(brand, costs as Record<string, number>)
+      if (err) return reply({ error: err })
+      // Recalcule les marges passées avec ces coûts (depuis la 1re donnée).
+      const status = await onboardingStatus(brand)
+      const from = status.steps[0].detail.firstDate as string | null
+      if (from) await backfillHistory(req.nextUrl.origin, brand, from)
+      return reply({ ok: true })
+    }
     case 'costs': {
       const shipping = Number(String(body.shipping ?? '').replace(',', '.'))
       const fee = body.feeRate === '' || body.feeRate == null ? null : Number(String(body.feeRate).replace(',', '.'))
