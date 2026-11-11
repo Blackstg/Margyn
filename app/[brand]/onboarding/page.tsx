@@ -29,11 +29,12 @@ const MISSIONS: Record<StepKey, { icon: typeof Store; short: string; question: s
 const ORDER: StepKey[] = ['shopify', 'identity', 'meta', 'google', 'products', 'shipping', 'team']
 
 const eur = (n: number) => new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR', maximumFractionDigits: 0 }).format(n)
+const price = (n: number) => new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR' }).format(n)
 const fmtDate = (d: string | null) => d ? new Date(d + 'T00:00:00').toLocaleDateString('fr-FR', { day: 'numeric', month: 'long' }) : '—'
 
 const btn = 'inline-flex items-center justify-center gap-2 rounded-2xl bg-[#1a1a2e] px-5 py-3 text-[15px] font-semibold text-white transition active:scale-[.98] disabled:opacity-40 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#1a1a2e]'
 const btnSoft = 'inline-flex items-center justify-center gap-2 rounded-2xl border-2 border-[#e4e2dc] bg-white px-5 py-3 text-[15px] font-semibold text-[#1a1a2e] transition hover:border-[#1a1a2e] active:scale-[.98] disabled:opacity-40'
-const field = 'w-full rounded-2xl border-2 border-[#e4e2dc] bg-white px-4 py-3 text-[15px] text-[#1a1a18] placeholder:text-[#b5b3ab] focus:border-[#1a1a2e] focus:outline-none'
+const field = 'rounded-2xl border-2 border-[#e4e2dc] bg-white px-4 py-3 text-[15px] text-[#1a1a18] placeholder:text-[#b5b3ab] focus:border-[#1a1a2e] focus:outline-none'
 
 export default function OnboardingPage() {
   const brand = useBrand()
@@ -344,7 +345,7 @@ function Body({ step, status, run, busy, skip }: { step: Step; status: Status; r
           ]} />
           <div className="flex flex-wrap gap-2">
             <input value={a} onChange={e => setA(e.target.value)} placeholder={isMeta ? '1234567890' : '123-456-7890'} inputMode="numeric"
-              className={`${field} max-w-[260px] tabular-nums`} aria-label="Numéro du compte publicitaire" />
+              className={`${field} w-full max-w-[260px] tabular-nums`} aria-label="Numéro du compte publicitaire" />
             <button disabled={busy || !a.trim()} className={btn}
               onClick={() => run(isMeta ? { action: 'meta', adAccount: a } : { action: 'google', customerId: a }, r => `Connecté : ${r.name}`)}>{spin} Connecter</button>
           </div>
@@ -391,7 +392,7 @@ function ProductCosts({ products, run, busy }: { products: Product[]; run: Run; 
               <span className="min-w-0 flex-1">
                 <span className="block truncate text-[15px] font-semibold text-[#1a1a18]">{p.title}</span>
                 <span className="text-[13px] text-[#6b6b63]">
-                  {p.price != null ? `Vendu ${eur(p.price)}` : ''}{m != null && <span className={`ml-2 font-semibold ${m >= 50 ? 'text-[#1a7f4b]' : m >= 25 ? 'text-[#a15c07]' : 'text-[#b42318]'}`}>{m} % de marge</span>}
+                  {p.price != null ? `Vendu ${price(p.price)}` : ''}{m != null && <span className={`ml-2 font-semibold ${m >= 50 ? 'text-[#1a7f4b]' : m >= 25 ? 'text-[#a15c07]' : 'text-[#b42318]'}`}>{m} % de marge</span>}
                 </span>
               </span>
               <label className="relative">
