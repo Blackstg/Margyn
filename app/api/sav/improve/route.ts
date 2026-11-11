@@ -20,7 +20,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'current_draft is required' }, { status: 400 })
   }
 
-  const prompt = `Voici une réponse rédigée par un agent SAV Mōom (cosmétiques naturels français).
+  const prompt = `Voici une réponse rédigée par un agent du service client d'une marque e-commerce française.
 
 Améliore la formulation : corrige les fautes d'orthographe et de grammaire, rends le texte plus chaleureux et professionnel, améliore la fluidité des phrases — tout en conservant EXACTEMENT le même sens, les mêmes informations et la même structure générale.
 

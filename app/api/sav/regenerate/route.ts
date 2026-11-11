@@ -1,6 +1,8 @@
 // POST /api/sav/regenerate
-// Body: { subject, description, category, order, customer_email, ticket_id, requester_id }
+// Body: { subject, description, category, order, customer_email, ticket_id, requester_id, instruction? }
 // Re-runs generateReply() with fresh rules from DB and the full conversation thread.
+// instruction : consigne libre de l'agent (« on rembourse, ton plus court… ») que
+// Claude applique strictement.
 
 import { NextRequest, NextResponse } from 'next/server'
 import { generateReply } from '@/lib/sav/classifier'
@@ -20,12 +22,14 @@ export async function POST(req: NextRequest) {
     customer_email: string
     ticket_id?:     number
     requester_id?:  number
+    instruction?:   string
   }
 
   try { body = await req.json() }
   catch { return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 }) }
 
   const { subject, description, category, order, customer_email, ticket_id, requester_id } = body
+  const instruction = body.instruction?.trim().slice(0, 2000) || undefined
 
   if (!subject || !description || !category || !customer_email) {
     return NextResponse.json({ error: 'subject, description, category and customer_email are required' }, { status: 400 })
@@ -43,7 +47,7 @@ export async function POST(req: NextRequest) {
   }
 
   try {
-    const result = await generateReply(subject, description, category, order ?? null, customer_email, comments, undefined, savBrandFromRequest(req))
+    const result = await generateReply(subject, description, category, order ?? null, customer_email, comments, instruction, savBrandFromRequest(req))
     return NextResponse.json({ body: result.body, solved: result.solved })
   } catch (err) {
     console.error('[SAV] regenerate error:', err)

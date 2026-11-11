@@ -425,8 +425,8 @@ ${examplesBlock}
 ${rulesBlock || '(aucune règle spécifique — appliquer les bonnes pratiques SAV)'}
 
 ━━━ SECTION 4 — INSTRUCTION ━━━
-${decision ? `⚡ DÉCISION PRISE PAR L'ÉQUIPE : "${decision}"
-Tu DOIS rédiger la réponse en appliquant strictement cette décision. Ne la remet pas en question.
+${decision ? `⚡ CONSIGNE DE L'ÉQUIPE (décision ou indication sur la réponse voulue) : "${decision}"
+Tu DOIS rédiger la réponse en appliquant strictement cette consigne (fond, ton, longueur, informations à donner). Ne la remets pas en question.
 
 ` : ''}Rédige une réponse UNIQUEMENT pour répondre à la SITUATION ACTUELLE (dernier message).
 

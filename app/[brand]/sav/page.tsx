@@ -1045,6 +1045,8 @@ function ReplyPanel({ ticket, draft, solved, onDraftChange, onSolvedChange, onSe
   useEffect(() => { openedAtRef.current = Date.now() }, [ticket.ticket_id])
   const [showForward, setShowForward]     = useState(false)
   const [showMore, setShowMore]           = useState(false)
+  const [instruction, setInstruction]     = useState('')
+  useEffect(() => { setInstruction('') }, [ticket.ticket_id])
   const [forwardTo, setForwardTo]         = useState('')
   const [forwardNote, setForwardNote]     = useState('')
   const [forwarding, setForwarding]       = useState(false)
@@ -1103,6 +1105,7 @@ function ReplyPanel({ ticket, draft, solved, onDraftChange, onSolvedChange, onSe
 
   async function regenerate() {
     setRegenerating(true); setError(null)
+    if (draft.trim()) setPreviousDraft(draft)
     try {
       const res = await savFetch('/api/sav/regenerate', {
         method: 'POST',
@@ -1115,14 +1118,17 @@ function ReplyPanel({ ticket, draft, solved, onDraftChange, onSolvedChange, onSe
           customer_email: ticket.customer_email,
           ticket_id:      ticket.ticket_id,
           requester_id:   ticket.requester_id ?? 0,
+          instruction:    instruction.trim() || undefined,
         }),
       })
       const d = await savJson<{ body?: string; solved?: boolean; error?: string }>(res, 'La régénération')
       if (!res.ok) throw new Error(d.error ?? `HTTP ${res.status}`)
       if (d.body) onDraftChange(d.body)
       if (d.solved !== undefined) onSolvedChange(d.solved)
+      setInstruction('')
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Erreur inconnue')
+      setPreviousDraft(null)
     } finally { setRegenerating(false) }
   }
 
@@ -1351,7 +1357,31 @@ function ReplyPanel({ ticket, draft, solved, onDraftChange, onSolvedChange, onSe
         onChange={handleFileChange}
         accept=".pdf,.jpg,.jpeg,.png,.gif,.webp,.zip,.doc,.docx,.xls,.xlsx"
       />
-      <div className="shrink-0 flex items-center gap-1 px-2 pt-1 border-t border-[#f2f2f7] flex-wrap">
+      {!showDecisionPanel && (
+        <div className="shrink-0 px-3 pt-2 border-t border-[#f2f2f7]">
+          <div className="flex items-end gap-2 rounded-xl bg-[#f5f0ff] border border-[#e6dafd] px-3 py-2 focus-within:border-[#a78bfa]">
+            <Sparkles size={14} className="text-[#7c3aed] shrink-0 mb-1" />
+            <textarea
+              value={instruction}
+              onChange={e => setInstruction(e.target.value)}
+              onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey && instruction.trim() && !regenerating) { e.preventDefault(); regenerate() } }}
+              rows={instruction.length > 60 ? 3 : 1}
+              aria-label="Consigne pour Claude"
+              placeholder="Dis à Claude quoi répondre : « on rembourse les 35 €, plus court »…"
+              className="flex-1 bg-transparent text-[13px] leading-snug text-[#1d1d1f] placeholder-[#9b87d6] resize-none focus:outline-none font-[inherit]"
+            />
+            <button
+              onClick={regenerate}
+              disabled={!instruction.trim() || regenerating || sending || archiving}
+              title="Réécrire la réponse en suivant cette consigne (Entrée)"
+              className="shrink-0 h-7 px-2.5 rounded-lg bg-[#7c3aed] text-white text-[12px] font-semibold inline-flex items-center gap-1 disabled:opacity-40"
+            >
+              {regenerating ? <RefreshCw size={12} className="animate-spin" /> : <ArrowRight size={12} />} Appliquer
+            </button>
+          </div>
+        </div>
+      )}
+      <div className="shrink-0 flex items-center gap-1 px-2 pt-1 flex-wrap">
         <button
           onClick={() => fileInputRef.current?.click()}
           disabled={uploading || sending || archiving}
