@@ -6,7 +6,7 @@
 import { createClient } from '@supabase/supabase-js'
 import { BRANDS, effectiveBrands } from '@/lib/access'
 import { cfgStr, getIntegration, googleAdsCustomerId, metaCreds, saveIntegration, shopifyCreds } from '@/lib/tenant/integrations'
-import { fetchCustomerName } from '@/lib/google-ads'
+import { fetchCustomerName, inviteToManager } from '@/lib/google-ads'
 import { activeIn, loadValidity } from '@/lib/fixedCostValidity'
 
 export type StepKey = 'shopify' | 'identity' | 'meta' | 'google' | 'products' | 'shipping' | 'fixed' | 'team'
@@ -260,8 +260,13 @@ export async function connectGoogle(origin: string, brand: string, raw: string):
     if (err) return { error: err }
     await backfillAds(origin, brand, 'google-ads')
     return { name: `${c.name}${c.currency ? ` · ${c.currency}` : ''}` }
-  } catch {
-    return { error: 'Compte inaccessible : accepte l’invitation du compte gestionnaire Steero dans Google Ads, puis réessaie' }
+  } catch (e) {
+    console.error('[onboarding] connectGoogle', String(e).slice(0, 300))
+    // Hors du compte gestionnaire : on envoie l'invitation, la marque l'accepte puis réessaie.
+    const invited = await inviteToManager(id).catch(() => 'error' as const)
+    return invited === 'sent'
+      ? { error: 'Invitation envoyée. Dans Google Ads : Admin → Accès et sécurité → onglet Gestionnaires, accepte la demande de « Cool Brands », puis clique à nouveau sur Connecter.' }
+      : { error: 'Compte introuvable ou inaccessible. Vérifie le numéro (10 chiffres) ; si c’est bien le bon, écris-nous.' }
   }
 }
 

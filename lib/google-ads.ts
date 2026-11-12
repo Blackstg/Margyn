@@ -70,6 +70,11 @@ export interface NormalizedAdSpend {
   revenue: number
 }
 
+// Version de l'API Google Ads. Google coupe chaque version ~1 an après sa sortie
+// (v22 bloquée le 22/10/2026 → plus aucune dépense Google remontée) : à monter
+// dès qu'une erreur UNSUPPORTED_VERSION apparaît.
+const API = 'https://googleads.googleapis.com/v26'
+
 // ─── Auth ─────────────────────────────────────────────────────────────────────
 
 export async function getGoogleAccessToken(): Promise<string> {
@@ -110,7 +115,7 @@ async function gaqlSearch(
     if (pageToken) body.pageToken = pageToken
 
     const res = await fetch(
-      `https://googleads.googleapis.com/v22/customers/${customerId}/googleAds:search`,
+      `${API}/customers/${customerId}/googleAds:search`,
       {
         method: 'POST',
         headers: {
@@ -145,6 +150,31 @@ export async function fetchCustomerName(customerId: string): Promise<{ name: str
     'SELECT customer.descriptive_name, customer.currency_code FROM customer')
   const c = (rows[0] as { customer?: { descriptiveName?: string; currencyCode?: string } } | undefined)?.customer
   return { name: c?.descriptiveName ?? customerId, currency: c?.currencyCode ?? '' }
+}
+
+// ─── Invitation du compte gestionnaire (MCC) ──────────────────────────────────
+// Un compte hors MCC n'est pas lisible : le MCC lui envoie une demande d'accès,
+// que la marque accepte dans Google Ads (Admin → Accès et sécurité → Gestionnaires).
+// 'sent' = invitation envoyée (ou déjà en attente).
+export async function inviteToManager(customerId: string): Promise<'sent' | 'error'> {
+  const mcc = process.env.GOOGLE_ADS_MCC_ID
+  if (!mcc) return 'error'
+  const res = await fetch(`${API}/customers/${mcc}/customerClientLinks:mutate`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${await getGoogleAccessToken()}`,
+      'developer-token': process.env.GOOGLE_ADS_DEVELOPER_TOKEN!,
+      'login-customer-id': mcc,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ operation: { create: { clientCustomer: `customers/${customerId}`, status: 'PENDING' } } }),
+    cache: 'no-store',
+  })
+  if (res.ok) return 'sent'
+  const err = await res.text()
+  if (/ALREADY_INVITED|ALREADY_MANAGED|already/i.test(err)) return 'sent'
+  console.error('[google-ads] inviteToManager', res.status, err.slice(0, 500))
+  return 'error'
 }
 
 // ─── fetchCampaigns ───────────────────────────────────────────────────────────
