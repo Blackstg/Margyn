@@ -264,9 +264,9 @@ export async function connectGoogle(origin: string, brand: string, raw: string):
     console.error('[onboarding] connectGoogle', String(e).slice(0, 300))
     // Hors du compte gestionnaire : on envoie l'invitation, la marque l'accepte puis réessaie.
     const invited = await inviteToManager(id).catch(() => 'error' as const)
-    return invited === 'sent'
-      ? { error: 'Invitation envoyée. Dans Google Ads : Admin → Accès et sécurité → onglet Gestionnaires, accepte la demande de « Cool Brands », puis clique à nouveau sur Connecter.' }
-      : { error: 'Compte introuvable ou inaccessible. Vérifie le numéro (10 chiffres) ; si c’est bien le bon, écris-nous.' }
+    if (invited === 'sent') return { error: 'Invitation envoyée. Dans Google Ads : Admin → Accès et sécurité → onglet Gestionnaires, accepte la demande de « Cool Brands », puis clique à nouveau sur Connecter.' }
+    if (invited === 'manual') return { error: `Ce compte n’est pas encore relié à Steero. 1) Dans le compte gestionnaire « Cool Brands » : Comptes → + → Associer un compte existant → ${raw.trim()}. 2) Dans le compte de la marque : Admin → Accès et sécurité → Gestionnaires → accepter. 3) Clique à nouveau sur Connecter.` }
+    return { error: 'Compte introuvable ou inaccessible. Vérifie le numéro (10 chiffres) ; si c’est bien le bon, écris-nous.' }
   }
 }
 

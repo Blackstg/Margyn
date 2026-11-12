@@ -155,8 +155,9 @@ export async function fetchCustomerName(customerId: string): Promise<{ name: str
 // ─── Invitation du compte gestionnaire (MCC) ──────────────────────────────────
 // Un compte hors MCC n'est pas lisible : le MCC lui envoie une demande d'accès,
 // que la marque accepte dans Google Ads (Admin → Accès et sécurité → Gestionnaires).
-// 'sent' = invitation envoyée (ou déjà en attente).
-export async function inviteToManager(customerId: string): Promise<'sent' | 'error'> {
+// 'sent' = invitation envoyée (ou déjà en attente) ; 'manual' = la clé développeur
+// n'a que l'accès Explorer (lecture seule) → l'invitation se fait à la main depuis le MCC.
+export async function inviteToManager(customerId: string): Promise<'sent' | 'manual' | 'error'> {
   const mcc = process.env.GOOGLE_ADS_MCC_ID
   if (!mcc) return 'error'
   const res = await fetch(`${API}/customers/${mcc}/customerClientLinks:mutate`, {
@@ -173,6 +174,7 @@ export async function inviteToManager(customerId: string): Promise<'sent' | 'err
   if (res.ok) return 'sent'
   const err = await res.text()
   if (/ALREADY_INVITED|ALREADY_MANAGED|already/i.test(err)) return 'sent'
+  if (/DEVELOPER_TOKEN_NOT_APPROVED/.test(err)) return 'manual'
   console.error('[google-ads] inviteToManager', res.status, err.slice(0, 500))
   return 'error'
 }
