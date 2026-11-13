@@ -242,3 +242,66 @@ export function autoPlan(input: { orders: PlanOrder[]; tours: PlanTour[]; today?
 
   return { additions, new_tours, waiting, drivers: profiles.map((p) => ({ ...p, points: [] })) }
 }
+
+// ─── Tournées par zone (onglet « Tournées auto ») ────────────────────────────
+// La France est coupée en 4 zones ; chaque zone remplit sa tournée au fil des
+// commandes (à replanifier puis plus anciennes d'abord, ≤ capacité). Départ
+// conseillé : camion plein, ou plein estimé au rythme des commandes de la zone,
+// sans que la plus ancienne commande dépasse le délai d'attente max.
+
+export const ZONES = ['nord-est', 'nord-ouest', 'sud-est', 'sud-ouest'] as const
+export type ZoneKey = (typeof ZONES)[number]
+
+export type ZoneTour = {
+  zone: ZoneKey
+  orders: string[]
+  panels: number
+  oldest_days: number
+  depart: string
+  reason: string
+}
+
+const nextWeekday = (d: Date) => {
+  while (d.getUTCDay() === 0 || d.getUTCDay() === 6) d.setUTCDate(d.getUTCDate() + 1)
+  return d
+}
+const fmtFr = (iso: string) => new Date(iso + 'T12:00:00Z').toLocaleDateString('fr-FR', { day: 'numeric', month: 'long', timeZone: 'UTC' })
+
+export function planZoneTours(input: {
+  orders: PlanOrder[]
+  panelsPerDay: Partial<Record<ZoneKey, number>>
+  maxWaitDays: number
+  today?: Date
+}): ZoneTour[] {
+  const today = input.today ?? new Date()
+  const start = Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate())
+  const tomorrow = start + DAY
+  const out: ZoneTour[] = []
+  for (const zone of ZONES) {
+    const list = input.orders
+      .filter((o) => o.zone === zone)
+      .sort((a, b) => Number(!!b.needs_replan) - Number(!!a.needs_replan) || ageDays(b, today) - ageDays(a, today))
+    const tours: PlanOrder[][] = []
+    for (const o of list) {
+      const t = tours.find((g) => g.reduce((n, x) => n + x.panel_count, 0) + o.panel_count <= CAPACITY)
+      if (t) t.push(o)
+      else tours.push([o])
+    }
+    for (const group of tours) {
+      const panels = group.reduce((n, o) => n + o.panel_count, 0)
+      const oldest = Math.max(...group.map((o) => ageDays(o, today)))
+      const rate = input.panelsPerDay[zone] ?? 0
+      const deadline = start + Math.max(0, input.maxWaitDays - oldest) * DAY
+      const fillAt = panels >= CAPACITY * 0.9 ? start : rate > 0 ? start + Math.ceil((CAPACITY - panels) / rate) * DAY : Infinity
+      const at = Math.max(tomorrow, Math.min(deadline, fillAt))
+      const depart = isoDay(nextWeekday(new Date(at)))
+      const reason = panels >= CAPACITY * 0.9
+        ? 'camion plein'
+        : fillAt <= deadline
+          ? `camion plein estimé vers le ${fmtFr(isoDay(new Date(fillAt)))} (~${Math.round(rate * 7)} panneaux/semaine dans la zone)`
+          : `la plus ancienne commande aura ${input.maxWaitDays} jours${oldest > input.maxWaitDays ? ` (déjà ${oldest} jours)` : ''}`
+      out.push({ zone, orders: group.map((o) => o.order_name), panels, oldest_days: oldest, depart, reason })
+    }
+  }
+  return out
+}

@@ -43,3 +43,29 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: err instanceof Error ? err.message : String(err) }, { status: 500 })
   }
 }
+
+// Rythme des commandes par zone : panneaux mis en tournée sur les 60 derniers jours.
+export async function GET(req: NextRequest) {
+  if (!(await callerName(req))) return NextResponse.json({ error: 'Non connecté' }, { status: 401 })
+  try {
+    const admin = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!)
+    const since = new Date(Date.now() - 60 * 864e5).toISOString().slice(0, 10)
+    const { data, error } = await admin
+      .from('delivery_stops')
+      .select('order_name, zone, panel_count, delivery_tours!inner(planned_date, brand)')
+      .eq('delivery_tours.brand', 'bowa')
+      .gte('delivery_tours.planned_date', since)
+    if (error) throw error
+    const seen = new Set<string>()
+    const panelsPerDay: Record<string, number> = {}
+    for (const s of data ?? []) {
+      if (seen.has(s.order_name)) continue // une commande replanifiée ne compte qu'une fois
+      seen.add(s.order_name)
+      panelsPerDay[s.zone] = (panelsPerDay[s.zone] ?? 0) + (s.panel_count || 0) / 60
+    }
+    return NextResponse.json({ panelsPerDay })
+  } catch (err) {
+    console.error('[delivery/autoplan GET]', err)
+    return NextResponse.json({ error: err instanceof Error ? err.message : String(err) }, { status: 500 })
+  }
+}

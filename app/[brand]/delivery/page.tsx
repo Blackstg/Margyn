@@ -12,6 +12,7 @@ import { geoAddress, streetLine } from '@/lib/delivery/geo'
 import { geocodeParts } from '@/lib/delivery/geocode'
 import { normalizeDriverName } from '@/lib/delivery/driver'
 import { tourName as autoTourName, type AutoPlan } from '@/lib/delivery/autoplan'
+import AutoToursView from '@/components/delivery/AutoToursView'
 import { canSeeShopifyFulfillment } from '@/lib/access'
 import { ChevronDown, ChevronUp, ChevronLeft, ChevronRight, Trash2, Mail, Plus, X, MapPin, Package, Truck, Map as MapIcon, Search, Pencil, Check, MessageSquare, GripVertical, Printer, RefreshCw, Clock, Calendar, ArrowLeftRight } from 'lucide-react'
 import {
@@ -285,11 +286,12 @@ export default function DeliveryPage() {
   )
 }
 
-type DeliveryView = 'planificateur' | 'livreur' | 'sav' | 'shopify' | 'stats'
+type DeliveryView = 'planificateur' | 'auto' | 'livreur' | 'sav' | 'shopify' | 'stats'
 const ALL_VIEWS: DeliveryView[] = ['planificateur', 'livreur', 'sav']
 
 const TAB_LABELS: Record<DeliveryView, string> = {
   planificateur: 'Planificateur',
+  auto:          'Tournées auto',
   livreur:       'Livreur',
   sav:           'SAV',
   shopify:       'Traitement Shopify',
@@ -324,8 +326,9 @@ function DeliveryPageInner() {
       const withShopify: DeliveryView[] = canSeeShopifyFulfillment(role) && !base.every(v => v === 'livreur')
         ? [...base, 'shopify']
         : base
+      // « Tournées auto » (test) et Stats : comptes ayant accès au Planificateur
       const withStats: DeliveryView[] = base.includes('planificateur')
-        ? [...withShopify, 'stats']
+        ? [...withShopify.flatMap((v): DeliveryView[] => v === 'planificateur' ? [v, 'auto'] : [v]), 'stats']
         : withShopify
       setAllowedViews(withStats)
     })
@@ -333,7 +336,7 @@ function DeliveryPageInner() {
 
   const rawView = searchParams.get('view')
   const activeTab: DeliveryView =
-    rawView === 'livreur' || rawView === 'sav' || rawView === 'planificateur' || rawView === 'shopify' || rawView === 'stats'
+    rawView === 'livreur' || rawView === 'sav' || rawView === 'planificateur' || rawView === 'auto' || rawView === 'shopify' || rawView === 'stats'
       ? rawView
       : 'planificateur'
 
@@ -424,6 +427,7 @@ function DeliveryPageInner() {
       </div>
 
       {effectiveTab === 'planificateur' && <PlanificateurView />}
+      {effectiveTab === 'auto' && <AutoToursView optimizeTour={optimizeTourById} />}
       {effectiveTab === 'livreur' && <LivreurView />}
       {effectiveTab === 'sav' && <SavView />}
       {effectiveTab === 'shopify' && <FulfillmentStatusView />}
@@ -3520,6 +3524,12 @@ function optimizeTSP(
     if (L < bestLen) { bestLen = L; best = r }
   }
   return best ?? nearestNeighborTSP(depot, validIndices, coords)
+}
+
+async function optimizeTourById(tourId: string): Promise<void> {
+  const data = await (await fetch('/api/delivery/tours', { cache: 'no-store' })).json() as { tours?: Tour[] }
+  const tour = data.tours?.find((t) => t.id === tourId)
+  if (tour) await optimizeTourStops(tour.stops)
 }
 
 // Optimise l'ordre des arrêts d'une tournée et PERSISTE les nouvelles séquences.
