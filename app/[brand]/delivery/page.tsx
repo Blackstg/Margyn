@@ -6583,7 +6583,7 @@ const attemptTime = (a: { delivered_at: string | null; planned_date: string | nu
   a.delivered_at ?? (a.planned_date ? a.planned_date + 'T12:00:00' : null) ?? a.created_at ?? ''
 
 const fmtDateTime = (iso: string | null | undefined) => iso
-  ? new Date(iso).toLocaleString('fr-FR', { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })
+  ? new Date(iso).toLocaleString('fr-FR', { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Paris' })
   : ''
 
 function distanceM(a: { lat: number; lng: number }, b: { lat: number; lng: number }) {
@@ -7773,10 +7773,10 @@ function SavView() {
                                 <>
                                   <span>
                                     {dist != null
-                                      ? <>Position du livreur : <b className={dist > 500 ? 'text-[#c2410c]' : 'text-[#1a7f4b]'}>{dist < 1000 ? `à ${dist} m` : `à ${(dist / 1000).toFixed(1)} km`}</b> de l&apos;adresse</>
+                                      ? <>Position du livreur : <b className={dist > 500 ? 'text-[#c2410c]' : 'text-[#1a7f4b]'}>{dist < 1000 ? `à ${dist} m` : `à ${dist < 10_000 ? (dist / 1000).toFixed(1) : Math.round(dist / 1000)} km`}</b> de l&apos;adresse</>
                                       : 'Position du livreur enregistrée'}
                                     {pos.accuracy ? ` (précision ±${Math.round(pos.accuracy)} m)` : ''}
-                                    {pos.source === 'suivi' ? ` · relevée à ${new Date(pos.at).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}` : ''}
+                                    {pos.source === 'suivi' ? ` · relevée à ${new Date(pos.at).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Paris' })}` : ''}
                                   </span>
                                   <a href={`https://www.google.com/maps?q=${pos.lat},${pos.lng}`} target="_blank" rel="noreferrer" className="text-[#6d28d9] font-medium hover:underline">Voir sur la carte</a>
                                 </>
