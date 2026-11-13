@@ -11,6 +11,7 @@ import { useBrand } from '@/context/BrandContext'
 import { geoAddress, streetLine } from '@/lib/delivery/geo'
 import { geocodeParts } from '@/lib/delivery/geocode'
 import { normalizeDriverName } from '@/lib/delivery/driver'
+import { tourName as autoTourName, type AutoPlan } from '@/lib/delivery/autoplan'
 import { canSeeShopifyFulfillment } from '@/lib/access'
 import { ChevronDown, ChevronUp, ChevronLeft, ChevronRight, Trash2, Mail, Plus, X, MapPin, Package, Truck, Map as MapIcon, Search, Pencil, Check, MessageSquare, GripVertical, Printer, RefreshCw, Clock, Calendar, ArrowLeftRight } from 'lucide-react'
 import {
@@ -679,6 +680,12 @@ function PlanificateurView() {
   // ── Modale « Diviser la tournée » (répartir les arrêts restants sur N chauffeurs) ──
   type SplitStop = { id: string; city: string; customer_name: string; sequence: number; lat: number | null; lng: number | null }
   const [splitModal, setSplitModal] = useState<{ tourId: string; tourName: string; pending: SplitStop[]; baseDriver: string } | null>(null)
+  // Planification automatique : propositions à valider (rien n'est créé avant « Appliquer »).
+  const [autoPlan, setAutoPlan] = useState<(AutoPlan & { skipped: number }) | null>(null)
+  const [autoPick, setAutoPick] = useState<Set<string>>(new Set()) // `${tourId}:${order}` des ajouts cochés
+  const [autoEdits, setAutoEdits] = useState<{ on: boolean; driver: string; date: string }[]>([])
+  const [autoLoading, setAutoLoading] = useState(false)
+  const [autoSaving, setAutoSaving] = useState(false)
   const [splitN, setSplitN] = useState(3)
   const [splitDrivers, setSplitDrivers] = useState<string[]>([])
   const [splitSaving, setSplitSaving] = useState(false)
@@ -1165,6 +1172,82 @@ function PlanificateurView() {
     setSelectedOrders(newSelected)
   }
 
+  async function openAutoPlan() {
+    setAutoLoading(true)
+    try {
+      const today = new Date().toISOString().slice(0, 10)
+      const truck = shopifyOrders
+        .filter((o) => !o.is_accessory_only && (!o.is_preorder || o.preorder_ready))
+        .filter((o) => { const d = deferredOrders.get(o.order_name); return !d || (!!d.deferred_until && d.deferred_until <= today) })
+      const located = truck.filter((o) => o.lat != null && o.lng != null)
+      const r = await fetch('/api/delivery/autoplan', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          orders: located.map(({ order_name, lat, lng, city, zip, zone, panel_count, created_at, needs_replan }) =>
+            ({ order_name, lat, lng, city, zip, zone, panel_count, created_at, needs_replan })),
+        }),
+      })
+      const data = await r.json() as AutoPlan & { error?: string }
+      if (!r.ok) { alert(`Planification impossible : ${data.error ?? r.status}`); return }
+      setAutoPlan({ ...data, skipped: truck.length - located.length })
+      setAutoPick(new Set(data.additions.flatMap((a) => a.orders.map((o) => `${a.tour_id}:${o.order_name}`))))
+      setAutoEdits(data.new_tours.map((t) => ({ on: true, driver: t.driver, date: t.planned_date })))
+    } finally {
+      setAutoLoading(false)
+    }
+  }
+
+  async function applyAutoPlan() {
+    if (!autoPlan) return
+    setAutoSaving(true)
+    try {
+      const byName = new Map(shopifyOrders.map((o) => [o.order_name, o]))
+      const pick = (names: string[]) => names.map((n) => byName.get(n)).filter((o): o is ShopifyOrder => !!o)
+      const done = new Set<string>()
+      const addStops = async (tourId: string, stops: ShopifyOrder[]) => {
+        const r = await fetch(`/api/delivery/tours/${tourId}/stops`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ stops }),
+        })
+        if (r.ok) stops.forEach((o) => done.add(o.order_name))
+        return r.ok
+      }
+      for (const a of autoPlan.additions) {
+        const stops = pick(a.orders.map((o) => o.order_name).filter((n) => autoPick.has(`${a.tour_id}:${n}`)))
+        if (stops.length) await addStops(a.tour_id, stops)
+      }
+      const created: string[] = []
+      for (const [i, t] of autoPlan.new_tours.entries()) {
+        const edit = autoEdits[i]
+        if (!edit?.on || !edit.driver.trim() || !edit.date) continue
+        const r = await fetch('/api/delivery/tours', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name: autoTourName(edit.date, edit.driver.trim()), zone: t.zone, driver_name: edit.driver, planned_date: edit.date }),
+        })
+        if (!r.ok) continue
+        const { tour } = await r.json() as { tour: { id: string } }
+        if (await addStops(tour.id, pick(t.orders))) created.push(tour.id)
+      }
+      // Ordre de passage optimisé pour les tournées créées (les tournées existantes
+      // gardent leur ordre : il a pu être annoncé aux clients).
+      if (created.length) {
+        const data = await (await fetch('/api/delivery/tours', { cache: 'no-store' })).json() as { tours?: Tour[] }
+        for (const id of created) {
+          const t = data.tours?.find((x) => x.id === id)
+          if (t) await optimizeTourStops(t.stops).catch((e) => console.error('Route optimization failed', e))
+        }
+      }
+      setShopifyOrders((prev) => prev.filter((o) => !done.has(o.order_name)))
+      setAutoPlan(null)
+      await fetchTours()
+    } finally {
+      setAutoSaving(false)
+    }
+  }
+
   return (
     <>
     <div className="relative pb-24">
@@ -1180,6 +1263,14 @@ function PlanificateurView() {
                 )}
               </h2>
               <div className="flex items-center gap-2">
+                <button
+                  onClick={openAutoPlan}
+                  disabled={autoLoading || loadingOrders || loadingTours}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-[10px] bg-[#1a1a2e] text-white text-xs font-medium hover:bg-[#2d2d4a] transition-colors disabled:opacity-40"
+                >
+                  <Calendar size={12} />
+                  {autoLoading ? 'Calcul…' : 'Planifier automatiquement'}
+                </button>
                 {targetTourId && ordersViewMode === 'list' && (
                   <button
                     onClick={handleAutoSuggest}
@@ -2548,6 +2639,115 @@ function PlanificateurView() {
               <button onClick={() => setSplitModal(null)} disabled={splitSaving} className="px-4 py-2 rounded-[10px] text-sm text-[#6b6b63] hover:text-[#1a1a2e] disabled:opacity-40">Annuler</button>
               <button onClick={saveSplit} disabled={splitSaving} className="px-4 py-2 rounded-[10px] bg-[#4338ca] text-white text-sm font-medium disabled:opacity-40">
                 {splitSaving ? 'Division…' : `Créer ${splitN} tournées`}
+              </button>
+            </div>
+          </div>
+        </div>
+      )
+    })()}
+
+    {/* ── Modale Planification automatique ── */}
+    {autoPlan && (() => {
+      const byName = new Map(shopifyOrders.map((o) => [o.order_name, o]))
+      const fmt = (d: string | null) => d ? new Date(d + 'T12:00:00').toLocaleDateString('fr-FR', { weekday: 'short', day: 'numeric', month: 'short' }) : 'sans date'
+      const driverOpts = [...new Set(drivers.map((d) => normalizeDriverName(d)).filter(Boolean))]
+      const nAdd = autoPlan.additions.reduce((n, a) => n + a.orders.filter((o) => autoPick.has(`${a.tour_id}:${o.order_name}`)).length, 0)
+      const nNew = autoPlan.new_tours.reduce((n, t, i) => n + (autoEdits[i]?.on ? t.orders.length : 0), 0)
+      const empty = !autoPlan.additions.length && !autoPlan.new_tours.length && !autoPlan.waiting.length
+      const orderLine = (n: string) => {
+        const o = byName.get(n)
+        return o ? `${n} · ${o.city} (${o.zip.slice(0, 2)}) · ${o.panel_count} pann.` : n
+      }
+      return (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm" onClick={() => { if (!autoSaving) setAutoPlan(null) }}>
+          <div className="bg-white rounded-[20px] shadow-2xl w-full max-w-2xl mx-4 overflow-hidden flex flex-col max-h-[92vh]" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between px-5 py-4 border-b border-[#ebebeb] shrink-0">
+              <div>
+                <h3 className="font-bold text-[#1a1a2e]">Planification automatique</h3>
+                <p className="text-xs text-[#6b6b63] mt-0.5">D&apos;après les secteurs et le remplissage habituels de vos livreurs ({autoPlan.drivers.map((d) => d.driver).join(', ') || 'aucun livreur actif'}). Rien n&apos;est créé avant de valider.</p>
+              </div>
+              {!autoSaving && <button onClick={() => setAutoPlan(null)} className="text-[#6b6b63] hover:text-[#1a1a2e]"><X size={18} /></button>}
+            </div>
+            <div className="px-5 py-4 flex-1 min-h-0 overflow-y-auto space-y-5">
+              {empty && <p className="text-sm text-[#6b6b63]">Rien à planifier : toutes les commandes camion sont déjà dans une tournée.</p>}
+
+              {autoPlan.additions.length > 0 && (
+                <section>
+                  <h4 className="text-sm font-semibold text-[#1a1a2e] mb-1">Sur le trajet d&apos;une tournée prévue</h4>
+                  <p className="text-[11px] text-[#9b9b93] mb-2">Ajoutées en fin de tournée, l&apos;ordre de passage existant n&apos;est pas modifié.</p>
+                  <div className="space-y-2">
+                    {autoPlan.additions.map((a) => (
+                      <div key={a.tour_id} className="rounded-[12px] border border-[#ececec] bg-[#fafaf8] px-3 py-2.5">
+                        <p className="text-xs font-bold text-[#1a1a2e]">{a.tour_name} <span className="font-normal text-[#6b6b63]">· {a.driver} · {fmt(a.planned_date)} · {a.panels_after}/100 panneaux après ajout</span></p>
+                        {a.orders.map((o) => {
+                          const key = `${a.tour_id}:${o.order_name}`
+                          return (
+                            <label key={key} className="flex items-center gap-2 mt-1.5 text-xs text-[#1a1a2e] cursor-pointer">
+                              <input type="checkbox" checked={autoPick.has(key)} onChange={() => setAutoPick((prev) => { const n = new Set(prev); if (n.has(key)) n.delete(key); else n.add(key); return n })} />
+                              <span>{orderLine(o.order_name)}</span>
+                              <span className="text-[#6b6b63]">· {o.detour_km <= 1 ? 'sur le trajet' : `~${o.detour_km} km de détour`}</span>
+                            </label>
+                          )
+                        })}
+                      </div>
+                    ))}
+                  </div>
+                </section>
+              )}
+
+              {autoPlan.new_tours.length > 0 && (
+                <section>
+                  <h4 className="text-sm font-semibold text-[#1a1a2e] mb-1">Nouvelles tournées</h4>
+                  <p className="text-[11px] text-[#9b9b93] mb-2">Créées en brouillon, avec l&apos;ordre de passage optimisé. Vous pouvez changer le livreur et la date.</p>
+                  <div className="space-y-2">
+                    {autoPlan.new_tours.map((t, i) => {
+                      const edit = autoEdits[i] ?? { on: false, driver: t.driver, date: t.planned_date }
+                      const set = (patch: Partial<typeof edit>) => setAutoEdits((prev) => { const n = [...prev]; n[i] = { ...edit, ...patch }; return n })
+                      return (
+                        <div key={i} className={`rounded-[12px] border px-3 py-2.5 ${edit.on ? 'border-[#c7d2fe] bg-[#f5f7ff]' : 'border-[#ececec] bg-[#fafaf8] opacity-60'}`}>
+                          <div className="flex flex-wrap items-center gap-2">
+                            <input type="checkbox" checked={edit.on} onChange={() => set({ on: !edit.on })} aria-label="Créer cette tournée" />
+                            <input type="text" list="autoplan-drivers" value={edit.driver} onChange={(e) => set({ driver: e.target.value })}
+                              className="text-xs border border-[#e0e0e0] rounded-[8px] px-2 py-1 bg-white w-32 focus:outline-none focus:ring-2 focus:ring-[#4338ca]/20" />
+                            <input type="date" value={edit.date} onChange={(e) => set({ date: e.target.value })}
+                              className="text-xs border border-[#e0e0e0] rounded-[8px] px-2 py-1 bg-white focus:outline-none focus:ring-2 focus:ring-[#4338ca]/20" />
+                            <span className="text-xs font-semibold text-[#4338ca]">{t.orders.length} commande{t.orders.length > 1 ? 's' : ''} · {t.panels}/100 panneaux</span>
+                          </div>
+                          <p className="text-[11px] text-[#6b6b63] mt-1.5">Départements {t.depts.join(', ')} — {t.reason}</p>
+                          <p className="text-[11px] text-[#9b9b93] mt-1 leading-snug">{t.orders.map((n) => byName.get(n)?.city ?? n).join(', ')}</p>
+                        </div>
+                      )
+                    })}
+                  </div>
+                  <datalist id="autoplan-drivers">
+                    {driverOpts.map((d) => <option key={d} value={d} />)}
+                  </datalist>
+                </section>
+              )}
+
+              {autoPlan.waiting.length > 0 && (
+                <section>
+                  <h4 className="text-sm font-semibold text-[#1a1a2e] mb-1">Pas encore assez pour partir</h4>
+                  <p className="text-[11px] text-[#9b9b93] mb-2">Ces commandes restent à planifier ; elles seront proposées quand le secteur sera assez rempli ou qu&apos;elles attendront depuis plus de 10 jours.</p>
+                  <div className="space-y-1.5">
+                    {autoPlan.waiting.map((w, i) => (
+                      <div key={i} className={`rounded-[12px] border px-3 py-2 ${w.oldest_days >= 10 ? 'border-[#fdba74] bg-[#fff7ed]' : 'border-[#ececec]'}`}>
+                        <p className="text-xs text-[#1a1a2e]"><span className="font-semibold">{w.driver ?? 'Sans livreur'}</span> · {w.reason}</p>
+                        <p className="text-[11px] text-[#6b6b63] mt-0.5 leading-snug">{w.orders.map(orderLine).join(' — ')}</p>
+                      </div>
+                    ))}
+                  </div>
+                </section>
+              )}
+
+              {autoPlan.skipped > 0 && (
+                <p className="text-[11px] text-[#b45309]">{autoPlan.skipped} commande{autoPlan.skipped > 1 ? 's' : ''} sans position GPS, à planifier à la main.</p>
+              )}
+            </div>
+            <div className="px-5 py-4 border-t border-[#ebebeb] flex gap-2 justify-end shrink-0">
+              <button onClick={() => setAutoPlan(null)} disabled={autoSaving} className="px-4 py-2 rounded-[10px] text-sm text-[#6b6b63] hover:text-[#1a1a2e] disabled:opacity-40">Fermer</button>
+              <button onClick={applyAutoPlan} disabled={autoSaving || nAdd + nNew === 0} className="px-4 py-2 rounded-[10px] bg-[#4338ca] text-white text-sm font-medium disabled:opacity-40">
+                {autoSaving ? 'Planification…' : `Planifier ${nAdd + nNew} commande${nAdd + nNew > 1 ? 's' : ''}`}
               </button>
             </div>
           </div>
