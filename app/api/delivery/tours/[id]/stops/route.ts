@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
+import { callerName, logStopEvents, tourName, type StopEvent } from '@/lib/delivery/trace'
 
 function getAdmin() {
   return createClient(
@@ -36,12 +37,12 @@ export async function POST(
     // Get existing stops for this tour (sequence + order_name + status)
     const { data: existingStops } = await admin
       .from('delivery_stops')
-      .select('id, sequence, order_name, status')
+      .select('id, sequence, order_name, status, comment')
       .eq('tour_id', params.id)
       .order('sequence', { ascending: false })
 
     const existingByName = new Map(
-      (existingStops ?? []).map((s: { id: string; order_name: string; status: string }) => [s.order_name, s])
+      (existingStops ?? []).map((s: { id: string; order_name: string; status: string; comment: string | null }) => [s.order_name, s])
     )
     const maxSeq = existingStops?.[0]?.sequence ?? -1
 
@@ -50,7 +51,14 @@ export async function POST(
     // elle resterait signalée « à replanifier » à gauche malgré sa présence dans la tournée.
     const toReplan = stops
       .map((s) => existingByName.get(s.order_name))
-      .filter((s): s is { id: string; order_name: string; status: string } => !!s && (s.status === 'failed' || s.status === 'partial'))
+      .filter((s): s is { id: string; order_name: string; status: string; comment: string | null } => !!s && (s.status === 'failed' || s.status === 'partial'))
+    const author = await callerName(req)
+    const tName = await tourName(admin, params.id)
+    // Journal : la remise à zéro efface la note d'échec de l'arrêt → on la garde ici.
+    const events: StopEvent[] = toReplan.map((s) => ({
+      stop_id: s.id, order_name: s.order_name, tour_id: params.id, tour_name: tName, kind: 'replanned', author,
+      status: s.status, comment: s.comment ? `Passage précédent (${s.status === 'partial' ? 'partiel' : 'non livré'}) : ${s.comment}` : null,
+    }))
     for (const s of toReplan) {
       // Nouvelle tentative → on repart de zéro : la réponse du client (présent/absent)
       // ET l'envoi du mail sont réinitialisés, sinon un ancien « Présent » resterait
@@ -61,7 +69,10 @@ export async function POST(
     }
 
     const newStops = stops.filter((s) => !existingByName.has(s.order_name))
-    if (newStops.length === 0) return NextResponse.json({ added: 0, replanned: toReplan.length })
+    if (newStops.length === 0) {
+      await logStopEvents(admin, events)
+      return NextResponse.json({ added: 0, replanned: toReplan.length })
+    }
 
     const rows = newStops.map((s, i) => ({
       tour_id: params.id,
@@ -90,6 +101,17 @@ export async function POST(
       ;({ error } = await admin.from('delivery_stops').insert(rowsNoCoord))
     }
     if (error) throw error
+
+    // Nouvelle tentative pour une commande déjà passée (échec / partielle) → trace.
+    const { data: previous } = await admin
+      .from('delivery_stops')
+      .select('order_name')
+      .in('order_name', rows.map((r) => r.order_name))
+      .in('status', ['failed', 'partial'])
+    for (const name of new Set((previous ?? []).map((p: { order_name: string }) => p.order_name))) {
+      events.push({ order_name: name, tour_id: params.id, tour_name: tName, kind: 'replanned', author })
+    }
+    await logStopEvents(admin, events)
 
     return NextResponse.json({ added: rows.length, replanned: toReplan.length, skipped: stops.length - rows.length - toReplan.length })
   } catch (err) {

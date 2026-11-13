@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 import { blockingAlert, alertMessage } from '@/lib/delivery/shopifyCancellations'
 import { fulfillOrder } from '@/lib/delivery/shopifyFulfill'
+import { callerName, logStopEvents, parsePosition, tourName, updateStop, type StopEvent } from '@/lib/delivery/trace'
 
 function getAdmin() {
   return createClient(
@@ -176,7 +177,7 @@ export async function PATCH(
 ) {
   try {
     const body = await req.json()
-    const { status, sequence, email_sent_at, comment, sav_note, signature_url, photo_url, partial_delivered, tour_id, force } = body as {
+    const { status, sequence, email_sent_at, comment, sav_note, signature_url, photo_url, partial_delivered, tour_id, force, already_delivered, signed_at } = body as {
       force?: boolean
       status?: string
       sequence?: number
@@ -187,12 +188,27 @@ export async function PATCH(
       photo_url?: string | null
       partial_delivered?: { sku: string; title: string; qty_ordered: number; qty_delivered: number }[] | null
       tour_id?: string
+      // « Déjà livrée » : le livreur (ou le SAV) constate que la commande a été livrée
+      // lors d'un passage précédent → livrée, sans mail de satisfaction ni nouvelle replanif.
+      already_delivered?: boolean
+      signed_at?: string
     }
+    const position = parsePosition(body.position)
+    const admin = getAdmin()
+    const author = await callerName(req)
+
+    const { data: before } = await admin
+      .from('delivery_stops')
+      .select('order_name, tour_id, status, shopify_order_id, panel_details')
+      .eq('id', params.id)
+      .single()
+    const event = (e: Omit<StopEvent, 'order_name' | 'stop_id' | 'author'>): StopEvent => ({
+      stop_id: params.id, order_name: before?.order_name ?? '?', author, ...e,
+    })
 
     // Déplacer l'arrêt vers UNE AUTRE tournée : change tour_id et le place en fin
     // de séquence de la tournée cible (le planificateur réordonne ensuite si besoin).
     if (tour_id !== undefined) {
-      const admin = getAdmin()
       const { data: last } = await admin
         .from('delivery_stops')
         .select('sequence')
@@ -208,28 +224,30 @@ export async function PATCH(
         .select()
         .single()
       if (error) throw error
+      const [from, to] = await Promise.all([tourName(admin, before?.tour_id), tourName(admin, tour_id)])
+      await logStopEvents(admin, [event({ kind: 'moved', tour_id, tour_name: to, comment: from ? `Depuis « ${from} »` : null })])
       return NextResponse.json({ stop: data })
     }
 
     // Livraison d'une commande annulée / remboursée sur Shopify entre-temps : refusée
     // (sauf correction volontaire, force=true). Ne concerne que le passage à livré.
-    if ((status === 'delivered' || status === 'partial') && !force) {
-      const { data: current } = await getAdmin()
-        .from('delivery_stops')
-        .select('status, shopify_order_id, panel_details')
-        .eq('id', params.id)
-        .single()
-      if (current && current.status !== 'delivered' && current.status !== 'partial') {
-        const alert = await blockingAlert(current)
+    if ((status === 'delivered' || status === 'partial') && !force && !already_delivered) {
+      if (before && before.status !== 'delivered' && before.status !== 'partial') {
+        const alert = await blockingAlert(before)
         if (alert) return NextResponse.json({ error: alertMessage(alert), code: 'ORDER_CANCELLED', alert }, { status: 409 })
       }
     }
 
+    const now = new Date().toISOString()
     const updates: Record<string, unknown> = {}
     if (status !== undefined) {
       updates.status = status
       if (status === 'delivered' || status === 'failed' || status === 'partial') {
-        updates.delivered_at = new Date().toISOString()
+        updates.delivered_at = now
+        updates.done_by = author
+        updates.done_lat = position?.lat ?? null
+        updates.done_lng = position?.lng ?? null
+        updates.done_accuracy = position?.accuracy ?? null
       }
     }
     if (partial_delivered !== undefined) updates.partial_delivered = partial_delivered
@@ -237,24 +255,37 @@ export async function PATCH(
     if (email_sent_at !== undefined) updates.email_sent_at = email_sent_at
     if (comment !== undefined) {
       updates.comment = comment
-      updates.comment_at = new Date().toISOString()
+      updates.comment_at = now
+      updates.comment_by = author
     }
     if (sav_note !== undefined) {
       updates.sav_note = sav_note
-      updates.sav_note_at = sav_note ? new Date().toISOString() : null
+      updates.sav_note_at = sav_note ? now : null
+      updates.sav_note_by = sav_note ? author : null
     }
-    if (signature_url !== undefined) updates.signature_url = signature_url
+    if (signature_url !== undefined) {
+      updates.signature_url = signature_url
+      if (signature_url) updates.signed_at = signed_at && !isNaN(Date.parse(signed_at)) ? signed_at : now
+    }
     if (photo_url !== undefined)     updates.photo_url = photo_url
 
-    const admin = getAdmin()
-    const { data, error } = await admin
-      .from('delivery_stops')
-      .update(updates)
-      .eq('id', params.id)
-      .select()
-      .single()
+    const { data, error } = await updateStop(admin, params.id, updates)
 
     if (error) throw error
+
+    // Journal : chaque changement de statut / note, avec son auteur et sa position.
+    const events: StopEvent[] = []
+    const tName = status !== undefined || comment !== undefined || sav_note !== undefined ? await tourName(admin, data.tour_id) : null
+    if (status !== undefined && status !== before?.status) {
+      const kind = already_delivered ? 'already_delivered'
+        : status === 'delivered' || status === 'partial' || status === 'failed' || status === 'pending' ? status : null
+      if (kind) events.push(event({ kind, status, tour_id: data.tour_id, tour_name: tName, comment: comment ?? null, position }))
+    } else if (comment !== undefined && comment) {
+      events.push(event({ kind: 'note_driver', tour_id: data.tour_id, tour_name: tName, comment, position }))
+    }
+    if (sav_note !== undefined) events.push(event({ kind: 'note_sav', tour_id: data.tour_id, tour_name: tName, comment: sav_note }))
+    if (signature_url) events.push(event({ kind: 'signature', tour_id: data.tour_id, status: data.status }))
+    await logStopEvents(admin, events)
 
     // Marque « traitée » dans Shopify ce qui vient d'être livré. Un échec ne bloque
     // jamais le livreur : le rattrapage nocturne (/api/delivery/shopify-fulfill) repasse.
@@ -268,7 +299,7 @@ export async function PATCH(
     }
 
     // Send satisfaction email only on full delivery
-    if (status === 'delivered' && data.email && !data.satisfaction_sent_at) {
+    if (status === 'delivered' && !already_delivered && data.email && !data.satisfaction_sent_at) {
       sendSatisfactionEmail(
         admin,
         params.id,
@@ -286,11 +317,28 @@ export async function PATCH(
 }
 
 export async function DELETE(
-  _req: NextRequest,
+  req: NextRequest,
   { params }: { params: { id: string } }
 ) {
   try {
     const admin = getAdmin()
+    const { data: stop } = await admin
+      .from('delivery_stops')
+      .select('order_name, tour_id, status')
+      .eq('id', params.id)
+      .maybeSingle()
+    // Un arrêt livré porte la preuve de livraison (date, signature, photo) : le
+    // supprimer ferait « disparaître » la livraison pour le SAV et renverrait la
+    // commande à planifier.
+    if (stop && (stop.status === 'delivered' || stop.status === 'partial')) {
+      return NextResponse.json({ error: 'Arrêt déjà livré : il ne peut pas être retiré de la tournée.' }, { status: 409 })
+    }
+    if (stop) {
+      await logStopEvents(admin, [{
+        stop_id: null, order_name: stop.order_name, tour_id: stop.tour_id, tour_name: await tourName(admin, stop.tour_id),
+        kind: 'removed', status: stop.status, author: await callerName(req),
+      }])
+    }
     const { error } = await admin
       .from('delivery_stops')
       .delete()

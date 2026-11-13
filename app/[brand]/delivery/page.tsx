@@ -104,7 +104,13 @@ interface TourStop {
   photo_url?: string | null
   partial_delivered?: { sku: string; title: string; qty_ordered: number; qty_delivered: number }[] | null
   client_availability?: 'confirmed' | 'unavailable' | null
-  shopify_alert?: ShopifyAlert | null   // annulée / remboursée sur Shopify depuis la mise en tournée
+  shopify_alert?: ShopifyAlert | null
+  created_at?: string | null
+  // Traçabilité (migration 032) : qui a écrit / validé, où, quand le client a signé
+  comment_by?: string | null
+  sav_note_by?: string | null
+  done_by?: string | null
+  signed_at?: string | null   // annulée / remboursée sur Shopify depuis la mise en tournée
 }
 
 // Renseigné par /api/delivery/tours pour les arrêts à livrer des tournées actives
@@ -950,7 +956,11 @@ function PlanificateurView() {
     const stop = tours.flatMap((t) => t.stops).find((s) => s.id === stopId)
 
     const res = await fetch(`/api/delivery/stops/${stopId}`, { method: 'DELETE' })
-    if (!res.ok) return
+    if (!res.ok) {
+      const d = await res.json().catch(() => ({})) as { error?: string }
+      if (d.error) alert(d.error)
+      return
+    }
 
     // Optimistic: immediately restore the order to "Commandes à planifier"
     if (stop) {
@@ -4063,10 +4073,33 @@ function LivreurView() {
     return `https://www.google.com/maps/dir/${encodeURIComponent(DEPOT)}/${waypoints.join('/')}`
   })()
 
+  // Position GPS au moment de la validation (livré / partiel / non livré / signature),
+  // enregistrée sur l'arrêt pour le SAV. Demandée dès l'ouverture de l'écran de
+  // validation pour être prête au clic ; jamais bloquante (3 s max au clic).
+  const actionPosRef = useRef<Promise<{ lat: number; lng: number; accuracy: number } | null> | null>(null)
+  function requestActionPos() {
+    if (typeof navigator === 'undefined' || !navigator.geolocation) { actionPosRef.current = Promise.resolve(null); return }
+    actionPosRef.current = new Promise(resolve => {
+      navigator.geolocation.getCurrentPosition(
+        p => resolve({ lat: p.coords.latitude, lng: p.coords.longitude, accuracy: Math.round(p.coords.accuracy) }),
+        () => resolve(null),
+        { enableHighAccuracy: true, timeout: 10_000, maximumAge: 30_000 },
+      )
+    })
+  }
+  useEffect(() => {
+    if (commentMode !== 'none') requestActionPos()
+  }, [commentMode, stopIdx]) // eslint-disable-line react-hooks/exhaustive-deps
+  async function actionPos() {
+    if (!actionPosRef.current) requestActionPos()
+    return Promise.race([actionPosRef.current!, new Promise<null>(r => setTimeout(() => r(null), 3000))])
+  }
+
   async function handleMarkDelivered(opts: {
     comment?: string
     signature_url?: string
     photo_url?: string
+    already_delivered?: boolean
   } = {}): Promise<boolean> {
     if (!currentStop) return false
     // Capture GPS au moment EXACT du « livré » (app au 1er plan → position fiable) :
@@ -4074,10 +4107,11 @@ function LivreurView() {
     void sendPos()
     setMarking(true)
     try {
+      const position = await actionPos()
       const res = await fetch(`/api/delivery/stops/${currentStop.id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ status: 'delivered', ...opts }),
+        body: JSON.stringify({ status: 'delivered', ...opts, position }),
       })
       // On vérifie explicitement le succès : sinon une validation pouvait échouer
       // en silence (le livreur pense avoir validé alors que non).
@@ -4160,6 +4194,7 @@ function LivreurView() {
     }
     if (proofPhoto) form.append('photo', proofPhoto, proofPhoto.name)
     const hasProof = form.has('signature') || form.has('photo')
+    const signedAt = form.has('signature') ? new Date().toISOString() : null
     const comment  = pendingComment.trim()
 
     // 1. On VALIDE la livraison d'abord. L'upload des preuves (photo lourde,
@@ -4183,7 +4218,7 @@ function LivreurView() {
           if (!res.ok) return
           const data = await res.json() as { signature_url?: string; photo_url?: string }
           const patch: Record<string, string> = {}
-          if (data.signature_url) patch.signature_url = data.signature_url
+          if (data.signature_url) { patch.signature_url = data.signature_url; if (signedAt) patch.signed_at = signedAt }
           if (data.photo_url)     patch.photo_url = data.photo_url
           if (Object.keys(patch).length) {
             await fetch(`/api/delivery/stops/${stopId}`, {
@@ -4209,11 +4244,13 @@ function LivreurView() {
       qty_ordered:   item.qty,
       qty_delivered: partialQtys[i] ?? item.qty,
     }))
+    const position = await actionPos()
     const res = await fetch(`/api/delivery/stops/${currentStop.id}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         status: 'partial',
+        position,
         partial_delivered,
         ...(partialNote.trim() ? { comment: partialNote.trim() } : {}),
       }),
@@ -4241,10 +4278,11 @@ function LivreurView() {
     if (!currentStop) return
     void sendPos()   // position au moment du marquage (preuve de présence)
     setMarking(true)
+    const position = await actionPos()
     await fetch(`/api/delivery/stops/${currentStop.id}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ status: 'failed', comment }),
+      body: JSON.stringify({ status: 'failed', comment, position }),
     })
     await fetchTours()
     setMarking(false)
@@ -6245,7 +6283,7 @@ function LivreurView() {
             <div className="space-y-2">
               <p className="text-sm font-semibold text-[#1a1a2e]">Raison <span className="text-[#c7293a]">*</span></p>
               <div className="flex flex-wrap gap-1.5">
-                {['Client absent', 'Refus de livraison', 'Adresse introuvable', 'Mauvais article', 'Autre'].map((chip) => (
+                {['Client absent', 'Refus de livraison', 'Adresse introuvable', 'Mauvais article', 'Rupture de stock', 'Déjà livrée', 'Autre'].map((chip) => (
                   <button
                     key={chip}
                     onClick={() => { setSelectedChip(chip); setPendingComment(chip) }}
@@ -6259,10 +6297,19 @@ function LivreurView() {
                   </button>
                 ))}
               </div>
+              {selectedChip === 'Déjà livrée' && (
+                <p className="rounded-[12px] bg-[#f0fdf4] border border-[#bbf7d0] px-3 py-2 text-xs text-[#166534] leading-snug">
+                  La commande a été livrée lors d&apos;un passage précédent : elle sera marquée <b>livrée</b> et ne sera plus replanifiée.
+                </p>
+              )}
               <textarea
                 value={pendingComment}
-                onChange={(e) => { setPendingComment(e.target.value); setSelectedChip('') }}
-                placeholder="Précisez la situation..."
+                onChange={(e) => {
+                  setPendingComment(e.target.value)
+                  // « Déjà livrée » reste sélectionnée quand on précise (ex. date du passage).
+                  if (selectedChip !== 'Déjà livrée') setSelectedChip('')
+                }}
+                placeholder={selectedChip === 'Déjà livrée' ? 'Quand ? (ex. livrée le 20/10 avec la tournée de Bordeaux)' : 'Précisez la situation...'}
                 className="w-full px-3 py-2.5 text-sm border border-[#e8e8e4] rounded-[12px] outline-none focus:border-[#aeb0c9] resize-none"
                 rows={2}
               />
@@ -6274,17 +6321,23 @@ function LivreurView() {
                   Annuler
                 </button>
                 <button
-                  onClick={() => {
+                  onClick={async () => {
                     if (!pendingComment.trim()) return
-                    handleMarkFailed(pendingComment.trim())
+                    if (selectedChip === 'Déjà livrée') {
+                      const note = pendingComment.trim()
+                      const ok = await handleMarkDelivered({ already_delivered: true, comment: note === 'Déjà livrée' ? 'Déjà livrée lors d\'un passage précédent' : `Déjà livrée — ${note}` })
+                      if (!ok) return
+                    } else {
+                      handleMarkFailed(pendingComment.trim())
+                    }
                     setCommentMode('none')
                     setPendingComment('')
                     setSelectedChip('')
                   }}
                   disabled={!pendingComment.trim() || marking}
-                  className="flex-[2] py-3 rounded-[14px] bg-[#c2680a] text-white font-bold text-sm disabled:opacity-50 active:bg-[#b45309] transition-colors"
+                  className={`flex-[2] py-3 rounded-[14px] text-white font-bold text-sm disabled:opacity-50 transition-colors ${selectedChip === 'Déjà livrée' ? 'bg-[#1a7f4b] active:bg-[#166a3f]' : 'bg-[#c2680a] active:bg-[#b45309]'}`}
                 >
-                  {marking ? 'Enregistrement...' : 'Confirmer'}
+                  {marking ? 'Enregistrement...' : selectedChip === 'Déjà livrée' ? 'Confirmer : déjà livrée' : 'Confirmer'}
                 </button>
               </div>
             </div>
@@ -6386,7 +6439,7 @@ function StepperScroll({ children, stops }: {
 
 // ─── SAV View ─────────────────────────────────────────────────────────────────
 
-type SavStatus = 'pending' | 'planned' | 'in_progress' | 'delivered' | 'partial'
+type SavStatus = 'pending' | 'planned' | 'in_progress' | 'delivered' | 'partial' | 'to_replan'
 
 // SAV-only info — never included in email templates
 const DRIVER_PHONES: Record<string, string> = {
@@ -6442,7 +6495,65 @@ interface SavEntry {
   signature_url?: string | null
   photo_url?: string | null
   partial_delivered?: { sku: string; title: string; qty_ordered: number; qty_delivered: number }[] | null
+  comment_at?: string | null
+  comment_by?: string | null
+  sav_note_at?: string | null
+  sav_note_by?: string | null
   sav_status: SavStatus
+  // Tous les passages de la commande (une ligne par arrêt, du plus ancien au plus récent)
+  attempts: SavAttempt[]
+  // Présente dans « À planifier » (reliquat / échec à remettre en tournée)
+  in_planner: boolean
+}
+
+interface SavEvent {
+  id: string
+  stop_id: string | null
+  tour_name: string | null
+  kind: string
+  status: string | null
+  comment: string | null
+  author: string | null
+  created_at: string
+}
+interface SavPosition { lat: number; lng: number; accuracy: number | null; at: string; source: 'validation' | 'suivi' }
+
+const EVENT_LABEL: Record<string, (e: SavEvent) => string> = {
+  delivered:         () => 'Livrée',
+  partial:           () => 'Livraison partielle',
+  failed:            () => 'Non livrée',
+  already_delivered: () => 'Marquée « déjà livrée »',
+  pending:           () => 'Remise à livrer',
+  note_driver:       () => 'Note du livreur',
+  note_sav:          (e) => e.comment ? 'Note SAV pour le livreur' : 'Note SAV effacée',
+  signature:         () => 'Signature du client',
+  replanned:         (e) => `Replanifiée${e.tour_name ? ` dans « ${e.tour_name} »` : ''}`,
+  removed:           (e) => `Retirée de « ${e.tour_name ?? 'la tournée'} »`,
+  moved:             (e) => `Déplacée vers « ${e.tour_name ?? '?'} »`,
+}
+
+// Un passage = un arrêt dans une tournée (1re livraison, replanification…)
+interface SavAttempt {
+  stop_id: string
+  tour_name: string
+  tour_status: TourStatus
+  planned_date: string | null
+  driver_name: string | null
+  status: StopStatus
+  result: SavStatus
+  created_at: string | null
+  delivered_at: string | null
+  done_by: string | null
+  comment: string | null
+  comment_at: string | null
+  comment_by: string | null
+  sav_note: string | null
+  sav_note_at: string | null
+  sav_note_by: string | null
+  signature_url: string | null
+  photo_url: string | null
+  signed_at: string | null
+  partial_delivered: SavEntry['partial_delivered']
 }
 
 const SAV_STATUS_CONFIG: Record<SavStatus, { label: string; bg: string; text: string }> = {
@@ -6451,6 +6562,35 @@ const SAV_STATUS_CONFIG: Record<SavStatus, { label: string; bg: string; text: st
   in_progress: { label: 'En livraison',      bg: '#dbeafe', text: '#1d4ed8' },
   delivered:   { label: 'Livrée',            bg: '#d1fae5', text: '#1a7f4b' },
   partial:     { label: 'Partielle',         bg: '#fef3c7', text: '#92400e' },
+  to_replan:   { label: 'À replanifier',     bg: '#ffedd5', text: '#c2410c' },
+}
+
+// Statut SAV d'UN passage. Un arrêt « non livré », ou resté sans validation dans une
+// tournée terminée, n'est plus « planifié » : la commande est à replanifier.
+function stopSavStatus(stop: TourStop, tourStatus: TourStatus): SavStatus {
+  if (stop.status === 'delivered') return 'delivered'
+  if (stop.status === 'partial')   return 'partial'
+  if (stop.status === 'failed')    return 'to_replan'
+  if (tourStatus === 'in_progress') return 'in_progress'
+  if (tourStatus === 'completed')   return 'to_replan'
+  return 'planned'
+}
+
+// Statut retenu pour la commande parmi ses passages : livrée > en cours > planifiée,
+// sinon le passage le plus récent (partielle / à replanifier).
+const SAV_RANK: Partial<Record<SavStatus, number>> = { delivered: 3, in_progress: 2, planned: 1 }
+const attemptTime = (a: { delivered_at: string | null; planned_date: string | null; created_at: string | null }) =>
+  a.delivered_at ?? (a.planned_date ? a.planned_date + 'T12:00:00' : null) ?? a.created_at ?? ''
+
+const fmtDateTime = (iso: string | null | undefined) => iso
+  ? new Date(iso).toLocaleString('fr-FR', { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })
+  : ''
+
+function distanceM(a: { lat: number; lng: number }, b: { lat: number; lng: number }) {
+  const R = 6371000, rad = Math.PI / 180
+  const dLat = (b.lat - a.lat) * rad, dLng = (b.lng - a.lng) * rad
+  const h = Math.sin(dLat / 2) ** 2 + Math.cos(a.lat * rad) * Math.cos(b.lat * rad) * Math.sin(dLng / 2) ** 2
+  return Math.round(2 * R * Math.asin(Math.sqrt(h)))
 }
 
 const TIMELINE_STEPS: { label: string; statuses: SavStatus[] }[] = [
@@ -6502,6 +6642,11 @@ function buildSavEmail(entry: SavEntry): string {
         : '?'
       return `Bonjour ${prenom},\n\nVotre commande ${ref} a bien été livrée le ${dateStr}. Nous espérons que vous êtes satisfait(e) de votre achat. N'hésitez pas à nous contacter pour toute question.\n\nCordialement,\nL'équipe Bowa`
     }
+    case 'to_replan': {
+      const last = entry.attempts[entry.attempts.length - 1]
+      const when = last?.delivered_at ? ` le ${new Date(last.delivered_at).toLocaleDateString('fr-FR', { day: 'numeric', month: 'long' })}` : ''
+      return `Bonjour ${prenom},\n\nNotre livreur est passé${when} mais n'a malheureusement pas pu vous livrer votre commande ${ref}. Elle va être reprogrammée dans une prochaine tournée et nous vous recontacterons pour convenir d'une nouvelle date.\n\nToutes nos excuses pour la gêne occasionnée.\n\nCordialement,\nL'équipe Bowa`
+    }
     case 'partial':
       return `Bonjour ${prenom},\n\nNotre livreur a pu déposer une partie de votre commande ${ref}. Les articles manquants seront reprogrammés dès que possible. Nous vous contacterons pour convenir d'une nouvelle date de livraison.\n\nToutes nos excuses pour la gêne occasionnée.\n\nCordialement,\nL'équipe Bowa`
   }
@@ -6511,6 +6656,7 @@ function buildSavEmail(entry: SavEntry): string {
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function buildSavEntries(toursRaw: any[], ordersRaw: ShopifyOrder[]): SavEntry[] {
   const result: SavEntry[] = []
+  const perStop: SavEntry[] = []
 
   for (const tour of toursRaw) {
     if (tour.status === 'cancelled') continue
@@ -6541,17 +6687,13 @@ function buildSavEntries(toursRaw: any[], ordersRaw: ShopifyOrder[]): SavEntry[]
     }))
 
     for (const stop of stops) {
-      let sav_status: SavStatus
-      if (stop.status === 'delivered')        sav_status = 'delivered'
-      else if (stop.status === 'partial')     sav_status = 'partial'
-      else if (tour.status === 'in_progress') sav_status = 'in_progress'
-      else                                    sav_status = 'planned'
+      const sav_status = stopSavStatus(stop, tour.status)
 
       const stopsBefore = sortedStops.filter(
         (s: TourStop) => s.sequence < stop.sequence && s.status !== 'delivered'
       ).length
 
-      result.push({
+      perStop.push({
         id: stop.id, order_name: stop.order_name, customer_name: stop.customer_name,
         email: stop.email, city: stop.city, zip: stop.zip, zone: stop.zone,
         address1: stop.address1, address2: stop.address2, lat: stop.lat, lng: stop.lng, panel_count: stop.panel_count,
@@ -6563,16 +6705,43 @@ function buildSavEntries(toursRaw: any[], ordersRaw: ShopifyOrder[]): SavEntry[]
         driver_name: tour.driver_name ?? null,
         stop_status: stop.status, stop_sequence: stop.sequence,
         delivered_at: stop.delivered_at ?? null, comment: stop.comment ?? null,
-        sav_note: stop.sav_note ?? null,
+        comment_at: stop.comment_at ?? null, comment_by: stop.comment_by ?? null,
+        sav_note: stop.sav_note ?? null, sav_note_at: stop.sav_note_at ?? null, sav_note_by: stop.sav_note_by ?? null,
         signature_url: stop.signature_url ?? null,
         photo_url: stop.photo_url ?? null,
         partial_delivered: stop.partial_delivered ?? null,
         sav_status,
+        attempts: [{
+          stop_id: stop.id, tour_name: tour.name, tour_status: tour.status, planned_date: tour.planned_date ?? null,
+          driver_name: tour.driver_name ?? null, status: stop.status, result: sav_status,
+          created_at: stop.created_at ?? null, delivered_at: stop.status === 'pending' ? null : stop.delivered_at ?? null,
+          done_by: stop.done_by ?? null,
+          comment: stop.comment ?? null, comment_at: stop.comment_at ?? null, comment_by: stop.comment_by ?? null,
+          sav_note: stop.sav_note ?? null, sav_note_at: stop.sav_note_at ?? null, sav_note_by: stop.sav_note_by ?? null,
+          signature_url: stop.signature_url ?? null, photo_url: stop.photo_url ?? null, signed_at: stop.signed_at ?? null,
+          partial_delivered: stop.partial_delivered ?? null,
+        }],
+        in_planner: false,
       })
     }
   }
 
+  // Une commande replanifiée a un arrêt PAR passage : on n'affiche qu'une fiche
+  // par commande, avec le statut qui compte et l'historique complet des passages.
+  const inPlanner = new Set(ordersRaw.map((o) => o.order_name))
+  const byOrder = new Map<string, SavEntry[]>()
+  for (const e of perStop) byOrder.set(e.order_name, [...(byOrder.get(e.order_name) ?? []), e])
+  for (const [orderName, list] of byOrder) {
+    const attempts = list.map((e) => e.attempts[0]).sort((x, y) => attemptTime(x).localeCompare(attemptTime(y)))
+    const primary = [...list].sort((x, y) => {
+      const r = (SAV_RANK[y.sav_status] ?? 0) - (SAV_RANK[x.sav_status] ?? 0)
+      return r !== 0 ? r : attemptTime(y.attempts[0]).localeCompare(attemptTime(x.attempts[0]))
+    })[0]
+    result.push({ ...primary, attempts, in_planner: inPlanner.has(orderName) })
+  }
+
   for (const order of ordersRaw) {
+    if (byOrder.has(order.order_name)) continue
     result.push({
       id: `order-${order.order_name}`, order_name: order.order_name,
       customer_name: order.customer_name, email: order.email,
@@ -6583,6 +6752,7 @@ function buildSavEntries(toursRaw: any[], ordersRaw: ShopifyOrder[]): SavEntry[]
       tour_total_stops: 0, tour_delivered_stops: 0, stops_before: 0,
       tour_stops_summary: [], driver_name: null,
       stop_status: null, stop_sequence: 0, delivered_at: null, sav_status: 'pending',
+      attempts: [], in_planner: true,
     })
   }
 
@@ -6691,6 +6861,10 @@ function SavView() {
   const [selected, setSelected] = useState<SavEntry | null>(null)
   const [copied, setCopied]     = useState(false)
   const [correctingStop, setCorrectingStop] = useState<SavEntry | null>(null)
+  // Journal + positions GPS des passages de la commande sélectionnée
+  const [history, setHistory] = useState<{ order: string; events: SavEvent[]; positions: Record<string, SavPosition> } | null>(null)
+  const [confirmingDelivered, setConfirmingDelivered] = useState(false)
+  const [markingDelivered, setMarkingDelivered] = useState(false)
 
   // Refs for polling — avoid stale closures
   const cachedOrdersRef = useRef<ShopifyOrder[]>([])
@@ -6721,6 +6895,53 @@ function SavView() {
     }
     load()
   }, [])
+
+  const selectedOrder = selected?.order_name ?? null
+  const selectedAttempts = selected?.attempts.length ?? 0
+  useEffect(() => {
+    setConfirmingDelivered(false)
+    if (!selectedOrder || selectedAttempts === 0) { setHistory(null); return }
+    let cancelled = false
+    fetch(`/api/delivery/history?order=${encodeURIComponent(selectedOrder)}`, { cache: 'no-store' })
+      .then(r => r.json())
+      .then((d: { events?: SavEvent[]; positions?: Record<string, SavPosition> }) => {
+        if (!cancelled) setHistory({ order: selectedOrder, events: d.events ?? [], positions: d.positions ?? {} })
+      })
+      .catch(() => { /* historique facultatif */ })
+    return () => { cancelled = true }
+  }, [selectedOrder, selectedAttempts])
+
+  async function reloadSav() {
+    const [toursData, ordersData] = await Promise.all([
+      fetch('/api/delivery/tours', { cache: 'no-store' }).then(r => r.json()),
+      fetch('/api/delivery/orders').then(r => r.json()),
+    ])
+    cachedOrdersRef.current = ordersData.orders ?? []
+    applyEntries(buildSavEntries(toursData.tours ?? [], cachedOrdersRef.current))
+  }
+
+  // Le client confirme avoir reçu sa commande alors que le dernier passage est
+  // « non livré » (ex. livrée lors d'un autre passage, hors tournée…).
+  async function handleConfirmReceived(entry: SavEntry) {
+    setMarkingDelivered(true)
+    try {
+      const r = await fetch(`/api/delivery/stops/${entry.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: 'delivered', already_delivered: true }),
+      })
+      if (!r.ok) {
+        const d = await r.json().catch(() => ({})) as { error?: string }
+        alert(d.error ?? `Erreur ${r.status}`)
+        return
+      }
+      setConfirmingDelivered(false)
+      await reloadSav()
+      setHistory(null)
+    } finally {
+      setMarkingDelivered(false)
+    }
+  }
 
   // Real-time polling — refresh every 10s when any in_progress tour exists
   useEffect(() => {
@@ -6769,8 +6990,13 @@ function SavView() {
         throw new Error(msg)
       }
       const note = noteValue.trim() || null
-      setEntries(prev => prev.map(e => e.id === stopId ? { ...e, sav_note: note } : e))
-      setSelected(prev => prev?.id === stopId ? { ...prev, sav_note: note } : prev)
+      const saved = (data.stop ?? {}) as { sav_note_at?: string | null; sav_note_by?: string | null }
+      const patch = { sav_note: note, sav_note_at: saved.sav_note_at ?? null, sav_note_by: saved.sav_note_by ?? null }
+      const withNote = (e: SavEntry): SavEntry => e.id === stopId
+        ? { ...e, ...patch, attempts: e.attempts.map(a => a.stop_id === stopId ? { ...a, ...patch } : a) }
+        : e
+      setEntries(prev => prev.map(withNote))
+      setSelected(prev => prev ? withNote(prev) : prev)
       setEditingNote(false)
     } catch (e) {
       setNoteError(e instanceof Error ? e.message : 'Erreur inconnue')
@@ -7080,6 +7306,7 @@ function SavView() {
               { key: 'in_progress', label: 'En cours',    bg: '#f5f5f3', text: '#6b6b63', activeBg: '#1d4ed8', activeText: '#fff' },
               { key: 'delivered',   label: 'Livrée',      bg: '#f5f5f3', text: '#6b6b63', activeBg: '#1a7f4b', activeText: '#fff' },
               { key: 'partial',     label: '⚠ Partielle', bg: '#f5f5f3', text: '#6b6b63', activeBg: '#92400e', activeText: '#fff' },
+              { key: 'to_replan',   label: 'À replanifier', bg: '#f5f5f3', text: '#6b6b63', activeBg: '#c2410c', activeText: '#fff' },
             ] as const).map(({ key, label, activeBg, activeText }) => {
               const count = key === 'all' ? entries.length : entries.filter(e => e.sav_status === key).length
               const active = statusFilter === key
@@ -7182,7 +7409,10 @@ function SavView() {
                         </span>
                       </div>
                     </div>
-                    <div className="text-xs text-[#6b6b63] truncate">{entry.customer_name} · {entry.city}</div>
+                    <div className="text-xs text-[#6b6b63] truncate">
+                      {entry.customer_name} · {entry.city}
+                      {entry.attempts.length > 1 && <span className="ml-1 text-[10px] font-semibold text-[#6d28d9]">· {entry.attempts.length} passages</span>}
+                    </div>
                     {driverNote && (
                       <div className="mt-1 flex items-start gap-1 rounded-[8px] bg-[#ffedd5] px-2 py-1">
                         <span className="text-[10px] shrink-0 leading-snug">💬</span>
@@ -7209,7 +7439,12 @@ function SavView() {
         const driverPhone = driverPhoneFor(selected.driver_name)
 
         // Timeline
-        const stepIndex = ['pending', 'planned', 'in_progress', 'delivered'].indexOf(selected.sav_status)
+        const stepIndex = ({ pending: 0, to_replan: 0, planned: 1, in_progress: 2, partial: 2, delivered: 3 } as Record<SavStatus, number>)[selected.sav_status]
+        const lastAttempt = selected.attempts[selected.attempts.length - 1] ?? null
+        const positions = history?.order === selected.order_name ? history.positions : {}
+        const journal = history?.order === selected.order_name
+          ? history.events.filter(e => ['replanned', 'removed', 'moved', 'already_delivered'].includes(e.kind))
+          : []
 
         // Driver progress (in_progress)
         const pct = selected.tour_total_stops > 0
@@ -7296,8 +7531,48 @@ function SavView() {
                 })}
               </div>
 
+              {/* ── À replanifier : où en est la commande ── */}
+              {(selected.sav_status === 'to_replan' || selected.sav_status === 'partial') && (
+                <div className="rounded-[14px] bg-[#fff7ed] border border-[#fed7aa] p-4 space-y-2">
+                  <p className="text-sm font-bold text-[#9a3412]">
+                    {selected.sav_status === 'partial' ? 'Livrée en partie' : lastAttempt?.status === 'pending' ? 'Passage jamais validé par le livreur' : 'Pas livrée'}
+                    {lastAttempt?.delivered_at ? ` le ${fmtDateTime(lastAttempt.delivered_at)}` : lastAttempt?.planned_date ? ` (tournée du ${new Date(lastAttempt.planned_date + 'T00:00:00').toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' })})` : ''}
+                  </p>
+                  {selected.in_planner ? (
+                    <p className="text-xs text-[#7c2d12] leading-snug">
+                      ✓ {selected.sav_status === 'partial' ? 'Le reste à livrer est' : 'Elle est'} dans <b>À planifier</b> (badge « ⚠ À replanifier ») : il reste à {selected.sav_status === 'partial' ? 'le' : 'la'} mettre dans une prochaine tournée.
+                    </p>
+                  ) : (
+                    <p className="text-xs text-[#7c2d12] leading-snug">
+                      ⚠ Elle n&apos;apparaît pas dans <b>À planifier</b> : soit elle est mise « en attente », soit elle a été marquée expédiée sur Shopify (reliquat La Poste), soit elle a été masquée.
+                    </p>
+                  )}
+                  {selected.sav_status === 'to_replan' && (
+                    confirmingDelivered ? (
+                      <div className="flex gap-2 pt-1">
+                        <button onClick={() => setConfirmingDelivered(false)} className="flex-1 py-2 rounded-[10px] border border-[#e8e8e4] bg-white text-xs font-medium text-[#6b6b63]">Annuler</button>
+                        <button
+                          onClick={() => handleConfirmReceived(selected)}
+                          disabled={markingDelivered}
+                          className="flex-[2] py-2 rounded-[10px] bg-[#1a7f4b] text-white text-xs font-semibold disabled:opacity-50"
+                        >
+                          {markingDelivered ? 'Enregistrement…' : 'Confirmer : la commande a été livrée'}
+                        </button>
+                      </div>
+                    ) : (
+                      <button
+                        onClick={() => setConfirmingDelivered(true)}
+                        className="w-full py-2 rounded-[10px] border border-[#bbf7d0] bg-white text-xs font-semibold text-[#1a7f4b] hover:bg-[#f0fdf4]"
+                      >
+                        Le client l&apos;a bien reçue ? Marquer livrée
+                      </button>
+                    )
+                  )}
+                </div>
+              )}
+
               {/* ── Tour block ── */}
-              {selected.tour_name && (
+              {selected.tour_name && (selected.sav_status === 'planned' || selected.sav_status === 'in_progress') && (
                 <div className={`rounded-[14px] p-4 ${selected.sav_status === 'in_progress' ? 'bg-[#f0f4ff]' : 'bg-[#faf5ff]'}`}>
                   <div className="flex items-start justify-between gap-2 mb-2">
                     <div>
@@ -7396,18 +7671,137 @@ function SavView() {
                 )}
               </div>
 
-              {/* ── Note du livreur (alerte SAV) ── */}
-              {selected.comment?.trim() && (
-                <div className="rounded-[12px] bg-[#fff7ed] border border-[#fdba74] px-3 py-2.5">
-                  <p className="text-[10px] font-semibold uppercase tracking-[0.08em] text-[#c2680a] mb-1">💬 Note du livreur</p>
-                  <p className="text-sm text-[#7c2d12] leading-snug whitespace-pre-wrap">{selected.comment}</p>
-                  {selected.delivered_at && (
-                    <p className="text-[10px] text-[#c2680a]/70 mt-1">{new Date(selected.delivered_at).toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' })}</p>
+              {/* ── Historique des passages (le plus récent en haut) ── */}
+              {selected.attempts.length > 0 && (
+                <div>
+                  <p className="text-[10px] font-semibold uppercase tracking-[0.08em] text-[#9b9b93] mb-2">
+                    {selected.attempts.length > 1 ? `Historique · ${selected.attempts.length} passages` : 'Passage'}
+                  </p>
+                  <div className="space-y-2.5">
+                    {[...selected.attempts].reverse().map((a, idx) => {
+                      const cfg = SAV_STATUS_CONFIG[a.result]
+                      const driver = normalizeDriverName(a.driver_name)
+                      const pos = positions[a.stop_id]
+                      const dist = pos && typeof selected.lat === 'number' && typeof selected.lng === 'number'
+                        ? distanceM(pos, { lat: selected.lat, lng: selected.lng })
+                        : null
+                      const validated = a.status !== 'pending' && a.delivered_at
+                      const failedLike = a.result === 'to_replan'
+                      return (
+                        <div key={a.stop_id} className={`rounded-[14px] border p-3 space-y-2 ${idx === 0 ? 'border-[#d4d4f0] bg-white' : 'border-[#f0f0ee] bg-[#fafaf8]'}`}>
+                          <div className="flex items-start justify-between gap-2">
+                            <div className="min-w-0">
+                              <p className="text-xs font-bold text-[#1a1a2e] truncate">{a.tour_name}</p>
+                              <p className="text-[11px] text-[#6b6b63]">
+                                {driver ? `Livreur : ${driver}` : 'Livreur non renseigné'}
+                                {a.planned_date ? ` · prévue le ${new Date(a.planned_date + 'T00:00:00').toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' })}` : ''}
+                              </p>
+                            </div>
+                            <span className="shrink-0 px-2 py-0.5 rounded-full text-[10px] font-semibold" style={{ backgroundColor: cfg.bg, color: cfg.text }}>
+                              {a.result === 'to_replan' ? (a.status === 'pending' ? 'Jamais validé' : 'Non livrée') : cfg.label}
+                            </span>
+                          </div>
+
+                          {validated && (
+                            <p className="text-[11px] text-[#1a1a2e]">
+                              {a.result === 'delivered' ? '✓ Validée' : a.result === 'partial' ? '◐ Validée en partie' : '✕ Marquée non livrée'}
+                              {' '}le <b>{fmtDateTime(a.delivered_at)}</b>
+                              {a.done_by ? <> par <b>{a.done_by}</b></> : driver ? <> (tournée de {driver})</> : null}
+                            </p>
+                          )}
+
+                          {a.comment?.trim() && (
+                            <div className={`rounded-[10px] border px-2.5 py-2 ${failedLike ? 'bg-[#fff7ed] border-[#fdba74]' : 'bg-[#f0fdf4] border-[#bbf7d0]'}`}>
+                              <p className={`text-[12px] leading-snug whitespace-pre-wrap ${failedLike ? 'text-[#7c2d12]' : 'text-[#14532d]'}`}>💬 {a.comment}</p>
+                              <p className="text-[10px] text-[#6b6b63] mt-1">
+                                {a.comment_by ?? (driver ? `${driver} (livreur de la tournée)` : 'Livreur')}
+                                {(a.comment_at ?? a.delivered_at) ? ` · ${fmtDateTime(a.comment_at ?? a.delivered_at)}` : ''}
+                              </p>
+                            </div>
+                          )}
+
+                          {a.sav_note?.trim() && a.stop_id !== selected.id && (
+                            <div className="rounded-[10px] bg-[#fffbeb] border border-[#fde68a] px-2.5 py-2">
+                              <p className="text-[12px] text-[#92400e] leading-snug">📝 {a.sav_note}</p>
+                              <p className="text-[10px] text-[#6b6b63] mt-1">Note SAV · {a.sav_note_by ?? 'auteur non enregistré'}{a.sav_note_at ? ` · ${fmtDateTime(a.sav_note_at)}` : ''}</p>
+                            </div>
+                          )}
+
+                          {a.result === 'partial' && a.partial_delivered && (
+                            <div className="space-y-1">
+                              {a.partial_delivered.map((item, i) => {
+                                const remaining = item.qty_ordered - item.qty_delivered
+                                return (
+                                  <div key={i} className={`flex items-center gap-2 rounded-[8px] px-2.5 py-1.5 text-[11px] ${remaining > 0 ? 'bg-[#fef3c7]' : 'bg-[#f0fdf4]'}`}>
+                                    <span className="flex-1 min-w-0 truncate text-[#1a1a2e]">{item.title}</span>
+                                    <span className={`font-bold shrink-0 ${remaining > 0 ? 'text-[#c2680a]' : 'text-[#1a7f4b]'}`}>{item.qty_delivered}/{item.qty_ordered}</span>
+                                  </div>
+                                )
+                              })}
+                            </div>
+                          )}
+
+                          {(a.signature_url || a.photo_url) && (
+                            <div className="flex gap-2">
+                              {a.signature_url && (
+                                <a href={a.signature_url} target="_blank" rel="noreferrer" className="flex-1 group">
+                                  <div className="rounded-[10px] border border-[#bbf7d0] bg-white overflow-hidden">
+                                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                                    <img src={a.signature_url} alt="Signature" className="w-full h-20 object-contain p-1 group-hover:opacity-80 transition-opacity" />
+                                    <p className="text-center text-[10px] text-[#6b6b63] pb-1">
+                                      Signée le {fmtDateTime(a.signed_at ?? a.delivered_at)}
+                                    </p>
+                                  </div>
+                                </a>
+                              )}
+                              {a.photo_url && (
+                                <a href={a.photo_url} target="_blank" rel="noreferrer" className="flex-1 group">
+                                  <div className="rounded-[10px] border border-[#bbf7d0] overflow-hidden">
+                                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                                    <img src={a.photo_url} alt="Photo colis" className="w-full h-20 object-cover group-hover:opacity-80 transition-opacity" />
+                                    <p className="text-center text-[10px] text-[#6b6b63] py-1">Photo colis</p>
+                                  </div>
+                                </a>
+                              )}
+                            </div>
+                          )}
+
+                          {validated && (
+                            <p className="text-[11px] text-[#6b6b63] flex items-center gap-1 flex-wrap">
+                              <MapPin size={11} className="shrink-0" />
+                              {pos ? (
+                                <>
+                                  <span>
+                                    {dist != null
+                                      ? <>Position du livreur : <b className={dist > 500 ? 'text-[#c2410c]' : 'text-[#1a7f4b]'}>{dist < 1000 ? `à ${dist} m` : `à ${(dist / 1000).toFixed(1)} km`}</b> de l&apos;adresse</>
+                                      : 'Position du livreur enregistrée'}
+                                    {pos.accuracy ? ` (précision ±${Math.round(pos.accuracy)} m)` : ''}
+                                    {pos.source === 'suivi' ? ` · relevée à ${new Date(pos.at).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}` : ''}
+                                  </span>
+                                  <a href={`https://www.google.com/maps?q=${pos.lat},${pos.lng}`} target="_blank" rel="noreferrer" className="text-[#6d28d9] font-medium hover:underline">Voir sur la carte</a>
+                                </>
+                              ) : history?.order === selected.order_name ? 'Pas de position GPS enregistrée pour ce passage' : 'Position GPS…'}
+                            </p>
+                          )}
+                        </div>
+                      )
+                    })}
+                  </div>
+                  {journal.length > 0 && (
+                    <div className="mt-2.5 rounded-[12px] bg-[#fafaf8] border border-[#f0f0ee] px-3 py-2 space-y-1">
+                      {[...journal].reverse().map(e => (
+                        <p key={e.id} className="text-[11px] text-[#6b6b63] leading-snug">
+                          <span className="text-[#1a1a2e] font-medium">{(EVENT_LABEL[e.kind] ?? (() => e.kind))(e)}</span>
+                          {' · '}{fmtDateTime(e.created_at)}{e.author ? ` · ${e.author}` : ''}
+                          {e.comment && e.kind !== 'note_sav' ? <span className="block text-[#9b9b93]">{e.comment}</span> : null}
+                        </p>
+                      ))}
+                    </div>
                   )}
                 </div>
               )}
 
-              {/* ── Note SAV pour le livreur ── */}
+              {/* ── Note SAV pour le livreur (sur le passage en cours) ── */}
               {selected.stop_status !== null && (
                 <div>
                   <div className="flex items-center justify-between mb-1.5">
@@ -7453,6 +7847,9 @@ function SavView() {
                   ) : selected.sav_note ? (
                     <div className="rounded-[12px] bg-[#fffbeb] border border-[#fde68a] px-3 py-2.5">
                       <p className="text-sm text-[#92400e]">📝 {selected.sav_note}</p>
+                      <p className="text-[10px] text-[#6b6b63] mt-1">
+                        {selected.sav_note_by ?? 'Auteur non enregistré'}{selected.sav_note_at ? ` · ${fmtDateTime(selected.sav_note_at)}` : ''}
+                      </p>
                     </div>
                   ) : (
                     <div className="rounded-[12px] bg-[#fafaf8] border border-dashed border-[#e8e8e4] px-3 py-2 text-center">
@@ -7470,77 +7867,6 @@ function SavView() {
                 >
                   ↩ Pas tout livré ? Remettre le reste à planifier
                 </button>
-              )}
-
-              {/* ── Livraison partielle ── */}
-              {selected.sav_status === 'partial' && selected.partial_delivered && (
-                <div>
-                  <p className="text-[10px] font-semibold uppercase tracking-[0.08em] text-[#92400e] mb-1.5">⚠ Livraison partielle — articles à replanifier</p>
-                  <div className="space-y-1">
-                    {selected.partial_delivered.map((item, i) => {
-                      const remaining = item.qty_ordered - item.qty_delivered
-                      return (
-                        <div key={i} className={`flex items-center gap-2 rounded-[10px] px-3 py-2 text-xs ${remaining > 0 ? 'bg-[#fef3c7] border border-[#fcd34d]' : 'bg-[#f0fdf4] border border-[#bbf7d0]'}`}>
-                          <div className="flex-1 min-w-0">
-                            <span className={`font-medium ${remaining > 0 ? 'text-[#92400e]' : 'text-[#1a7f4b]'}`}>{item.title}</span>
-                            {item.sku && <span className="ml-1 font-mono text-[#9b9b93]">({item.sku})</span>}
-                          </div>
-                          <span className={`font-bold shrink-0 ${remaining > 0 ? 'text-[#c2680a]' : 'text-[#1a7f4b]'}`}>
-                            {item.qty_delivered}/{item.qty_ordered} livré{item.qty_delivered > 1 ? 's' : ''}
-                          </span>
-                          {remaining > 0 && (
-                            <span className="shrink-0 px-1.5 py-0.5 rounded-full bg-[#fed7aa] text-[#92400e] font-bold text-[10px]">
-                              −{remaining}
-                            </span>
-                          )}
-                        </div>
-                      )
-                    })}
-                  </div>
-                </div>
-              )}
-
-              {/* ── Commentaire livreur ── */}
-              {selected.comment && (
-                <div>
-                  <p className="text-[10px] font-semibold uppercase tracking-[0.08em] text-[#9b9b93] mb-1.5">Note du livreur</p>
-                  <div className={`rounded-[12px] border px-3 py-2.5 ${
-                    selected.stop_status === 'failed'
-                      ? 'bg-[#fff7ed] border-[#fed7aa]'
-                      : 'bg-[#f0fdf4] border-[#bbf7d0]'
-                  }`}>
-                    <p className={`text-xs ${selected.stop_status === 'failed' ? 'text-[#c2680a]' : 'text-[#1a7f4b]'}`}>
-                      💬 {selected.comment}
-                    </p>
-                  </div>
-                </div>
-              )}
-
-              {/* ── Preuve de livraison (signature + photo) ── */}
-              {(selected.signature_url || selected.photo_url) && (
-                <div>
-                  <p className="text-[10px] font-semibold uppercase tracking-[0.08em] text-[#9b9b93] mb-1.5">Preuve de livraison</p>
-                  <div className="flex gap-2">
-                    {selected.signature_url && (
-                      <a href={selected.signature_url} target="_blank" rel="noreferrer" className="flex-1 group">
-                        <div className="rounded-[10px] border border-[#bbf7d0] bg-white overflow-hidden">
-                          {/* eslint-disable-next-line @next/next/no-img-element */}
-                          <img src={selected.signature_url} alt="Signature" className="w-full h-20 object-contain p-1 group-hover:opacity-80 transition-opacity" />
-                          <p className="text-center text-[9px] text-[#6b6b63] pb-1">Signature</p>
-                        </div>
-                      </a>
-                    )}
-                    {selected.photo_url && (
-                      <a href={selected.photo_url} target="_blank" rel="noreferrer" className="flex-1 group">
-                        <div className="rounded-[10px] border border-[#bbf7d0] overflow-hidden">
-                          {/* eslint-disable-next-line @next/next/no-img-element */}
-                          <img src={selected.photo_url} alt="Photo colis" className="w-full h-20 object-cover group-hover:opacity-80 transition-opacity" />
-                          <p className="text-center text-[9px] text-[#6b6b63] py-1">Photo colis</p>
-                        </div>
-                      </a>
-                    )}
-                  </div>
-                </div>
               )}
 
               {/* ── Address ── */}
@@ -7595,14 +7921,7 @@ function SavView() {
           onClose={() => setCorrectingStop(null)}
           onDone={async () => {
             setCorrectingStop(null)
-            try {
-              const [toursData, ordersData] = await Promise.all([
-                fetch('/api/delivery/tours', { cache: 'no-store' }).then(r => r.json()),
-                fetch('/api/delivery/orders').then(r => r.json()),
-              ])
-              cachedOrdersRef.current = ordersData.orders ?? []
-              applyEntries(buildSavEntries(toursData.tours ?? [], cachedOrdersRef.current))
-            } catch (e) { console.error(e) }
+            try { await reloadSav() } catch (e) { console.error(e) }
           }}
         />
       )}
