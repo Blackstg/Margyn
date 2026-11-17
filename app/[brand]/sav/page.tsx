@@ -475,7 +475,7 @@ function CustomerHistory({ email, currentTicketId }: { email: string; currentTic
                             ? 'bg-white border border-[#e8e8e4] text-[#1a1a2e]'
                             : 'bg-[#1a1a2e] text-white'
                         }`}>
-                          {c.body.slice(0, 400)}{c.body.length > 400 ? '…' : ''}
+                          {(() => { const b = c.body.replace(MD_IMAGE_RE, '📷 Photo'); return b.slice(0, 400) + (b.length > 400 ? '…' : '') })()}
                         </div>
                       </div>
                     ))
@@ -512,6 +512,31 @@ function parseZipchatTranscript(body: string): ZipchatLine[] | null {
       text: line.replace(ZIPCHAT_EITHER_RE, '').trim(),
     }))
     .filter(m => m.text.length > 0)
+}
+
+// ─── Images Markdown dans le texte ───────────────────────────────────────────
+// Zipchat (WhatsApp, chat) recopie les photos du client dans le texte sous la
+// forme ![Image from the customer](https://…) : on les affiche en vraies images.
+
+const MD_IMAGE_RE = /!\[([^\]]*)\]\(\s*(https?:\/\/[^)\s]+)\s*\)/g
+
+function RichText({ text, imgClassName = 'max-h-56' }: { text: string; imgClassName?: string }) {
+  const parts: React.ReactNode[] = []
+  let last = 0
+  for (const m of Array.from(text.matchAll(MD_IMAGE_RE))) {
+    const before = text.slice(last, m.index).replace(/[ \t]+$/, '')
+    if (before) parts.push(before)
+    parts.push(
+      <a key={m.index} href={m[2]} target="_blank" rel="noopener noreferrer" className="block my-1.5 w-fit">
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img src={m[2]} alt={m[1] || 'Image'} loading="lazy" className={`${imgClassName} rounded-xl object-contain border border-[#e5e5ea] hover:opacity-90 transition-opacity`} />
+      </a>,
+    )
+    last = (m.index ?? 0) + m[0].length
+  }
+  const rest = text.slice(last)
+  if (rest) parts.push(rest)
+  return <>{parts}</>
 }
 
 function ConversationThread({ ticket, refreshKey, customerName }: { ticket: ProcessedTicket; refreshKey: number; customerName: string }) {
@@ -565,7 +590,7 @@ function ConversationThread({ ticket, refreshKey, customerName }: { ticket: Proc
   if (comments.length === 0) {
     return (
       <p className="rounded-2xl border border-[#e5e5ea] bg-white px-5 py-4 text-[14px] text-[#1d1d1f] leading-[1.6] whitespace-pre-wrap">
-        {ticket.description ?? '—'}
+        {ticket.description ? <RichText text={ticket.description} /> : "—"}
       </p>
     )
   }
@@ -600,7 +625,7 @@ function ConversationThread({ ticket, refreshKey, customerName }: { ticket: Proc
                     <div className={`max-w-[80%] px-3 py-2 rounded-2xl text-[13px] leading-relaxed ${
                       bubble.role === 'customer' ? 'bg-[#f2f2f7] text-[#1d1d1f]' : 'bg-[#0a66f5] text-white'
                     }`}>
-                      {bubble.text}
+                      <RichText text={bubble.text} imgClassName="max-h-48" />
                     </div>
                   </div>
                 ))}
@@ -624,7 +649,7 @@ function ConversationThread({ ticket, refreshKey, customerName }: { ticket: Proc
             </header>
 
             {c.body && (
-              <p className={`text-[14px] leading-[1.6] text-[#1d1d1f] whitespace-pre-wrap break-words ${isAgent ? 'pr-[46px]' : 'pl-[46px]'}`}>{c.body.replace(/\n{3,}/g, '\n\n').trim()}</p>
+              <div className={`text-[14px] leading-[1.6] text-[#1d1d1f] whitespace-pre-wrap break-words ${isAgent ? 'pr-[46px]' : 'pl-[46px]'}`}><RichText text={c.body.replace(/\n{3,}/g, '\n\n').trim()} /></div>
             )}
             {attachments.length > 0 && (
               <div className={`flex flex-wrap gap-2 ${isAgent ? 'pr-[46px] justify-end' : 'pl-[46px]'} ${c.body ? 'mt-3' : ''}`}>
