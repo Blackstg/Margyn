@@ -55,7 +55,9 @@ interface TrackingResult {
 // Local (final-mile) carrier name = drop the cross-border consolidator (YunExpress)
 function localCarrier(name?: string | null): string | null {
   if (!name) return null
+  // 17Track renvoie « Colis Prive(Colis Privé) » : on garde le nom entre parenthèses.
   const parts = name.split(/\s*\+\s*/).map(s => s.trim()).filter(s => s && !/yunexpress/i.test(s))
+    .map(s => s.match(/\(([^)]+)\)\s*$/)?.[1]?.trim() || s)
   return parts.join(' / ') || null
 }
 
@@ -296,6 +298,8 @@ const EN_LABELS: [RegExp, string][] = [
   [/^shipment is ready for outbound/i, 'Prêt à partir du centre de tri'],
   [/^collected at cargo terminal/i, 'Réceptionné au terminal de fret'],
   [/^departed (from )?(the )?(sorting )?(facility|cent(er|re))/i, 'Départ du centre de tri'],
+  [/^arrived at (the )?local delivery (round|office|station)/i, 'Arrivé à l’agence de livraison'],
+  [/^arrived at (the )?(delivery )?hub/i, 'Arrivé au centre de distribution'],
   [/^out for delivery/i, 'En cours de livraison'],
   [/^delivered/i, 'Livré'],
 ]
