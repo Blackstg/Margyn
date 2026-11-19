@@ -89,14 +89,24 @@ export interface TrackItem { number: string; carrier?: number }
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
+// 17Track limite le débit (429) : on réessaie 2 fois, puis on LÈVE une erreur au lieu
+// de renvoyer du vide, pour que l'appelant ne prenne pas un échec pour « rien de neuf »
+// (sinon le cache était marqué à jour et le suivi restait figé — cause des rechutes).
+async function call17(path: string, items: TrackItem[]): Promise<any> {
+  for (let attempt = 0; ; attempt++) {
+    const res = await fetch(`${API}/${path}`, { method: 'POST', headers: headers(), body: JSON.stringify(items), cache: 'no-store' })
+    if (res.ok) return res.json()
+    if (attempt >= 2 || (res.status !== 429 && res.status < 500)) throw new Error(`17Track ${path} ${res.status}`)
+    await new Promise(r => setTimeout(r, 1000 * (attempt + 1)))
+  }
+}
+
 export async function register(items: TrackItem[]): Promise<any> {
-  const res = await fetch(`${API}/register`, { method: 'POST', headers: headers(), body: JSON.stringify(items) })
-  return res.json()
+  return call17('register', items)
 }
 
 export async function getTrackInfo(items: TrackItem[]): Promise<any> {
-  const res = await fetch(`${API}/gettrackinfo`, { method: 'POST', headers: headers(), body: JSON.stringify(items) })
-  return res.json()
+  return call17('gettrackinfo', items)
 }
 
 // Un "accepted" (gettrackinfo) ou "data" (webhook) → résultat normalisé (fusionne TOUS les providers)

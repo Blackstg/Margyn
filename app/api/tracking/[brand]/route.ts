@@ -39,14 +39,19 @@ async function getOrRefresh17(
   const items: TrackItem[] = carriers.map(c => (c ? { number, carrier: c } : { number }))
 
   // Enregistre (1×) chaque transporteur candidat, puis interroge et fusionne
-  if (!row?.registered) { try { await register(items) } catch { /* ignore */ } }
+  let registered = !!row?.registered
+  if (!registered) { try { await register(items); registered = true } catch { /* réessayé à la prochaine visite */ } }
 
+  // Un appel en échec (limite de débit, panne) ≠ « rien de neuf » : dans ce cas on
+  // n'avance PAS updated_at, pour que la visite suivante réinterroge 17Track au lieu
+  // de servir l'ancien cache comme s'il était à jour.
+  let failed = false
   const results = await Promise.all(items.map(async (it) => {
     try {
       const j = await getTrackInfo([it])
       const acc = j?.data?.accepted?.[0]
       return acc ? normalize(acc) : null
-    } catch { return null }
+    } catch { failed = true; return null }
   }))
   const freshResult = mergeResults(results)
 
@@ -67,8 +72,8 @@ async function getOrRefresh17(
     eta_from:   result?.eta_from ?? row?.eta_from ?? null,
     eta_to:     result?.eta_to ?? row?.eta_to ?? null,
     events:     result?.events ?? [],
-    registered: true,
-    updated_at: new Date().toISOString(),
+    registered,
+    updated_at: failed ? (row?.updated_at ?? new Date(0).toISOString()) : new Date().toISOString(),
   }, { onConflict: 'tracking_number' })
 
   return result ?? prior
