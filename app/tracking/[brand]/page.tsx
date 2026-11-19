@@ -507,10 +507,11 @@ function buildRealTimeline(result: TrackingResult, settings: TrackingSettings | 
       // Réparti entre maintenant et la livraison estimée, mais avec AU MOINS 1 jour
       // d'écart entre chaque étape (sinon plusieurs étapes tombent le même jour),
       // et jamais un dimanche (pas de livraison).
-      const ms = Math.max(startMs + (endMs - startMs) * ((k + 1) / upcoming.length), prevMs + DAY)
+      // La 1re étape à venir peut tomber aujourd'hui (colis en tournée du jour).
+      const ms = Math.max(startMs + (endMs - startMs) * ((k + 1) / upcoming.length), k === 0 ? startMs : prevMs + DAY)
       const dt = nextDeliveryDay(new Date(ms))
       prevMs = dt.getTime()
-      estForIdx[idx] = dt.toLocaleDateString('fr-FR', { day: 'numeric', month: 'long' })
+      estForIdx[idx] = dt.toDateString() === new Date().toDateString() ? 'aujourd’hui' : dt.toLocaleDateString('fr-FR', { day: 'numeric', month: 'long' })
     })
   }
 
