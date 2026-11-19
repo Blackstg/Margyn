@@ -283,7 +283,8 @@ export const EN_LABELS: [RegExp, string][] = [
 // d'ajouter une traduction à chaque nouveau cas, on retombe sur un libellé FR
 // générique selon le sens. Le client ne voit jamais d'anglais.
 export const looksEnglish = (l: string) =>
-  /\b(the|at|by|to|for|your|this|has|been|is|was|arrived|departed|shipment|parcel|package|sorting|sorted|processed|processing|collected|received|handed|courier|agency|depot|facility|hub|release|inbound|outbound|transit|delivery|scan)\b/i.test(l)
+  // Mots uniquement anglais (pas « transit », « hub »… communs au français).
+  /\b(the|at|by|to|for|your|this|has|been|is|was|arrived|departed|shipment|parcel|package|sorting|sorted|processed|processing|collected|received|handed|courier|agency|depot|facility|release|inbound|outbound|delivery|warehouse)\b/i.test(l)
 
 const EN_FALLBACK: [RegExp, string][] = [
   [/out for delivery|on (its|the) way to (you|the recipient)|with (the )?(courier|driver) for delivery/i, 'En cours de livraison'],
