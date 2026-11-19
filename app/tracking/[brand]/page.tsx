@@ -429,6 +429,28 @@ function fmtRange(r: { from: Date; to: Date }): string {
   return r.from.getMonth() === r.to.getMonth() ? `${day(r.from)} – ${full(r.to)}` : `${full(r.from)} – ${full(r.to)}`
 }
 
+// Dernier scan CÔTÉ ORIGINE (encore en Chine / en train de quitter l'origine).
+function latestOriginTime(events: TrackingResult['tracking_events']): number {
+  let latest = 0
+  for (const e of events) {
+    const c = countryOf(e.location)
+    const L = (e.label || '').toLowerCase()
+    const isOrigin = c === 'CN' || /export|vol international parti|international flight has departed|origin facility|origine|centre de tri \((départ|origine)\)/.test(L)
+    if (!isOrigin) continue
+    const t = new Date(e.date).getTime()
+    if (!isNaN(t) && t > latest) latest = t
+  }
+  return latest
+}
+
+// Journal « voir le détail » : uniquement la partie France (après le dernier scan
+// côté origine). Le trajet YunExpress au départ de Chine n'est pas montré au client,
+// les grandes étapes de la frise suffisent.
+function localEvents(events: TrackingResult['tracking_events']): TrackingResult['tracking_events'] {
+  const cut = latestOriginTime(events)
+  return events.filter(e => { const t = new Date(e.date).getTime(); return !isNaN(t) && t > cut && countryOf(e.location) !== 'CN' })
+}
+
 function buildRealTimeline(result: TrackingResult, settings: TrackingSettings | null): TLEvent[] {
   const delivered = result.step === 5
   const estDate = estimatedDeliveryRange(result, settings)?.to ?? null
@@ -443,15 +465,7 @@ function buildRealTimeline(result: TrackingResult, settings: TrackingSettings | 
   // parfois une pré-déclaration douanière en France AVANT que l'avion ait quitté la
   // Chine → sans ça, on saute à « Dédouanement » alors que le colis est encore en
   // transit international (désaccord avec 17Track, qui reflète le dernier scan réel).
-  let latestOriginMs = 0
-  for (const e of result.tracking_events) {
-    const c = countryOf(e.location)
-    const L = (e.label || '').toLowerCase()
-    const isOrigin = c === 'CN' || /export|vol international parti|international flight has departed|origin facility|origine|centre de tri \((départ|origine)\)/.test(L)
-    if (!isOrigin) continue
-    const t = new Date(e.date).getTime()
-    if (!isNaN(t) && t > latestOriginMs) latestOriginMs = t
-  }
+  const latestOriginMs = latestOriginTime(result.tracking_events)
 
   const dateFor: Record<string, string> = {}
   const latestDateByIdx: Record<number, string> = {}  // date du scan le + RÉCENT de la phase
@@ -885,6 +899,7 @@ export default function BrandTrackingPage({ params }: { params: { brand: string 
   const primary     = settings?.brand_color || '#111'
   const isDelivered = result?.step === 5
 
+  const detailEvents = result ? localEvents(result.tracking_events) : []
   const timeline     = result ? (result.has_carrier_data ? buildRealTimeline(result, settings) : buildTimeline(result, settings)) : []
   const currentEvent = timeline.find(e => e.status === 'current')
     ?? [...timeline].reverse().find(e => e.status === 'done')
@@ -1122,7 +1137,7 @@ export default function BrandTrackingPage({ params }: { params: { brand: string 
                     </div>
                   </div>
 
-                  {result.tracking_events.length > 0 && (
+                  {detailEvents.length > 0 && (
                     <button
                       onClick={() => setEventsOpen((o) => !o)}
                       style={{
@@ -1138,17 +1153,17 @@ export default function BrandTrackingPage({ params }: { params: { brand: string 
                   )}
                 </div>
 
-                {eventsOpen && result.tracking_events.length > 0 && (
+                {eventsOpen && detailEvents.length > 0 && (
                   <div style={{ borderTop: '1px solid rgba(0,0,0,0.06)', padding: '12px 16px', display: 'flex', flexDirection: 'column', gap: 0 }}>
-                    {result.tracking_events.map((ev, i) => (
-                      <div key={i} style={{ display: 'flex', gap: 12, paddingBottom: i < result.tracking_events.length - 1 ? 14 : 0 }}>
+                    {detailEvents.map((ev, i) => (
+                      <div key={i} style={{ display: 'flex', gap: 12, paddingBottom: i < detailEvents.length - 1 ? 14 : 0 }}>
                         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', flexShrink: 0 }}>
                           <div style={{
                             width: 10, height: 10, borderRadius: '50%', flexShrink: 0, marginTop: 3,
                             background: i === 0 ? '#22c55e' : 'rgba(0,0,0,0.15)',
                             boxShadow: i === 0 ? '0 0 0 3px #22c55e22' : 'none',
                           }} />
-                          {i < result.tracking_events.length - 1 && (
+                          {i < detailEvents.length - 1 && (
                             <div style={{ width: 1, flex: 1, minHeight: 14, background: 'rgba(0,0,0,0.08)', marginTop: 3 }} />
                           )}
                         </div>
