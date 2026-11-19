@@ -4,14 +4,13 @@
 // YunExpress visibles, libellés anglais). Pur : utilisé par /api/cron/tracking-audit.
 import {
   type TrackingResult, RT_PHASES, PHASE_IDX, buildRealTimeline, estimatedDeliveryRange,
-  localEvents, localCarrier, frLabel, prettyPlace, phaseOf, handoverTime, countryOf,
+  localEvents, localCarrier, frLabel, looksEnglish, prettyPlace, phaseOf, handoverTime, countryOf,
 } from '@/lib/tracking/display'
 import type { Track17Result } from '@/lib/track17'
 
 export type AuditIssue = { kind: string; detail: string }
 
 const LEAK_RE = /yunexpress|\bchin(a|e)\b|shenzhen|guangzhou|dongguan|yiwu|hong ?kong|mainland/i
-const ENGLISH_RE = /\b(arrived|departed|shipment|parcel|hub|facility|received|picked up|in transit|customs|out for|handed|collected|ready for|outbound|inbound|sorting)\b/i
 const HOUR = 3600_000
 
 const parisDay = (d: Date) => d.toLocaleDateString('fr-CA', { timeZone: 'Europe/Paris' })
@@ -42,7 +41,7 @@ export function auditTracking(page: TrackingResult, truth: Track17Result | null,
     if (new Date(tLatest.date).getTime() > new Date(pLatest.date).getTime() + HOUR)
       push('retard', `dernier scan affiché ${fmt(pLatest.date)} « ${frLabel(pLatest.label)} », 17Track a ${fmt(tLatest.date)} « ${frLabel(tLatest.label)} »`)
     if (truth.delivered && !pageDelivered) push('livré non affiché', `17Track : livré le ${fmt(tLatest.date)}`)
-    else if (shownIdx < truthIdx && truthIdx !== PHASE_IDX.delivered)
+    else if (shownIdx < truthIdx && truthIdx !== PHASE_IDX.delivered && !(shownIdx === PHASE_IDX.sorting && truthIdx === PHASE_IDX.domestic))
       push('étape en retard', `page « ${RT_PHASES[shownIdx].title} », 17Track « ${RT_PHASES[truthIdx].title} » (${frLabel(tLatest.label)})`)
     else if (shownIdx > truthIdx + 1 && new Date(pLatest.date).getTime() <= new Date(tLatest.date).getTime())
       push('étape en avance', `page « ${RT_PHASES[shownIdx].title} », 17Track seulement « ${RT_PHASES[truthIdx].title} » (${frLabel(tLatest.label)})`)
@@ -72,7 +71,7 @@ export function auditTracking(page: TrackingResult, truth: Track17Result | null,
     const txt = [label, e.message, prettyPlace(e.location)].filter(Boolean).join(' ')
     if (countryOf(e.location) === 'CN' || LEAK_RE.test(txt)) { push('fuite Chine', `détail : ${txt.slice(0, 120)}`); break }
   }
-  const english = Array.from(new Set(localEvents(events).map(e => frLabel(e.label)).filter(l => ENGLISH_RE.test(l))))
+  const english = Array.from(new Set(localEvents(events).map(e => frLabel(e.label)).filter(looksEnglish)))
   if (english.length) push('libellé anglais', english.slice(0, 4).join(' | '))
 
   return issues

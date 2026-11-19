@@ -279,9 +279,28 @@ export const EN_LABELS: [RegExp, string][] = [
   [/^out for delivery/i, 'En cours de livraison'],
   [/^delivered/i, 'Livré'],
 ]
+// Libellé resté en anglais (transporteurs variés : Evri, DPD, GOFO…) → plutôt que
+// d'ajouter une traduction à chaque nouveau cas, on retombe sur un libellé FR
+// générique selon le sens. Le client ne voit jamais d'anglais.
+export const looksEnglish = (l: string) =>
+  /\b(the|at|by|to|for|your|this|has|been|is|was|arrived|departed|shipment|parcel|package|sorting|sorted|processed|processing|collected|received|handed|courier|agency|depot|facility|hub|release|inbound|outbound|transit|delivery|scan)\b/i.test(l)
+
+const EN_FALLBACK: [RegExp, string][] = [
+  [/out for delivery|on (its|the) way to (you|the recipient)|with (the )?(courier|driver) for delivery/i, 'En cours de livraison'],
+  [/\bdelivered\b/i, 'Livré'],
+  [/back to the sorting|returned to (the )?(sort|depot)|failed|unsuccessful|attempt|deliver(y)? again/i, 'Nouvelle tentative de livraison prévue'],
+  [/agency|depot|delivery (cent(er|re)|office|station|round)|courier/i, 'Arrivé à l’agence de livraison'],
+  [/customs|import|export|release/i, 'Formalités douanières'],
+  [/sort|hub|facility|processed|processing|warehouse/i, 'Au centre de tri'],
+  [/collected|received|first scan|handed|picked up|pick-?up|accepted|drop(ped)? off/i, 'Pris en charge par le transporteur'],
+]
+
 export function frLabel(label: string): string {
-  for (const [re, fr] of EN_LABELS) if (re.test(label.trim())) return fr
-  return label
+  const l = label.trim()
+  for (const [re, fr] of EN_LABELS) if (re.test(l)) return fr
+  if (!looksEnglish(l)) return label
+  for (const [re, fr] of EN_FALLBACK) if (re.test(l)) return fr
+  return 'Colis en transit'
 }
 
 // Ajoute n jours ouvrés (ni samedi, ni dimanche, ni férié) — délais transporteur.
