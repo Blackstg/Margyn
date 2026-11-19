@@ -405,6 +405,14 @@ function estimatedDeliveryRange(result: TrackingResult, settings: TrackingSettin
     if (idx != null && idx > phase) phase = idx
   }
   if (phase < PHASE_IDX.sorting) return single ? { from: single, to: single } : null
+  // En tournée aujourd'hui (dernier scan = « en cours de livraison » du jour) →
+  // livraison prévue aujourd'hui, pas « J+1 à J+2 » (cas Krom #1422).
+  const latest = result.tracking_events?.[0]
+  const parisDay = (d: Date) => d.toLocaleDateString('fr-CA', { timeZone: 'Europe/Paris' })
+  if (latest && phaseOf(latest, handoverMs) === PHASE_IDX.delivery && parisDay(new Date(lastScan)) === parisDay(new Date())) {
+    const today = new Date()
+    return { from: today, to: today }
+  }
   const anchor = new Date(lastScan)
   const [a, b] = phase >= PHASE_IDX.delivery ? [1, 2] : [2, 4]
   let from = addWorkingDays(anchor, a), to = addWorkingDays(anchor, b)
@@ -417,7 +425,7 @@ function estimatedDeliveryRange(result: TrackingResult, settings: TrackingSettin
 function fmtRange(r: { from: Date; to: Date }): string {
   const day = (d: Date) => d.toLocaleDateString('fr-FR', { day: 'numeric' })
   const full = (d: Date) => d.toLocaleDateString('fr-FR', { day: 'numeric', month: 'long' })
-  if (r.from.toDateString() === r.to.toDateString()) return full(r.to)
+  if (r.from.toDateString() === r.to.toDateString()) return r.to.toDateString() === new Date().toDateString() ? 'Aujourd’hui' : full(r.to)
   return r.from.getMonth() === r.to.getMonth() ? `${day(r.from)} – ${full(r.to)}` : `${full(r.from)} – ${full(r.to)}`
 }
 

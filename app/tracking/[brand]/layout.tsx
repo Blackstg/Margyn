@@ -1,5 +1,6 @@
 import { Metadata } from 'next'
 import { createAdminClient } from '@/lib/supabase'
+import { BRAND_LABELS, type Brand } from '@/lib/access'
 
 export async function generateMetadata(
   { params }: { params: { brand: string } }
@@ -19,7 +20,7 @@ export async function generateMetadata(
     .eq('brand', brand)
     .maybeSingle()
 
-  const brandName = invoice?.company_name || (brand.charAt(0).toUpperCase() + brand.slice(1))
+  const brandName = BRAND_LABELS[brand as Brand] || invoice?.company_name || (brand.charAt(0).toUpperCase() + brand.slice(1))
   const logoUrl   = invoice?.logo_url ?? null
   const siteUrl   = tracking?.brand_website ?? null
 

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
+import { BRAND_LABELS, type Brand } from '@/lib/access'
 
 function getAdmin() {
   return createClient(
@@ -20,7 +21,8 @@ export async function GET(req: NextRequest) {
 
   const merged = {
     // Branding from invoice_settings
-    brand_name:    invoice?.company_name  ?? '',
+    // Nom commercial (Krom Water, Mōom Paris) et non la raison sociale de la facture
+    brand_name:    BRAND_LABELS[brand as Brand] ?? invoice?.company_name ?? '',
     brand_logo_url: invoice?.logo_url     ?? '',
     brand_color:   invoice?.color_primary ?? '#111111',
     contact_email: invoice?.email         ?? '',
