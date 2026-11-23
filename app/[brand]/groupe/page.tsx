@@ -226,7 +226,7 @@ export default function GroupePage() {
             <span className="flex items-center gap-2 text-xs text-[#9b9b93]"><span className="inline-block h-0.5 w-4 bg-[#1a1a2e]/40" /> {year - 1}</span>
           </div>
           <div className="overflow-x-auto">
-            <div className="relative min-w-[560px] pl-12">
+            <div className="relative min-w-[560px] pl-12 pt-3">
               <div className="relative h-[240px]">
                 {ticks.map(t => (
                   <div key={t} className="absolute left-0 right-0 border-t border-[#f0f0ed]" style={{ bottom: `${t / top * 100}%` }}>
