@@ -6,6 +6,7 @@ import {
   effectiveFeatures, effectiveBrands, homePath, isAdminRole,
   type Brand, type FeatureKey,
 } from '@/lib/access'
+import { isOwner } from '@/lib/owner'
 
 const VALID_BRANDS = BRANDS
 
@@ -198,6 +199,11 @@ export async function middleware(req: NextRequest) {
   const feats      = effectiveFeatures(role, user.user_metadata?.features as string[] | undefined)
   const userBrands = effectiveBrands(role, brands)
   const home       = homePath(feats, userBrands, defaultBrand)
+
+  // ── Groupe (CA consolidé de toutes les marques) : propriétaire uniquement ──
+  if (pageSeg === 'groupe') {
+    return isOwner(user.email) ? response : redirect(new URL(home, req.url))
+  }
 
   // ── Équipe : réservée aux admins de la marque (chacun ne voit que sa marque) ──
   if (pageSeg === 'users' && !isAdminRole(role)) {

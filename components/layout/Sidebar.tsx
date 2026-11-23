@@ -3,7 +3,7 @@
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
 import {
-  Compass,
+  Compass, Crown,
   LayoutDashboard, BarChart2, PackageOpen, Factory, Settings, LogOut,
   Boxes, FileText, Tag, Truck, Headphones, ChevronLeft, ChevronRight, ChevronDown, Sparkles, Receipt, PackageX, Users, Percent, Ticket, Coins,
 } from 'lucide-react'
@@ -11,6 +11,7 @@ import { createBrowserClient } from '@supabase/auth-helpers-nextjs'
 import { useState, useEffect } from 'react'
 import DataFreshness from './DataFreshness'
 import { effectiveFeatures, effectiveBrands, isAdminRole, BRAND_LOCK } from '@/lib/access'
+import { isOwner } from '@/lib/owner'
 
 // ─── Brand config ─────────────────────────────────────────────────────────────
 
@@ -43,6 +44,7 @@ const NAV_SECTIONS: { label: string; items: NavItem[] }[] = [
   {
     label: 'Analyse',
     items: [
+      { key: 'groupe',    icon: Crown,           label: 'Groupe',     brandLock: null   },
       { key: 'dashboard', icon: LayoutDashboard, label: 'Dashboard',  brandLock: null   },
       { key: 'pilot',     icon: Compass,          label: 'Pilote',     brandLock: 'bowa' },
       { key: 'campaigns', icon: BarChart2,        label: 'Campagnes',  brandLock: null   },
@@ -114,6 +116,7 @@ export default function Sidebar({ isOpen, collapsed, onToggleCollapse }: Sidebar
   const labelOf = (b: string) => BRAND_LABELS[b] ?? branding[b]?.name ?? b
   const [metaBrands, setMetaBrands]       = useState<string[] | null>(null)
   const [metaFeatures, setMetaFeatures]   = useState<string[] | null>(null)
+  const [owner, setOwner]                 = useState(false)
   const [role, setRole] = useState<string | null>(() => {
     if (typeof window !== 'undefined') return localStorage.getItem('bowa_role')
     return null
@@ -157,6 +160,7 @@ export default function Sidebar({ isOpen, collapsed, onToggleCollapse }: Sidebar
       localStorage.setItem('bowa_role', r)
       setMetaBrands(Array.isArray(meta?.brands) ? (meta!.brands as string[]) : null)
       setMetaFeatures(Array.isArray(meta?.features) ? (meta!.features as string[]) : null)
+      setOwner(isOwner(data.user?.email))
     })
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
@@ -284,6 +288,8 @@ export default function Sidebar({ isOpen, collapsed, onToggleCollapse }: Sidebar
           const items = section.items.filter(({ key, brandLock }) => {
             // 'users' (Équipe) : admins de la marque
             if (key === 'users') return isAdminRole(role)
+            // 'groupe' (CA consolidé) : propriétaire uniquement
+            if (key === 'groupe') return owner
             // Feature gate: restricted roles only see their allowed features
             if (feats !== 'all' && !(feats as string[]).includes(key)) return false
             // Shared pages: always visible
