@@ -24,6 +24,7 @@ export async function middleware(req: NextRequest) {
     pathname.startsWith('/api/') ||
     pathname === '/tracking' ||
     pathname.startsWith('/tracking/') ||
+    pathname.startsWith('/avis/') ||
     pathname.startsWith('/rapport-defauts/') ||
     pathname.startsWith('/facture/') ||
     pathname.startsWith('/factory/') ||

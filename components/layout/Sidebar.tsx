@@ -5,7 +5,7 @@ import { usePathname, useRouter } from 'next/navigation'
 import {
   Compass, Crown,
   LayoutDashboard, BarChart2, PackageOpen, Factory, Settings, LogOut,
-  Boxes, FileText, Tag, Truck, Headphones, ChevronLeft, ChevronRight, ChevronDown, Sparkles, Receipt, PackageX, Users, Percent, Ticket, Coins,
+  Boxes, FileText, Tag, Truck, Headphones, ChevronLeft, ChevronRight, ChevronDown, Sparkles, Receipt, PackageX, Users, Percent, Ticket, Coins, Star,
 } from 'lucide-react'
 import { createBrowserClient } from '@supabase/auth-helpers-nextjs'
 import { useState, useEffect } from 'react'
@@ -72,6 +72,7 @@ const NAV_SECTIONS: { label: string; items: NavItem[] }[] = [
       { key: 'sav',         icon: Headphones, label: 'SAV',      brandLock: ['moom', 'bowa'] },
       { key: 'sav-defects', icon: PackageX,   label: 'Défauts',  brandLock: 'moom' },
       { key: 'sav-krom',    icon: Headphones, label: 'SAV Krom', brandLock: 'krom' },
+      { key: 'avis',        icon: Star,       label: 'Avis clients', brandLock: ['moom', 'krom', 'bowa'] },
     ],
   },
   {

@@ -21,7 +21,7 @@ export const BRAND_LABELS: Record<Brand, string> = {
 export type FeatureKey =
   | 'dashboard' | 'pilot' | 'campaigns' | 'creatives' | 'margins'
   | 'reorder' | 'supplier' | 'billing' | 'delivery' | 'delivery-costs' | 'stock' | 'invoices' | 'products' | 'ventes-privees'
-  | 'sav' | 'sav-defects' | 'sav-krom'
+  | 'sav' | 'sav-defects' | 'sav-krom' | 'avis'
 
 export interface Feature {
   key:       FeatureKey
@@ -48,6 +48,7 @@ export const FEATURES: Feature[] = [
   { key: 'sav',         label: 'SAV',        section: 'Support',    brandLock: ['moom', 'bowa'] },
   { key: 'sav-defects', label: 'Défauts',    section: 'Support',    brandLock: 'moom' },
   { key: 'sav-krom',    label: 'SAV Krom',   section: 'Support',    brandLock: 'krom' },
+  { key: 'avis',        label: 'Avis clients', section: 'Support',  brandLock: ['moom', 'krom', 'bowa'] },
 ]
 
 // Verrou MONO-marque uniquement (pour la redirection middleware). Les features
@@ -74,7 +75,7 @@ export function canSeeShopifyFulfillment(role?: string | null): boolean {
 
 // Fallback feature sets for users created before per-user `features` existed.
 const ROLE_DEFAULT_FEATURES: Record<string, FeatureKey[]> = {
-  sav:      ['billing', 'delivery', 'sav', 'sav-defects', 'sav-krom'],
+  sav:      ['billing', 'delivery', 'sav', 'sav-defects', 'sav-krom', 'avis'],
   delivery: ['delivery'],
 }
 

@@ -3,6 +3,7 @@ import { createClient } from '@supabase/supabase-js'
 import { blockingAlert, alertMessage } from '@/lib/delivery/shopifyCancellations'
 import { fulfillOrder } from '@/lib/delivery/shopifyFulfill'
 import { callerName, logStopEvents, parsePosition, tourName, updateStop, type StopEvent } from '@/lib/delivery/trace'
+import { orderToken, reviewLink, trustpilotUrl } from '@/lib/reviews'
 
 function getAdmin() {
   return createClient(
@@ -17,7 +18,16 @@ function firstNameOf(fullName: string | null | undefined): string {
   return fullName?.split(' ')[0] ?? 'client'
 }
 
-function buildSatisfactionEmail(customerName: string, orderName: string): string {
+// Étoiles cliquables : chaque étoile ouvre /avis/bowa/… avec la note pré-remplie
+// (4-5 → Trustpilot, 1-3 → retour interne). Sans lien personnel : Trustpilot direct.
+function starsHtml(reviewUrl: string | null): string {
+  if (!reviewUrl) return `<a href="${trustpilotUrl('bowa')}" target="_blank" style="display:inline-block;background:#00b67a;color:#ffffff;font-size:15px;font-weight:700;text-decoration:none;padding:14px 32px;border-radius:50px;letter-spacing:0.3px;">👉 Laisser un avis sur Trustpilot</a>`
+  const star = (n: number) => `<a href="${reviewUrl}?note=${n}" target="_blank" style="display:inline-block;text-decoration:none;font-size:34px;line-height:1;color:#00b67a;padding:0 3px;" title="${n} sur 5">★</a>`
+  return `<p style="margin:0 0 8px;">${[1, 2, 3, 4, 5].map(star).join('')}</p>
+                    <p style="margin:0;font-size:12px;color:#9b9b93;">Cliquez sur une étoile pour donner votre note</p>`
+}
+
+function buildSatisfactionEmail(customerName: string, orderName: string, reviewUrl: string | null = null): string {
   const firstName = firstNameOf(customerName)
   return `<!DOCTYPE html>
 <html lang="fr">
@@ -70,20 +80,12 @@ function buildSatisfactionEmail(customerName: string, orderName: string): string
                 <tr>
                   <td align="center">
                     <p style="margin:0 0 6px;font-size:15px;color:#3a3a3a;line-height:1.6;font-weight:600;">
-                      Si vous êtes satisfait(e) de votre expérience, nous serions vraiment touchés que vous partagiez votre avis.
+                      Comment s'est passée votre livraison&nbsp;?
                     </p>
                     <p style="margin:0 0 20px;font-size:14px;color:#6b6b63;line-height:1.5;">
-                      Cela nous aide énormément à faire connaître Bowa et à continuer à nous améliorer.
+                      Votre avis nous aide énormément à faire connaître Bowa et à continuer à nous améliorer.
                     </p>
-                    <!-- Trustpilot star row -->
-                    <p style="margin:0 0 16px;font-size:28px;letter-spacing:2px;">★★★★★</p>
-                    <a
-                      href="https://fr.trustpilot.com/evaluate/bowa-concept.com"
-                      target="_blank"
-                      style="display:inline-block;background:#00b67a;color:#ffffff;font-size:15px;font-weight:700;text-decoration:none;padding:14px 32px;border-radius:50px;letter-spacing:0.3px;"
-                    >
-                      👉 Laisser un avis sur Trustpilot
-                    </a>
+                    ${starsHtml(reviewUrl)}
                   </td>
                 </tr>
               </table>
@@ -138,11 +140,13 @@ async function sendSatisfactionEmail(
   stopId: string,
   email: string,
   customerName: string,
-  orderName: string
+  orderName: string,
+  shopifyOrderId: string | null,
 ): Promise<void> {
   if (!process.env.RESEND_API_KEY || !email) return
 
-  const html = buildSatisfactionEmail(customerName, orderName)
+  const token = shopifyOrderId ? await orderToken('bowa', shopifyOrderId) : null
+  const html = buildSatisfactionEmail(customerName, orderName, token ? reviewLink('bowa', shopifyOrderId!, token) : null)
 
   const res = await fetch('https://api.resend.com/emails', {
     method: 'POST',
@@ -300,12 +304,13 @@ export async function PATCH(
 
     // Send satisfaction email only on full delivery
     if (status === 'delivered' && !already_delivered && data.email && !data.satisfaction_sent_at) {
-      sendSatisfactionEmail(
+      await sendSatisfactionEmail(
         admin,
         params.id,
         data.email,
         data.customer_name ?? '',
-        data.order_name ?? ''
+        data.order_name ?? '',
+        data.shopify_order_id ?? null,
       ).catch((err) => console.error('[satisfaction email]', err))
     }
 
