@@ -44,7 +44,7 @@ function BarTip({ active, payload }: { active?: boolean; payload?: { name: strin
 export default function ProductOutcome({ p, o, estimateTip }: { p: ProductEconomics; o: AloneOutcome; estimateTip?: string }) {
   // Rarement vendu seul : en gris, sans verdict (pas assez de commandes pour conclure).
   const leftColor = o.rare ? '#9b9b93' : o.left >= 0 ? '#1a7f4b' : '#c7293a'
-  const signed = (n: number) => `${n >= 0 ? '+' : ''}${eur2(n)}`
+  const signed = (n: number) => (Math.abs(n) < 0.005 ? eur2(0) : `${n > 0 ? "+" : ""}${eur2(n)}`)
   const row = [{ name: p.title, purchase: o.purchase, shipping: o.shipping, pub: o.pub, fees: o.fees, left: o.left }]
   const costs = o.purchase + o.shipping + o.pub + o.fees
   const domain: [number, number] = [Math.min(0, o.left) * 1.05, Math.max(costs + Math.max(0, o.left), o.price) * 1.02]
