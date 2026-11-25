@@ -50,13 +50,60 @@ function monthOptions(): { value: string; label: string }[] {
 }
 
 const eur = (n: number) => new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR', maximumFractionDigits: 0 }).format(n)
+const eur2 = (n: number) => new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR', minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(n)
 const pct = (m: number, rev: number) => (rev > 0 ? (m / rev) * 100 : 0)
 
 interface Sale { product_title: string; shopify_product_id: string | null; variant_id: string | null; variant_title: string | null; quantity: number; revenue: number; order_id: string | null }
+// Ligne vendue PAYANTE (les articles offerts à 0 € sont exclus : leur coût est déjà
+// compris dans celui de l'article principal, ex. attaches poussette avec le sac).
+interface Line { orderId: string; pKey: string; title: string; vKey: string; variantTitle: string; qty: number; revenue: number; cost: number | null }
 interface VariantRow { key: string; variant_title: string; quantity: number; revenue: number; cost: number; shipping: number; missing: boolean }
 interface ProductRow { key: string; title: string; quantity: number; revenue: number; cost: number; shipping: number; margin: number; missing: boolean; variants: VariantRow[] }
 
 type SortKey = 'margin' | 'pct' | 'revenue'
+type ShipMode = 'prorata' | 'marginal'
+
+// Répartit la livraison de chaque commande sur ses lignes.
+//  - prorata  : au prorata du CA de chaque ligne ;
+//  - marginal : l'article principal (prix unitaire le plus élevé) porte la livraison,
+//    chaque article en plus ne porte que `extra` €. Le total reste le coût réel de la
+//    commande : l'article principal porte ce qui reste une fois les extras déduits.
+function shippingByLine(lines: Line[], shipFor: (orderId: string) => number, mode: ShipMode, extra: number): number[] {
+  const out = new Array<number>(lines.length).fill(0)
+  const byOrder = new Map<string, number[]>()
+  lines.forEach((l, i) => {
+    if (!l.orderId) return
+    const a = byOrder.get(l.orderId) ?? []
+    a.push(i); byOrder.set(l.orderId, a)
+  })
+  for (const [oid, idx] of byOrder) {
+    const S = shipFor(oid)
+    if (!S) continue
+    if (mode === 'prorata') {
+      const tot = idx.reduce((s, i) => s + lines[i].revenue, 0)
+      for (const i of idx) out[i] = tot > 0 ? S * (lines[i].revenue / tot) : 0
+      continue
+    }
+    let main = idx[0]
+    for (const i of idx) if (lines[i].revenue / lines[i].qty > lines[main].revenue / lines[main].qty) main = i
+    const others = idx.reduce((s, i) => s + lines[i].qty, 0) - 1
+    const e = others > 0 ? Math.min(extra, S / others) : 0
+    for (const i of idx) out[i] = e * lines[i].qty
+    out[main] = S - e * others + e * (lines[main].qty - 1)
+  }
+  return out
+}
+
+function Toggle<T extends string>({ value, options, onChange, title }: { value: T; options: [T, string][]; onChange: (v: T) => void; title?: string }) {
+  return (
+    <div className="inline-flex items-center bg-[#f5f5f3] rounded-lg p-0.5 gap-0.5" title={title}>
+      {options.map(([v, lbl]) => (
+        <button key={v} onClick={() => onChange(v)}
+          className={`px-2 py-0.5 rounded-md text-[10px] font-semibold ${value === v ? 'bg-white text-[#1a1a2e] shadow-sm' : 'text-[#6b6b63]'}`}>{lbl}</button>
+      ))}
+    </div>
+  )
+}
 
 export default function MarginsPage({ params }: { params: { brand: string } }) {
   const { brand } = params
@@ -70,25 +117,34 @@ export default function MarginsPage({ params }: { params: { brand: string } }) {
     return p === '7j' || p === '30j' || p === 'mois' ? p : 'mois'
   })
   const [month, setMonth]     = useState<string>(() => searchParams.get('month') ?? '')  // '' = période glissante · sinon 'YYYY-MM'
-  const [rows, setRows]       = useState<ProductRow[]>([])
+  const [lines, setLines]     = useState<Line[]>([])
+  const [freeOnlyOrders, setFreeOnlyOrders] = useState<string[]>([])  // commandes sans aucun article payant
+  const [freeItems, setFreeItems] = useState(0)
+  const [shipByOrder, setShipByOrder] = useState<Record<string, number> | null>(null)  // Moom : coût réel par commande
   const [loading, setLoading] = useState(true)
   const [sort, setSort]       = useState<SortKey>('margin')
+  const [tab, setTab]         = useUrlState<'produits' | 'commandes'>('tab', 'produits')
   const [view, setView]       = useUrlState<'total' | 'unit'>('view', 'unit')  // 'unit' = prix par article
+  const [shipMode, setShipMode] = useUrlState<ShipMode>('livraison', 'prorata')
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
   const [shipPerOrder, setShipPerOrder] = useState(0)
+  const [extraItem, setExtraItem] = useState(0)
+  const [feeRate, setFeeRate] = useState(0.017)
   const [realCov, setRealCov] = useState<{ matched: number; orders: number; fallback: number; label: string } | null>(null)
   const [basis, setBasis] = useUrlState<'contribution' | 'loaded'>('basis', 'contribution')
   // Charges hors produit/livraison (pub + frais fixes + frais transaction), au niveau période.
   const [overhead, setOverhead] = useState<{ marketing: number; fixed: number; fees: number; total: number } | null>(null)
   const [partial, setPartial] = useState(false)  // période non clôturée (mois courant / fenêtre glissante)
 
-  // Reflète la sélection dans l'URL (un mois précis a priorité sur la période).
+  // Reflète la sélection dans l'URL (un mois précis a priorité sur la période), sans
+  // perdre les autres paramètres (onglet, vue…).
   useEffect(() => {
-    const qs = new URLSearchParams()
+    const qs = new URLSearchParams(window.location.search)
+    qs.delete('month'); qs.delete('period')
     if (month) qs.set('month', month)
     else qs.set('period', period)
     const next = qs.toString()
-    if (next !== searchParams.toString()) router.replace(`${pathname}?${next}`, { scroll: false })
+    if (next !== window.location.search.replace(/^\?/, '')) router.replace(`${pathname}?${next}`, { scroll: false })
   }, [period, month, pathname, router, searchParams])
 
   const load = useCallback(async () => {
@@ -123,25 +179,15 @@ export default function MarginsPage({ params }: { params: { brand: string } }) {
           .select('shopify_variant_id, shopify_product_id, cost_price').eq('brand', brand),
         supabase.from('products')
           .select('shopify_id, cost_price').eq('brand', brand),
-        supabase.from('brand_settings').select('shipping_cost_per_order, transaction_fee_rate').eq('brand', brand).maybeSingle(),
+        supabase.from('brand_settings').select('shipping_cost_per_order, transaction_fee_rate, extra_item_cost').eq('brand', brand).maybeSingle(),
         supabase.from('ad_spends').select('spend').eq('brand', brand).gte('date', from).lte('date', to),
         fetch(`/api/fixed-costs?brand=${brand}`).then(r => r.json()).catch(() => []),
       ])
-      const shipPerOrder = settingsRes.data?.shipping_cost_per_order ?? 0
-      setShipPerOrder(shipPerOrder)
-
-      // Livraison = coût PAR COMMANDE, réparti sur les produits de la commande au
-      // prorata du CA de chaque ligne (une commande de 3 articles = 1 livraison).
-      const orderRevenue = new Map<string, number>()
-      for (const s of salesData) {
-        if (!s.order_id) continue
-        orderRevenue.set(s.order_id, (orderRevenue.get(s.order_id) ?? 0) + (s.revenue || 0))
-      }
-      const shipShare = (s: Sale): number => {
-        if (!shipPerOrder || !s.order_id) return 0
-        const tot = orderRevenue.get(s.order_id) ?? 0
-        return tot > 0 ? shipPerOrder * ((s.revenue || 0) / tot) : 0
-      }
+      const flat = Number(settingsRes.data?.shipping_cost_per_order ?? 0)
+      setShipPerOrder(flat)
+      setExtraItem(Number(settingsRes.data?.extra_item_cost ?? 0))
+      const rate = settingsRes.data?.transaction_fee_rate ?? 0.017
+      setFeeRate(rate)
 
       // Coût : variante → produit → moyenne variantes du produit
       const costByVariant = new Map<string, number>()
@@ -167,58 +213,43 @@ export default function MarginsPage({ params }: { params: { brand: string } }) {
         return costByProduct.get(pid) ?? costByProductAvg.get(pid) ?? null
       }
 
-      // Agrégation produit → variante
-      const prodMap = new Map<string, ProductRow & { varMap: Map<string, VariantRow> }>()
+      // Lignes payantes uniquement ; les articles offerts (0 €) ne comptent ni comme
+      // article ni comme coût.
+      const out: Line[] = []
+      const paidOrders = new Set<string>(), allOrders = new Set<string>()
+      let free = 0
       for (const s of salesData) {
         if (!s.product_title) continue
-        const pKey = s.shopify_product_id ? `p${s.shopify_product_id}` : `t${s.product_title}`
-        let p = prodMap.get(pKey)
-        if (!p) { p = { key: pKey, title: s.product_title, quantity: 0, revenue: 0, cost: 0, shipping: 0, margin: 0, missing: false, variants: [], varMap: new Map() }; prodMap.set(pKey, p) }
+        const oid = s.order_id ? String(s.order_id) : ''
+        if (oid) allOrders.add(oid)
+        if (!((s.revenue || 0) > 0) || !(s.quantity > 0)) { free += s.quantity || 0; continue }
+        if (oid) paidOrders.add(oid)
         const c = unitCost(s)
-        const q = s.quantity || 0, rev = s.revenue || 0, sh = shipShare(s)
-        p.quantity += q; p.revenue += rev; p.shipping += sh
-        if (c != null) p.cost += q * c; else p.missing = true
-
-        const vKey = s.variant_id ? `v${s.variant_id}` : `vt${s.variant_title ?? ''}`
-        let v = p.varMap.get(vKey)
-        if (!v) { v = { key: vKey, variant_title: s.variant_title || '—', quantity: 0, revenue: 0, cost: 0, shipping: 0, missing: false }; p.varMap.set(vKey, v) }
-        v.quantity += q; v.revenue += rev; v.shipping += sh
-        if (c != null) v.cost += q * c; else v.missing = true
+        out.push({
+          orderId: oid,
+          pKey: s.shopify_product_id ? `p${s.shopify_product_id}` : `t${s.product_title}`, title: s.product_title,
+          vKey: s.variant_id ? `v${s.variant_id}` : `vt${s.variant_title ?? ''}`, variantTitle: s.variant_title || '—',
+          qty: s.quantity, revenue: s.revenue || 0, cost: c == null ? null : c * s.quantity,
+        })
       }
+      setFreeItems(free)
+      setFreeOnlyOrders(Array.from(allOrders).filter(o => !paidOrders.has(o)))
 
-      const net = (r: { revenue: number; cost: number; shipping: number }) => r.revenue - r.cost - r.shipping
-      const out: ProductRow[] = [...prodMap.values()].map(p => ({
-        key: p.key, title: p.title, quantity: p.quantity, revenue: p.revenue, cost: p.cost, shipping: p.shipping,
-        margin: net(p), missing: p.missing,
-        variants: [...p.varMap.values()].sort((a, b) => net(b) - net(a)),
-      }))
-
-      // Moom : coût de livraison RÉEL par produit (factures logisticien) — remplace
-      // la moyenne. Réel là où la commande est facturée, moyenne en repli sinon.
+      // Moom : coût de livraison RÉEL par commande (factures logisticien), même calcul
+      // que le tableau de bord. Autres marques : tarif moyen paramétré.
       let cov: { matched: number; orders: number; fallback: number; label: string } | null = null
+      let byOrder: Record<string, number> | null = null
       if (brand === 'moom') {
         try {
           const ship = await fetch(`/api/margins/shipping?brand=moom&from=${from}&to=${to}`).then(r => r.json()) as
-            { byVariant?: Record<string, number>; byProduct?: Record<string, number>; matched?: number; orders?: number; cpo_fallback?: number; est_label?: string }
-          if (ship?.byVariant) {
-            for (const p of out) {
-              let pSum = 0
-              for (const v of p.variants) {
-                const vid = v.key.startsWith('v') ? v.key.slice(1) : ''
-                const s = ship.byVariant[vid]
-                if (s != null) v.shipping = s
-                pSum += v.shipping
-              }
-              const pid = p.key.startsWith('p') ? p.key.slice(1) : ''
-              p.shipping = ship.byProduct?.[pid] ?? pSum
-              p.margin = net(p)
-              p.variants.sort((a, b) => net(b) - net(a))
-            }
-            out.sort((a, b) => net(b) - net(a))
-            cov = { matched: ship.matched ?? 0, orders: ship.orders ?? 0, fallback: ship.cpo_fallback ?? shipPerOrder, label: ship.est_label ?? 'moyenne' }
+            { byOrder?: Record<string, number>; matched?: number; orders?: number; cpo_fallback?: number; est_label?: string }
+          if (ship?.byOrder) {
+            byOrder = ship.byOrder
+            cov = { matched: ship.matched ?? 0, orders: ship.orders ?? 0, fallback: ship.cpo_fallback ?? flat, label: ship.est_label ?? 'moyenne' }
           }
         } catch { /* garde l'estimation */ }
       }
+      setShipByOrder(byOrder)
       setRealCov(cov)
 
       // ── Charges hors produit/livraison, au niveau période ────────────────────
@@ -247,24 +278,71 @@ export default function MarginsPage({ params }: { params: { brand: string } }) {
       const ratio = isFullMonth ? 1 : days / 30.44
       setPartial(!isFullMonth)  // pub non « mûrie » + charges au prorata → net à interpréter avec prudence
       const fixed = Math.round((fixedTeam + fixedInfra + fixedApp) * ratio)
-
-      const feeRate = settingsRes.data?.transaction_fee_rate ?? 0.017
-      const fees = Math.round(periodRevenue * feeRate)
+      const fees = Math.round(periodRevenue * rate)
 
       setOverhead({ marketing: Math.round(marketing), fixed, fees, total: Math.round(marketing) + fixed + fees })
-      setRows(out)
+      setLines(out)
     } finally { setLoading(false) }
   }, [brand, period, month])
 
   useEffect(() => { load() }, [load])
 
+  const shipFor = useCallback((oid: string) => (shipByOrder ? shipByOrder[oid] ?? shipPerOrder : shipPerOrder), [shipByOrder, shipPerOrder])
+
+  // Agrégation produit → variante, livraison répartie selon la vue choisie.
+  const rows = useMemo<ProductRow[]>(() => {
+    const ship = shippingByLine(lines, shipFor, shipMode, extraItem)
+    const prodMap = new Map<string, ProductRow & { varMap: Map<string, VariantRow> }>()
+    lines.forEach((l, i) => {
+      let p = prodMap.get(l.pKey)
+      if (!p) { p = { key: l.pKey, title: l.title, quantity: 0, revenue: 0, cost: 0, shipping: 0, margin: 0, missing: false, variants: [], varMap: new Map() }; prodMap.set(l.pKey, p) }
+      let v = p.varMap.get(l.vKey)
+      if (!v) { v = { key: l.vKey, variant_title: l.variantTitle, quantity: 0, revenue: 0, cost: 0, shipping: 0, missing: false }; p.varMap.set(l.vKey, v) }
+      for (const r of [p, v]) {
+        r.quantity += l.qty; r.revenue += l.revenue; r.shipping += ship[i]
+        if (l.cost != null) r.cost += l.cost; else r.missing = true
+      }
+    })
+    const net = (r: { revenue: number; cost: number; shipping: number }) => r.revenue - r.cost - r.shipping
+    return Array.from(prodMap.values()).map(p => ({
+      key: p.key, title: p.title, quantity: p.quantity, revenue: p.revenue, cost: p.cost, shipping: p.shipping,
+      margin: net(p), missing: p.missing,
+      variants: Array.from(p.varMap.values()).sort((a, b) => net(b) - net(a)),
+    }))
+  }, [lines, shipFor, shipMode, extraItem])
+
+  // ── Vue par commande : CA, achat, livraison (1 coût par commande), frais ──────
+  const orderStats = useMemo(() => {
+    const orders = new Map<string, { revenue: number; cost: number; items: number }>()
+    for (const l of lines) {
+      if (!l.orderId) continue
+      const o = orders.get(l.orderId) ?? { revenue: 0, cost: 0, items: 0 }
+      o.revenue += l.revenue; o.cost += l.cost ?? 0; o.items += l.qty
+      orders.set(l.orderId, o)
+    }
+    for (const oid of freeOnlyOrders) if (!orders.has(oid)) orders.set(oid, { revenue: 0, cost: 0, items: 0 })
+    const n = orders.size
+    const pubPer = n > 0 && overhead ? overhead.marketing / n : 0
+    const fixedPer = n > 0 && overhead ? overhead.fixed / n : 0
+    type Bucket = { key: string; label: string; count: number; revenue: number; cost: number; ship: number; fees: number }
+    const mk = (key: string, label: string): Bucket => ({ key, label, count: 0, revenue: 0, cost: 0, ship: 0, fees: 0 })
+    const buckets = [mk('0', 'Articles offerts seuls'), mk('1', '1 article'), mk('2', '2 articles'), mk('3', '3 articles'), mk('4', '4 articles et plus')]
+    const all = mk('all', 'Toutes les commandes')
+    for (const [oid, o] of orders) {
+      const b = buckets[Math.min(o.items, 4)]
+      const ship = shipFor(oid), fees = o.revenue * feeRate
+      for (const t of [b, all]) { t.count++; t.revenue += o.revenue; t.cost += o.cost; t.ship += ship; t.fees += fees }
+    }
+    return { buckets: buckets.filter(b => b.key !== '0' || b.count > 0), all, n, pubPer, fixedPer }
+  }, [lines, freeOnlyOrders, overhead, shipFor, feeRate])
+
   const totals = useMemo(() => {
     const revenue  = rows.reduce((s, r) => s + r.revenue, 0)
     const cost     = rows.reduce((s, r) => s + r.cost, 0)
-    const shipping = rows.reduce((s, r) => s + r.shipping, 0)
+    const shipping = orderStats.all.ship   // toutes les commandes, y compris celles sans article payant
     const missing  = rows.filter(r => r.missing).length
     return { revenue, cost, shipping, margin: revenue - cost - shipping, missing }
-  }, [rows])
+  }, [rows, orderStats])
 
   // Charges (pub + frais fixes + transaction) réparties sur chaque ligne au prorata du CA.
   const ovhFor = useCallback((rev: number) => (
@@ -292,15 +370,31 @@ export default function MarginsPage({ params }: { params: { brand: string } }) {
     setExpanded(prev => { const n = new Set(prev); if (n.has(k)) n.delete(k); else n.add(k); return n })
   }
 
+  const shipSource = realCov
+    ? `Livraison au coût RÉEL facturé (factures logisticien) pour ${realCov.matched}/${realCov.orders} commandes${realCov.matched < realCov.orders ? ` — ${realCov.label} (${eur(realCov.fallback)} / commande) pour les non encore facturées` : ''}.`
+    : shipPerOrder > 0
+      ? `Livraison estimée à ${eur(shipPerOrder)} / commande (paramétré).`
+      : 'Aucun coût de livraison par commande paramétré pour cette marque (ex. Bowa = livraison en propre).'
+  const freeNote = freeItems > 0 ? ` ${freeItems.toLocaleString('fr-FR')} article(s) offert(s) à 0 € exclus (ni article, ni coût).` : ''
+
+
   return (
     <div className="min-h-screen bg-[#f8f7f5] pl-[72px]">
       <div className="max-w-5xl mx-auto px-6 py-8 space-y-6">
 
         {/* Header */}
         <div className="flex items-center justify-between gap-4 flex-wrap">
-          <div className="flex items-center gap-2">
-            <Percent size={18} className="text-[#aeb0c9]" />
-            <h1 className="text-xl font-bold text-[#1a1a2e]">Marges par produit</h1>
+          <div className="flex items-center gap-3">
+            <div className="flex items-center gap-2">
+              <Percent size={18} className="text-[#aeb0c9]" />
+              <h1 className="text-xl font-bold text-[#1a1a2e]">Marges</h1>
+            </div>
+            <div className="inline-flex items-center bg-white rounded-xl p-0.5 gap-0.5 border border-[#e8e8e4]">
+              {([['produits', 'Par produit'], ['commandes', 'Par commande']] as ['produits' | 'commandes', string][]).map(([t, lbl]) => (
+                <button key={t} onClick={() => setTab(t)}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${tab === t ? 'bg-[#1a1a2e] text-white' : 'text-[#6b6b63] hover:text-[#1a1a2e]'}`}>{lbl}</button>
+              ))}
+            </div>
           </div>
           <div className="flex items-center gap-2 flex-wrap">
             <div className="inline-flex items-center bg-white rounded-xl p-0.5 gap-0.5 border border-[#e8e8e4]">
@@ -327,7 +421,7 @@ export default function MarginsPage({ params }: { params: { brand: string } }) {
           {[
             { label: 'Chiffre d\'affaires', value: eur(totals.revenue), sub: '', color: '#1a1a2e' },
             { label: 'Coût produits (COGS)', value: eur(totals.cost), sub: '', color: '#6b6b63' },
-            { label: 'Livraison', value: eur(totals.shipping), sub: '', color: '#6b6b63' },
+            { label: 'Livraison', value: eur(totals.shipping), sub: orderStats.n > 0 ? `${eur2(totals.shipping / orderStats.n)} / commande` : '', color: '#6b6b63' },
             { label: 'Marge nette', value: eur(totals.margin), sub: `${pct(totals.margin, totals.revenue).toFixed(0)} % du CA`, color: '#1a7f4b' },
           ].map(c => (
             <div key={c.label} className="bg-white rounded-[16px] shadow-[0_2px_16px_rgba(0,0,0,0.06)] p-4">
@@ -339,11 +433,7 @@ export default function MarginsPage({ params }: { params: { brand: string } }) {
         </div>
 
         <p className="text-[11px] text-[#9b9b93]">
-          Marge nette = CA − coût d&apos;achat − livraison. {realCov
-            ? `Livraison au coût RÉEL facturé (factures logisticien) pour ${realCov.matched}/${realCov.orders} commandes${realCov.matched < realCov.orders ? ` — ${realCov.label} (${eur(realCov.fallback)} / commande) pour les non encore facturées` : ''}, répartie par produit au prorata du CA.`
-            : shipPerOrder > 0
-              ? `Livraison estimée à ${eur(shipPerOrder)} / commande (paramétré), répartie sur les produits de chaque commande au prorata du CA.`
-              : 'Aucun coût de livraison par commande paramétré pour cette marque (ex. Bowa = livraison en propre).'}
+          Marge nette = CA − coût d&apos;achat − livraison. {shipSource}{freeNote}
         </p>
 
         {/* Résultat net de la période (précis — après pub & frais fixes) */}
@@ -398,25 +488,86 @@ export default function MarginsPage({ params }: { params: { brand: string } }) {
           </div>
         )}
 
-        {/* Tableau */}
-        <div className="bg-white rounded-[20px] shadow-[0_2px_16px_rgba(0,0,0,0.06)] overflow-hidden">
-          <div className="flex items-center justify-between px-5 py-3 border-b border-[#f0f0ee]">
-            <div className="flex items-center gap-2">
-              <p className="text-[10px] font-semibold text-[#6b6b63] uppercase tracking-[0.1em]">Produits ({rows.length})</p>
-              <div className="inline-flex items-center bg-[#f5f5f3] rounded-lg p-0.5 gap-0.5">
-                {([['unit', 'Par unité'], ['total', 'Totaux']] as ['unit' | 'total', string][]).map(([v, lbl]) => (
-                  <button key={v} onClick={() => setView(v)}
-                    className={`px-2 py-0.5 rounded-md text-[10px] font-semibold ${view === v ? 'bg-white text-[#1a1a2e] shadow-sm' : 'text-[#6b6b63]'}`}>{lbl}</button>
-                ))}
+        {tab === 'commandes' ? (
+          /* ── Par commande, selon la taille du panier ───────────────────────── */
+          <div className="bg-white rounded-[20px] shadow-[0_2px_16px_rgba(0,0,0,0.06)] overflow-hidden">
+            <div className="flex items-center justify-between gap-3 flex-wrap px-5 py-3 border-b border-[#f0f0ee]">
+              <div className="flex items-center gap-2">
+                <p className="text-[10px] font-semibold text-[#6b6b63] uppercase tracking-[0.1em]">Par taille de panier ({orderStats.n.toLocaleString('fr-FR')} commandes)</p>
+                {overhead && <Toggle value={basis} onChange={setBasis} options={[['contribution', 'Contribution'], ['loaded', 'Chargée']]}
+                  title="Chargée = en plus, frais fixes répartis par commande" />}
               </div>
-              {overhead && (
-                <div className="inline-flex items-center bg-[#f5f5f3] rounded-lg p-0.5 gap-0.5" title="Contribution = CA − achat − livraison · Chargée = en plus, pub + frais fixes répartis au prorata du CA">
-                  {([['contribution', 'Contribution'], ['loaded', 'Chargée']] as ['contribution' | 'loaded', string][]).map(([b, lbl]) => (
-                    <button key={b} onClick={() => setBasis(b)}
-                      className={`px-2 py-0.5 rounded-md text-[10px] font-semibold ${basis === b ? 'bg-white text-[#1a1a2e] shadow-sm' : 'text-[#6b6b63]'}`}>{lbl}</button>
-                  ))}
-                </div>
-              )}
+              <p className="text-[10px] text-[#9b9b93]">Montants moyens par commande</p>
+            </div>
+            {loading ? (
+              <div className="p-10 text-center text-sm text-[#9b9b93]">Chargement…</div>
+            ) : orderStats.n === 0 ? (
+              <div className="p-10 text-center text-sm text-[#9b9b93]">Aucune commande sur la période.</div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-xs">
+                  <thead>
+                    <tr className="text-[#9b9b93] border-b border-[#f0f0ee]">
+                      <th className="text-left font-medium py-2 pl-4">Panier</th>
+                      <th className="text-right font-medium py-2">Cmd</th>
+                      <th className="text-right font-medium py-2">Part</th>
+                      <th className="text-right font-medium py-2">Panier moyen</th>
+                      <th className="text-right font-medium py-2">Achat</th>
+                      <th className="text-right font-medium py-2">Livraison</th>
+                      <th className="text-right font-medium py-2">Frais</th>
+                      <th className="text-right font-medium py-2">Contribution</th>
+                      <th className="text-right font-medium py-2">Pub</th>
+                      <th className={`text-right font-medium py-2 ${basis === 'loaded' ? '' : 'pr-4'}`}>Après pub</th>
+                      {basis === 'loaded' && <th className="text-right font-medium py-2">Frais fixes</th>}
+                      {basis === 'loaded' && <th className="text-right font-medium py-2 pr-4">Résultat</th>}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {[...orderStats.buckets, orderStats.all].map(b => {
+                      const per = (x: number) => (b.count > 0 ? x / b.count : 0)
+                      const contrib = per(b.revenue - b.cost - b.ship - b.fees)
+                      const afterPub = contrib - orderStats.pubPer
+                      const loaded = afterPub - orderStats.fixedPer
+                      const isAll = b.key === 'all'
+                      const color = (x: number) => (x >= 0 ? '#1a7f4b' : '#c7293a')
+                      return (
+                        <tr key={b.key} className={`border-b border-[#f6f6f4] ${isAll ? 'bg-[#fafaf9] font-semibold' : ''}`}>
+                          <td className="py-2.5 pl-4 text-[#1a1a2e] font-medium whitespace-nowrap">{b.label}</td>
+                          <td className="text-right tabular-nums text-[#6b6b63]">{b.count.toLocaleString('fr-FR')}</td>
+                          <td className="text-right tabular-nums text-[#9b9b93]">{pct(b.count, orderStats.n).toFixed(0)} %</td>
+                          <td className="text-right tabular-nums text-[#1a1a2e]">{eur2(per(b.revenue))}</td>
+                          <td className="text-right tabular-nums text-[#9b9b93]">{eur2(per(b.cost))}</td>
+                          <td className="text-right tabular-nums text-[#9b9b93]">{eur2(per(b.ship))}</td>
+                          <td className="text-right tabular-nums text-[#9b9b93]">{eur2(per(b.fees))}</td>
+                          <td className="text-right tabular-nums font-semibold" style={{ color: color(contrib) }}>
+                            {eur2(contrib)} <span className="text-[10px] font-medium text-[#9b9b93]">{pct(contrib, per(b.revenue)).toFixed(0)} %</span>
+                          </td>
+                          <td className="text-right tabular-nums text-[#9b9b93]">{eur2(orderStats.pubPer)}</td>
+                          <td className={`text-right tabular-nums font-semibold ${basis === 'loaded' ? '' : 'pr-4'}`} style={{ color: color(afterPub) }}>{eur2(afterPub)}</td>
+                          {basis === 'loaded' && <td className="text-right tabular-nums text-[#9b9b93]">{eur2(orderStats.fixedPer)}</td>}
+                          {basis === 'loaded' && <td className="text-right tabular-nums font-semibold pr-4" style={{ color: color(loaded) }}>{eur2(loaded)}</td>}
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+            <p className="text-[11px] text-[#9b9b93] px-5 py-3 border-t border-[#f0f0ee]">
+              Taille du panier = articles payants (une ligne en quantité 2 compte pour 2 ; articles offerts à 0 € exclus). Contribution = CA − achat − livraison (un seul coût par commande) − frais de transaction ({(feeRate * 100).toLocaleString('fr-FR')} % du CA). Pub et frais fixes = dépense de la période ÷ nombre de commandes, le même montant pour chaque commande.
+            </p>
+          </div>
+        ) : (
+        /* Tableau produits */
+        <div className="bg-white rounded-[20px] shadow-[0_2px_16px_rgba(0,0,0,0.06)] overflow-hidden">
+          <div className="flex items-center justify-between gap-3 flex-wrap px-5 py-3 border-b border-[#f0f0ee]">
+            <div className="flex items-center gap-2 flex-wrap">
+              <p className="text-[10px] font-semibold text-[#6b6b63] uppercase tracking-[0.1em]">Produits ({rows.length})</p>
+              <Toggle value={view} onChange={setView} options={[['unit', 'Par unité'], ['total', 'Totaux']]} />
+              {overhead && <Toggle value={basis} onChange={setBasis} options={[['contribution', 'Contribution'], ['loaded', 'Chargée']]}
+                title="Contribution = CA − achat − livraison · Chargée = en plus, pub + frais fixes répartis au prorata du CA" />}
+              <Toggle value={shipMode} onChange={setShipMode} options={[['prorata', 'Livr. au prorata'], ['marginal', 'Marginale']]}
+                title={`Au prorata : la livraison de la commande est répartie selon le CA de chaque article · Marginale : l'article principal (le plus cher) porte la livraison, chaque article en plus ${extraItem > 0 ? `${eur2(extraItem)}` : '0 €'} (Paramètres)`} />
             </div>
             <div className="inline-flex items-center gap-1 text-[10px]">
               <span className="text-[#9b9b93] mr-1">Trier :</span>
@@ -426,6 +577,11 @@ export default function MarginsPage({ params }: { params: { brand: string } }) {
               ))}
             </div>
           </div>
+          {shipMode === 'marginal' && (
+            <p className="text-[11px] text-[#6b6b63] px-5 py-2 bg-[#fafaf9] border-b border-[#f0f0ee]">
+              Vue marginale : l&apos;article le plus cher de chaque commande porte la livraison ; chaque article en plus ne coûte que {eur2(extraItem)} (réglable dans Paramètres › Livraison). Le total de livraison ne change pas.
+            </p>
+          )}
 
           {loading ? (
             <div className="p-10 text-center text-sm text-[#9b9b93]">Chargement…</div>
@@ -496,6 +652,7 @@ export default function MarginsPage({ params }: { params: { brand: string } }) {
             </table>
           )}
         </div>
+        )}
       </div>
     </div>
   )

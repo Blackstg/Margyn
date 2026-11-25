@@ -1043,6 +1043,7 @@ export default function SettingsPage() {
   // ── Shipping (moom / krom) ───────────────────────────────────────────────
   const [shippingCosts, setShippingCosts]   = useState<Record<BrandTab, string>>({ bowa: '17', moom: '17', krom: '27.21', yone: '0' })
   const [shippingSave, setShippingSave]     = useState<Record<BrandTab, SaveState>>({ bowa: 'idle', moom: 'idle', krom: 'idle', yone: 'idle' })
+  const [extraItemCosts, setExtraItemCosts] = useState<Record<BrandTab, string>>({ bowa: '0', moom: '0', krom: '0', yone: '0' })
 
   // ── Config ───────────────────────────────────────────────────────────────
   const [config, setConfig]                 = useState<Config>({ roasTarget: '3.0', stockThreshold: '20' })
@@ -1055,7 +1056,7 @@ export default function SettingsPage() {
     setLoading(true)
     const [{ data }, { data: shippingData }] = await Promise.all([
       supabase.from('fixed_costs').select('id, label, amount, category, brand').eq('month', SENTINEL),
-      supabase.from('brand_settings').select('brand, shipping_cost_per_order'),
+      supabase.from('brand_settings').select('brand, shipping_cost_per_order, extra_item_cost'),
     ])
 
     const get = (brand: string, category: string) =>
@@ -1085,6 +1086,8 @@ export default function SettingsPage() {
     if (shippingData) {
       const map = Object.fromEntries(shippingData.map((r) => [r.brand, String(r.shipping_cost_per_order ?? 17)])) as Partial<Record<BrandTab, string>>
       setShippingCosts((prev) => ({ ...prev, ...map }))
+      const extra = Object.fromEntries(shippingData.map((r) => [r.brand, String(r.extra_item_cost ?? 0)])) as Partial<Record<BrandTab, string>>
+      setExtraItemCosts((prev) => ({ ...prev, ...extra }))
     }
     setLoading(false)
   }, [])
@@ -1266,10 +1269,11 @@ export default function SettingsPage() {
 
   async function saveShipping(brand: BrandTab) {
     const rate = parseFloat(shippingCosts[brand])
-    if (isNaN(rate) || rate < 0) return
+    const extra = parseFloat(extraItemCosts[brand] || '0')
+    if (isNaN(rate) || rate < 0 || isNaN(extra) || extra < 0) return
     setShippingSave((prev) => ({ ...prev, [brand]: 'saving' }))
     try {
-      const { error } = await supabase.from('brand_settings').upsert({ brand, shipping_cost_per_order: rate }, { onConflict: 'brand' })
+      const { error } = await supabase.from('brand_settings').upsert({ brand, shipping_cost_per_order: rate, extra_item_cost: extra }, { onConflict: 'brand' })
       if (error) throw error
       setShippingSave((prev) => ({ ...prev, [brand]: 'saved' }))
       setTimeout(() => setShippingSave((prev) => ({ ...prev, [brand]: 'idle' })), 2500)
@@ -1521,6 +1525,20 @@ export default function SettingsPage() {
                         className="w-24 text-right text-sm text-[#1a1a18] border border-[#e8e8e4] rounded-lg px-3 py-1.5 focus:border-[#1a1a2e] focus:outline-none transition-colors"
                       />
                       <span className="text-xs text-[#6b6b63]">€ / commande</span>
+                    </div>
+                  </div>
+                  <div className="flex items-center justify-between gap-4 px-6 py-4 border-t border-[#f0f0ee]">
+                    <div>
+                      <p className="text-sm font-medium text-[#1a1a2e]">Coût par article supplémentaire</p>
+                      <p className="text-xs text-[#6b6b63] mt-0.5">Marges, vue « Marginale » : la livraison est portée par l&apos;article principal, chaque article en plus ne coûte que ce montant (articles offerts à 0 € exclus)</p>
+                    </div>
+                    <div className="flex items-center gap-2 shrink-0">
+                      <input type="number" value={extraItemCosts[b]}
+                        onChange={(e) => setExtraItemCosts((prev) => ({ ...prev, [b]: e.target.value }))}
+                        min="0" step="0.01"
+                        className="w-24 text-right text-sm text-[#1a1a18] border border-[#e8e8e4] rounded-lg px-3 py-1.5 focus:border-[#1a1a2e] focus:outline-none transition-colors"
+                      />
+                      <span className="text-xs text-[#6b6b63]">€ / article</span>
                     </div>
                   </div>
                   <div className="flex items-center justify-end px-6 py-4 border-t border-[#f0f0ee] bg-[#faf9f8]">
