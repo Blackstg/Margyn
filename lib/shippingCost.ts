@@ -467,10 +467,11 @@ export async function shippingAnomalies(brand: string): Promise<{ anomalies: Ano
     const same = solo.filter(b => b !== a && b.w > 0 && Math.abs(b.w - a.w) / a.w <= 0.1 && a.ship >= b.ship * 1.3).sort((x, y) => x.ship - y.ship)[0]
     if (same) push({ kind: 'poids', product: title(a.k), compared: title(same.k), perParcel: a.ship - same.ship, parcelsPerMonth: a.perMonth,
       detail: `Même poids que ${title(same.k)} (${kg(a.w)}) mais transport ${eur2(a.ship)} contre ${eur2(same.ship)} par colis (${a.n} et ${same.n} colis observés).` })
-    // Plus léger (≤ 70 %) mais plus cher qu'un produit plus lourd.
-    const heavier = solo.filter(b => b !== a && b.w > 0 && a.w <= b.w * 0.7 && a.ship + a.serv > b.ship + b.serv).sort((x, y) => (x.ship + x.serv) - (y.ship + y.serv))[0]
-    if (heavier) push({ kind: 'léger', product: title(a.k), compared: title(heavier.k), perParcel: (a.ship + a.serv) - (heavier.ship + heavier.serv), parcelsPerMonth: a.perMonth,
-      detail: `${kg(a.w)} contre ${kg(heavier.w)} pour ${title(heavier.k)}, mais colis facturé ${eur2(a.ship + a.serv)} contre ${eur2(heavier.ship + heavier.serv)}.` })
+    // Plus léger (≤ 70 %) mais transport plus cher qu'un produit plus lourd (la
+    // préparation est comparée à part, pour ne pas compter deux fois le même écart).
+    const heavier = solo.filter(b => b !== a && b.w > 0 && a.w <= b.w * 0.7 && a.ship > b.ship).sort((x, y) => x.ship - y.ship)[0]
+    if (heavier) push({ kind: 'léger', product: title(a.k), compared: title(heavier.k), perParcel: a.ship - heavier.ship, parcelsPerMonth: a.perMonth,
+      detail: `${kg(a.w)} contre ${kg(heavier.w)} pour ${title(heavier.k)}, mais transport ${eur2(a.ship)} contre ${eur2(heavier.ship)} par colis.` })
   }
   // Préparation : comparée au tarif le plus bas pratiqué.
   const minServ = Math.min(...solo.map(s => s.serv))
