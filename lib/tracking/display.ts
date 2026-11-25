@@ -190,6 +190,7 @@ export function countryOf(loc: string | null | undefined): string | null {
 // Europe (hors CN) c'est le côté destination — le hub de dédouanement + tri
 // YunExpress est en Belgique (Liège) MÊME pour une livraison en France, donc on
 // ne peut pas exiger le pays de destination exact, seulement « hors origine ».
+const EUROPE = new Set(['FR', 'BE', 'LU', 'CH', 'MC', 'DE', 'NL', 'ES', 'IT', 'PT', 'AT', 'IE'])
 export function phaseFromEvent(label: string, code: string | null, country: string | null): number | null {
   const c = (code ?? '').toLowerCase()
   if (c.startsWith('delivered'))                                            return PHASE_IDX.delivered
@@ -231,7 +232,10 @@ export function phaseFromEvent(label: string, code: string | null, country: stri
   // est du bruit et NE compte pas — seul « remis au transporteur local » (réel) compte.
   // "acheminement / agence (régionale) de destination / arrivé en France" = étapes
   // domestiques (destination) → « Au centre de tri », pas transit international.
-  if (destSide && /centre de tri|sort facility|arrived at hub|\bhub\b|départ du centre|ready for outbound|outbound|remis au transporteur local|pris en charge|cargo terminal|livraison|\btri\b|acheminement|agence|arriv[ée] en france/.test(L))
+  // Colissimo : « disponible / vous attend dans votre point de retrait » = colis à
+  // récupérer (comme AvailableForPickup), pas un simple transit.
+  if (destSide && /disponible dans votre point|vous attend dans votre point/.test(L)) return PHASE_IDX.delivery
+  if (destSide && /centre de tri|sort facility|arrived at hub|\bhub\b|départ du centre|ready for outbound|outbound|remis au transporteur local|pris en charge|cargo terminal|livr|\btri\b|achemin|agence|arriv[ée] en france|plate-?forme|site de distribution|point de retrait|relais|consigne|point postal/.test(L))
     return PHASE_IDX.sorting
 
   // Départ de l'entrepôt d'origine (Chine) — UNIQUEMENT côté origine. Un « pris en
@@ -239,6 +243,10 @@ export function phaseFromEvent(label: string, code: string | null, country: stri
   // expédié » (bug : statut de départ affiché alors que le colis est déjà en France).
   if (!destSide && /centre de tri \((départ|origine)\)|origin facility|pris en charge/.test(L)) return PHASE_IDX.shipped
   if (/informations d’expédition|information received|préparation/.test(L)) return PHASE_IDX.prepared
+  // Scan en Europe non reconnu (Colissimo : incident, nouvelle tentative, retour…) :
+  // le colis est déjà dans le pays, jamais « en transit international » (cas Mōom
+  // #33691 : « en transit sur nos plateformes logistiques » en France).
+  if (country && EUROPE.has(country)) return PHASE_IDX.sorting
   // Tout le reste du voyage = transit international
   if (c.startsWith('intransit') || c.startsWith('exception') || L.length > 0)  return PHASE_IDX.transit
   return null
