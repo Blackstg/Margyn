@@ -97,6 +97,7 @@ test('grille : utilisée seulement si tous les poids sont connus, la facture res
   assert.equal(gridCost(grid, 'BE', { tapis: 1 }, { tapis: 650 }), 16)                        // pays absent → '*'
   assert.equal(gridCost(grid, 'FR', { sac: 1, cary: 1 }, { sac: 1800 }), null)                // poids manquant
   assert.equal(gridCost(grid, 'FR', { sac: 2 }, { sac: 1800 }), null)                         // 3,6 kg : hors grille
+  assert.equal(gridCost(grid, 'FR', { tapis: 1, tip: 1 }, { tapis: 650 }), 7)                // pourboire : pas de poids requis
   const m = trainModel(train)
   assert.deepEqual(orderCost(undefined, m, sample(1), 21, 10), { cost: 10, source: 'grille' })
   assert.deepEqual(orderCost(30, m, sample(1), 21, 10), { cost: 30, source: 'réel' })

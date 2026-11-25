@@ -18,6 +18,8 @@ export type Zone = 'FR' | 'X'
 export const shippingKey = (title: string) => title.trim().toLowerCase().replace(/\s+/g, ' ')
 const ATTACH_RE = /^strap\s+([^™\s]+)/i
 export const isAttachment = (title: string) => ATTACH_RE.test(title.trim())
+// Lignes sans colis (pourboire, carte cadeau, jeu concours) : aucun poids à saisir.
+export const isNonPhysical = (title: string) => /^(tip|pourboire)$|carte cadeau|gift card|concours/i.test(title.trim())
 
 // Produits d'un colis → { clé: quantité }. Les attaches offertes qui accompagnent
 // leur produit (« Strap MumExplorer™ … » avec « MumExplorer™ … ») sont fusionnées
@@ -60,6 +62,7 @@ export function gridCost(grid: ShippingGrid | null, country: string, products: R
   if (!grid || !grid.rows.length) return null
   let g = 0
   for (const [k, q] of Object.entries(products)) {
+    if (isNonPhysical(k)) continue
     const w = weights[k]
     if (!(w > 0)) return null
     g += w * q

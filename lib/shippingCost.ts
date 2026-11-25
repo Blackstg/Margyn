@@ -14,7 +14,7 @@
 import 'server-only'
 import { createAdminClient } from '@/lib/supabase'
 import {
-  trainModel, orderCost, backtest, sizeOf, predict, basketProducts, gridCost, isAttachment, shippingKey,
+  trainModel, orderCost, backtest, sizeOf, predict, basketProducts, gridCost, isAttachment, isNonPhysical, shippingKey,
   type ShippingModel, type OrderFeatures, type Zone, type ShippingGrid,
 } from '@/lib/shipping/model'
 
@@ -312,7 +312,7 @@ export async function saveGrid(brand: string, rows: ShippingGrid['rows']): Promi
 export async function gridStatus(brand: string) {
   const [grid, weights, inv] = await Promise.all([loadGrid(brand), loadWeights(brand), loadInvoices(brand)])
   const cached = await getModel(brand, inv)
-  const sold = cached ? Object.entries(cached.stats.perMonth).filter(([k]) => !isAttachment(cached.titles[k] ?? k)) : []
+  const sold = cached ? Object.entries(cached.stats.perMonth).filter(([k]) => !isAttachment(cached.titles[k] ?? k) && !isNonPhysical(k)) : []
   const missing = sold.filter(([k]) => !(weights[k] > 0)).map(([k, perMonth]) => ({ title: cached!.titles[k] ?? k, perMonth: Math.round(perMonth) }))
     .sort((a, b) => b.perMonth - a.perMonth)
   return { grid: grid ? { importedAt: grid.importedAt, rows: grid.rows.length, prepPerOrder: grid.prepPerOrder } : null, missingWeights: missing, products: sold.length }
