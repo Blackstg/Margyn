@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef } from 'react'
 import { useUrlState } from '@/lib/useUrlState'
+import ShippingForecastCheck from '@/components/margins/ShippingForecastCheck'
 import { read, utils } from 'xlsx'
 import { Upload, TrendingUp, Sparkles, AlertTriangle, CheckCircle, Clock, Loader2, Scale, Gavel } from 'lucide-react'
 
@@ -237,7 +238,7 @@ export default function FacturesLogisticienPage() {
   const [saved, setSaved]                   = useState(false)
   const [parseError, setParseError]         = useState('')
   const [usdEurRate, setUsdEurRate]         = useState(0.92)
-  const [view, setView]                     = useUrlState<'facture' | 'contestation'>('view', 'facture')
+  const [view, setView]                     = useUrlState<'facture' | 'contestation' | 'prevision'>('view', 'facture')
 
   // Taux USD→EUR live (frankfurter.app, gratuit sans clé)
   useEffect(() => {
@@ -504,7 +505,7 @@ Historique FW : ${history.map(h => `${h.month}: ${h.fw_count} FW ($${h.fw_total?
 
         {/* Onglets */}
         <div className="flex items-center gap-1 border-b border-[#e8e4e0]">
-          {([['facture', 'Facturation'], ['contestation', 'Contestation']] as const).map(([v, l]) => (
+          {([['facture', 'Facturation'], ['contestation', 'Contestation'], ['prevision', 'Prévision livraison']] as const).map(([v, l]) => (
             <button
               key={v}
               onClick={() => setView(v)}
@@ -518,7 +519,9 @@ Historique FW : ${history.map(h => `${h.month}: ${h.fw_count} FW ($${h.fw_total?
           ))}
         </div>
 
-        {view === 'contestation' ? (
+        {view === 'prevision' ? (
+          <ShippingForecastCheck brand="moom" />
+        ) : view === 'contestation' ? (
           <ContestationView
             rate={usdEurRate}
             months={sortedHistory.map(h => h.month)}
