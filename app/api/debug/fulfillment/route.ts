@@ -45,7 +45,7 @@ export async function GET(req: NextRequest) {
   let rateSource = 'fallback (0.92)'
   let rateActualDate = rateDate
   try {
-    const rateRes = await fetch(`https://api.frankfurter.app/${rateDate}?from=USD&to=EUR`)
+    const rateRes = await fetch(`https://api.frankfurter.dev/v1/${rateDate}?from=USD&to=EUR`)
     const rateData = await rateRes.json() as { date?: string; rates?: { EUR?: number } }
     eurRate = rateData.rates?.EUR ?? 0.92
     rateActualDate = rateData.date ?? rateDate

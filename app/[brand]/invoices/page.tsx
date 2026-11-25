@@ -241,7 +241,7 @@ export default function FacturesLogisticienPage() {
 
   // Taux USD→EUR live (frankfurter.app, gratuit sans clé)
   useEffect(() => {
-    fetch('https://api.frankfurter.app/latest?from=USD&to=EUR')
+    fetch('https://api.frankfurter.dev/v1/latest?from=USD&to=EUR')
       .then(r => r.json())
       .then(d => { if (d.rates?.EUR) setUsdEurRate(d.rates.EUR) })
       .catch(() => {})

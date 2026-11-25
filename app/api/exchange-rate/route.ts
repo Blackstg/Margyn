@@ -19,7 +19,7 @@ export async function GET(req: NextRequest) {
     : `${y}-${String(m + 1).padStart(2, '0')}-01`
   const date = nextMonth
   try {
-    const res = await fetch(`https://api.frankfurter.app/${date}?from=USD&to=EUR`, {
+    const res = await fetch(`https://api.frankfurter.dev/v1/${date}?from=USD&to=EUR`, {
       next: { revalidate: 86400 }, // cache 24h — historical rates don't change
     })
     if (!res.ok) throw new Error(`frankfurter ${res.status}`)
