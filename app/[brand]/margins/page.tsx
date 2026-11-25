@@ -8,6 +8,11 @@ import { useSearchParams, useRouter, usePathname } from 'next/navigation'
 import { createBrowserClient } from '@supabase/auth-helpers-nextjs'
 import { ChevronRight, Percent, AlertTriangle } from 'lucide-react'
 import { shippingKey } from '@/lib/shipping/model'
+import { aloneOutcome, addOutcomes, takeaways, type ProductEconomics } from '@/lib/margins/packRules'
+import ProductOutcome, { SEGMENTS } from '@/components/margins/ProductOutcome'
+import PackGrid from '@/components/margins/PackGrid'
+import TakeawayCards from '@/components/margins/TakeawayCards'
+import TypicalBasketCards from '@/components/margins/TypicalBasketCards'
 
 const supabase = createBrowserClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -152,6 +157,9 @@ export default function MarginsPage({ params }: { params: { brand: string } }) {
   const [typical, setTypical] = useState<TypicalBasket[]>([])
   const [detail, setDetail] = useUrlState<'simple' | 'detail'>('colonnes', 'simple')
   const [showThin, setShowThin] = useState(false)
+  const [showFigures, setShowFigures] = useState(false)   // tableaux détaillés (Par commande)
+  // Prix catalogue, coût d'achat et image par produit (clé d'expédition = nom).
+  const [catalog, setCatalog] = useState<Record<string, { title: string; price: number; purchase: number; image: string | null }>>({})
   const [loading, setLoading] = useState(true)
   const [sort, setSort]       = useState<SortKey>('margin')
   const [tab, setTab]         = useUrlState<'produits' | 'commandes'>('tab', 'produits')
@@ -206,7 +214,7 @@ export default function MarginsPage({ params }: { params: { brand: string } }) {
       const [salesData, variantsRes, productsRes, settingsRes, spendRes, fixedCostsRaw] = await Promise.all([
         fetchAllSales(),
         supabase.from('product_variants')
-          .select('shopify_variant_id, shopify_product_id, cost_price').eq('brand', brand),
+          .select('shopify_variant_id, shopify_product_id, cost_price, product_title, sell_price, image_url, product_status').eq('brand', brand),
         supabase.from('products')
           .select('shopify_id, cost_price').eq('brand', brand),
         supabase.from('brand_settings').select('shipping_cost_per_order, transaction_fee_rate, extra_item_cost').eq('brand', brand).maybeSingle(),
@@ -233,6 +241,21 @@ export default function MarginsPage({ params }: { params: { brand: string } }) {
         }
       }
       for (const p of productsRes.data ?? []) if (p.cost_price != null) costByProduct.set(String(p.shopify_id), p.cost_price)
+
+      // Catalogue par produit : moyenne des variantes actives (prix catalogue, achat).
+      type V = { product_title: string | null; sell_price: number | null; cost_price: number | null; image_url: string | null; product_status: string | null }
+      const cat: Record<string, { title: string; prices: number[]; costs: number[]; image: string | null }> = {}
+      for (const v of (variantsRes.data ?? []) as V[]) {
+        if (!v.product_title || v.product_status !== 'active') continue
+        const k = shippingKey(v.product_title)
+        const c = cat[k] ??= { title: v.product_title.split('™')[0].trim(), prices: [], costs: [], image: null }
+        if (v.sell_price) c.prices.push(Number(v.sell_price))
+        if (v.cost_price != null) c.costs.push(Number(v.cost_price))
+        if (!c.image && v.image_url) c.image = v.image_url
+      }
+      const mean = (a: number[]) => (a.length ? a.reduce((x, y) => x + y, 0) / a.length : 0)
+      setCatalog(Object.fromEntries(Object.entries(cat).filter(([, c]) => c.prices.length && c.costs.length)
+        .map(([k, c]) => [k, { title: c.title, price: mean(c.prices), purchase: mean(c.costs), image: c.image }])))
       const costByProductAvg = new Map<string, number>()
       for (const [k, a] of prodVarCosts) costByProductAvg.set(k, a.reduce((s, x) => s + x, 0) / a.length)
 
@@ -410,13 +433,39 @@ export default function MarginsPage({ params }: { params: { brand: string } }) {
     setExpanded(prev => { const n = new Set(prev); if (n.has(k)) n.delete(k); else n.add(k); return n })
   }
 
+  // ── Ce qu'il reste par produit (vendu seul / ajouté dans un colis) ─────────────
+  const economics = useMemo(() => {
+    if (!model) return { rows: [], thin: [] as string[], ctx: null }
+    const sold: Record<string, number> = {}
+    for (const l of lines) { const k = shippingKey(l.title); sold[k] = (sold[k] ?? 0) + l.qty }
+    const single = orderStats.buckets.find(b => b.key === '1')
+    const ctx = { pubPerOrder: orderStats.pubPer, feeRate, portAlone: single && single.count ? single.port / single.count : 0 }
+    const rows: { p: ProductEconomics; alone: ReturnType<typeof aloneOutcome>; add: ReturnType<typeof addOutcomes> }[] = []
+    const thin: string[] = []
+    for (const m of model.products) {
+      const c = catalog[m.key]
+      if (!c) continue
+      if (!m.used) { if (sold[m.key]) thin.push(c.title); continue }
+      const p: ProductEconomics = { key: m.key, title: c.title, image: c.image, price: c.price, purchase: c.purchase, sendAlone: model.base + m.coef, addCost: Math.max(0, m.coef), sold: sold[m.key] ?? 0 }
+      rows.push({ p, alone: aloneOutcome(p, ctx), add: addOutcomes(p) })
+    }
+    return { rows, thin, ctx }
+  }, [model, catalog, lines, orderStats, feeRate])
+  const takeawayItems = useMemo(() => takeaways(economics.rows, orderStats.buckets.filter(b => b.key !== '0').map(b => {
+    const per = (x: number) => (b.count ? x / b.count : 0)
+    return { items: Number(b.key), label: b.label, count: b.count, afterPub: per(b.revenue - b.cost - b.ship + b.port - b.fees) - orderStats.pubPer }
+  })), [economics.rows, orderStats])
+  const monthsLabel = model
+    ? `${new Date(model.window.from).toLocaleDateString('fr-FR', { month: 'long' })} à ${new Date(model.window.to).toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' })}`
+    : ''
+
   const shipSource = shipNote
     ? `${shipNote}.`
     : shipPerOrder > 0
       ? `Livraison estimée à ${eur(shipPerOrder)} / commande (paramétré).`
       : 'Aucun coût de livraison par commande paramétré pour cette marque (ex. Bowa = livraison en propre).'
   const forecastShare = orderStats.n > 0 ? orderStats.all.forecast / orderStats.n : 0
-  const forecastTip = forecastShare > 0 ? `${Math.round(forecastShare * 100)} % des commandes ne sont pas encore facturées par le logisticien : leur coût est estimé d'après les produits du colis` : undefined
+  const forecastTip = forecastShare > 0 ? `${Math.round(forecastShare * 100)} % des commandes ne sont pas encore facturées par le logisticien : leur coût est estimé d'après les factures des ventes de ${monthsLabel}` : undefined
   const hasShipData = !!shipByOrder
   const freeNote = freeItems > 0 ? ` ${freeItems.toLocaleString('fr-FR')} article(s) offert(s) à 0 € exclus (ni article, ni coût).` : ''
 
@@ -458,6 +507,9 @@ export default function MarginsPage({ params }: { params: { brand: string } }) {
             </select>
           </div>
         </div>
+
+        {/* À retenir (Par commande) */}
+        {tab === 'commandes' && !loading && takeawayItems.length > 0 && <TakeawayCards items={takeawayItems} />}
 
         {/* Totaux */}
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
@@ -534,6 +586,61 @@ export default function MarginsPage({ params }: { params: { brand: string } }) {
         )}
 
         {tab === 'commandes' ? (
+          <>
+          {/* ── Vendu seul : où part le prix de vente ─────────────────────────── */}
+          {economics.rows.length > 0 && economics.ctx && (
+            <section className="space-y-3">
+              <div className="flex items-end justify-between gap-3 flex-wrap">
+                <div>
+                  <h2 className="text-sm font-semibold text-[#1a1a2e]">Vendu seul : ce qu&apos;il reste par commande</h2>
+                  <p className="text-[11px] text-[#9b9b93] mt-0.5">Prix de vente moins l&apos;achat, l&apos;envoi, la pub ({eur2(economics.ctx.pubPerOrder)} par commande sur la période) et les frais de paiement.</p>
+                </div>
+                <div className="flex items-center gap-3 flex-wrap text-[10px] text-[#6b6b63]">
+                  {SEGMENTS.map(sg => <span key={sg.key} className="inline-flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-sm" style={{ background: sg.color }} />{sg.label}</span>)}
+                  <span className="inline-flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-sm bg-[#1a7f4b]" />Ce qu&apos;il reste</span>
+                  <ShipBadge share={forecastShare} tip={forecastTip} />
+                </div>
+              </div>
+              <div className="grid gap-3 grid-cols-1 lg:grid-cols-2">
+                {[...economics.rows].sort((a, b) => a.alone.left - b.alone.left).map(r => (
+                  <ProductOutcome key={r.p.key} p={r.p} o={r.alone} estimateTip={forecastTip} />
+                ))}
+              </div>
+              {economics.thin.length > 0 && (
+                <p className="text-[11px] text-[#9b9b93]">Pas assez de commandes pour estimer : {economics.thin.join(', ')}.</p>
+              )}
+            </section>
+          )}
+
+          {/* ── Pack : ce qu'il reste quand le produit est ajouté ─────────────── */}
+          {economics.rows.length > 0 && (
+            <div className="bg-white rounded-[20px] shadow-[0_2px_16px_rgba(0,0,0,0.06)] overflow-hidden pb-2">
+              <div className="px-5 py-3 border-b border-[#f0f0ee] mb-1">
+                <p className="text-sm font-semibold text-[#1a1a2e]">Ce produit a-t-il sa place dans le pack ?</p>
+                <p className="text-[11px] text-[#9b9b93] mt-0.5">Ce qu&apos;il reste quand il est ajouté à une commande qui part déjà (pas de pub : elle est payée par le premier article). Survole une case pour le détail.</p>
+              </div>
+              <PackGrid rows={[...economics.rows].sort((a, b) => a.add[a.add.length - 1].left - b.add[b.add.length - 1].left)} />
+            </div>
+          )}
+
+          {/* ── Colis types ───────────────────────────────────────────────────── */}
+          {typical.length > 0 && (
+            <section className="space-y-3">
+              <div>
+                <h2 className="text-sm font-semibold text-[#1a1a2e]">Colis types</h2>
+                <p className="text-[11px] text-[#9b9b93] mt-0.5">Coût d&apos;envoi estimé en France, comparé au réel des commandes identiques déjà facturées.</p>
+              </div>
+              <TypicalBasketCards items={typical} />
+            </section>
+          )}
+
+          <button onClick={() => setShowFigures(v => !v)}
+            className="w-full flex items-center justify-center gap-1.5 py-2.5 rounded-xl border border-[#e8e8e4] bg-white text-xs font-semibold text-[#6b6b63] hover:text-[#1a1a2e]">
+            <ChevronRight size={13} className={`transition-transform ${showFigures ? 'rotate-90' : ''}`} />
+            {showFigures ? 'Masquer le détail des chiffres' : 'Voir le détail des chiffres'}
+          </button>
+
+          {showFigures && (
           /* ── Par commande, selon la taille du panier ───────────────────────── */
           <div className="bg-white rounded-[20px] shadow-[0_2px_16px_rgba(0,0,0,0.06)] overflow-hidden">
             <div className="flex items-center justify-between gap-3 flex-wrap px-5 py-3 border-b border-[#f0f0ee]">
@@ -606,6 +713,8 @@ export default function MarginsPage({ params }: { params: { brand: string } }) {
               Taille du panier = articles payants (une ligne en quantité 2 compte pour 2 ; articles offerts à 0 € exclus). Profit après pub = CA − achat − livraison (un seul coût par commande) + port payé par le client − frais de transaction ({(feeRate * 100).toLocaleString('fr-FR')} % du CA). Pub et frais fixes = dépense de la période ÷ nombre de commandes, le même montant pour chaque commande.
             </p>
           </div>
+          )}
+          </>
         ) : (
         /* Tableau produits */
         <div className="bg-white rounded-[20px] shadow-[0_2px_16px_rgba(0,0,0,0.06)] overflow-hidden">
@@ -704,7 +813,7 @@ export default function MarginsPage({ params }: { params: { brand: string } }) {
         )}
 
         {/* ── Coût de livraison par produit (onglet Par commande) ────────────── */}
-        {tab === 'commandes' && model && (() => {
+        {tab === 'commandes' && showFigures && model && (() => {
           const reliable = model.products.filter(p => p.used)
           const thin = model.products.filter(p => !p.used)
           const alone = [...reliable].sort((a, b) => (a.coef) - (b.coef))
