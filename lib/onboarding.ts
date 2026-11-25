@@ -88,6 +88,7 @@ export async function onboardingStatus(brand: string): Promise<OnboardingStatus>
     sb.from('ad_spends').select('platform, spend').eq('brand', brand).gte('date', since),
     sb.from('fixed_costs').select('label, amount, category').eq('brand', brand).eq('month', SENTINEL),
   ])
+  const subcontractGrid = await readSubcontractGrid(sb, brand)
   const since90 = new Date(Date.now() - 90 * 864e5).toISOString().slice(0, 10)
   const sales = await allRows<{ variant_id: string | number | null; revenue: number | null }>(
     (a, b) => sb.from('product_sales').select('variant_id, revenue').eq('brand', brand).gte('date', since90).range(a, b))
@@ -150,7 +151,11 @@ export async function onboardingStatus(brand: string): Promise<OnboardingStatus>
     step('meta', !!(meta.token && meta.adAccount), { adAccount: meta.adAccount ?? null }),
     step('google', !!googleId, { customerId: googleId ?? null }),
     step('products', variants > 0 && coverage >= 0.9, { variants, costed, coverage: Math.round(coverage * 100), shopHandle: shop.shop?.replace(/\.myshopify\.com$/, '') ?? null, missingCount: missingByProduct.size }),
-    step('shipping', shipping > 0, { shipping, feeRate }),
+    // Livraison sous-traitée (Bowa → Terence) : prix par commande selon zone × nombre de
+    // panneaux (onglet Coûts livraison), pas un coût moyen par commande → étape faite.
+    subcontractGrid
+      ? step('shipping', true, { mode: 'subcontract', grid: subcontractGrid, shipping, feeRate })
+      : step('shipping', shipping > 0, { shipping, feeRate }),
     step('fixed', fixedRows.length > 0, { rows: fixedRows, total: preview.fixedMonthly }),
     step('team', team > 0, { members: team }),
   ]
@@ -305,8 +310,21 @@ export async function saveFixedCosts(brand: string, rows: FixedRow[]): Promise<s
   return error?.message ?? null
 }
 
-export async function saveCosts(brand: string, shipping: number, feeRatePct: number | null) {
-  const row: Record<string, unknown> = { brand, shipping_cost_per_order: shipping }
+// Grille du sous-traitant livraison ([zone][tranche de panneaux] en € HT), enregistrée
+// par /api/delivery/subcontract dans le bucket app-config. null si la marque n'en a pas.
+async function readSubcontractGrid(sb: ReturnType<typeof db>, brand: string): Promise<number[][] | null> {
+  try {
+    const { data } = await sb.storage.from('app-config').download(`${brand}/subcontract-billing.json`)
+    if (!data) return null
+    const grid = (JSON.parse(await data.text()) as { grid?: unknown }).grid
+    return Array.isArray(grid) && grid.every(r => Array.isArray(r)) ? grid as number[][] : null
+  } catch { return null }
+}
+
+// shipping null = livraison au forfait sous-traitant : on n'enregistre que les frais de paiement.
+export async function saveCosts(brand: string, shipping: number | null, feeRatePct: number | null) {
+  const row: Record<string, unknown> = { brand }
+  if (shipping != null) row.shipping_cost_per_order = shipping
   if (feeRatePct != null) row.transaction_fee_rate = feeRatePct / 100
   const { error } = await db().from('brand_settings').upsert(row, { onConflict: 'brand' })
   return error?.message ?? null

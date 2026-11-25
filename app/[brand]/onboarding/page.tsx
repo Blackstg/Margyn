@@ -552,6 +552,39 @@ function FixedCosts({ step, status, run, busy, skip }: { step: Step; status: Sta
 const SHIP = [4, 6, 8, 10]
 const FEES = [{ label: 'Shopify Payments', hint: '≈ 1,7 %', v: 1.7 }, { label: 'PayPal', hint: '≈ 2,9 %', v: 2.9 }, { label: 'Je ne sais pas', hint: 'on met 1,7 %', v: 1.7 }]
 
+// Livraison par un sous-traitant : forfait par commande selon la zone (distance depuis
+// son dépôt) et le nombre de panneaux. La grille se règle dans Coûts livraison.
+const ZONES = ['Zone 1 · ≤ 100 km', 'Zone 2 · 100 à 300 km', 'Zone 3 · > 300 km']
+const TRANCHES = ['1-3', '4-7', '8-12', '13+']
+function SubcontractGrid({ grid }: { grid: number[][] }) {
+  const brand = useBrand()
+  return (
+    <div>
+      <p className="text-[15px] font-semibold text-[#1a1a2e]">Ta livraison est sous-traitée : rien à saisir ici</p>
+      <p className="mt-1 text-[14px] leading-relaxed text-[#6b6b63]">
+        Chaque commande est facturée selon la zone de livraison et le nombre de panneaux. Steero applique cette grille à chaque livraison pour calculer ta marge.
+      </p>
+      <div className="mt-4 overflow-x-auto rounded-2xl border-2 border-[#f0efeb]">
+        <table className="w-full min-w-[420px] text-[14px]">
+          <thead><tr className="text-left text-[12px] text-[#8a887f]">
+            <th className="px-4 py-2.5 font-medium">Panneaux</th>
+            {TRANCHES.map(t => <th key={t} className="px-3 py-2.5 text-right font-medium">{t}</th>)}
+          </tr></thead>
+          <tbody>
+            {grid.slice(0, 3).map((row, z) => (
+              <tr key={z} className="border-t border-[#f0efeb]">
+                <td className="px-4 py-2.5 text-[#1a1a2e]">{ZONES[z]}</td>
+                {row.slice(0, 4).map((v, b) => <td key={b} className="px-3 py-2.5 text-right tabular-nums font-semibold text-[#1a1a2e]">{v} €</td>)}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <Link href={`/${brand}/delivery-costs?tab=terence`} className={`${btnSoft} mt-3`}>Modifier la grille</Link>
+    </div>
+  )
+}
+
 function ShippingChoice({ step, run, busy }: { step: Step; run: Run; busy: boolean }) {
   const cur = Number(step.detail.shipping ?? 0)
   const [ship, setShip] = useState<number | null>(cur > 0 ? cur : null)
@@ -561,9 +594,11 @@ function ShippingChoice({ step, run, busy }: { step: Step; run: Run; busy: boole
   const fee = FEES.find(f => f.label === feeLabel)?.v ?? saved
   const chip = (on: boolean) => `rounded-2xl border-2 px-4 py-3 text-[15px] font-semibold transition active:scale-[.98] ${on ? 'border-[#1a1a2e] bg-[#1a1a2e] text-white' : 'border-[#e4e2dc] bg-white text-[#1a1a2e] hover:border-[#1a1a2e]'}`
   const shipValue = other ? Number(other.replace(',', '.')) : ship
+  const grid = step.detail.mode === 'subcontract' ? step.detail.grid as number[][] : null
 
   return (
     <div className="space-y-7">
+      {grid ? <SubcontractGrid grid={grid} /> : (
       <div>
         <p className="mb-3 text-[15px] font-semibold text-[#1a1a2e]">En moyenne, pour une commande</p>
         <div className="flex flex-wrap gap-2">
@@ -576,6 +611,7 @@ function ShippingChoice({ step, run, busy }: { step: Step; run: Run; busy: boole
           </label>
         </div>
       </div>
+      )}
       <div>
         <p className="mb-3 text-[15px] font-semibold text-[#1a1a2e]">Tes clients paient surtout avec</p>
         <div className="flex flex-wrap gap-2">
@@ -586,8 +622,8 @@ function ShippingChoice({ step, run, busy }: { step: Step; run: Run; busy: boole
           ))}
         </div>
       </div>
-      <button disabled={busy || !(shipValue && shipValue > 0)} className={btn}
-        onClick={() => run({ action: 'costs', shipping: shipValue, feeRate: fee ?? 1.7 }, () => 'C’est noté')}>
+      <button disabled={busy || (grid ? fee == null : !(shipValue && shipValue > 0))} className={btn}
+        onClick={() => run({ action: 'costs', shipping: grid ? null : shipValue, feeRate: fee ?? 1.7 }, () => 'C’est noté')}>
         {busy && <Loader2 size={16} className="animate-spin" />} Valider
       </button>
     </div>

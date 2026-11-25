@@ -57,9 +57,10 @@ export async function POST(req: NextRequest) {
       return reply({ error: await saveFixedCosts(brand, body.rows as FixedRow[]) })
     }
     case 'costs': {
-      const shipping = Number(String(body.shipping ?? '').replace(',', '.'))
+      // shipping null : livraison sous-traitée (grille par zone) → seuls les frais de paiement
+      const shipping = body.shipping == null ? null : Number(String(body.shipping).replace(',', '.'))
       const fee = body.feeRate === '' || body.feeRate == null ? null : Number(String(body.feeRate).replace(',', '.'))
-      if (!(shipping > 0) || (fee != null && !(fee >= 0 && fee < 20))) return reply({ error: 'Valeurs invalides' })
+      if ((shipping != null && !(shipping > 0)) || (shipping == null && fee == null) || (fee != null && !(fee >= 0 && fee < 20))) return reply({ error: 'Valeurs invalides' })
       return reply({ error: await saveCosts(brand, shipping, fee) })
     }
     case 'history': {
