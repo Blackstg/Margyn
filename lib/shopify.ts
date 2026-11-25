@@ -33,6 +33,9 @@ interface ShopifyLineItem {
   quantity: number
   price: string
   total_discount: string
+  // Toutes les remises réparties sur la ligne (codes promo panier compris) ;
+  // total_discount ne contient que les remises propres à la ligne.
+  discount_allocations?: { amount: string }[]
 }
 
 export interface ShopifyOrder {
@@ -510,7 +513,11 @@ export function aggregateProductSales(
       const shopify_product_id = info?.product_id     ?? null
       const variant_title      = info?.variant_title  ?? null
       const variant_id         = item.variant_id ? String(item.variant_id) : ''
-      const revenue            = parseFloat(item.price) * item.quantity - parseFloat(item.total_discount)
+      // CA de la ligne net de TOUTES les remises (codes promo du panier inclus).
+      const discount           = item.discount_allocations
+        ? item.discount_allocations.reduce((sum, d) => sum + parseFloat(d.amount || '0'), 0)
+        : parseFloat(item.total_discount || '0')
+      const revenue            = parseFloat(item.price) * item.quantity - discount
       const key                = `${order_id}|${variant_id || product_title}`
 
       const prev = byKey.get(key) ?? {
