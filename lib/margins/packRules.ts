@@ -15,6 +15,9 @@ export const PACK_RULES = {
   ],
   // « Rentable » à partir de ce qu'il reste (€) ; entre 0 et ce seuil : « Limite ».
   verdictThreshold: 5,
+  // En dessous de ce nombre de commandes où il est seul sur la période, le produit
+  // est « rarement vendu seul » : affiché en gris, sans verdict.
+  minSoloOrders: 10,
 }
 
 export type Verdict = 'rentable' | 'limite' | 'perte'
@@ -34,19 +37,27 @@ export type ProductEconomics = {
   purchase: number     // coût d'achat
   sendAlone: number    // coût d'envoi du produit seul
   addCost: number      // coût d'ajout dans un colis qui part déjà
-  sold: number         // articles vendus sur la période
+  soloOrders: number   // commandes où il est le seul article payant (cadeaux à 0 € exclus)
 }
 
 export type Context = { pubPerOrder: number; feeRate: number; portAlone: number }
 
-export type AloneOutcome = { price: number; purchase: number; shipping: number; pub: number; fees: number; left: number; leftWithPort: number; verdict: Verdict }
+export type AloneOutcome = {
+  price: number; purchase: number; shipping: number; pub: number; fees: number
+  left: number; leftWithPort: number; verdict: Verdict
+  impact: number           // commandes où il est seul × ce qu'il reste
+  rare: boolean            // rarement vendu seul (< minSoloOrders) : pas de verdict
+}
 
 // Vendu seul : prix − achat − envoi − frais de paiement − pub moyenne par commande.
 export function aloneOutcome(p: ProductEconomics, ctx: Context): AloneOutcome {
   const price = priceExVat(p.price)
   const fees = p.price * ctx.feeRate
   const left = price - p.purchase - p.sendAlone - fees - ctx.pubPerOrder
-  return { price, purchase: p.purchase, shipping: p.sendAlone, pub: ctx.pubPerOrder, fees, left, leftWithPort: left + ctx.portAlone, verdict: verdictOf(left) }
+  return {
+    price, purchase: p.purchase, shipping: p.sendAlone, pub: ctx.pubPerOrder, fees, left, leftWithPort: left + ctx.portAlone,
+    verdict: verdictOf(left), impact: left * p.soloOrders, rare: p.soloOrders < PACK_RULES.minSoloOrders,
+  }
 }
 
 export type AddOutcome = { label: string; pct: number; price: number; left: number; verdict: Verdict }
@@ -65,6 +76,7 @@ export type Takeaway = { tone: Verdict; big: string; title: string; text: string
 
 const eur = (n: number) => `${n < 0 ? '−' : ''}${Math.abs(n).toLocaleString('fr-FR', { maximumFractionDigits: 0 })} €`
 const plural = (n: number, one: string, many: string) => (n > 1 ? many : one)
+const eur2 = (n: number, sign = false) => `${n < 0 ? '−' : sign ? '+' : ''}${Math.abs(n).toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €`
 
 // Bandeau « À retenir » : 3 à 4 phrases courtes tirées des données.
 export function takeaways(
@@ -74,15 +86,18 @@ export function takeaways(
   const out: Takeaway[] = []
   if (!products.length) return out
 
-  const losers = products.filter(x => x.alone.verdict === 'perte').sort((a, b) => a.alone.left - b.alone.left)
+  // Seuls les produits réellement vendus seuls comptent ; on met en avant le plus
+  // gros impact total (commandes seul × ce qu'il reste), pas la pire marge unitaire.
+  const losers = products.filter(x => !x.alone.rare && x.alone.left < 0).sort((a, b) => a.alone.impact - b.alone.impact)
   if (losers.length) {
     const w = losers[0]
-    out.push({ tone: 'perte', big: eur(w.alone.left), title: `${losers.length} ${plural(losers.length, 'produit vendu', 'produits vendus')} à perte quand ${plural(losers.length, 'il est seul', 'ils sont seuls')}`,
-      text: `${losers.map(x => x.p.title).join(', ')}. Pire cas : ${w.p.title}, ${eur(w.alone.left)} par commande (${w.p.sold} vendus sur la période).` })
+    const others = losers.slice(1).map(x => x.p.title)
+    out.push({ tone: 'perte', big: eur(w.alone.impact),
+      title: `${w.p.title} seul : ${w.p.soloOrders} commandes à ${eur2(w.alone.left)} (${eur2(w.alone.leftWithPort, true)} avec le port)`,
+      text: `Ce qu'il reste sur la période pour ces commandes.${others.length ? ` Aussi à perte seuls : ${others.join(', ')}.` : ''}` })
   } else {
-    const worst = [...products].sort((a, b) => a.alone.left - b.alone.left)[0]
-    out.push({ tone: worst.alone.verdict, big: eur(worst.alone.left), title: 'Aucun produit vendu à perte quand il est seul',
-      text: `Le moins rentable seul : ${worst.p.title}, ${eur(worst.alone.left)} par commande après pub.` })
+    out.push({ tone: 'rentable', big: '0', title: 'Aucun produit vendu seul à perte',
+      text: `Parmi les produits commandés seuls au moins ${PACK_RULES.minSoloOrders} fois sur la période.` })
   }
 
   const last = PACK_RULES.discounts[PACK_RULES.discounts.length - 1]

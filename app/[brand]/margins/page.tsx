@@ -8,7 +8,7 @@ import { useSearchParams, useRouter, usePathname } from 'next/navigation'
 import { createBrowserClient } from '@supabase/auth-helpers-nextjs'
 import { ChevronRight, Percent, AlertTriangle } from 'lucide-react'
 import { shippingKey } from '@/lib/shipping/model'
-import { aloneOutcome, addOutcomes, takeaways, type ProductEconomics } from '@/lib/margins/packRules'
+import { aloneOutcome, addOutcomes, takeaways, PACK_RULES, type ProductEconomics } from '@/lib/margins/packRules'
 import ProductOutcome, { SEGMENTS } from '@/components/margins/ProductOutcome'
 import PackGrid from '@/components/margins/PackGrid'
 import TakeawayCards from '@/components/margins/TakeawayCards'
@@ -436,8 +436,17 @@ export default function MarginsPage({ params }: { params: { brand: string } }) {
   // ── Ce qu'il reste par produit (vendu seul / ajouté dans un colis) ─────────────
   const economics = useMemo(() => {
     if (!model) return { rows: [], thin: [] as string[], ctx: null }
-    const sold: Record<string, number> = {}
-    for (const l of lines) { const k = shippingKey(l.title); sold[k] = (sold[k] ?? 0) + l.qty }
+    // Commandes où le produit est le seul article payant (les lignes sont déjà hors
+    // cadeaux à 0 €) : c'est sur elles que porte le calcul « vendu seul ».
+    const perOrder = new Map<string, { qty: number; key: string }>()
+    for (const l of lines) {
+      if (!l.orderId) continue
+      const o = perOrder.get(l.orderId) ?? { qty: 0, key: shippingKey(l.title) }
+      o.qty += l.qty
+      perOrder.set(l.orderId, o)
+    }
+    const solo: Record<string, number> = {}
+    for (const o of perOrder.values()) if (o.qty === 1) solo[o.key] = (solo[o.key] ?? 0) + 1
     const single = orderStats.buckets.find(b => b.key === '1')
     const ctx = { pubPerOrder: orderStats.pubPer, feeRate, portAlone: single && single.count ? single.port / single.count : 0 }
     const rows: { p: ProductEconomics; alone: ReturnType<typeof aloneOutcome>; add: ReturnType<typeof addOutcomes> }[] = []
@@ -445,8 +454,8 @@ export default function MarginsPage({ params }: { params: { brand: string } }) {
     for (const m of model.products) {
       const c = catalog[m.key]
       if (!c) continue
-      if (!m.used) { if (sold[m.key]) thin.push(c.title); continue }
-      const p: ProductEconomics = { key: m.key, title: c.title, image: c.image, price: c.price, purchase: c.purchase, sendAlone: model.base + m.coef, addCost: Math.max(0, m.coef), sold: sold[m.key] ?? 0 }
+      if (!m.used) { if (solo[m.key] || lines.some(l => shippingKey(l.title) === m.key)) thin.push(c.title); continue }
+      const p: ProductEconomics = { key: m.key, title: c.title, image: c.image, price: c.price, purchase: c.purchase, sendAlone: model.base + m.coef, addCost: Math.max(0, m.coef), soloOrders: solo[m.key] ?? 0 }
       rows.push({ p, alone: aloneOutcome(p, ctx), add: addOutcomes(p) })
     }
     return { rows, thin, ctx }
@@ -510,6 +519,57 @@ export default function MarginsPage({ params }: { params: { brand: string } }) {
 
         {/* À retenir (Par commande) */}
         {tab === 'commandes' && !loading && takeawayItems.length > 0 && <TakeawayCards items={takeawayItems} />}
+
+        {tab === 'commandes' && !loading && (
+          <>
+        {/* ── Vendu seul : où part le prix de vente ─────────────────────────── */}
+        {economics.rows.length > 0 && economics.ctx && (
+          <section className="space-y-3">
+            <div className="flex items-end justify-between gap-3 flex-wrap">
+              <div>
+                <h2 className="text-sm font-semibold text-[#1a1a2e]">Vendu seul : ce qu&apos;il reste par commande</h2>
+                <p className="text-[11px] text-[#9b9b93] mt-0.5">Commandes d&apos;un seul article : prix moins achat, envoi, pub ({eur2(economics.ctx.pubPerOrder)} par commande) et frais, triées par impact sur la période.</p>
+              </div>
+              <div className="flex items-center gap-3 flex-wrap text-[10px] text-[#6b6b63]">
+                {SEGMENTS.map(sg => <span key={sg.key} className="inline-flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-sm" style={{ background: sg.color }} />{sg.label}</span>)}
+                <span className="inline-flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-sm bg-[#1a7f4b]" />Ce qu&apos;il reste</span>
+                <ShipBadge share={forecastShare} tip={forecastTip} />
+              </div>
+            </div>
+            <div className="grid gap-3 grid-cols-1 lg:grid-cols-2">
+              {economics.rows.filter(r => !r.alone.rare).sort((a, b) => a.alone.impact - b.alone.impact).map(r => (
+                <ProductOutcome key={r.p.key} p={r.p} o={r.alone} estimateTip={forecastTip} />
+              ))}
+            </div>
+            {economics.rows.some(r => r.alone.rare) && (
+              <>
+                <p className="text-xs font-semibold text-[#9b9b93] pt-1">Rarement vendu seul (moins de {PACK_RULES.minSoloOrders} commandes seul sur la période)</p>
+                <div className="grid gap-3 grid-cols-1 lg:grid-cols-2">
+                  {economics.rows.filter(r => r.alone.rare).sort((a, b) => b.p.soloOrders - a.p.soloOrders).map(r => (
+                    <ProductOutcome key={r.p.key} p={r.p} o={r.alone} estimateTip={forecastTip} />
+                  ))}
+                </div>
+              </>
+            )}
+            {economics.thin.length > 0 && (
+              <p className="text-[11px] text-[#9b9b93]">Pas assez de commandes pour estimer : {economics.thin.join(', ')}.</p>
+            )}
+          </section>
+        )}
+
+        {/* ── Pack : ce qu'il reste quand le produit est ajouté ─────────────── */}
+        {economics.rows.length > 0 && (
+          <div className="bg-white rounded-[20px] shadow-[0_2px_16px_rgba(0,0,0,0.06)] overflow-hidden pb-2">
+            <div className="px-5 py-3 border-b border-[#f0f0ee] mb-1">
+              <p className="text-sm font-semibold text-[#1a1a2e]">Ce produit a-t-il sa place dans le pack ?</p>
+              <p className="text-[11px] text-[#9b9b93] mt-0.5">Ce qu&apos;il reste quand il est ajouté à une commande qui part déjà (pas de pub : elle est payée par le premier article). Survole une case pour le détail.</p>
+            </div>
+            <PackGrid rows={[...economics.rows].sort((a, b) => a.add[a.add.length - 1].left - b.add[b.add.length - 1].left)} />
+          </div>
+        )}
+
+          </>
+        )}
 
         {/* Totaux */}
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
@@ -587,42 +647,6 @@ export default function MarginsPage({ params }: { params: { brand: string } }) {
 
         {tab === 'commandes' ? (
           <>
-          {/* ── Vendu seul : où part le prix de vente ─────────────────────────── */}
-          {economics.rows.length > 0 && economics.ctx && (
-            <section className="space-y-3">
-              <div className="flex items-end justify-between gap-3 flex-wrap">
-                <div>
-                  <h2 className="text-sm font-semibold text-[#1a1a2e]">Vendu seul : ce qu&apos;il reste par commande</h2>
-                  <p className="text-[11px] text-[#9b9b93] mt-0.5">Prix de vente moins l&apos;achat, l&apos;envoi, la pub ({eur2(economics.ctx.pubPerOrder)} par commande sur la période) et les frais de paiement.</p>
-                </div>
-                <div className="flex items-center gap-3 flex-wrap text-[10px] text-[#6b6b63]">
-                  {SEGMENTS.map(sg => <span key={sg.key} className="inline-flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-sm" style={{ background: sg.color }} />{sg.label}</span>)}
-                  <span className="inline-flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-sm bg-[#1a7f4b]" />Ce qu&apos;il reste</span>
-                  <ShipBadge share={forecastShare} tip={forecastTip} />
-                </div>
-              </div>
-              <div className="grid gap-3 grid-cols-1 lg:grid-cols-2">
-                {[...economics.rows].sort((a, b) => a.alone.left - b.alone.left).map(r => (
-                  <ProductOutcome key={r.p.key} p={r.p} o={r.alone} estimateTip={forecastTip} />
-                ))}
-              </div>
-              {economics.thin.length > 0 && (
-                <p className="text-[11px] text-[#9b9b93]">Pas assez de commandes pour estimer : {economics.thin.join(', ')}.</p>
-              )}
-            </section>
-          )}
-
-          {/* ── Pack : ce qu'il reste quand le produit est ajouté ─────────────── */}
-          {economics.rows.length > 0 && (
-            <div className="bg-white rounded-[20px] shadow-[0_2px_16px_rgba(0,0,0,0.06)] overflow-hidden pb-2">
-              <div className="px-5 py-3 border-b border-[#f0f0ee] mb-1">
-                <p className="text-sm font-semibold text-[#1a1a2e]">Ce produit a-t-il sa place dans le pack ?</p>
-                <p className="text-[11px] text-[#9b9b93] mt-0.5">Ce qu&apos;il reste quand il est ajouté à une commande qui part déjà (pas de pub : elle est payée par le premier article). Survole une case pour le détail.</p>
-              </div>
-              <PackGrid rows={[...economics.rows].sort((a, b) => a.add[a.add.length - 1].left - b.add[b.add.length - 1].left)} />
-            </div>
-          )}
-
           {/* ── Colis types ───────────────────────────────────────────────────── */}
           {typical.length > 0 && (
             <section className="space-y-3">
