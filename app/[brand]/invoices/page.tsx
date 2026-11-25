@@ -505,7 +505,7 @@ Historique FW : ${history.map(h => `${h.month}: ${h.fw_count} FW ($${h.fw_total?
 
         {/* Onglets */}
         <div className="flex items-center gap-1 border-b border-[#e8e4e0]">
-          {([['facture', 'Facturation'], ['contestation', 'Contestation'], ['prevision', 'Prévision livraison']] as const).map(([v, l]) => (
+          {([['facture', 'Facturation'], ['contestation', 'Contestation'], ['prevision', 'Livraison estimée']] as const).map(([v, l]) => (
             <button
               key={v}
               onClick={() => setView(v)}

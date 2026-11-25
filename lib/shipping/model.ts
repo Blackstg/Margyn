@@ -12,6 +12,62 @@
 
 export type Zone = 'FR' | 'X'
 
+// ── Contenu du colis ─────────────────────────────────────────────────────────
+// Clé d'expédition d'un produit : son nom (deux fiches Shopify du même produit, ou sa
+// version offerte, coûtent pareil à expédier).
+export const shippingKey = (title: string) => title.trim().toLowerCase().replace(/\s+/g, ' ')
+const ATTACH_RE = /^strap\s+([^™\s]+)/i
+export const isAttachment = (title: string) => ATTACH_RE.test(title.trim())
+
+// Produits d'un colis → { clé: quantité }. Les attaches offertes qui accompagnent
+// leur produit (« Strap MumExplorer™ … » avec « MumExplorer™ … ») sont fusionnées
+// dans ce produit : un seul coût « sac + attaches ». Une attache sans son produit
+// reste à part.
+export function basketProducts(lines: { title: string; qty: number; free: boolean }[]): Record<string, number> {
+  const out: Record<string, number> = {}
+  const names = lines.filter(l => !isAttachment(l.title)).map(l => l.title.trim().toLowerCase())
+  for (const l of lines) {
+    if (!(l.qty > 0)) continue
+    const parent = l.title.trim().match(ATTACH_RE)?.[1]?.toLowerCase()
+    if (l.free && parent && names.some(n => n.startsWith(parent + '™') || n.startsWith(parent + ' '))) continue
+    const k = shippingKey(l.title)
+    out[k] = (out[k] ?? 0) + l.qty
+  }
+  return out
+}
+
+// ── Grille tarifaire du logisticien (poids × pays) ───────────────────────────
+// Une fois importée ET les poids renseignés pour tous les produits du colis, la
+// prévision se fait à la grille ; sinon, calcul appris sur les factures.
+export type ShippingGrid = {
+  importedAt: string
+  rows: { country: string; maxKg: number; price: number }[]   // country = code ISO ou '*' (tous pays)
+  prepPerOrder: number                                       // préparation moyenne par colis (€)
+}
+
+export function gridPrice(grid: ShippingGrid, country: string, kg: number): number | null {
+  for (const c of [country.toUpperCase(), '*']) {
+    const rows = grid.rows.filter(r => r.country.toUpperCase() === c).sort((a, b) => a.maxKg - b.maxKg)
+    const hit = rows.find(r => kg <= r.maxKg)
+    if (hit) return hit.price
+    if (rows.length) return null   // trop lourd pour la grille de ce pays
+  }
+  return null
+}
+
+// Coût à la grille, ou null si un produit du colis n'a pas de poids.
+export function gridCost(grid: ShippingGrid | null, country: string, products: Record<string, number>, weights: Record<string, number>): number | null {
+  if (!grid || !grid.rows.length) return null
+  let g = 0
+  for (const [k, q] of Object.entries(products)) {
+    const w = weights[k]
+    if (!(w > 0)) return null
+    g += w * q
+  }
+  const price = gridPrice(grid, country, g / 1000)
+  return price == null ? null : price + grid.prepPerOrder
+}
+
 export type OrderFeatures = {
   zone: Zone
   paidItems: number                  // articles payants (taille du panier)
@@ -121,10 +177,12 @@ export function extraItemCost(model: ShippingModel | null, productKey: string, f
   return Math.max(0, p.coef)
 }
 
-// Coût retenu pour une commande : la facture si elle existe, sinon la prévision.
-export function orderCost(real: number | undefined, model: ShippingModel | null, f: OrderFeatures | null, fallback: number):
-  { cost: number; source: 'réel' | 'produit' | 'taille' | 'moyenne' } {
+// Coût retenu pour une commande : la facture si elle existe, sinon la grille (si
+// importée et poids complets), sinon le calcul appris, sinon la moyenne.
+export function orderCost(real: number | undefined, model: ShippingModel | null, f: OrderFeatures | null, fallback: number, grid: number | null = null):
+  { cost: number; source: 'réel' | 'grille' | 'produit' | 'taille' | 'moyenne' } {
   if (real != null) return { cost: real, source: 'réel' }
+  if (grid != null) return { cost: grid, source: 'grille' }
   if (model && f && model.orders > 0) { const p = predict(model, f); return { cost: p.cost, source: p.method } }
   return { cost: fallback, source: 'moyenne' }
 }

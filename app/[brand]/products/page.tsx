@@ -12,12 +12,14 @@ interface Variant {
   sku_cn: string | null
   warehouse: string | null
   product_status: string
+  weight_g: number | null
 }
 
 interface EditState {
   sku_fr: string
   sku_cn: string
   warehouse: string
+  weight_g: string
 }
 
 function parseCSV(text: string): string[][] {
@@ -64,6 +66,7 @@ export default function ProduitsPage() {
         sku_fr:    v.sku_fr    ?? '',
         sku_cn:    v.sku_cn    ?? '',
         warehouse: v.warehouse ?? '',
+        weight_g:  v.weight_g != null ? String(v.weight_g) : '',
       }
     }
     setEdits(initEdits)
@@ -73,7 +76,7 @@ export default function ProduitsPage() {
   useEffect(() => { loadVariants() }, [])
 
   async function saveVariant(id: string, override?: Partial<EditState>) {
-    const base = edits[id] ?? { sku_fr: '', sku_cn: '', warehouse: '' }
+    const base = edits[id] ?? { sku_fr: '', sku_cn: '', warehouse: '', weight_g: '' }
     const e = { ...base, ...override }
     await fetch('/api/produits', {
       method: 'PATCH',
@@ -83,6 +86,7 @@ export default function ProduitsPage() {
         sku_fr:    e.sku_fr    || null,
         sku_cn:    e.sku_cn    || null,
         warehouse: e.warehouse || null,
+        weight_g:  e.weight_g ? Number(e.weight_g) : null,
       }),
     })
     setSaved(s => ({ ...s, [id]: true }))
@@ -194,13 +198,14 @@ export default function ProduitsPage() {
           {/* Column headers */}
           <div
             className="grid gap-3 px-5 py-3 border-b border-[#f0f0ee] bg-[#fafaf9]"
-            style={{ gridTemplateColumns: '36px 1fr 180px 180px 130px 24px' }}
+            style={{ gridTemplateColumns: '36px 1fr 160px 160px 120px 90px 24px' }}
           >
             <div />
             <p className="text-[10px] font-semibold uppercase tracking-[0.1em] text-[#6b6b63]">Produit</p>
             <p className="text-[10px] font-semibold uppercase tracking-[0.1em] text-[#6b6b63]">SKU France</p>
             <p className="text-[10px] font-semibold uppercase tracking-[0.1em] text-[#6b6b63]">SKU Chine</p>
             <p className="text-[10px] font-semibold uppercase tracking-[0.1em] text-[#6b6b63]">Entrepôt</p>
+            <p className="text-[10px] font-semibold uppercase tracking-[0.1em] text-[#6b6b63]" title="Poids du produit emballé, utilisé pour estimer la livraison avec la grille du logisticien">Poids (g)</p>
             <div />
           </div>
 
@@ -213,13 +218,13 @@ export default function ProduitsPage() {
           ) : (
             <div className="divide-y divide-[#f8f8f7]">
               {filtered.map(v => {
-                const e       = edits[v.shopify_variant_id] ?? { sku_fr: '', sku_cn: '', warehouse: '' }
+                const e       = edits[v.shopify_variant_id] ?? { sku_fr: '', sku_cn: '', warehouse: '', weight_g: '' }
                 const isSaved = saved[v.shopify_variant_id]
                 return (
                   <div
                     key={v.shopify_variant_id}
                     className={`grid gap-3 items-center px-5 py-2 ${v.product_status !== 'active' ? 'opacity-40' : ''}`}
-                    style={{ gridTemplateColumns: '36px 1fr 180px 180px 130px 24px' }}
+                    style={{ gridTemplateColumns: '36px 1fr 160px 160px 120px 90px 24px' }}
                   >
                     {/* Image */}
                     {v.image_url ? (
@@ -275,6 +280,16 @@ export default function ProduitsPage() {
                       <option value="Chine">Chine</option>
                       <option value="Les deux">Les deux</option>
                     </select>
+
+                    {/* Poids */}
+                    <input
+                      type="number" min="1" step="1"
+                      value={e.weight_g}
+                      onChange={ev => setField(v.shopify_variant_id, 'weight_g', ev.target.value)}
+                      onBlur={() => saveVariant(v.shopify_variant_id)}
+                      placeholder="à saisir"
+                      className={`w-full rounded-lg border px-2.5 py-1.5 text-xs text-right tabular-nums focus:outline-none focus:ring-2 focus:ring-[#aeb0c9]/40 placeholder:text-[#b45309] ${e.weight_g ? 'border-[#e8e4e0] text-[#1a1a2e]' : 'border-[#fcd34d] bg-[#fffbeb]'}`}
+                    />
 
                     {/* Save indicator */}
                     <div className="flex items-center justify-center">

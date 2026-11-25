@@ -1,7 +1,7 @@
 // npm test — modèle de prévision du coût de livraison.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { trainModel, predict, orderCost, extraItemCost, backtest, type OrderFeatures } from './model'
+import { trainModel, predict, orderCost, extraItemCost, backtest, basketProducts, gridCost, shippingKey, type OrderFeatures, type ShippingGrid } from './model'
 
 // Barème synthétique connu : 7 € par colis + 2 € hors France + 9 € par sac, 3 € par
 // tapis, 0,5 € par attache offerte.
@@ -74,4 +74,31 @@ test('contrôle qualité : écart nul sur un barème exact', () => {
   const r = backtest(m, train.slice(0, 60))
   assert.ok(Math.abs(r.total.errorPct ?? 1) < 0.01)
   for (const s of r.bySize) if (s.orders) assert.ok(Math.abs(s.errorPct ?? 1) < 0.03)
+})
+
+test('attaches offertes fusionnées dans leur sac ; version offerte = même produit', () => {
+  const p = basketProducts([
+    { title: 'MumExplorer™ Sac à Langer', qty: 1, free: false },
+    { title: 'Strap MumExplorer™ Attaches poussette', qty: 1, free: true },
+    { title: 'WalkExplorer™ Porte-bébé hanche', qty: 1, free: true },
+    { title: 'WalkExplorer™ Porte-bébé hanche', qty: 1, free: false },
+  ])
+  assert.deepEqual(p, { [shippingKey('MumExplorer™ Sac à Langer')]: 1, [shippingKey('WalkExplorer™ Porte-bébé hanche')]: 2 })
+  // Attache sans son sac : reste à part
+  const seule = basketProducts([{ title: 'Strap MumEssential™ Attaches poussette', qty: 1, free: true }, { title: 'MatExplorer™ Tapis', qty: 1, free: false }])
+  assert.equal(Object.keys(seule).length, 2)
+})
+
+test('grille : utilisée seulement si tous les poids sont connus, la facture reste prioritaire', () => {
+  const grid: ShippingGrid = { importedAt: '2026-11-25', prepPerOrder: 1, rows: [
+    { country: 'FR', maxKg: 1, price: 6 }, { country: 'FR', maxKg: 3, price: 9 }, { country: '*', maxKg: 3, price: 15 },
+  ] }
+  assert.equal(gridCost(grid, 'FR', { sac: 1, tapis: 1 }, { sac: 1800, tapis: 650 }), 10)     // 2,45 kg → 9 + 1
+  assert.equal(gridCost(grid, 'BE', { tapis: 1 }, { tapis: 650 }), 16)                        // pays absent → '*'
+  assert.equal(gridCost(grid, 'FR', { sac: 1, cary: 1 }, { sac: 1800 }), null)                // poids manquant
+  assert.equal(gridCost(grid, 'FR', { sac: 2 }, { sac: 1800 }), null)                         // 3,6 kg : hors grille
+  const m = trainModel(train)
+  assert.deepEqual(orderCost(undefined, m, sample(1), 21, 10), { cost: 10, source: 'grille' })
+  assert.deepEqual(orderCost(30, m, sample(1), 21, 10), { cost: 30, source: 'réel' })
+  assert.equal(orderCost(undefined, m, sample(1), 21, null).source, 'produit')
 })

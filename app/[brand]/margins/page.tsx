@@ -7,6 +7,7 @@ import { useUrlState } from '@/lib/useUrlState'
 import { useSearchParams, useRouter, usePathname } from 'next/navigation'
 import { createBrowserClient } from '@supabase/auth-helpers-nextjs'
 import { ChevronRight, Percent, AlertTriangle } from 'lucide-react'
+import { shippingKey } from '@/lib/shipping/model'
 
 const supabase = createBrowserClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -65,20 +66,32 @@ type SortKey = 'margin' | 'pct' | 'revenue'
 type ShipMode = 'prorata' | 'marginal'
 // Coût de livraison d'une commande (API, même calcul que le tableau de bord) :
 // réel facturé ou prévu selon le contenu du colis, + port payé par le client.
-type OrderShip = { cost: number; source: 'réel' | 'produit' | 'taille' | 'moyenne'; port: number }
+type OrderShip = { cost: number; source: 'réel' | 'grille' | 'produit' | 'taille' | 'moyenne'; port: number }
 type ModelSummary = {
   window: { from: string; to: string }; orders: number; base: number; intlExtra: number; minOrders: number
   products: { key: string; title: string; coef: number; orders: number; used: boolean }[]
   bySize: { size: number; avg: number; orders: number }[]
 }
+type TypicalBasket = { label: string; predicted: number; real: number | null; realOrders: number; frequent?: number }
 const isForecast = (o: OrderShip | undefined) => !!o && o.source !== 'réel'
+const shortTitle = (t: string) => t.split('™')[0].trim()
+
+// Pastille « réel » / « estimé » à côté d'un montant de livraison.
+function ShipBadge({ share, tip }: { share: number; tip?: string }) {
+  if (share <= 0) return <span className="ml-1.5 inline-block align-middle rounded-full px-1.5 py-px text-[9px] font-semibold bg-[#e6f4ec] text-[#1a7f4b] not-italic">réel</span>
+  return (
+    <span title={tip} className="ml-1.5 inline-block align-middle rounded-full px-1.5 py-px text-[9px] font-semibold bg-[#fff3cd] text-[#92400e] not-italic cursor-help">
+      {share >= 0.995 ? 'estimé' : `${Math.round(share * 100)} % estimé`}
+    </span>
+  )
+}
 
 // Répartit la livraison de chaque commande sur ses lignes.
 //  - prorata  : au prorata du CA de chaque ligne ;
 //  - marginal : l'article principal (prix unitaire le plus élevé) porte la livraison,
 //    chaque article en plus ne porte que `extra` €. Le total reste le coût réel de la
 //    commande : l'article principal porte ce qui reste une fois les extras déduits.
-function shippingByLine(lines: Line[], shipFor: (orderId: string) => number, mode: ShipMode, extraFor: (pKey: string) => number): number[] {
+function shippingByLine(lines: Line[], shipFor: (orderId: string) => number, mode: ShipMode, extraFor: (title: string) => number): number[] {
   const out = new Array<number>(lines.length).fill(0)
   const byOrder = new Map<string, number[]>()
   lines.forEach((l, i) => {
@@ -99,7 +112,7 @@ function shippingByLine(lines: Line[], shipFor: (orderId: string) => number, mod
     // Chaque article en plus porte son supplément ; l'article principal porte le reste.
     let extras = 0
     for (const i of idx) {
-      out[i] = extraFor(lines[i].pKey) * (i === main ? lines[i].qty - 1 : lines[i].qty)
+      out[i] = extraFor(lines[i].title) * (i === main ? lines[i].qty - 1 : lines[i].qty)
       extras += out[i]
     }
     out[main] += S - extras
@@ -136,6 +149,9 @@ export default function MarginsPage({ params }: { params: { brand: string } }) {
   const [shipByOrder, setShipByOrder] = useState<Record<string, OrderShip> | null>(null)
   const [shipNote, setShipNote] = useState<string | null>(null)
   const [model, setModel] = useState<ModelSummary | null>(null)
+  const [typical, setTypical] = useState<TypicalBasket[]>([])
+  const [detail, setDetail] = useUrlState<'simple' | 'detail'>('colonnes', 'simple')
+  const [showThin, setShowThin] = useState(false)
   const [loading, setLoading] = useState(true)
   const [sort, setSort]       = useState<SortKey>('margin')
   const [tab, setTab]         = useUrlState<'produits' | 'commandes'>('tab', 'produits')
@@ -256,8 +272,8 @@ export default function MarginsPage({ params }: { params: { brand: string } }) {
       if (brand === 'moom' || brand === 'krom') {
         try {
           const ship = await fetch(`/api/margins/shipping?brand=${brand}&from=${from}&to=${to}`).then(r => r.json()) as
-            { byOrder?: Record<string, OrderShip>; note?: string | null; model?: ModelSummary | null }
-          if (ship?.byOrder) { byOrder = ship.byOrder; note = ship.note ?? null; summary = ship.model ?? null }
+            { byOrder?: Record<string, OrderShip>; note?: string | null; model?: ModelSummary | null; typical?: TypicalBasket[] }
+          if (ship?.byOrder) { byOrder = ship.byOrder; note = ship.note ?? null; summary = ship.model ?? null; setTypical(ship.typical ?? []) }
         } catch { /* garde l'estimation */ }
       }
       setShipByOrder(byOrder)
@@ -304,8 +320,9 @@ export default function MarginsPage({ params }: { params: { brand: string } }) {
   const netFor  = useCallback((oid: string) => costFor(oid) - portFor(oid), [costFor, portFor])
   // Vue marginale : supplément par produit appris sur les factures ; réglage manuel
   // (Paramètres) pour les produits que le modèle ne connaît pas assez.
-  const extraFor = useCallback((pKey: string) => {
-    const p = model?.products.find(x => x.key === pKey)
+  const extraFor = useCallback((title: string) => {
+    const k = shippingKey(title)
+    const p = model?.products.find(x => x.key === k)
     return p && p.used ? Math.max(0, p.coef) : extraItem
   }, [model, extraItem])
 
@@ -394,12 +411,13 @@ export default function MarginsPage({ params }: { params: { brand: string } }) {
   }
 
   const shipSource = shipNote
-    ? `Livraison : ${shipNote}.`
+    ? `${shipNote}.`
     : shipPerOrder > 0
       ? `Livraison estimée à ${eur(shipPerOrder)} / commande (paramétré).`
       : 'Aucun coût de livraison par commande paramétré pour cette marque (ex. Bowa = livraison en propre).'
   const forecastShare = orderStats.n > 0 ? orderStats.all.forecast / orderStats.n : 0
-  const forecastTip = forecastShare > 0 ? `${Math.round(forecastShare * 100)} % des commandes pas encore facturées : coût prévu selon le contenu du colis` : undefined
+  const forecastTip = forecastShare > 0 ? `${Math.round(forecastShare * 100)} % des commandes ne sont pas encore facturées par le logisticien : leur coût est estimé d'après les produits du colis` : undefined
+  const hasShipData = !!shipByOrder
   const freeNote = freeItems > 0 ? ` ${freeItems.toLocaleString('fr-FR')} article(s) offert(s) à 0 € exclus (ni article, ni coût).` : ''
 
 
@@ -446,19 +464,19 @@ export default function MarginsPage({ params }: { params: { brand: string } }) {
           {[
             { label: 'Chiffre d\'affaires', value: eur(totals.revenue), sub: '', color: '#1a1a2e' },
             { label: 'Coût produits (COGS)', value: eur(totals.cost), sub: '', color: '#6b6b63' },
-            { label: 'Livraison', value: eur(totals.shipping), sub: orderStats.n > 0 ? `${eur2(totals.shipping / orderStats.n)} / commande${totals.port > 0 ? ` · port payé ${eur(totals.port)}` : ''}` : '', color: '#6b6b63', tip: forecastTip },
-            { label: 'Marge nette', value: eur(totals.margin), sub: `${pct(totals.margin, totals.revenue).toFixed(0)} % du CA`, color: '#1a7f4b', tip: forecastTip },
+            { label: 'Livraison', value: eur(totals.shipping), sub: orderStats.n > 0 ? `${eur2(totals.shipping / orderStats.n)} / commande${totals.port > 0 ? ` · port payé ${eur(totals.port)}` : ''}` : '', color: '#6b6b63', badge: hasShipData },
+            { label: 'Marge nette', value: eur(totals.margin), sub: `${pct(totals.margin, totals.revenue).toFixed(0)} % du CA`, color: '#1a7f4b' },
           ].map(c => (
             <div key={c.label} className="bg-white rounded-[16px] shadow-[0_2px_16px_rgba(0,0,0,0.06)] p-4">
               <p className="text-[10px] font-semibold uppercase tracking-[0.08em] text-[#9b9b93]">{c.label}</p>
-              <p className={`text-xl font-bold tabular-nums mt-1 ${'tip' in c && c.tip ? 'italic' : ''}`} style={{ color: c.color }} title={'tip' in c ? c.tip : undefined}>{c.value}</p>
+              <p className="text-xl font-bold tabular-nums mt-1" style={{ color: c.color }}>{c.value}{'badge' in c && c.badge && <ShipBadge share={forecastShare} tip={forecastTip} />}</p>
               {c.sub && <p className="text-[11px] text-[#9b9b93] mt-0.5">{c.sub}</p>}
             </div>
           ))}
         </div>
 
         <p className="text-[11px] text-[#9b9b93]">
-          Marge nette = CA − coût d&apos;achat − livraison + port payé par les clients. {shipSource}{freeNote}{forecastShare > 0 && <> Les montants <i>en italique</i> contiennent des coûts prévus.</>}
+          Marge nette = CA − coût d&apos;achat − livraison + port payé par les clients. {shipSource}{freeNote}
         </p>
 
         {/* Résultat net de la période (précis — après pub & frais fixes) */}
@@ -484,8 +502,8 @@ export default function MarginsPage({ params }: { params: { brand: string } }) {
                 {lines.filter(l => l.value !== 0 || l.sign === '').map(l => (
                   <div key={l.label} className="flex items-center justify-between py-1.5 text-xs">
                     <span className={l.sign ? 'text-[#6b6b63]' : 'text-[#1a1a2e] font-medium'}>{l.label}</span>
-                    <span className={`tabular-nums ${l.label.startsWith('Livraison') && forecastTip ? 'italic' : ''}`} title={l.label.startsWith('Livraison') ? forecastTip : undefined}
-                      style={{ color: l.sign === '−' ? '#9b9b93' : l.sign === '+' ? '#1a7f4b' : '#1a1a2e' }}>{l.sign}{eur(l.value)}</span>
+                    <span className="tabular-nums" style={{ color: l.sign === '−' ? '#9b9b93' : l.sign === '+' ? '#1a7f4b' : '#1a1a2e' }}>
+                      {l.label.startsWith('Livraison') && hasShipData && <ShipBadge share={forecastShare} tip={forecastTip} />}{' '}{l.sign}{eur(l.value)}</span>
                   </div>
                 ))}
                 <div className="flex items-center justify-between pt-2.5 mt-1">
@@ -521,8 +539,8 @@ export default function MarginsPage({ params }: { params: { brand: string } }) {
             <div className="flex items-center justify-between gap-3 flex-wrap px-5 py-3 border-b border-[#f0f0ee]">
               <div className="flex items-center gap-2">
                 <p className="text-[10px] font-semibold text-[#6b6b63] uppercase tracking-[0.1em]">Par taille de panier ({orderStats.n.toLocaleString('fr-FR')} commandes)</p>
-                {overhead && <Toggle value={basis} onChange={setBasis} options={[['contribution', 'Contribution'], ['loaded', 'Chargée']]}
-                  title="Chargée = en plus, frais fixes répartis par commande" />}
+                <Toggle value={detail} onChange={setDetail} options={[['simple', 'Essentiel'], ['detail', 'Détail']]} />
+                {overhead && <Toggle value={basis} onChange={setBasis} options={[['contribution', 'Avant frais fixes'], ['loaded', 'Après frais fixes']]} />}
               </div>
               <p className="text-[10px] text-[#9b9b93]">Montants moyens par commande</p>
             </div>
@@ -536,45 +554,46 @@ export default function MarginsPage({ params }: { params: { brand: string } }) {
                   <thead>
                     <tr className="text-[#9b9b93] border-b border-[#f0f0ee]">
                       <th className="text-left font-medium py-2 pl-4">Panier</th>
-                      <th className="text-right font-medium py-2">Cmd</th>
-                      <th className="text-right font-medium py-2">Part</th>
+                      <th className="text-right font-medium py-2">Commandes</th>
+                      {detail === 'detail' && <th className="text-right font-medium py-2">Part</th>}
                       <th className="text-right font-medium py-2">Panier moyen</th>
-                      <th className="text-right font-medium py-2">Achat</th>
+                      {detail === 'detail' && <th className="text-right font-medium py-2">Achat</th>}
                       <th className="text-right font-medium py-2">Livraison</th>
-                      <th className="text-right font-medium py-2">Port payé</th>
-                      <th className="text-right font-medium py-2">Frais</th>
-                      <th className="text-right font-medium py-2">Contribution</th>
-                      <th className="text-right font-medium py-2">Pub</th>
-                      <th className={`text-right font-medium py-2 ${basis === 'loaded' ? '' : 'pr-4'}`}>Après pub</th>
-                      {basis === 'loaded' && <th className="text-right font-medium py-2">Frais fixes</th>}
-                      {basis === 'loaded' && <th className="text-right font-medium py-2 pr-4">Résultat</th>}
+                      {detail === 'detail' && <th className="text-right font-medium py-2">Port payé</th>}
+                      {detail === 'detail' && <th className="text-right font-medium py-2">Frais</th>}
+                      {detail === 'detail' && <th className="text-right font-medium py-2">Contribution</th>}
+                      {detail === 'detail' && <th className="text-right font-medium py-2">Pub</th>}
+                      <th className={`text-right font-medium py-2 ${basis === 'loaded' ? '' : 'pr-4'}`}>Profit après pub</th>
+                      {basis === 'loaded' && detail === 'detail' && <th className="text-right font-medium py-2">Frais fixes</th>}
+                      {basis === 'loaded' && <th className="text-right font-medium py-2 pr-4">Après frais fixes</th>}
                     </tr>
                   </thead>
                   <tbody>
                     {[...orderStats.buckets, orderStats.all].map(b => {
                       const per = (x: number) => (b.count > 0 ? x / b.count : 0)
                       const contrib = per(b.revenue - b.cost - b.ship + b.port - b.fees)
-                      const fcTip = b.forecast > 0 ? `${b.forecast}/${b.count} commandes pas encore facturées : coût prévu selon le contenu du colis` : undefined
                       const afterPub = contrib - orderStats.pubPer
                       const loaded = afterPub - orderStats.fixedPer
                       const isAll = b.key === 'all'
                       const color = (x: number) => (x >= 0 ? '#1a7f4b' : '#c7293a')
+                      const fcShare = b.count > 0 ? b.forecast / b.count : 0
+                      const fcTip = b.forecast > 0 ? `${b.forecast} commande${b.forecast > 1 ? 's' : ''} sur ${b.count} pas encore facturée${b.forecast > 1 ? 's' : ''} : coût estimé d'après les produits du colis` : undefined
                       return (
                         <tr key={b.key} className={`border-b border-[#f6f6f4] ${isAll ? 'bg-[#fafaf9] font-semibold' : ''}`}>
                           <td className="py-2.5 pl-4 text-[#1a1a2e] font-medium whitespace-nowrap">{b.label}</td>
-                          <td className="text-right tabular-nums text-[#6b6b63]">{b.count.toLocaleString('fr-FR')}</td>
-                          <td className="text-right tabular-nums text-[#9b9b93]">{pct(b.count, orderStats.n).toFixed(0)} %</td>
+                          <td className="text-right tabular-nums text-[#6b6b63]">{b.count.toLocaleString('fr-FR')}{detail === 'simple' && <span className="text-[10px] text-[#9b9b93] ml-1">({pct(b.count, orderStats.n).toFixed(0)} %)</span>}</td>
+                          {detail === 'detail' && <td className="text-right tabular-nums text-[#9b9b93]">{pct(b.count, orderStats.n).toFixed(0)} %</td>}
                           <td className="text-right tabular-nums text-[#1a1a2e]">{eur2(per(b.revenue))}</td>
-                          <td className="text-right tabular-nums text-[#9b9b93]">{eur2(per(b.cost))}</td>
-                          <td className={`text-right tabular-nums text-[#9b9b93] ${fcTip ? 'italic' : ''}`} title={fcTip}>{eur2(per(b.ship))}</td>
-                          <td className="text-right tabular-nums text-[#1a7f4b]">{b.port > 0 ? `+${eur2(per(b.port))}` : '—'}</td>
-                          <td className="text-right tabular-nums text-[#9b9b93]">{eur2(per(b.fees))}</td>
-                          <td className={`text-right tabular-nums font-semibold ${fcTip ? 'italic' : ''}`} title={fcTip} style={{ color: color(contrib) }}>
+                          {detail === 'detail' && <td className="text-right tabular-nums text-[#9b9b93]">{eur2(per(b.cost))}</td>}
+                          <td className="text-right tabular-nums text-[#6b6b63] whitespace-nowrap">{eur2(per(b.ship))}{hasShipData && <ShipBadge share={fcShare} tip={fcTip} />}</td>
+                          {detail === 'detail' && <td className="text-right tabular-nums text-[#1a7f4b]">{b.port > 0 ? `+${eur2(per(b.port))}` : '—'}</td>}
+                          {detail === 'detail' && <td className="text-right tabular-nums text-[#9b9b93]">{eur2(per(b.fees))}</td>}
+                          {detail === 'detail' && <td className="text-right tabular-nums font-semibold" style={{ color: color(contrib) }}>
                             {eur2(contrib)} <span className="text-[10px] font-medium text-[#9b9b93]">{pct(contrib, per(b.revenue)).toFixed(0)} %</span>
-                          </td>
-                          <td className="text-right tabular-nums text-[#9b9b93]">{eur2(orderStats.pubPer)}</td>
+                          </td>}
+                          {detail === 'detail' && <td className="text-right tabular-nums text-[#9b9b93]">{eur2(orderStats.pubPer)}</td>}
                           <td className={`text-right tabular-nums font-semibold ${basis === 'loaded' ? '' : 'pr-4'}`} style={{ color: color(afterPub) }}>{eur2(afterPub)}</td>
-                          {basis === 'loaded' && <td className="text-right tabular-nums text-[#9b9b93]">{eur2(orderStats.fixedPer)}</td>}
+                          {basis === 'loaded' && detail === 'detail' && <td className="text-right tabular-nums text-[#9b9b93]">{eur2(orderStats.fixedPer)}</td>}
                           {basis === 'loaded' && <td className="text-right tabular-nums font-semibold pr-4" style={{ color: color(loaded) }}>{eur2(loaded)}</td>}
                         </tr>
                       )
@@ -584,7 +603,7 @@ export default function MarginsPage({ params }: { params: { brand: string } }) {
               </div>
             )}
             <p className="text-[11px] text-[#9b9b93] px-5 py-3 border-t border-[#f0f0ee]">
-              Taille du panier = articles payants (une ligne en quantité 2 compte pour 2 ; articles offerts à 0 € exclus). Contribution = CA − achat − livraison (un seul coût par commande, réel ou prévu) + port payé par le client − frais de transaction ({(feeRate * 100).toLocaleString('fr-FR')} % du CA). Pub et frais fixes = dépense de la période ÷ nombre de commandes, le même montant pour chaque commande.
+              Taille du panier = articles payants (une ligne en quantité 2 compte pour 2 ; articles offerts à 0 € exclus). Profit après pub = CA − achat − livraison (un seul coût par commande) + port payé par le client − frais de transaction ({(feeRate * 100).toLocaleString('fr-FR')} % du CA). Pub et frais fixes = dépense de la période ÷ nombre de commandes, le même montant pour chaque commande.
             </p>
           </div>
         ) : (
@@ -609,7 +628,7 @@ export default function MarginsPage({ params }: { params: { brand: string } }) {
           </div>
           {shipMode === 'marginal' && (
             <p className="text-[11px] text-[#6b6b63] px-5 py-2 bg-[#fafaf9] border-b border-[#f0f0ee]">
-              Vue marginale : l&apos;article le plus cher de chaque commande porte la livraison ; chaque article en plus ne coûte que {model ? 'son supplément estimé (voir « Coût de livraison par produit »)' : eur2(extraItem)}{model ? `, ou ${eur2(extraItem)} pour un produit trop peu facturé (Paramètres › Livraison)` : ' (réglable dans Paramètres › Livraison)'}. Le total de livraison ne change pas.
+              Vue marginale : l&apos;article le plus cher de chaque commande porte la livraison ; chaque article en plus ne coûte que {model ? 'son coût d’ajout dans un colis (onglet Par commande)' : eur2(extraItem)}{model ? `, ou ${eur2(extraItem)} pour un produit sans assez de commandes pour estimer (Paramètres › Livraison)` : ' (réglable dans Paramètres › Livraison)'}. Le total de livraison ne change pas.
             </p>
           )}
 
@@ -653,7 +672,7 @@ export default function MarginsPage({ params }: { params: { brand: string } }) {
                         <td className="text-right tabular-nums text-[#6b6b63]">{p.quantity.toLocaleString('fr-FR')}</td>
                         <td className="text-right tabular-nums text-[#1a1a2e]">{money(show(p.revenue, p.quantity))}</td>
                         <td className="text-right tabular-nums text-[#9b9b93]">{money(show(p.cost, p.quantity))}</td>
-                        <td className={`text-right tabular-nums text-[#9b9b93] ${p.forecast ? 'italic' : ''}`} title={p.forecast ? 'Contient des coûts prévus (commandes pas encore facturées)' : undefined}>{p.shipping !== 0 ? money(show(p.shipping, p.quantity)) : '—'}</td>
+                        <td className="text-right tabular-nums text-[#9b9b93] whitespace-nowrap">{p.shipping !== 0 ? money(show(p.shipping, p.quantity)) : '—'}</td>
                         {basis === 'loaded' && <td className="text-right tabular-nums text-[#9b9b93]">{p_ovh > 0 ? money(show(p_ovh, p.quantity)) : '—'}</td>}
                         <td className="text-right tabular-nums font-semibold" style={{ color: p_margin >= 0 ? '#1a7f4b' : '#c7293a' }}>{money(show(p_margin, p.quantity))}</td>
                         <td className="text-right tabular-nums font-semibold pr-4" style={{ color: p_pct >= 50 ? '#1a7f4b' : p_pct >= 25 ? '#b45309' : '#c7293a' }}>{p_pct.toFixed(0)}%</td>
@@ -668,7 +687,7 @@ export default function MarginsPage({ params }: { params: { brand: string } }) {
                             <td className="text-right tabular-nums text-[#9b9b93]">{v.quantity.toLocaleString('fr-FR')}</td>
                             <td className="text-right tabular-nums text-[#6b6b63]">{money(show(v.revenue, v.quantity))}</td>
                             <td className="text-right tabular-nums text-[#b0b0a8]">{money(show(v.cost, v.quantity))}</td>
-                            <td className={`text-right tabular-nums text-[#b0b0a8] ${v.forecast ? 'italic' : ''}`}>{v.shipping !== 0 ? money(show(v.shipping, v.quantity)) : '—'}</td>
+                            <td className="text-right tabular-nums text-[#b0b0a8]">{v.shipping !== 0 ? money(show(v.shipping, v.quantity)) : '—'}</td>
                             {basis === 'loaded' && <td className="text-right tabular-nums text-[#b0b0a8]">{v_ovh > 0 ? money(show(v_ovh, v.quantity)) : '—'}</td>}
                             <td className="text-right tabular-nums" style={{ color: v_net >= 0 ? '#1a7f4b' : '#c7293a' }}>{money(show(v_net, v.quantity))}</td>
                             <td className="text-right tabular-nums pr-4 text-[#9b9b93]">{v_pct.toFixed(0)}%</td>
@@ -684,52 +703,108 @@ export default function MarginsPage({ params }: { params: { brand: string } }) {
         </div>
         )}
 
-        {/* ── Coût de livraison par produit (modèle de prévision) ─────────── */}
-        {model && (
-          <div className="bg-white rounded-[20px] shadow-[0_2px_16px_rgba(0,0,0,0.06)] overflow-hidden">
+        {/* ── Coût de livraison par produit (onglet Par commande) ────────────── */}
+        {tab === 'commandes' && model && (() => {
+          const reliable = model.products.filter(p => p.used)
+          const thin = model.products.filter(p => !p.used)
+          const alone = [...reliable].sort((a, b) => (a.coef) - (b.coef))
+          const card = 'bg-white rounded-[20px] shadow-[0_2px_16px_rgba(0,0,0,0.06)] overflow-hidden'
+          const head = (title: string, sub: string) => (
             <div className="px-5 py-3 border-b border-[#f0f0ee]">
-              <p className="text-[10px] font-semibold text-[#6b6b63] uppercase tracking-[0.1em]">Coût de livraison par produit</p>
-              <p className="text-[11px] text-[#9b9b93] mt-1">
-                Sert à prévoir le coût des commandes pas encore facturées. Appris sur {model.orders.toLocaleString('fr-FR')} commandes facturées vendues du {new Date(model.window.from).toLocaleDateString('fr-FR')} au {new Date(model.window.to).toLocaleDateString('fr-FR')}.
-                Coût d&apos;un colis = {eur2(model.base)} de base{model.intlExtra > 0 ? ` (+ ${eur2(model.intlExtra)} hors France)` : ''} + le supplément de chaque produit présent.
-              </p>
+              <p className="text-sm font-semibold text-[#1a1a2e]">{title}</p>
+              <p className="text-[11px] text-[#9b9b93] mt-0.5">{sub}</p>
             </div>
-            <div className="overflow-x-auto">
-              <table className="w-full text-xs">
-                <thead>
-                  <tr className="text-[#9b9b93] border-b border-[#f0f0ee]">
-                    <th className="text-left font-medium py-2 pl-5">Produit</th>
-                    <th className="text-right font-medium py-2">Commandes facturées</th>
-                    <th className="text-right font-medium py-2 pr-5">Supplément par article</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {model.products.map(p => (
-                    <tr key={p.key} className="border-b border-[#f6f6f4]">
-                      <td className="py-2 pl-5 text-[#1a1a2e]">{p.title}</td>
-                      <td className="text-right tabular-nums text-[#6b6b63]">{p.orders.toLocaleString('fr-FR')}</td>
-                      <td className="text-right tabular-nums pr-5">
-                        {p.used
-                          ? <span className="text-[#1a1a2e] font-medium">{eur2(p.coef)}</span>
-                          : <span className="inline-flex items-center gap-1 text-[#b45309]" title={`Moins de ${model.minOrders} commandes facturées : les colis qui le contiennent sont prévus selon la taille du panier`}>
-                              <AlertTriangle size={11} /> échantillon trop petit
-                            </span>}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-            <div className="px-5 py-3 border-t border-[#f0f0ee] text-[11px] text-[#9b9b93] space-y-1">
-              <p>
-                Repli, coût moyen réel par taille de panier : {model.bySize.filter(b => b.orders > 0).map(b => `${b.size === 4 ? '4 et +' : b.size} article${b.size > 1 ? 's' : ''} ${eur2(b.avg)} (${b.orders} cmd)`).join(' · ')}.
+          )
+          return (
+            <>
+              <div className="grid gap-4 md:grid-cols-2">
+                <div className={card}>
+                  {head('Coût d’envoi d’un produit seul', 'Colis envoyé en France avec ce seul produit (attaches offertes comprises).')}
+                  <table className="w-full text-xs">
+                    <tbody>
+                      {alone.map(p => (
+                        <tr key={p.key} className="border-b border-[#f6f6f4]">
+                          <td className="py-2 pl-5 text-[#1a1a2e]">{shortTitle(p.title)}</td>
+                          <td className="text-right tabular-nums text-[10px] text-[#9b9b93]" title="Commandes facturées qui ont servi au calcul">{p.orders} cmd</td>
+                          <td className="text-right tabular-nums font-semibold text-[#1a1a2e] pr-5">{eur2(model.base + p.coef)}</td>
+                        </tr>
+                      ))}
+                      {thin.length > 0 && (
+                        <>
+                          <tr className="border-b border-[#f6f6f4] cursor-pointer hover:bg-[#fafafa]" onClick={() => setShowThin(v => !v)}>
+                            <td colSpan={3} className="py-2 pl-5 text-[#9b9b93]">
+                              <ChevronRight size={12} className={`inline mr-1 transition-transform ${showThin ? 'rotate-90' : ''}`} />
+                              Pas assez de commandes pour estimer ({thin.length} produit{thin.length > 1 ? 's' : ''})
+                            </td>
+                          </tr>
+                          {showThin && thin.map(p => (
+                            <tr key={p.key} className="border-b border-[#f6f6f4] bg-[#fbfbfa]">
+                              <td className="py-1.5 pl-9 text-[#6b6b63]">{shortTitle(p.title)}</td>
+                              <td className="text-right tabular-nums text-[10px] text-[#9b9b93]">{p.orders} cmd</td>
+                              <td className="text-right text-[10px] text-[#9b9b93] pr-5">estimation moins précise</td>
+                            </tr>
+                          ))}
+                        </>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+                <div className={card}>
+                  {head('Coût d’ajout dans un colis', 'Ce que coûte un produit ajouté à une commande qui part déjà.')}
+                  <table className="w-full text-xs">
+                    <tbody>
+                      {alone.map(p => (
+                        <tr key={p.key} className="border-b border-[#f6f6f4]">
+                          <td className="py-2 pl-5 text-[#1a1a2e]">{shortTitle(p.title)}</td>
+                          <td className="text-right tabular-nums font-semibold text-[#1a1a2e] pr-5">+ {eur2(Math.max(0, p.coef))}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                  <p className="px-5 py-2.5 text-[11px] text-[#9b9b93]">
+                    Un colis coûte {eur2(model.base)} de départ{model.intlExtra > 0 ? ` (${eur2(model.base + model.intlExtra)} hors France)` : ''}, plus le coût d&apos;ajout de chaque produit.
+                  </p>
+                </div>
+              </div>
+
+              {typical.length > 0 && (
+                <div className={card}>
+                  {head('Colis types', 'Coût de livraison estimé en France, et coût réel moyen des commandes identiques déjà facturées.')}
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-xs">
+                      <thead>
+                        <tr className="text-[#9b9b93] border-b border-[#f0f0ee]">
+                          <th className="text-left font-medium py-2 pl-5">Colis</th>
+                          <th className="text-right font-medium py-2">Estimé</th>
+                          <th className="text-right font-medium py-2 pr-5">Réel constaté</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {typical.map(t => (
+                          <tr key={t.label} className="border-b border-[#f6f6f4]">
+                            <td className="py-2 pl-5 text-[#1a1a2e]">
+                              {t.label}
+                              {t.frequent != null && <span className="text-[10px] text-[#9b9b93] ml-1.5">{t.frequent} commandes sur la période</span>}
+                            </td>
+                            <td className="text-right tabular-nums font-semibold text-[#1a1a2e]">{eur2(t.predicted)}</td>
+                            <td className="text-right tabular-nums pr-5">
+                              {t.real != null
+                                ? <span className="text-[#6b6b63]">{eur2(t.real)} <span className="text-[10px] text-[#9b9b93]">({t.realOrders} cmd)</span></span>
+                                : <span className="text-[10px] text-[#9b9b93]">aucune commande identique</span>}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+              <p className="text-[11px] text-[#9b9b93]">
+                Ces coûts sont calculés à partir de {model.orders.toLocaleString('fr-FR')} commandes facturées par le logisticien (ventes du {new Date(model.window.from).toLocaleDateString('fr-FR')} au {new Date(model.window.to).toLocaleDateString('fr-FR')}). Ils servent à estimer les commandes pas encore facturées ; leur fiabilité est vérifiée chaque mois dans Coûts logisticien › Livraison estimée.
               </p>
-              <p>
-                Un article offert qui part toujours avec le même produit (ex. attaches avec le sac) partage son coût avec lui : regarde la somme des deux plutôt que chaque montant seul. La fiabilité de la prévision est contrôlée chaque mois dans Coûts logisticien.
-              </p>
-            </div>
-          </div>
-        )}
+            </>
+          )
+        })()}
       </div>
     </div>
   )
