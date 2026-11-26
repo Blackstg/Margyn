@@ -342,7 +342,7 @@ export default function ReapproPage() {
                                   {(p.status === 'order' || p.status === 'snoozed') && (
                                     cartSet.has(r.id)
                                       ? <span className="inline-flex items-center gap-1 px-2 py-1 text-[11px] text-[#1a7f4b] font-semibold"><Check size={12} />Ajouté</span>
-                                      : <button onClick={() => addToCart(r)} className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-semibold border border-[#e8e4e0] text-[#1a1a2e] hover:border-[#aeb0c9]"><Plus size={12} />Bon</button>
+                                      : <button onClick={() => addToCart(r)} className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-semibold border border-[#e8e4e0] text-[#1a1a2e] hover:border-[#aeb0c9]"><Plus size={12} />Commander</button>
                                   )}
                                   {p.status === 'order' && (
                                     <button onClick={() => act({ action: 'snooze', variantId: r.id }).then((ok) => ok && setToast('Plus de relance pendant 14 jours'))}
@@ -429,7 +429,7 @@ export default function ReapproPage() {
               <div className="flex flex-col items-center justify-center h-full gap-3 text-center px-8">
                 <div className="w-12 h-12 rounded-2xl bg-[#f5f0f2] flex items-center justify-center"><ClipboardList size={22} className="text-[#aeb0c9]" /></div>
                 <p className="text-sm font-medium text-[#1a1a2e]">Aucun article</p>
-                <p className="text-xs text-[#9b9b93]">« Tout ajouter » met d’un coup toutes les lignes conseillées ; « + Bon » ajoute une ligne.</p>
+                <p className="text-xs text-[#9b9b93]">« Tout ajouter » met d’un coup toutes les lignes conseillées ; « + Commander » ajoute une ligne.</p>
                 {toOrder.length > 0 && <button onClick={addAll} className="mt-1 px-3 py-1.5 rounded-lg text-xs font-semibold bg-[#1a1a2e] text-white">Tout ajouter ({toOrder.length})</button>}
               </div>
             ) : (
