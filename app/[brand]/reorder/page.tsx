@@ -21,7 +21,11 @@ const BRAND_LABELS: Record<string, string> = { bowa: 'Bowa', moom: 'Mōom Paris'
 
 // Réglages modifiables depuis la page (les autres restent ceux du serveur).
 const EDITABLE: (keyof ReorderSettings)[] = ['fabDays', 'transitDays', 'safetyDays', 'orderCoverDays', 'refPeriod', 'promos', 'closures', 'products', 'recipients']
-const pick = (s: ReorderSettings) => JSON.stringify(EDITABLE.map((k) => s[k]))
+// Clés triées : la base (jsonb) ne garde pas l'ordre des clés des objets.
+const stable = (v: unknown): string => (Array.isArray(v) ? `[${v.map(stable).join(',')}]`
+  : v && typeof v === 'object' ? `{${Object.keys(v).sort().map((k) => `${k}:${stable((v as Record<string, unknown>)[k])}`).join(',')}}`
+  : JSON.stringify(v))
+const pick = (s: ReorderSettings) => stable(EDITABLE.map((k) => s[k]))
 
 const GROUPS: { key: string; title: string; statuses: VariantStatus[]; hint?: string }[] = [
   { key: 'order',   title: 'À commander',              statuses: ['order'] },
