@@ -41,7 +41,7 @@ export async function GET(req: NextRequest) {
 }
 
 // Seuls ces réglages sont modifiables depuis la page.
-const SETTING_KEYS: (keyof ReorderSettings)[] = ['fabDays', 'transitDays', 'safetyDays', 'orderCoverDays', 'refPeriod', 'promos', 'products', 'recipients']
+const SETTING_KEYS: (keyof ReorderSettings)[] = ['fabDays', 'transitDays', 'safetyDays', 'orderCoverDays', 'refPeriod', 'promos', 'closures', 'products', 'recipients', 'colorAliases']
 
 export async function POST(req: NextRequest) {
   const brand = req.nextUrl.searchParams.get('brand') ?? ''
@@ -52,9 +52,18 @@ export async function POST(req: NextRequest) {
   try {
     switch (b.action) {
       case 'create_order': {
-        const o: NewOrder = { orderedOn: isDay(b.orderedOn) ? b.orderedOn : parisDay(), source: b.source ?? 'validated', note: b.note ?? null, lines: Array.isArray(b.lines) ? b.lines : [] }
-        if (!['validated', 'declared', 'after_the_fact'].includes(o.source)) throw new Error('source invalide')
-        return NextResponse.json({ ok: true, id: await createOrder(db, brand, o) })
+        const o: NewOrder = {
+          orderedOn: isDay(b.orderedOn) ? b.orderedOn : parisDay(), source: b.source ?? 'validated', note: b.note ?? null,
+          lines: Array.isArray(b.lines) ? b.lines : [], invoice: b.invoice ?? null,
+        }
+        if (!['validated', 'declared', 'after_the_fact', 'invoice'].includes(o.source)) throw new Error('source invalide')
+        const id = await createOrder(db, brand, o)
+        // Rapprochements validés à la relecture d'une facture : réutilisés aux prochains imports.
+        if (b.aliases && typeof b.aliases === 'object') {
+          const s = await loadSettings(db, brand)
+          await saveSettings(db, brand, { invoiceAliases: { ...s.invoiceAliases, ...(b.aliases as Record<string, string>) } })
+        }
+        return NextResponse.json({ ok: true, id })
       }
       case 'update_order': {
         const patch: Record<string, unknown> = { updated_at: new Date().toISOString() }

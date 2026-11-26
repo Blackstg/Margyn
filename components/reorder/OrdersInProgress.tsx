@@ -10,6 +10,8 @@ import { CARD, GREEN, ORANGE, RED, eur0, fmtDay, int, plural } from './format'
 
 type Act = (body: Record<string, unknown>) => Promise<boolean>
 
+const money = (n: number, cur: string) => n.toLocaleString('fr-FR', { style: 'currency', currency: cur || 'USD', maximumFractionDigits: 2 })
+
 function stage(o: ReorderOrder, today: string) {
   if (today < o.prodDoneOn) return { label: 'En production', icon: Factory, color: '#6f739f', left: daysBetween(today, o.prodDoneOn), next: 'fin de production' }
   if (today < o.arrivalOn) return { label: 'En transport', icon: Ship, color: ORANGE, left: daysBetween(today, o.arrivalOn), next: 'arrivée' }
@@ -62,6 +64,12 @@ function OrderCard({ o, today, act }: { o: ReorderOrder; today: string; act: Act
             {received > 0 && <>, {int(received)} déjà reçues</>}
             {o.source === 'declared' && ', déclarée après coup'}
           </p>
+          {o.invoice && (
+            <p className="text-[11px] text-[#6b6b63]">
+              Facture {o.invoice.supplier} n° {o.invoice.number} : {money(o.invoice.total, o.invoice.currency)}, acompte {money(o.invoice.deposit, o.invoice.currency)} payé,{' '}
+              <span className="font-semibold text-[#1a1a2e]">solde {money(o.invoice.balance, o.invoice.currency)}</span>
+            </p>
+          )}
         </div>
         <div className="text-right">
           <p className="inline-flex items-center gap-1.5 text-xs font-semibold" style={{ color: st.color }}><Icon size={13} />{st.label}</p>
@@ -133,13 +141,16 @@ function OrderCard({ o, today, act }: { o: ReorderOrder; today: string; act: Act
   )
 }
 
-export default function OrdersInProgress({ orders, today, act }: { orders: ReorderOrder[]; today: string; act: Act }) {
+export default function OrdersInProgress({ orders, today, act, action }: { orders: ReorderOrder[]; today: string; act: Act; action?: React.ReactNode }) {
   const open = orders.filter((o) => o.status === 'open').sort((a, b) => a.arrivalOn.localeCompare(b.arrivalOn))
   return (
     <section className="space-y-3">
-      <h2 className="text-sm font-bold text-[#1a1a2e]">Commandes en cours</h2>
+      <div className="flex items-center justify-between gap-3">
+        <h2 className="text-sm font-bold text-[#1a1a2e]">Commandes en cours</h2>
+        {action}
+      </div>
       {open.length === 0
-        ? <p className={`${CARD} p-4 text-xs text-[#9b9b93]`}>Aucune commande en cours. Quand tu valides un bon de commande, il apparaît ici avec ses dates de production et d’arrivée.</p>
+        ? <p className={`${CARD} p-4 text-xs text-[#9b9b93]`}>Aucune commande en cours. Valide un bon de commande ou importe la facture d’une commande passée hors de Steero : elle apparaît ici avec ses dates de production et d’arrivée.</p>
         : <div className="grid gap-3 grid-cols-1 lg:grid-cols-2">{open.map((o) => <OrderCard key={o.id} o={o} today={today} act={act} />)}</div>}
     </section>
   )

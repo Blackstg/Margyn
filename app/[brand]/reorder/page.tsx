@@ -13,13 +13,14 @@ import ReceiptPrompts from '@/components/reorder/ReceiptPrompts'
 import OrdersInProgress from '@/components/reorder/OrdersInProgress'
 import ReorderSettingsPanel from '@/components/reorder/ReorderSettingsPanel'
 import StockGauge from '@/components/reorder/StockGauge'
+import InvoiceImport from '@/components/reorder/InvoiceImport'
 import { CARD, RED, ORANGE, dec, fmtDay, int, plural } from '@/components/reorder/format'
 import { downloadCSV, poCSV, printPO, supplierMessage, type PoLine } from '@/components/reorder/po'
 
 const BRAND_LABELS: Record<string, string> = { bowa: 'Bowa', moom: 'Mōom Paris', krom: 'Krom', yone: 'Yone' }
 
 // Réglages modifiables depuis la page (les autres restent ceux du serveur).
-const EDITABLE: (keyof ReorderSettings)[] = ['fabDays', 'transitDays', 'safetyDays', 'orderCoverDays', 'refPeriod', 'promos', 'products', 'recipients']
+const EDITABLE: (keyof ReorderSettings)[] = ['fabDays', 'transitDays', 'safetyDays', 'orderCoverDays', 'refPeriod', 'promos', 'closures', 'products', 'recipients']
 const pick = (s: ReorderSettings) => JSON.stringify(EDITABLE.map((k) => s[k]))
 
 const GROUPS: { key: string; title: string; statuses: VariantStatus[]; hint?: string }[] = [
@@ -265,7 +266,9 @@ export default function ReapproPage() {
 
         <ReceiptPrompts proposals={computed.proposals} rows={rowMap} lead={lead} act={act} />
 
-        <OrdersInProgress orders={inputs.orders} today={today} act={act} />
+        <OrdersInProgress orders={inputs.orders} today={today} act={act}
+          action={<InvoiceImport brand={brand} variants={rows} act={act} onDone={setToast}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold border border-[#e8e4e0] text-[#1a1a2e] hover:border-[#aeb0c9] bg-white disabled:opacity-50" />} />
 
         {/* ── Variantes ─────────────────────────────────────────────────── */}
         <section className="space-y-3">
@@ -328,7 +331,10 @@ export default function ReapproPage() {
                                   ? <span className="text-[#1a1a2e] font-semibold">{int(p.inProduction + p.inTransit + p.manual)}{p.manual > 0 && <span className="font-normal text-[#9b9b93]"> dont {int(p.manual)} saisi</span>}</span>
                                   : <span className="text-[#c0c0b8]">—</span>}
                               </td>
-                              <td className="px-3 py-2.5 tabular-nums text-xs text-[#1a1a2e]">{r.velocity.daily > 0 ? dec(r.velocity.daily, 2) : '—'}</td>
+                              <td className="px-3 py-2.5 tabular-nums text-xs text-[#1a1a2e]">
+                                {r.velocity.daily > 0 ? dec(r.velocity.daily, 2) : '—'}
+                                {r.velocity.estimated && <span className="block mt-0.5 w-max px-1.5 py-px rounded-full bg-[#fff3dc] text-[#a16207] text-[9px] font-semibold" title={`Ventes en promo divisées par ${dec(r.velocity.estimated.ratio, 1)} (rapport promo / normal des autres couleurs)`}>estimé, variante récente</span>}
+                              </td>
                               <td className="px-3 py-2.5"><StockGauge stockDays={p.stockDays} positionDays={p.positionDays} lead={lead} trigger={trigger} target={target} /></td>
                               <td className="px-3 py-2.5 tabular-nums text-xs whitespace-nowrap" style={{ color: p.ruptureOn && daysBetween(today, p.ruptureOn) <= lead ? RED : undefined }}>
                                 {p.ruptureOn ? (p.ruptureOn <= today ? 'en rupture' : fmtDay(p.ruptureOn, true)) : '—'}
@@ -369,6 +375,12 @@ export default function ReapproPage() {
                                         Exclus : {r.velocity.rupture} {plural(r.velocity.rupture, 'jour', 'jours')} de rupture, {r.velocity.promo} de promo
                                         {r.velocity.capped ? `, ${r.velocity.capped} ${plural(r.velocity.capped, 'pic plafonné', 'pics plafonnés')}` : ''}.
                                       </p>
+                                      {r.velocity.estimated && (
+                                        <p className="text-[#a16207]">
+                                          Estimé, variante récente : {int(r.velocity.estimated.promoSales)} ventes sur {r.velocity.estimated.promoDays} jours de promo,
+                                          divisées par {dec(r.velocity.estimated.ratio, 1)} (les autres couleurs vendent {dec(r.velocity.estimated.ratio, 1)} fois plus en promo).
+                                        </p>
+                                      )}
                                       {r.sku && <p className="text-[#aeb0c9] font-mono text-[10px]">{r.sku}</p>}
                                     </div>
                                     <div className="bg-white rounded-xl p-3 space-y-2">
@@ -478,11 +490,12 @@ export default function ReapproPage() {
               <span className="text-[#6b6b63]">{cartItems.length} {plural(cartItems.length, 'référence', 'références')}, {int(cartUnits)} unités</span>
               <span className="font-bold text-[#1a1a2e]">{cartCost.toLocaleString('fr-FR', { style: 'currency', currency: 'EUR', maximumFractionDigits: 0 })}</span>
             </div>
+            <InvoiceImport brand={brand} variants={rows} act={act} onDone={(m) => { setToast(m); setSidebarOpen(false) }} />
             <button onClick={validate} disabled={!poLines.length || validating}
               className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-[#1a1a2e] text-white rounded-xl text-sm font-semibold hover:bg-[#2d2d4e] disabled:opacity-40">
               <Check size={14} />{validating ? 'Enregistrement…' : 'Valider la commande'}
             </button>
-            <p className="text-[10px] text-[#9b9b93] text-center">Enregistre la commande, exporte le PDF et le CSV, et prépare le message pour le fournisseur.</p>
+            <p className="text-[10px] text-[#9b9b93] text-center">« Valider » enregistre la commande, exporte le PDF et le CSV et prépare le message au fournisseur. Commande passée hors de Steero : importe sa facture.</p>
           </div>
         </div>
       </div>

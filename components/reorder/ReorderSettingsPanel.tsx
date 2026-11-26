@@ -4,7 +4,7 @@
 // promo exclues, minimum de commande et colisage par produit, récap du lundi.
 // Les changements s'appliquent tout de suite au calcul ; « Enregistrer » les garde.
 import { Plus, X } from 'lucide-react'
-import { leadDays, targetDays, triggerDays, type ReorderSettings } from '@/lib/reorder/plan'
+import { leadDays, targetDays, triggerDays, type Promo, type ReorderSettings } from '@/lib/reorder/plan'
 import { CARD } from './format'
 
 const input = 'border border-[#e8e4e0] rounded-lg px-2 py-1 text-xs bg-white tabular-nums focus:outline-none focus:border-[#aeb0c9]'
@@ -16,6 +16,27 @@ function Num({ label, value, onChange }: { label: string; value: number; onChang
         <input type="number" min={0} value={value} onChange={(e) => onChange(Math.max(0, parseInt(e.target.value) || 0))} className={`${input} w-16 text-center`} /> j
       </span>
     </label>
+  )
+}
+
+function Periods({ title, hint, add, items, onChange }: { title: string; hint: string; add: string; items: Promo[]; onChange: (p: Promo[]) => void }) {
+  const today = new Date().toISOString().slice(0, 10)
+  return (
+    <div className="space-y-2">
+      <p className="text-xs font-semibold text-[#1a1a2e]">{title}</p>
+      <p className="text-[11px] text-[#9b9b93]">{hint}</p>
+      {items.map((p, i) => (
+        <div key={i} className="flex items-center gap-2 flex-wrap">
+          <input value={p.label} placeholder="Nom" onChange={(e) => onChange(items.map((x, j) => (j === i ? { ...x, label: e.target.value } : x)))} className={`${input} w-44`} />
+          <input type="date" value={p.from} onChange={(e) => onChange(items.map((x, j) => (j === i ? { ...x, from: e.target.value } : x)))} className={input} />
+          <span className="text-[11px] text-[#9b9b93]">au</span>
+          <input type="date" value={p.to} onChange={(e) => onChange(items.map((x, j) => (j === i ? { ...x, to: e.target.value } : x)))} className={input} />
+          <button onClick={() => onChange(items.filter((_, j) => j !== i))} className="p-1 rounded hover:bg-[#fce8ea] text-[#9b9b93] hover:text-[#c7293a]" aria-label={`Retirer ${p.label}`}><X size={12} /></button>
+        </div>
+      ))}
+      <button onClick={() => onChange([...items, { label: '', from: today, to: today }])}
+        className="inline-flex items-center gap-1 text-[11px] font-medium text-[#6b6b63] hover:text-[#1a1a2e]"><Plus size={12} />{add}</button>
+    </div>
   )
 }
 
@@ -76,23 +97,11 @@ export default function ReorderSettingsPanel({ s, set, products, dirty, saving, 
         </div>
       </div>
 
-      <div className="space-y-2">
-        <p className="text-xs font-semibold text-[#1a1a2e]">Périodes promo exclues du calcul</p>
-        <p className="text-[11px] text-[#9b9b93]">
-          Comme les jours de rupture. S’il reste moins de {s.minUsefulDays} jours utiles, le calcul remonte en arrière jusqu’à en avoir {s.windowDays}.
-        </p>
-        {s.promos.map((p, i) => (
-          <div key={i} className="flex items-center gap-2 flex-wrap">
-            <input value={p.label} placeholder="Nom" onChange={(e) => set({ promos: s.promos.map((x, j) => (j === i ? { ...x, label: e.target.value } : x)) })} className={`${input} w-40`} />
-            <input type="date" value={p.from} onChange={(e) => set({ promos: s.promos.map((x, j) => (j === i ? { ...x, from: e.target.value } : x)) })} className={input} />
-            <span className="text-[11px] text-[#9b9b93]">au</span>
-            <input type="date" value={p.to} onChange={(e) => set({ promos: s.promos.map((x, j) => (j === i ? { ...x, to: e.target.value } : x)) })} className={input} />
-            <button onClick={() => set({ promos: s.promos.filter((_, j) => j !== i) })} className="p-1 rounded hover:bg-[#fce8ea] text-[#9b9b93] hover:text-[#c7293a]" aria-label={`Retirer ${p.label}`}><X size={12} /></button>
-          </div>
-        ))}
-        <button onClick={() => set({ promos: [...s.promos, { label: 'Promo', from: new Date().toISOString().slice(0, 10), to: new Date().toISOString().slice(0, 10) }] })}
-          className="inline-flex items-center gap-1 text-[11px] font-medium text-[#6b6b63] hover:text-[#1a1a2e]"><Plus size={12} />Ajouter une période</button>
-      </div>
+      <Periods title="Périodes promo exclues du calcul" add="Ajouter une période" items={s.promos} onChange={(promos) => set({ promos })}
+        hint={`Comme les jours de rupture. S’il reste moins de ${s.minUsefulDays} jours utiles, le calcul remonte en arrière jusqu’à en avoir ${s.windowDays}.`} />
+
+      <Periods title="Fermetures d’usine" add="Ajouter une fermeture" items={s.closures} onChange={(closures) => set({ closures })}
+        hint="Une commande dont la fabrication chevauche une fermeture voit son délai allongé d’autant ; « Commander avant » avance en conséquence." />
 
       <div className="space-y-2">
         <p className="text-xs font-semibold text-[#1a1a2e]">Minimum de commande et colisage</p>

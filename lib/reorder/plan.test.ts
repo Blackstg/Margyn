@@ -3,11 +3,11 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
   DEFAULT_SETTINGS, addDays, velocity, planVariant, roundQty, ruptureDate, stockJumps, receiptProposals, ruptureKpis,
-  triggerDays, targetDays, type SalesHistory, type ReorderSettings,
+  triggerDays, targetDays, fabEnd, arrivalFor, daysBetween, recentEstimate, type SalesHistory, type ReorderSettings,
 } from './plan'
 
 const today = '2026-11-26'
-const s: ReorderSettings = { ...DEFAULT_SETTINGS, promos: [] }
+const s: ReorderSettings = { ...DEFAULT_SETTINGS, promos: [], closures: [] }
 const hist = (perDay: (day: string) => number, days = 200, extra: Partial<SalesHistory> = {}): SalesHistory => {
   const sales: Record<string, number> = {}
   for (let i = 1; i <= days; i++) { const d = addDays(today, -i); const q = perDay(d); if (q) sales[d] = q }
@@ -118,4 +118,30 @@ test('indicateurs : rupture en cours et CA perdu sur le mois', () => {
   assert.equal(k.ruptureNow, 1)
   assert.equal(k.daysWithoutRupture, 0)
   assert.equal(k.lostThisMonth, 14 * 2 * 25)   // du 13 au 26 novembre
+})
+
+test('fermeture d’usine : la fabrication s’allonge d’autant, « commander avant » avance', () => {
+  const closed: ReorderSettings = { ...s, closures: [{ from: '2027-01-30', to: '2027-02-21', label: 'CNY' }] }
+  assert.equal(fabEnd('2026-11-26', closed), '2026-12-26')            // pas de chevauchement
+  assert.equal(fabEnd('2027-01-20', closed), addDays('2027-02-19', 23)) // 23 jours de fermeture ajoutés
+  assert.equal(arrivalFor('2027-01-20', closed), addDays(fabEnd('2027-01-20', closed), 40))
+  // Couverture jusqu'au 30/05/2027 : sans fermeture on commanderait le 19/02, avec on doit le faire avant.
+  const p = planVariant({ stock: 2 * daysBetween(today, '2027-05-30'), daily: 2, open: [], manual: 0, snoozedUntil: null, today }, closed)
+  const q = planVariant({ stock: 2 * daysBetween(today, '2027-05-30'), daily: 2, open: [], manual: 0, snoozedUntil: null, today }, s)
+  assert.equal(q.orderBy, '2027-02-19')
+  assert.ok(p.orderBy! < q.orderBy!, `${p.orderBy} < ${q.orderBy}`)
+  assert.ok(arrivalFor(p.orderBy!, closed) <= addDays('2027-05-30', -30))
+})
+
+test('variante récente vendue seulement en promo : ventes ramenées au rythme normal', () => {
+  const promo = { ...s, promos: [{ from: '2026-11-06', to: '2026-11-30', label: 'BF' }] }
+  const sib = hist((d) => (d >= '2026-11-06' ? 3 : 1))                 // sœur : 3/j en promo, 1/j sinon
+  const sibDaily = velocity(sib, promo, today).daily
+  const fresh = hist((d) => (d >= '2026-11-13' ? 6 : 0))                // nouvelle couleur depuis le 13/11
+  const vel = velocity(fresh, promo, today)
+  assert.equal(vel.daily, 0)
+  const est = recentEstimate(fresh, vel, [{ h: sib, daily: sibDaily }], promo, today)!
+  assert.equal(est.estimated!.ratio, 3)
+  assert.equal(est.daily, 2)                                           // 6 en promo ÷ 3
+  assert.equal(recentEstimate(sib, velocity(sib, promo, today), [], promo, today), null)  // ancienne : rien à estimer
 })

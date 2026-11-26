@@ -20,8 +20,11 @@ export type ReorderSettings = {
   soonDays: number         // date limite dans moins de N jours : « Bientôt »
   refPeriod: { from: string; to: string } | null   // période de référence manuelle (saisonnalité)
   promos: Promo[]          // jours exclus du calcul, comme les jours de rupture
+  closures: Promo[]        // fermetures d'usine : la fabrication s'arrête, le délai s'allonge d'autant
   products: Record<string, ProductRule>            // clé : shopify_product_id
   recipients: string[]     // récap du lundi
+  colorAliases: Record<string, string>    // couleur sur les factures → couleur Shopify (« marron » → « brown aubergine »)
+  invoiceAliases: Record<string, string>  // ligne de facture déjà rapprochée (`produit|couleur` normalisés) → variante
   dismissedJumps: string[] // `${variantId}|${day}` : hausses de stock déjà traitées
 }
 
@@ -31,7 +34,11 @@ export const DEFAULT_SETTINGS: ReorderSettings = {
   spikeFactor: 3, spikeFloor: 3, snoozeDays: 14, soonDays: 21,
   refPeriod: null,
   promos: [{ from: '2026-11-06', to: '2026-11-30', label: 'Black Friday 2026' }],
+  // Nouvel An chinois le 6 février 2027 : usines fermées environ une semaine avant et deux après (à confirmer).
+  closures: [{ from: '2027-01-30', to: '2027-02-21', label: 'Nouvel An chinois 2027' }],
   products: {}, recipients: [], dismissedJumps: [],
+  colorAliases: { marron: 'brown aubergine', jean: 'denim brut', cream: 'creme' },
+  invoiceAliases: {},
 }
 
 export function mergeSettings(partial: Partial<ReorderSettings> | null | undefined): ReorderSettings {
@@ -53,6 +60,27 @@ export const daysBetween = (a: string, b: string) =>
   Math.round((new Date(b + 'T00:00:00Z').getTime() - new Date(a + 'T00:00:00Z').getTime()) / 86_400_000)
 
 const inPromo = (day: string, promos: Promo[]) => promos.some((p) => day >= p.from && day <= p.to)
+
+// ─── Fermetures d'usine ───────────────────────────────────────────────────────
+
+// Fin de fabrication : fabDays jours ouvrés de l'usine (les jours de fermeture ne comptent pas).
+export function fabEnd(orderedOn: string, s: ReorderSettings): string {
+  let d = orderedOn
+  for (let n = 0, guard = 0; n < s.fabDays && guard < 3650; guard++) {
+    d = addDays(d, 1)
+    if (!inPromo(d, s.closures)) n++
+  }
+  return d
+}
+export const arrivalFor = (orderedOn: string, s: ReorderSettings) => addDays(fabEnd(orderedOn, s), s.transitDays)
+export const effLead = (orderedOn: string, s: ReorderSettings) => daysBetween(orderedOn, arrivalFor(orderedOn, s))
+
+// Dernier jour pour commander et recevoir au plus tard le jour `by`.
+export function latestOrderFor(by: string, s: ReorderSettings): string {
+  let o = addDays(by, -leadDays(s))
+  for (let i = 0; i < 400 && arrivalFor(o, s) > by; i++) o = addDays(o, -1)
+  return o
+}
 
 // ─── Ventes par jour ──────────────────────────────────────────────────────────
 
@@ -78,6 +106,8 @@ export type Velocity = {
   from: string; to: string
   rupture: number; promo: number; capped: number
   mode: 'glissant' | 'référence'
+  // variante récente : ventes en promo ramenées au rythme normal (rapport constaté sur les autres couleurs)
+  estimated?: { ratio: number; promoDays: number; promoSales: number } | null
 }
 
 export function velocity(h: SalesHistory, s: ReorderSettings, today: string): Velocity {
@@ -109,6 +139,30 @@ export function velocity(h: SalesHistory, s: ReorderSettings, today: string): Ve
   let capped = 0
   const total = useful.reduce((a, q) => { if (q > cap) { capped++; return a + cap } return a + q }, 0)
   return { daily: total / useful.length, usefulDays: useful.length, from, to, rupture, promo, capped, mode: s.refPeriod ? 'référence' : 'glissant' }
+}
+
+// Variante récente dont presque toutes les ventes tombent en promo : on garde ses
+// ventes en promo, divisées par le rapport « ventes promo / ventes normales » des
+// autres couleurs du même produit sur les mêmes jours.
+export function recentEstimate(h: SalesHistory, vel: Velocity, siblings: { h: SalesHistory; daily: number }[], s: ReorderSettings, today: string): Velocity | null {
+  if (vel.usefulDays >= s.minUsefulDays || !h.firstSale || h.firstSale < addDays(today, -2 * s.windowDays)) return null
+  const days: string[] = []
+  for (let d = h.firstSale; d < today; d = addDays(d, 1)) if (inPromo(d, s.promos) && !isRuptureDay(d, h)) days.push(d)
+  if (!days.length) return null
+  const promoSales = days.reduce((a, d) => a + (h.sales[d] ?? 0), 0)
+  let sibPromo = 0, sibNormal = 0
+  for (const sib of siblings) {
+    if (sib.daily <= 0) continue
+    for (const d of days) {
+      if (isRuptureDay(d, sib.h)) continue
+      sibPromo += sib.h.sales[d] ?? 0
+      sibNormal += sib.daily
+    }
+  }
+  if (sibPromo <= 0 || sibNormal <= 0) return null
+  const ratio = sibPromo / sibNormal
+  const daily = (vel.daily * vel.usefulDays + promoSales / ratio) / (vel.usefulDays + days.length)
+  return { ...vel, daily, estimated: { ratio, promoDays: days.length, promoSales } }
 }
 
 // ─── Plan par variante ────────────────────────────────────────────────────────
@@ -170,9 +224,12 @@ export function planVariant(p: {
   const stockDays    = Math.max(0, stock) / daily
   const positionDays = position / daily
   const ruptureOn    = ruptureDate(stock, daily, open, today)
-  const orderBy      = addDays(today, Math.floor(positionDays - triggerDays(s)))
-  const lateBy       = ruptureOn ? Math.max(0, daysBetween(addDays(ruptureOn, -leadDays(s)), today)) : 0
-  const suggested    = positionDays < triggerDays(s) ? roundQty(daily * targetDays(s) - position, p.rule) : 0
+  // Seuil du jour : délai réel d'une commande passée aujourd'hui (fermetures comprises) + sécurité.
+  const trigger      = effLead(today, s) + s.safetyDays
+  const coverEnd     = addDays(today, Math.floor(positionDays))
+  const orderBy      = latestOrderFor(addDays(coverEnd, -s.safetyDays), s)
+  const lateBy       = ruptureOn ? Math.max(0, daysBetween(latestOrderFor(ruptureOn, s), today)) : 0
+  const suggested    = positionDays < trigger ? roundQty(daily * (trigger + s.orderCoverDays) - position, p.rule) : 0
 
   const status: VariantStatus =
     suggested > 0 ? (p.snoozedUntil && p.snoozedUntil > today ? 'snoozed' : 'order')

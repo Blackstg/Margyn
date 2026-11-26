@@ -1,6 +1,6 @@
 // Chargement côté serveur des données Réappro (variantes, ventes sur un an, relevés
 // de stock, commandes, lignes ignorées, réglages) et écritures associées.
-import { mergeSettings, addDays, type ReorderSettings } from './plan'
+import { mergeSettings, addDays, arrivalFor, fabEnd, type ReorderSettings } from './plan'
 import type { ReorderInputs, ReorderOrder } from './compute'
 import { parisDay } from './snapshots'
 
@@ -33,12 +33,13 @@ export async function saveSettings(db: Db, brand: string, patch: Partial<Reorder
 type OrderRow = {
   id: string; ordered_on: string; prod_done_on: string; arrival_on: string; status: ReorderOrder['status']; source: ReorderOrder['source']
   total_cost: number; received_on: string | null; note: string | null
+  supplier: string | null; invoice_number: string | null; currency: string | null; invoice_total: number | null; deposit_paid: number | null; balance_due: number | null
   purchase_order_lines: { id: string; shopify_variant_id: string; product_title: string; variant_title: string | null; sku: string | null; qty: number; unit_cost: number; received_qty: number }[]
 }
 
 export async function loadOrders(db: Db, brand: string, today: string): Promise<ReorderOrder[]> {
   const { data, error } = await db.from('purchase_orders')
-    .select('id, ordered_on, prod_done_on, arrival_on, status, source, total_cost, received_on, note, purchase_order_lines(id, shopify_variant_id, product_title, variant_title, sku, qty, unit_cost, received_qty)')
+    .select('id, ordered_on, prod_done_on, arrival_on, status, source, total_cost, received_on, note, supplier, invoice_number, currency, invoice_total, deposit_paid, balance_due, purchase_order_lines(id, shopify_variant_id, product_title, variant_title, sku, qty, unit_cost, received_qty)')
     .eq('brand', brand)
     .or(`status.eq.open,ordered_on.gte.${addDays(today, -180)}`)
     .order('ordered_on', { ascending: false })
@@ -46,6 +47,10 @@ export async function loadOrders(db: Db, brand: string, today: string): Promise<
   return ((data ?? []) as OrderRow[]).map((o) => ({
     id: o.id, orderedOn: o.ordered_on, prodDoneOn: o.prod_done_on, arrivalOn: o.arrival_on, status: o.status, source: o.source,
     totalCost: Number(o.total_cost), receivedOn: o.received_on, note: o.note,
+    invoice: o.invoice_total != null ? {
+      supplier: o.supplier, number: o.invoice_number, currency: o.currency ?? 'USD',
+      total: Number(o.invoice_total), deposit: Number(o.deposit_paid ?? 0), balance: Number(o.balance_due ?? 0),
+    } : null,
     lines: o.purchase_order_lines.map((l) => ({
       id: l.id, variantId: l.shopify_variant_id, title: l.product_title, variantTitle: l.variant_title, sku: l.sku,
       qty: l.qty, unitCost: Number(l.unit_cost), receivedQty: l.received_qty,
@@ -111,7 +116,9 @@ export type NewOrder = {
   orderedOn: string
   source: ReorderOrder['source']
   note?: string | null
-  lines: { variantId: string; qty: number; receivedQty?: number }[]
+  // unitCost (€) remplace le coût d'achat Shopify ; unitPrice garde le prix de la facture dans sa devise
+  lines: { variantId: string; qty: number; receivedQty?: number; unitCost?: number; unitPrice?: number }[]
+  invoice?: { supplier: string; number: string; currency: string; total: number; deposit: number; balance: number } | null
 }
 
 export async function createOrder(db: Db, brand: string, o: NewOrder): Promise<string> {
@@ -121,19 +128,27 @@ export async function createOrder(db: Db, brand: string, o: NewOrder): Promise<s
   const byId = new Map(((vs ?? []) as { shopify_variant_id: string; product_title: string; variant_title: string | null; sku: string | null; cost_price: number | null }[]).map((v) => [v.shopify_variant_id, v]))
   const lines = o.lines.filter((l) => l.qty > 0 && byId.has(l.variantId)).map((l) => {
     const v = byId.get(l.variantId)!
-    return { shopify_variant_id: l.variantId, product_title: v.product_title, variant_title: v.variant_title, sku: v.sku, qty: Math.floor(l.qty), unit_cost: Number(v.cost_price ?? 0), received_qty: Math.min(Math.floor(l.qty), Math.max(0, Math.floor(l.receivedQty ?? 0))) }
+    return {
+      shopify_variant_id: l.variantId, product_title: v.product_title, variant_title: v.variant_title, sku: v.sku, qty: Math.floor(l.qty),
+      unit_cost: Math.round((l.unitCost ?? Number(v.cost_price ?? 0)) * 10000) / 10000, unit_price: l.unitPrice ?? null,
+      received_qty: Math.min(Math.floor(l.qty), Math.max(0, Math.floor(l.receivedQty ?? 0))),
+    }
   })
   if (!lines.length) throw new Error('Aucune ligne valide')
   const total = lines.reduce((a, l) => a + l.qty * l.unit_cost, 0)
   const fullyReceived = lines.every((l) => l.received_qty >= l.qty)
   const { data: po, error } = await db.from('purchase_orders').insert({
     brand, ordered_on: o.orderedOn, source: o.source, note: o.note ?? null,
-    prod_done_on: addDays(o.orderedOn, settings.fabDays),
-    arrival_on: addDays(o.orderedOn, settings.fabDays + settings.transitDays),
+    prod_done_on: fabEnd(o.orderedOn, settings),             // fermetures d'usine comprises
+    arrival_on: arrivalFor(o.orderedOn, settings),
+    ...(o.invoice ? {
+      supplier: o.invoice.supplier, invoice_number: o.invoice.number, currency: o.invoice.currency,
+      invoice_total: o.invoice.total, deposit_paid: o.invoice.deposit, balance_due: o.invoice.balance,
+    } : {}),
     total_cost: Math.round(total * 100) / 100,
     status: fullyReceived ? 'received' : 'open', received_on: fullyReceived ? parisDay() : null,
   }).select('id').single()
-  if (error) throw new Error(error.message)
+  if (error) throw new Error(error.code === '23505' ? `Facture ${o.invoice?.number} déjà importée` : error.message)
   const { error: lerr } = await db.from('purchase_order_lines').insert(lines.map((l) => ({ ...l, order_id: po.id })))
   if (lerr) { await db.from('purchase_orders').delete().eq('id', po.id); throw new Error(lerr.message) }
   return po.id

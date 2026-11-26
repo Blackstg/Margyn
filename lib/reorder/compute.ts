@@ -1,7 +1,7 @@
 // Assemble le plan de toutes les variantes à partir des données chargées
 // (lib/reorder/data.ts). Pur : la page le recalcule à chaque réglage modifié.
 import {
-  addDays, planVariant, receiptProposals, ruptureKpis, stockJumps, velocity,
+  addDays, planVariant, receiptProposals, recentEstimate, ruptureKpis, stockJumps, velocity,
   type OpenLine, type ReceiptProposal, type ReorderSettings, type SalesHistory, type VariantPlan, type Velocity,
 } from './plan'
 
@@ -17,8 +17,9 @@ export type ReorderOrderLine = {
 
 export type ReorderOrder = {
   id: string; orderedOn: string; prodDoneOn: string; arrivalOn: string
-  status: 'open' | 'received' | 'cancelled'; source: 'validated' | 'declared' | 'after_the_fact'
+  status: 'open' | 'received' | 'cancelled'; source: 'validated' | 'declared' | 'after_the_fact' | 'invoice'
   totalCost: number; receivedOn: string | null; note: string | null
+  invoice: { supplier: string | null; number: string | null; currency: string; total: number; deposit: number; balance: number } | null
   lines: ReorderOrderLine[]
 }
 
@@ -65,9 +66,19 @@ export function computeReorder(inp: ReorderInputs, settings: ReorderSettings = i
   const openBy = openLinesByVariant(inp.orders)
   const histories = new Map(inp.variants.map((v) => [v.id, history(inp, v)]))
 
+  const base = new Map(inp.variants.map((v) => [v.id, velocity(histories.get(v.id)!, settings, today)]))
+  // Variantes récentes : estimation à partir des autres couleurs du produit (ou de toute la marque).
+  const settled = (v: ReorderVariant) => (base.get(v.id)!.usefulDays >= settings.minUsefulDays ? [{ h: histories.get(v.id)!, daily: base.get(v.id)!.daily }] : [])
+  const vels = new Map(inp.variants.map((v) => {
+    const vel = base.get(v.id)!
+    const sameProduct = inp.variants.filter((o) => o.productId === v.productId && o.id !== v.id).flatMap(settled)
+    const est = recentEstimate(histories.get(v.id)!, vel, sameProduct, settings, today)
+      ?? recentEstimate(histories.get(v.id)!, vel, inp.variants.filter((o) => o.id !== v.id).flatMap(settled), settings, today)
+    return [v.id, est ?? vel]
+  }))
+
   const rows: ReorderRow[] = inp.variants.map((v) => {
-    const h = histories.get(v.id)!
-    const vel = velocity(h, settings, today)
+    const vel = vels.get(v.id)!
     const open = openBy[v.id] ?? []
     const plan = planVariant({
       stock: v.stock, daily: vel.daily, open, manual: inp.manual[v.id] ?? 0,
