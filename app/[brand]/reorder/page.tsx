@@ -1,1009 +1,459 @@
 'use client'
 
-import { useState, useEffect, useMemo, useRef } from 'react'
-import { createBrowserClient } from '@supabase/auth-helpers-nextjs'
-import { Download, Search, Package, ChevronDown, ClipboardList, X, GripVertical, Plus, Check } from 'lucide-react'
+// Réappro : calcul glissant par variante (lib/reorder), bon de commande qui
+// enregistre la commande, suivi des commandes en cours et réceptions détectées.
+import { useState, useEffect, useMemo, useRef, useCallback } from 'react'
+import { Download, Search, Package, ChevronDown, ClipboardList, X, GripVertical, Plus, Check, Settings2, AlertTriangle, ListPlus, Copy, Clock, PencilLine } from 'lucide-react'
 import AiInsights from '@/components/dashboard/AiInsights'
 import { useBrand } from '@/context/BrandContext'
+import { computeReorder, type ReorderInputs, type ReorderRow } from '@/lib/reorder/compute'
+import { addDays, daysBetween, leadDays, targetDays, triggerDays, type ReorderSettings, type VariantStatus } from '@/lib/reorder/plan'
+import ReorderKpis from '@/components/reorder/ReorderKpis'
+import ReceiptPrompts from '@/components/reorder/ReceiptPrompts'
+import OrdersInProgress from '@/components/reorder/OrdersInProgress'
+import ReorderSettingsPanel from '@/components/reorder/ReorderSettingsPanel'
+import StockGauge from '@/components/reorder/StockGauge'
+import { CARD, RED, ORANGE, dec, fmtDay, int, plural } from '@/components/reorder/format'
+import { downloadCSV, poCSV, printPO, supplierMessage, type PoLine } from '@/components/reorder/po'
 
-const supabase = createBrowserClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-)
+const BRAND_LABELS: Record<string, string> = { bowa: 'Bowa', moom: 'Mōom Paris', krom: 'Krom', yone: 'Yone' }
 
-// ─── Types ────────────────────────────────────────────────────────────────────
+// Réglages modifiables depuis la page (les autres restent ceux du serveur).
+const EDITABLE: (keyof ReorderSettings)[] = ['fabDays', 'transitDays', 'safetyDays', 'orderCoverDays', 'refPeriod', 'promos', 'products', 'recipients']
+const pick = (s: ReorderSettings) => JSON.stringify(EDITABLE.map((k) => s[k]))
 
-interface VariantRow {
-  shopify_variant_id: string
-  shopify_product_id: string
-  product_title: string
-  variant_title: string | null
-  sku: string | null
-  stock_quantity: number
-  image_url: string | null
+const GROUPS: { key: string; title: string; statuses: VariantStatus[]; hint?: string }[] = [
+  { key: 'order',   title: 'À commander',              statuses: ['order'] },
+  { key: 'soon',    title: 'Bientôt',                  statuses: ['soon'],    hint: 'date limite dans moins de 3 semaines' },
+  { key: 'ordered', title: 'En commande',              statuses: ['ordered'], hint: 'couvertes par une commande en cours' },
+  { key: 'snoozed', title: 'Pas maintenant',           statuses: ['snoozed'], hint: 'plus de relance pendant 14 jours' },
+  { key: 'ok',      title: 'Ça va',                    statuses: ['ok', 'idle'] },
+]
+
+interface CartItem { id: string; qty: number }
+
+function Thumb({ src, alt }: { src: string | null; alt: string }) {
+  return src
+    // eslint-disable-next-line @next/next/no-img-element
+    ? <img src={src} alt={alt} className="w-10 h-10 rounded-lg object-cover bg-[#f5f0f2] shrink-0" />
+    : <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-[#e5c8d2] to-[#c4b4d4] flex items-center justify-center shrink-0"><Package size={13} className="text-white/70" /></div>
 }
-
-type DataSource = 'ref' | '90d' | 'none'
-
-interface ReplenishmentRow {
-  shopify_variant_id: string
-  product_title: string
-  variant_title: string | null
-  sku: string | null
-  image_url: string | null
-  stock_quantity: number
-  qty_in_production: number
-  ref_qty: number
-  daily_sales: number
-  coverage_days: number | null
-  projected_coverage: number | null
-  stock_needed: number
-  qty_to_order: number
-  order_deadline: Date
-  status: 'order' | 'in_prod' | 'low' | 'ok'
-  data_source: DataSource
-  velocity_days: number
-  velocity_from: string
-  velocity_to: string
-}
-
-interface CartItem {
-  shopify_variant_id: string
-  qty: number
-}
-
-// ─── Helpers ──────────────────────────────────────────────────────────────────
-
-function periodDays(from: string, to: string): number {
-  const a = new Date(from + 'T00:00:00')
-  const b = new Date(to   + 'T00:00:00')
-  return Math.max(1, Math.round((b.getTime() - a.getTime()) / 86_400_000) + 1)
-}
-
-function subtractDays(dateStr: string, n: number): Date {
-  const d = new Date(dateStr + 'T00:00:00')
-  d.setDate(d.getDate() - n)
-  return d
-}
-
-function fmtDate(d: Date): string {
-  return d.toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit', year: 'numeric' })
-}
-
-// ─── Source badge ─────────────────────────────────────────────────────────────
-
-function fmtShortPeriod(from: string, to: string): string {
-  const f = from.slice(5).split('-').reverse().join('/')  // MM-DD → DD/MM
-  const t = to.slice(5).split('-').reverse().join('/')
-  return `${f} → ${t}`
-}
-
-function SourceBadge({ source, days, from, to }: { source: DataSource; days: number; from: string; to: string }) {
-  if (source === 'none') return null
-  const tooltip = source === 'ref'
-    ? `Vélocité calculée sur ${days} jours — ${fmtShortPeriod(from, to)}`
-    : `Vélocité calculée sur ${days} jours — ${fmtShortPeriod(from, to)} (nouveau produit, pas d'historique N-1)`
-  const bg   = source === 'ref' ? 'bg-[#eef0f8]' : 'bg-[#fff3dc]'
-  const text = source === 'ref' ? 'text-[#6b6e9a]' : 'text-[#a16207]'
-  const dot  = source === 'ref' ? 'bg-[#6b6e9a]'  : 'bg-[#d97706]'
-  return (
-    <span
-      title={tooltip}
-      className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold cursor-default whitespace-nowrap ${bg} ${text}`}
-    >
-      <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${dot}`} />
-      {source === 'ref' ? 'N-1' : '90 jours'}
-    </span>
-  )
-}
-
-// ─── Coverage badge ───────────────────────────────────────────────────────────
-
-function CoverageBadge({ days }: { days: number | null }) {
-  if (days === null) return <span className="text-sm text-[#9b9b93]">—</span>
-  const bg   = days < 30 ? 'bg-[#fce8ea]' : days < 60 ? 'bg-[#fff3dc]' : 'bg-[#dcf5e7]'
-  const text = days < 30 ? 'text-[#c7293a]' : days < 60 ? 'text-[#a16207]' : 'text-[#1a7f4b]'
-  const dot  = days < 30 ? 'bg-[#c7293a]'  : days < 60 ? 'bg-[#d97706]'  : 'bg-[#1a7f4b]'
-  return (
-    <span className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold whitespace-nowrap ${bg} ${text}`}>
-      <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${dot}`} />
-      {days.toLocaleString('fr-FR')} jours
-    </span>
-  )
-}
-
-// ─── Print PO ─────────────────────────────────────────────────────────────────
-
-function printPO(cartItems: CartItem[], rowMap: Map<string, ReplenishmentRow>, deadline: Date, brandLabel: string) {
-  const included = cartItems.filter((c) => c.qty > 0)
-  const totalQty = included.reduce((s, c) => s + c.qty, 0)
-  const dateStr  = new Date().toLocaleDateString('fr-FR', { day: '2-digit', month: 'long', year: 'numeric' })
-
-  const tableRows = included.map((c) => {
-    const row = rowMap.get(c.shopify_variant_id)
-    if (!row) return ''
-    const imgTag = row.image_url
-      ? `<img src="${row.image_url}" alt="" style="width:36px;height:36px;object-fit:cover;border-radius:6px;display:block;" />`
-      : `<div style="width:36px;height:36px;border-radius:6px;background:#f0ece9;"></div>`
-    return `
-      <tr>
-        <td style="width:52px">${imgTag}</td>
-        <td>${row.product_title.replace(/</g, '&lt;')}</td>
-        <td>${row.variant_title ? row.variant_title.replace(/</g, '&lt;') : '—'}</td>
-        <td style="font-family:monospace;font-size:11px;color:#666">${row.sku ?? '—'}</td>
-        <td class="qty">${c.qty}</td>
-      </tr>`
-  }).join('')
-
-  const html = `<!DOCTYPE html>
-<html lang="fr">
-<head>
-  <meta charset="UTF-8" />
-  <title>Bon de commande — ${brandLabel}</title>
-  <style>
-    * { box-sizing: border-box; margin: 0; padding: 0; }
-    body { font-family: 'Helvetica Neue', Arial, sans-serif; font-size: 12px; color: #1a1a2e; background: white; padding: 40px; }
-    .header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 32px; padding-bottom: 20px; border-bottom: 2px solid #1a1a2e; }
-    .logo { font-size: 20px; font-weight: 800; letter-spacing: -0.5px; }
-    .subtitle { font-size: 13px; color: #666; margin-top: 3px; }
-    .meta { text-align: right; font-size: 11px; color: #666; line-height: 1.9; }
-    .meta strong { color: #1a1a2e; }
-    table { width: 100%; border-collapse: collapse; margin-top: 4px; }
-    thead tr { background: #f5f0f2; }
-    th { padding: 9px 10px; text-align: left; font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em; color: #888; border-bottom: 1px solid #e0dbd8; }
-    td { padding: 10px 10px; border-bottom: 1px solid #f0ece9; vertical-align: middle; }
-    td.qty { font-weight: 700; font-size: 14px; text-align: right; }
-    th:last-child { text-align: right; }
-    tr:last-child td { border-bottom: none; }
-    tr:nth-child(even) td { background: #faf9f8; }
-    .footer { margin-top: 24px; padding-top: 16px; border-top: 1px solid #e0dbd8; display: flex; justify-content: space-between; align-items: center; }
-    .footer .refs { font-size: 11px; color: #666; }
-    .footer .total { font-size: 15px; font-weight: 700; }
-    .footer .total span { font-size: 11px; font-weight: 400; color: #666; margin-left: 4px; }
-    @media print { body { padding: 20px; } @page { size: A4; margin: 15mm 20mm; } }
-  </style>
-</head>
-<body>
-  <div class="header">
-    <div>
-      <div class="logo">${brandLabel}</div>
-      <div class="subtitle">Bon de commande fournisseur</div>
-    </div>
-    <div class="meta">
-      <div>Date : <strong>${dateStr}</strong></div>
-      <div>À passer avant : <strong>${fmtDate(deadline)}</strong></div>
-    </div>
-  </div>
-  <table>
-    <thead>
-      <tr>
-        <th></th>
-        <th>Produit</th>
-        <th>Variant</th>
-        <th>Référence SKU</th>
-        <th style="text-align:right">Quantité</th>
-      </tr>
-    </thead>
-    <tbody>${tableRows}</tbody>
-  </table>
-  <div class="footer">
-    <div class="refs">${included.length} référence${included.length > 1 ? 's' : ''}</div>
-    <div class="total">${totalQty.toLocaleString('fr-FR')} unités <span>à commander</span></div>
-  </div>
-</body>
-</html>`
-
-  const w = window.open('', '_blank', 'width=900,height=700')
-  if (!w) return
-  w.document.write(html)
-  w.document.close()
-  w.focus()
-  setTimeout(() => { w.print() }, 500)
-}
-
-// ─── Page ─────────────────────────────────────────────────────────────────────
-
-const BRAND_LABELS: Record<string, string> = { bowa: 'Bowa', moom: 'Mōom Paris', krom: 'Krom' }
 
 export default function ReapproPage() {
-  // ── Brand ─────────────────────────────────────────────────────────────────
   const brand = useBrand()
+  const brandLabel = BRAND_LABELS[brand] ?? brand
 
-  // ── Settings ──────────────────────────────────────────────────────────────
-  const [refFrom,    setRefFrom]    = useState('2025-04-01')
-  const [refTo,      setRefTo]      = useState('2025-07-31')
-  const [targetFrom, setTargetFrom] = useState('2026-05-01')
-  const [targetTo,   setTargetTo]   = useState('2026-08-31')
-  const [leadTime,   setLeadTime]   = useState(30)
-  const [buffer,     setBuffer]     = useState(20)
-  const [search,     setSearch]     = useState('')
-  const [showAll,    setShowAll]    = useState(false)
+  // ── Données ───────────────────────────────────────────────────────────────
+  const [inputs, setInputs] = useState<ReorderInputs | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const [draft, setDraft] = useState<ReorderSettings | null>(null)
+  const [saving, setSaving] = useState(false)
+  const [toast, setToast] = useState<string | null>(null)
 
-  // ── Production en cours (localStorage par brand) ─────────────────────────
-  const [inProduction, setInProduction] = useState<Record<string, number>>(() => {
+  const load = useCallback(async () => {
     try {
-      const raw = typeof window !== 'undefined' ? localStorage.getItem(`reorder_inprod_${brand}`) : null
-      return raw ? (JSON.parse(raw) as Record<string, number>) : {}
-    } catch { return {} }
-  })
-
-  function setInProd(variantId: string, qty: number) {
-    setInProduction((prev) => {
-      const next = { ...prev }
-      if (qty > 0) next[variantId] = qty
-      else delete next[variantId]
-      try { localStorage.setItem(`reorder_inprod_${brand}`, JSON.stringify(next)) } catch { /* ignore */ }
-      return next
-    })
-    // Persiste côté serveur (partagé entre appareils + intégré à la valo stock)
-    fetch('/api/reorder/production', {
-      method: 'PUT', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ brand, shopify_variant_id: variantId, qty }),
-    }).catch(() => { /* offline : le localStorage garde la valeur */ })
-  }
-
-  // Charge les productions depuis le serveur (source de vérité). Si le serveur est
-  // vide mais qu'on a des saisies locales (ancien localStorage), on les migre une fois.
-  useEffect(() => {
-    let cancelled = false
-    ;(async () => {
-      try {
-        const r = await fetch(`/api/reorder/production?brand=${brand}`, { cache: 'no-store' })
-        if (!r.ok || cancelled) return
-        const { map } = await r.json() as { map: Record<string, number> }
-        let local: Record<string, number> = {}
-        try { local = JSON.parse(localStorage.getItem(`reorder_inprod_${brand}`) || '{}') } catch { /* ignore */ }
-        const serverEmpty = !map || Object.keys(map).length === 0
-        if (serverEmpty && Object.keys(local).length > 0) {
-          await fetch('/api/reorder/production', {
-            method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ brand, map: local }),
-          }).catch(() => {})
-          // on garde les valeurs locales déjà affichées
-        } else if (!cancelled) {
-          setInProduction(map ?? {})
-          try { localStorage.setItem(`reorder_inprod_${brand}`, JSON.stringify(map ?? {})) } catch { /* ignore */ }
-        }
-      } catch { /* offline : garde localStorage */ }
-    })()
-    return () => { cancelled = true }
+      const r = await fetch(`/api/reorder?brand=${brand}`, { cache: 'no-store' })
+      const j = await r.json()
+      if (!r.ok) { setError(j.error ?? 'Chargement impossible'); return }
+      setError(null)
+      setInputs(j as ReorderInputs)
+      setDraft((d) => d ?? (j as ReorderInputs).settings)
+    } catch { setError('Chargement impossible') }
   }, [brand])
 
-  // ── Cart / sidebar ─────────────────────────────────────────────────────────
-  const [sidebarOpen, setSidebarOpen] = useState(false)
-  const [cartItems,   setCartItems]   = useState<CartItem[]>([])
-  const cartSet = useMemo(() => new Set(cartItems.map((c) => c.shopify_variant_id)), [cartItems])
+  useEffect(() => { setInputs(null); setDraft(null); load() }, [load])
+  useEffect(() => { if (!toast) return; const t = setTimeout(() => setToast(null), 3500); return () => clearTimeout(t) }, [toast])
 
-  // ── Drag & drop ───────────────────────────────────────────────────────────
-  const dragIndex    = useRef<number | null>(null)
-  const [dragOver,   setDragOver]   = useState<number | null>(null)
+  const act = useCallback(async (body: Record<string, unknown>): Promise<boolean> => {
+    const r = await fetch(`/api/reorder?brand=${brand}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+    const j = await r.json().catch(() => ({}))
+    if (!r.ok) { setToast(j.error ?? 'Action impossible'); return false }
+    await load()
+    return true
+  }, [brand, load])
 
-  function handleDragStart(i: number) { dragIndex.current = i }
-  function handleDragOver(e: React.DragEvent, i: number) {
-    e.preventDefault()
-    setDragOver(i)
+  async function saveSettings() {
+    if (!draft) return
+    setSaving(true)
+    const patch = Object.fromEntries(EDITABLE.map((k) => [k, draft[k]]))
+    const ok = await act({ action: 'settings', patch })
+    setSaving(false)
+    if (ok) setToast('Réglages enregistrés')
   }
+
+  // ── Calcul ────────────────────────────────────────────────────────────────
+  const computed = useMemo(() => (inputs && draft
+    ? computeReorder(inputs, { ...draft, dismissedJumps: inputs.settings.dismissedJumps })
+    : null), [inputs, draft])
+  const rows = useMemo(() => computed?.rows ?? [], [computed])
+  const rowMap = useMemo(() => new Map(rows.map((r) => [r.id, r])), [rows])
+  const today = inputs?.today ?? ''
+  const s = draft
+  const dirty = !!(inputs && draft && pick(inputs.settings) !== pick(draft))
+
+  const [search, setSearch] = useState('')
+  const [showSettings, setShowSettings] = useState(false)
+  const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({ order: true, soon: true, ordered: true, snoozed: false, ok: false })
+  const [expanded, setExpanded] = useState<string | null>(null)
+
+  const sorted = useMemo(() => {
+    const q = search.trim().toLowerCase()
+    return rows
+      .filter((r) => !q || r.title.toLowerCase().includes(q) || (r.variantTitle ?? '').toLowerCase().includes(q) || (r.sku ?? '').toLowerCase().includes(q))
+      .sort((a, b) => (b.plan.lateBy - a.plan.lateBy)
+        || (a.plan.positionDays ?? 1e9) - (b.plan.positionDays ?? 1e9)
+        || a.title.localeCompare(b.title) || (a.variantTitle ?? '').localeCompare(b.variantTitle ?? ''))
+  }, [rows, search])
+
+  const urgent = rows.filter((r) => r.plan.status === 'order' && r.plan.lateBy > 0)
+  const toOrder = rows.filter((r) => r.plan.status === 'order')
+  const products = useMemo(() => {
+    const m = new Map<string, string>()
+    for (const r of rows) m.set(r.productId, r.title)
+    return Array.from(m, ([id, title]) => ({ id, title })).sort((a, b) => a.title.localeCompare(b.title))
+  }, [rows])
+
+  // ── Bon de commande ──────────────────────────────────────────────────────
+  const [sidebarOpen, setSidebarOpen] = useState(false)
+  const [cartItems, setCartItems] = useState<CartItem[]>([])
+  const [message, setMessage] = useState<string | null>(null)
+  const [validating, setValidating] = useState(false)
+  const cartSet = useMemo(() => new Set(cartItems.map((c) => c.id)), [cartItems])
+
+  function addToCart(r: ReorderRow) {
+    if (cartSet.has(r.id)) return
+    setCartItems((prev) => [...prev, { id: r.id, qty: r.plan.suggested > 0 ? r.plan.suggested : 1 }])
+    setSidebarOpen(true)
+  }
+  function addAll() {
+    setCartItems((prev) => {
+      const have = new Set(prev.map((c) => c.id))
+      return [...prev, ...toOrder.filter((r) => !have.has(r.id)).map((r) => ({ id: r.id, qty: r.plan.suggested }))]
+    })
+    setSidebarOpen(true)
+  }
+  const removeFromCart = (id: string) => setCartItems((prev) => prev.filter((c) => c.id !== id))
+  const setCartQty = (id: string, qty: number) => setCartItems((prev) => prev.map((c) => (c.id === id ? { ...c, qty: Math.max(0, qty) } : c)))
+
+  const dragIndex = useRef<number | null>(null)
+  const [dragOver, setDragOver] = useState<number | null>(null)
   function handleDrop(i: number) {
     const from = dragIndex.current
-    if (from === null || from === i) { setDragOver(null); return }
-    setCartItems((prev) => {
-      const next = [...prev]
-      const [item] = next.splice(from, 1)
-      next.splice(i, 0, item)
-      return next
-    })
+    if (from !== null && from !== i) setCartItems((prev) => { const next = [...prev]; const [it] = next.splice(from, 1); next.splice(i, 0, it); return next })
     dragIndex.current = null
     setDragOver(null)
   }
-  function handleDragEnd() { dragIndex.current = null; setDragOver(null) }
 
-  // ── Raw data ──────────────────────────────────────────────────────────────
-  const [loading,          setLoading]          = useState(true)
-  const [variants,         setVariants]         = useState<VariantRow[]>([])
-  const [salesByVariant,   setSalesByVariant]   = useState<Map<string, number>>(new Map())
-  const [salesByVariant90, setSalesByVariant90] = useState<Map<string, number>>(new Map())
-  const [exclusions,       setExclusions]       = useState<Set<string>>(new Set())
-
-  // 90-day window — computed once, stable across re-renders
-  const fmtLocal = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
-  const today90 = useMemo(() => fmtLocal(new Date()), [])
-  const from90  = useMemo(() => {
-    const d = new Date(); d.setDate(d.getDate() - 90); return fmtLocal(d)
-  }, [])
-
-  useEffect(() => {
-    let cancelled = false
-    async function load() {
-      setLoading(true)
-      const [salesRes, sales90Res, variantsRes, exclRes] = await Promise.all([
-        supabase
-          .from('product_sales')
-          .select('variant_id, quantity')
-          .eq('brand', brand)
-          .gte('date', refFrom)
-          .lte('date', refTo)
-          .not('variant_id', 'is', null)
-          .neq('variant_id', ''),
-        supabase
-          .from('product_sales')
-          .select('variant_id, quantity')
-          .eq('brand', brand)
-          .gte('date', from90)
-          .lte('date', today90)
-          .not('variant_id', 'is', null)
-          .neq('variant_id', ''),
-        supabase
-          .from('product_variants')
-          .select('shopify_variant_id, shopify_product_id, product_title, variant_title, sku, stock_quantity, image_url')
-          .eq('brand', brand)
-          .order('product_title'),
-        supabase
-          .from('product_exclusions')
-          .select('product_title')
-          .eq('brand', brand),
-      ])
-      if (cancelled) return
-
-      const byVariant = new Map<string, number>()
-      for (const r of salesRes.data ?? []) {
-        if (!r.variant_id) continue
-        byVariant.set(r.variant_id, (byVariant.get(r.variant_id) ?? 0) + (r.quantity ?? 0))
-      }
-
-      const byVariant90 = new Map<string, number>()
-      for (const r of sales90Res.data ?? []) {
-        if (!r.variant_id) continue
-        byVariant90.set(r.variant_id, (byVariant90.get(r.variant_id) ?? 0) + (r.quantity ?? 0))
-      }
-
-      setSalesByVariant(byVariant)
-      setSalesByVariant90(byVariant90)
-      setVariants(variantsRes.data ?? [])
-      setExclusions(new Set((exclRes.data ?? []).map((r) => r.product_title)))
-      setLoading(false)
-    }
-    load()
-    return () => { cancelled = true }
-  }, [brand, refFrom, refTo, from90, today90])
-
-  // ── Computed rows ──────────────────────────────────────────────────────────
-  const rows: ReplenishmentRow[] = useMemo(() => {
-    const refDays    = periodDays(refFrom, refTo)
-    const targetDays = periodDays(targetFrom, targetTo)
-    const deadline   = subtractDays(targetFrom, leadTime)
-
-    return variants
-      .filter((v) => !exclusions.has(v.product_title) && !v.product_title.includes(' + '))
-      .map((v): ReplenishmentRow => {
-        const ref_qty  = salesByVariant.get(v.shopify_variant_id) ?? 0
-        const qty_90   = salesByVariant90.get(v.shopify_variant_id) ?? 0
-
-        // ── Hybrid velocity logic ──────────────────────────────────────────
-        let data_source:   DataSource
-        let velocity_qty:  number
-        let velocity_days: number
-        let velocity_from: string
-        let velocity_to:   string
-
-        if (ref_qty > 0) {
-          data_source   = 'ref';  velocity_qty = ref_qty;  velocity_days = refDays
-          velocity_from = refFrom; velocity_to = refTo
-        } else if (qty_90 > 0) {
-          data_source   = '90d';  velocity_qty = qty_90;   velocity_days = 90
-          velocity_from = from90; velocity_to  = today90
-        } else {
-          data_source   = 'none'; velocity_qty = 0;        velocity_days = refDays
-          velocity_from = refFrom; velocity_to = refTo
-        }
-
-        const daily_sales        = velocity_qty / velocity_days
-        const stock_needed       = Math.round(daily_sales * targetDays)
-        const qty_in_production  = inProduction[v.shopify_variant_id] ?? 0
-        const raw_gap            = Math.max(0, stock_needed - v.stock_quantity)
-        const net_gap            = Math.max(0, raw_gap - qty_in_production)
-        const qty_to_order       = Math.round(net_gap * (1 + buffer / 100))
-        const coverage_days      = daily_sales > 0 ? Math.round(v.stock_quantity / daily_sales) : null
-        const projected_coverage = daily_sales > 0 ? Math.round((v.stock_quantity + qty_in_production) / daily_sales) : null
-
-        const status: ReplenishmentRow['status'] =
-          qty_to_order > 0                                    ? 'order'
-          : qty_in_production > 0 && raw_gap > 0             ? 'in_prod'
-          : coverage_days !== null && coverage_days < 60      ? 'low'
-          : 'ok'
-
-        return {
-          shopify_variant_id: v.shopify_variant_id,
-          product_title:      v.product_title,
-          variant_title:      v.variant_title,
-          sku:                v.sku,
-          image_url:          v.image_url,
-          stock_quantity:     v.stock_quantity,
-          qty_in_production,
-          ref_qty,
-          daily_sales,
-          coverage_days,
-          projected_coverage,
-          stock_needed,
-          qty_to_order,
-          order_deadline: deadline,
-          status,
-          data_source,
-          velocity_days,
-          velocity_from,
-          velocity_to,
-        }
-      })
-      .filter((r) => r.data_source !== 'none' || r.stock_quantity !== 0)
-      .sort((a, b) => {
-        const aToOrder = a.qty_to_order > 0
-        const bToOrder = b.qty_to_order > 0
-        if (aToOrder !== bToOrder) return aToOrder ? -1 : 1
-        if (aToOrder && bToOrder) return b.qty_to_order - a.qty_to_order
-        const aNeg = a.stock_quantity < 0
-        const bNeg = b.stock_quantity < 0
-        if (aNeg !== bNeg) return aNeg ? -1 : 1
-        if (a.product_title !== b.product_title) return a.product_title.localeCompare(b.product_title)
-        return (a.variant_title ?? '').localeCompare(b.variant_title ?? '')
-      })
-  }, [variants, salesByVariant, salesByVariant90, exclusions, refFrom, refTo, targetFrom, targetTo, leadTime, buffer, from90, today90, inProduction])
-
-  const rowMap = useMemo(() => new Map(rows.map((r) => [r.shopify_variant_id, r])), [rows])
-
-  // ── Filtered rows ─────────────────────────────────────────────────────────
-  const actionRows  = useMemo(() => rows.filter((r) => r.status !== 'ok'), [rows])
-  const okRows      = useMemo(() => rows.filter((r) => r.status === 'ok'),  [rows])
-  const visibleRows = useMemo(() => {
-    const base = showAll ? rows : actionRows
-    if (!search.trim()) return base
-    const q = search.toLowerCase()
-    return base.filter((r) =>
-      r.product_title.toLowerCase().includes(q) ||
-      (r.variant_title ?? '').toLowerCase().includes(q)
-    )
-  }, [rows, actionRows, showAll, search])
-
-  // ── AI context ────────────────────────────────────────────────────────────
-  const aiContext = useMemo(() => {
-    if (loading || rows.length === 0) return null
-    const urgentRows = rows.filter((r) => r.status === 'order').slice(0, 10)
-    const lowRows    = rows.filter((r) => r.status === 'low').slice(0, 5)
-    const urgentLines = urgentRows.map((r) =>
-      `${r.product_title}${r.variant_title ? ` — ${r.variant_title}` : ''}: stock ${r.stock_quantity}, commander ${r.qty_to_order} unités, couverture ${r.coverage_days ?? '?'} j, vélocité ${r.daily_sales.toFixed(2)}/j`
-    ).join('\n')
-    const lowLines = lowRows.map((r) =>
-      `${r.product_title}${r.variant_title ? ` — ${r.variant_title}` : ''}: stock ${r.stock_quantity}, couverture ${r.coverage_days ?? '?'} j`
-    ).join('\n')
-    const totalUnits = urgentRows.reduce((s, r) => s + r.qty_to_order, 0)
-    return `Marque: ${BRAND_LABELS[brand]} | Réapprovisionnement
-${urgentRows.length} variants à commander en urgence (${totalUnits} unités au total)
-${lowRows.length} variants en stock faible
-
-Urgents:\n${urgentLines || 'Aucun'}
-
-Stock faible:\n${lowLines || 'Aucun'}`
-  }, [brand, loading, rows])
-
-  // ── Cart helpers ───────────────────────────────────────────────────────────
-  function addToCart(row: ReplenishmentRow) {
-    if (cartSet.has(row.shopify_variant_id)) return
-    setCartItems((prev) => [...prev, {
-      shopify_variant_id: row.shopify_variant_id,
-      qty: row.qty_to_order > 0 ? row.qty_to_order : 1,
-    }])
-    setSidebarOpen(true)
-  }
-
-  function removeFromCart(id: string) {
-    setCartItems((prev) => prev.filter((c) => c.shopify_variant_id !== id))
-  }
-
-  function setCartQty(id: string, qty: number) {
-    setCartItems((prev) => prev.map((c) =>
-      c.shopify_variant_id === id ? { ...c, qty: Math.max(0, qty) } : c
-    ))
-  }
-
-  // ── Summary ───────────────────────────────────────────────────────────────
-  const deadline          = subtractDays(targetFrom, leadTime)
-  const daysToDeadline    = Math.round((deadline.getTime() - new Date().getTime()) / 86_400_000)
-  const totalToOrder      = rows.reduce((s, r) => s + r.qty_to_order, 0)
-  const variantsToOrder   = rows.filter((r) => r.qty_to_order > 0).length
-  const variantsInProd    = rows.filter((r) => r.status === 'in_prod').length
-  const cartTotal       = cartItems.reduce((s, c) => s + c.qty, 0)
-
-  // Per-product subtotals (only products with ≥ 2 cart lines)
+  const poLines: (PoLine & { id: string; cost: number })[] = cartItems.filter((c) => c.qty > 0).flatMap((c) => {
+    const r = rowMap.get(c.id)
+    return r ? [{ id: c.id, title: r.title, variantTitle: r.variantTitle, sku: r.sku, image: r.image, qty: c.qty, cost: r.cost }] : []
+  })
+  const cartUnits = poLines.reduce((a, l) => a + l.qty, 0)
+  const cartCost = poLines.reduce((a, l) => a + l.qty * l.cost, 0)
   const cartByProduct = useMemo(() => {
-    const map = new Map<string, number>()
-    for (const item of cartItems) {
-      const row = rowMap.get(item.shopify_variant_id)
-      if (!row) continue
-      map.set(row.product_title, (map.get(row.product_title) ?? 0) + item.qty)
+    const qty = new Map<string, number>(), n = new Map<string, number>()
+    for (const c of cartItems) {
+      const r = rowMap.get(c.id)
+      if (!r) continue
+      qty.set(r.title, (qty.get(r.title) ?? 0) + c.qty)
+      n.set(r.title, (n.get(r.title) ?? 0) + 1)
     }
-    // Keep only products appearing more than once
-    const countByProduct = new Map<string, number>()
-    for (const item of cartItems) {
-      const row = rowMap.get(item.shopify_variant_id)
-      if (!row) continue
-      countByProduct.set(row.product_title, (countByProduct.get(row.product_title) ?? 0) + 1)
-    }
-    return Array.from(map.entries())
-      .filter(([title]) => (countByProduct.get(title) ?? 0) > 1)
-      .sort((a, b) => b[1] - a[1])
+    return Array.from(qty).filter(([t]) => (n.get(t) ?? 0) > 1).sort((a, b) => b[1] - a[1])
   }, [cartItems, rowMap])
 
-  // ── CSV export ─────────────────────────────────────────────────────────────
-  function exportCSV(all = false) {
-    const exportRows = all ? rows : rows.filter((r) => r.status !== 'ok')
-    const headers = ['Produit', 'Variant', 'Stock actuel', 'Couverture (j)', 'Ventes/jour', 'Stock nécessaire', 'Qté à commander', 'Statut']
-    const csv = [
-      headers.join(';'),
-      ...exportRows.map((r) => [
-        `"${r.product_title.replace(/"/g, '""')}"`,
-        `"${(r.variant_title ?? '').replace(/"/g, '""')}"`,
-        r.stock_quantity,
-        r.coverage_days ?? '—',
-        r.daily_sales.toFixed(2).replace('.', ','),
-        r.stock_needed,
-        r.qty_to_order || '—',
-        r.status === 'order' ? 'Commander maintenant' : r.status === 'low' ? 'Stock faible' : 'Stock OK',
-      ].join(';')),
-    ].join('\r\n')
-    const blob = new Blob(['\ufeff' + csv], { type: 'text/csv;charset=utf-8' })
-    const url  = URL.createObjectURL(blob)
-    const a    = document.createElement('a')
-    a.href = url
-    a.download = `reappro-${brand}-${all ? 'complet-' : ''}${new Date().toISOString().slice(0, 10)}.csv`
-    a.click()
-    URL.revokeObjectURL(url)
+  async function validate() {
+    if (!s || !poLines.length) return
+    setValidating(true)
+    const win = window.open('', '_blank', 'width=900,height=700')   // ouverte au clic, sinon bloquée
+    const ok = await act({ action: 'create_order', source: 'validated', orderedOn: today, lines: poLines.map((l) => ({ variantId: l.id, qty: l.qty })) })
+    setValidating(false)
+    if (!ok) { win?.close(); return }
+    printPO(poLines, brandLabel, today, addDays(today, leadDays(s)), win)
+    poCSV(poLines, brand, today)
+    setMessage(supplierMessage(poLines, brandLabel, today, addDays(today, s.fabDays)))
+    setCartItems([])
+    setSidebarOpen(false)
   }
 
-  function exportCartCSV() {
-    const headers = ['Produit', 'Variant', 'Référence SKU', 'Quantité commandée']
-    const csv = [
-      headers.join(';'),
-      ...cartItems.filter((c) => c.qty > 0).map((c) => {
-        const r = rowMap.get(c.shopify_variant_id)
-        if (!r) return ''
-        return [
-          `"${r.product_title.replace(/"/g, '""')}"`,
-          `"${(r.variant_title ?? '').replace(/"/g, '""')}"`,
-          r.sku ?? '',
-          c.qty,
-        ].join(';')
-      }).filter(Boolean),
-    ].join('\r\n')
-    const blob = new Blob(['\ufeff' + csv], { type: 'text/csv;charset=utf-8' })
-    const url  = URL.createObjectURL(blob)
-    const a    = document.createElement('a')
-    a.href = url
-    a.download = `bon-commande-${brand}-${new Date().toISOString().slice(0, 10)}.csv`
-    a.click()
-    URL.revokeObjectURL(url)
+  // ── Actions par ligne ─────────────────────────────────────────────────────
+  const [declare, setDeclare] = useState<{ on: string; qty: number }>({ on: '', qty: 0 })
+  const [manualEdit, setManualEdit] = useState<number>(0)
+  function toggleRow(r: ReorderRow) {
+    if (expanded === r.id) { setExpanded(null); return }
+    setExpanded(r.id)
+    setDeclare({ on: today, qty: r.plan.suggested || 1 })
+    setManualEdit(r.plan.manual)
+  }
+  async function saveManual(id: string, qty: number) {
+    const res = await fetch('/api/reorder/production', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ brand, shopify_variant_id: id, qty }) })
+    if (!res.ok) { setToast('Enregistrement impossible'); return }
+    await load()
+    setToast('Saisie manuelle enregistrée')
   }
 
-  // ── Render ─────────────────────────────────────────────────────────────────
+  function exportTable() {
+    downloadCSV(`reappro-${brand}-${today}.csv`,
+      ['Produit', 'Variant', 'SKU', 'Stock', 'En prod.', 'En transport', 'Ventes/jour', 'Jours de stock', 'Rupture le', 'Commander avant', 'Qté conseillée', 'Statut'],
+      sorted.map((r) => [r.title, r.variantTitle ?? '', r.sku ?? '', r.stock, r.plan.inProduction + r.plan.manual, r.plan.inTransit,
+        dec(r.velocity.daily, 2), r.plan.stockDays == null ? '' : Math.round(r.plan.stockDays), fmtDay(r.plan.ruptureOn, true), fmtDay(r.plan.orderBy, true),
+        r.plan.suggested || '', GROUPS.find((g) => g.statuses.includes(r.plan.status))?.title ?? '']))
+  }
+
+  const aiContext = useMemo(() => {
+    if (!rows.length) return null
+    const lines = toOrder.slice(0, 10).map((r) => `${r.title}${r.variantTitle ? ` — ${r.variantTitle}` : ''}: stock ${r.stock}, ${dec(r.velocity.daily, 2)}/j, rupture ${fmtDay(r.plan.ruptureOn, true)}, commander ${r.plan.suggested}`)
+    return `Marque: ${brandLabel} | Réapprovisionnement\n${toOrder.length} variantes à commander, ${urgent.length} en retard sur la date limite\n\n${lines.join('\n') || 'Aucune'}`
+  }, [rows.length, toOrder, urgent.length, brandLabel])
+
+  // ── Rendu ─────────────────────────────────────────────────────────────────
+  if (error) return <div className="max-w-7xl mx-auto px-4 sm:px-6 py-8"><p className={`${CARD} p-4 text-sm text-[#c7293a]`}>{error}</p></div>
+  if (!inputs || !s || !computed) {
+    return (
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 py-8 space-y-4">
+        <div className="grid gap-3 grid-cols-1 sm:grid-cols-3">{[0, 1, 2].map((i) => <div key={i} className={`${CARD} h-28 animate-pulse`} />)}</div>
+        <div className={`${CARD} h-96 animate-pulse`} />
+      </div>
+    )
+  }
+
+  const lead = leadDays(s), trigger = triggerDays(s), target = targetDays(s)
+  const openOrders = inputs.orders.filter((o) => o.status === 'open').length
+
   return (
     <div className="min-h-screen bg-[#faf9f8]">
       <main className="max-w-7xl mx-auto px-4 sm:px-6 py-5 sm:py-8 space-y-5">
 
-        {/* ── Page header ────────────────────────────────────────────────── */}
-        <div className="flex items-start justify-between gap-4">
+        <div className="flex items-start justify-between gap-4 flex-wrap">
           <div>
             <h1 className="text-xl font-bold text-[#1a1a2e]">Commandes</h1>
-            <p className="text-sm text-[#6b6b63] mt-0.5">{BRAND_LABELS[brand]} — Calcul des commandes par variant</p>
+            <p className="text-sm text-[#6b6b63] mt-0.5">
+              {brandLabel} : {s.refPeriod ? `ventes du ${fmtDay(s.refPeriod.from, true)} au ${fmtDay(s.refPeriod.to, true)}` : `ventes des ${s.windowDays} derniers jours, hors ruptures et promos`}.
+              On commande sous {trigger} jours de stock, pour remonter à {target} jours.
+            </p>
           </div>
-          <div className="flex items-center gap-2 shrink-0">
-            {/* Bon de commande button with badge */}
-            <button
-              onClick={() => setSidebarOpen(true)}
-              className="relative flex items-center gap-2 px-4 py-2 bg-[#1a1a2e] text-white text-sm font-medium rounded-xl hover:bg-[#2d2d4e] transition-colors"
-            >
-              <ClipboardList size={14} />
-              Bon de commande
-              {cartItems.length > 0 && (
-                <span className="absolute -top-1.5 -right-1.5 min-w-[18px] h-[18px] px-1 bg-[#c7293a] text-white text-[10px] font-bold rounded-full flex items-center justify-center tabular-nums">
-                  {cartItems.length}
-                </span>
-              )}
+          <div className="flex items-center gap-2 shrink-0 flex-wrap">
+            <button onClick={() => setShowSettings((v) => !v)} className={`flex items-center gap-1.5 px-3 py-2 border rounded-xl text-sm transition-colors ${showSettings ? 'border-[#aeb0c9] text-[#1a1a2e] bg-white' : 'border-[#e8e4e0] text-[#6b6b63] hover:border-[#aeb0c9]'}`}>
+              <Settings2 size={14} />Réglages{dirty && <span className="w-1.5 h-1.5 rounded-full bg-[#b45309]" />}
             </button>
-            <button
-              onClick={() => exportCSV(false)}
-              className="flex items-center gap-2 px-4 py-2 border border-[#e8e4e0] bg-white text-[#6b6b63] text-sm font-medium rounded-xl hover:border-[#aeb0c9] hover:text-[#1a1a2e] transition-colors"
-            >
-              <Download size={14} />
-              CSV
+            <button onClick={exportTable} className="flex items-center gap-1.5 px-3 py-2 border border-[#e8e4e0] rounded-xl text-sm text-[#6b6b63] hover:border-[#aeb0c9]"><Download size={14} />CSV</button>
+            <button onClick={() => setSidebarOpen(true)} className="relative flex items-center gap-2 px-4 py-2 bg-[#1a1a2e] text-white text-sm font-medium rounded-xl hover:bg-[#2d2d4e] transition-colors">
+              <ClipboardList size={15} />Bon de commande
+              {cartItems.length > 0 && <span className="absolute -top-1.5 -right-1.5 min-w-[20px] h-5 px-1 rounded-full bg-[#c7293a] text-white text-[10px] font-bold flex items-center justify-center">{cartItems.length}</span>}
             </button>
           </div>
         </div>
 
-        {/* ── Settings panel ─────────────────────────────────────────────── */}
-        <div className="bg-white rounded-[20px] shadow-[0_2px_16px_rgba(0,0,0,0.06)] p-5">
-          <p className="text-[10px] font-semibold uppercase tracking-[0.1em] text-[#aeb0c9] mb-4">Paramètres de calcul</p>
+        <ReorderKpis kpis={computed.kpis} openOrders={openOrders} />
 
-          <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-4">
-            <div>
-              <p className="text-xs font-semibold text-[#6b6b63] mb-2">Période de référence</p>
-              <div className="space-y-1.5">
-                <input type="date" value={refFrom} onChange={(e) => setRefFrom(e.target.value)}
-                  className="w-full text-xs border border-[#e8e4e0] rounded-lg px-3 py-2 text-[#1a1a2e] focus:outline-none focus:border-[#aeb0c9] bg-white" />
-                <input type="date" value={refTo} onChange={(e) => setRefTo(e.target.value)}
-                  className="w-full text-xs border border-[#e8e4e0] rounded-lg px-3 py-2 text-[#1a1a2e] focus:outline-none focus:border-[#aeb0c9] bg-white" />
-              </div>
-              <p className="text-[10px] text-[#9b9b93] mt-1">{periodDays(refFrom, refTo)} jours</p>
-            </div>
-
-            <div>
-              <p className="text-xs font-semibold text-[#6b6b63] mb-2">Période cible</p>
-              <div className="space-y-1.5">
-                <input type="date" value={targetFrom} onChange={(e) => setTargetFrom(e.target.value)}
-                  className="w-full text-xs border border-[#e8e4e0] rounded-lg px-3 py-2 text-[#1a1a2e] focus:outline-none focus:border-[#aeb0c9] bg-white" />
-                <input type="date" value={targetTo} onChange={(e) => setTargetTo(e.target.value)}
-                  className="w-full text-xs border border-[#e8e4e0] rounded-lg px-3 py-2 text-[#1a1a2e] focus:outline-none focus:border-[#aeb0c9] bg-white" />
-              </div>
-              <p className="text-[10px] text-[#9b9b93] mt-1">{periodDays(targetFrom, targetTo)} jours</p>
-            </div>
-
-            <div>
-              <p className="text-xs font-semibold text-[#6b6b63] mb-2">Délai fabrication</p>
-              <div className="flex items-center gap-2">
-                <input type="number" value={leadTime} min={1} max={365}
-                  onChange={(e) => setLeadTime(Math.max(1, parseInt(e.target.value) || 30))}
-                  className="w-full text-xs border border-[#e8e4e0] rounded-lg px-3 py-2 text-[#1a1a2e] focus:outline-none focus:border-[#aeb0c9] bg-white" />
-                <span className="text-xs text-[#6b6b63] shrink-0">jours</span>
-              </div>
-            </div>
-
-            <div>
-              <p className="text-xs font-semibold text-[#6b6b63] mb-2">Buffer de sécurité</p>
-              <div className="flex items-center gap-2">
-                <input type="number" value={buffer} min={0} max={200}
-                  onChange={(e) => setBuffer(Math.max(0, parseInt(e.target.value) || 0))}
-                  className="w-full text-xs border border-[#e8e4e0] rounded-lg px-3 py-2 text-[#1a1a2e] focus:outline-none focus:border-[#aeb0c9] bg-white" />
-                <span className="text-xs text-[#6b6b63] shrink-0">%</span>
-              </div>
+        {urgent.length > 0 && (
+          <div className="rounded-[16px] border border-[#f5c6cc] bg-[#fce8ea] px-4 py-3 flex items-start gap-3">
+            <AlertTriangle size={16} className="text-[#c7293a] shrink-0 mt-0.5" />
+            <div className="text-sm">
+              <p className="font-bold text-[#c7293a]">
+                URGENT : date limite dépassée pour {urgent.length} {plural(urgent.length, 'variante', 'variantes')} (jusqu’à {int(Math.max(...urgent.map((r) => r.plan.lateBy)))} jours)
+              </p>
+              <p className="text-xs text-[#9b2c3a] mt-0.5">
+                Même commandées aujourd’hui, elles arriveront après la rupture : {urgent.slice(0, 4).map((r) => `${r.title.replace(/™.*$/, '')}${r.variantTitle ? ` ${r.variantTitle}` : ''}`).join(', ')}{urgent.length > 4 ? '…' : ''}.
+              </p>
             </div>
           </div>
+        )}
 
-          {/* Summary banner */}
-          {!loading && (
-            <div className="mt-5 pt-4 border-t border-[#f0f0ee]">
-              {daysToDeadline < 0 ? (
-                <div className="flex items-center gap-2.5 px-4 py-3 bg-[#fce8ea] rounded-xl">
-                  <span className="text-base">🚨</span>
-                  <span className="text-sm font-bold text-[#c7293a]">
-                    URGENT — Date limite dépassée de {Math.abs(daysToDeadline)} jour{Math.abs(daysToDeadline) > 1 ? 's' : ''}
-                  </span>
-                  <span className="text-sm text-[#c7293a] opacity-80">—</span>
-                  <span className="text-sm text-[#c7293a]">
-                    <strong>{totalToOrder.toLocaleString('fr-FR')} unités</strong>
-                    <span className="font-normal"> sur {variantsToOrder} variant{variantsToOrder > 1 ? 's' : ''}</span>
-                  </span>
-                </div>
-              ) : (
-                <div className="flex flex-wrap items-center gap-3">
-                  <span className="text-base">{daysToDeadline < 15 ? '⚠️' : '📦'}</span>
-                  {totalToOrder > 0 ? (
-                    <>
-                      <span className={`text-sm font-semibold ${daysToDeadline < 15 ? 'text-amber-600' : 'text-[#1a1a2e]'}`}>
-                        Commander avant le {fmtDate(deadline)}
-                      </span>
-                      <span className="text-sm text-[#6b6b63]">—</span>
-                      <span className="text-sm text-[#1a1a2e]">
-                        <strong>{totalToOrder.toLocaleString('fr-FR')} unités</strong>
-                        <span className="text-[#6b6b63] font-normal"> sur {variantsToOrder} variant{variantsToOrder > 1 ? 's' : ''}</span>
-                      </span>
-                      {daysToDeadline > 0 && (
-                        <span className={`text-xs font-medium ${daysToDeadline < 15 ? 'text-amber-600' : 'text-[#9b9b93]'}`}>
-                          (dans {daysToDeadline} j)
-                        </span>
-                      )}
-                    </>
-                  ) : (
-                    <span className="text-sm font-semibold text-[#1a7f4b]">Aucune commande urgente</span>
-                  )}
-                  {variantsInProd > 0 && (
-                    <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-blue-50 text-blue-700">
-                      <span className="w-1.5 h-1.5 rounded-full bg-blue-500 shrink-0" />
-                      {variantsInProd} variant{variantsInProd > 1 ? 's' : ''} en production
-                    </span>
-                  )}
-                </div>
-              )}
-            </div>
-          )}
-        </div>
+        {showSettings && (
+          <ReorderSettingsPanel s={s} set={(p) => setDraft({ ...s, ...p })} products={products} dirty={dirty} saving={saving} onSave={saveSettings} />
+        )}
 
-        {/* ── AI Insights ────────────────────────────────────────────────── */}
-        <AiInsights type="reapprovisionnement" brand="moom" context={aiContext} />
+        <ReceiptPrompts proposals={computed.proposals} rows={rowMap} lead={lead} act={act} />
 
-        {/* ── Table ──────────────────────────────────────────────────────── */}
-        <div className="bg-white rounded-[20px] shadow-[0_2px_16px_rgba(0,0,0,0.06)] overflow-hidden">
+        <OrdersInProgress orders={inputs.orders} today={today} act={act} />
 
-          <div className="px-5 py-4 border-b border-[#f0f0ee] flex items-center justify-between gap-4">
-            <div className="flex items-center gap-2 flex-1 max-w-xs">
-              <Search size={13} className="text-[#9b9b93] shrink-0" />
-              <input
-                type="text"
-                placeholder="Filtrer par produit ou variant…"
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                className="flex-1 text-sm text-[#1a1a2e] placeholder:text-[#9b9b93] focus:outline-none bg-transparent"
-              />
-            </div>
-            {!loading && (
-              <span className="text-xs text-[#9b9b93] shrink-0">
-                {visibleRows.length} variant{visibleRows.length > 1 ? 's' : ''}
-              </span>
-            )}
-          </div>
-
-          <div className="overflow-x-auto">
-            <table className="w-full min-w-[720px]">
-              <thead>
-                <tr className="border-b border-[#f0f0ee]">
-                  {[
-                    { label: 'Produit / Variant', w: '' },
-                    { label: 'Stock actuel',       w: 'w-24' },
-                    { label: 'En prod.',            w: 'w-28' },
-                    { label: 'Couverture',          w: 'w-32' },
-                    { label: 'Ventes / jour',       w: 'w-24' },
-                    { label: 'Stock cible',         w: 'w-28' },
-                    { label: 'À commander',         w: 'w-28' },
-                    { label: 'Statut',              w: 'w-36' },
-                    { label: '',                    w: 'w-28' },
-                  ].map(({ label, w }) => (
-                    <th key={label} className={`px-4 py-3 text-left text-[10px] font-semibold uppercase tracking-[0.08em] text-[#9b9b93] ${w}`}>
-                      {label}
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-[#f5f0f2]">
-                {loading ? (
-                  Array.from({ length: 10 }).map((_, i) => (
-                    <tr key={i}>
-                      {Array.from({ length: 9 }).map((_, j) => (
-                        <td key={j} className="px-4 py-3.5">
-                          <div className="h-3 bg-[#f0f0ee] rounded animate-pulse" style={{ width: j === 0 ? 180 : 56 }} />
-                        </td>
-                      ))}
-                    </tr>
-                  ))
-                ) : visibleRows.length === 0 ? (
-                  <tr>
-                    <td colSpan={9} className="px-4 py-14 text-center text-sm text-[#9b9b93]">
-                      {search ? 'Aucun variant correspondant' : 'Aucune donnée — relancez un sync Shopify'}
-                    </td>
-                  </tr>
-                ) : (
-                  visibleRows.map((row) => {
-                    const inCart = cartSet.has(row.shopify_variant_id)
-                    const badge =
-                      row.status === 'order'   ? { cls: 'bg-[#fce8ea] text-[#c7293a]', dot: 'bg-[#c7293a]', label: '⚠\uFE0F Commander' }
-                      : row.status === 'in_prod' ? { cls: 'bg-blue-50 text-blue-700',    dot: 'bg-blue-500',   label: 'En prod. ✓' }
-                      : row.status === 'low'     ? { cls: 'bg-amber-50 text-amber-700',  dot: 'bg-amber-500',  label: 'Stock faible' }
-                      :                           { cls: 'bg-[#dcf5e7] text-[#1a7f4b]', dot: 'bg-[#1a7f4b]', label: 'Stock OK' }
-
-                    return (
-                      <tr key={row.shopify_variant_id} className="hover:bg-[#faf9f8] transition-colors">
-                        <td className="px-4 py-3">
-                          <div className="flex items-center gap-3 min-w-0">
-                            {row.image_url ? (
-                              // eslint-disable-next-line @next/next/no-img-element
-                              <img src={row.image_url} alt={row.product_title}
-                                className="w-9 h-9 rounded-lg object-cover bg-[#f5f0f2] shrink-0" />
-                            ) : (
-                              <div className="w-9 h-9 rounded-lg bg-gradient-to-br from-[#e5c8d2] to-[#c4b4d4] flex items-center justify-center shrink-0">
-                                <Package size={14} className="text-white/70" />
-                              </div>
-                            )}
-                            <div className="min-w-0">
-                              <p className="text-xs font-semibold text-[#1a1a2e] truncate">{row.product_title}</p>
-                              {row.variant_title && (
-                                <p className="text-[10px] text-[#9b9b93] truncate mt-0.5">{row.variant_title}</p>
-                              )}
-                            </div>
-                          </div>
-                        </td>
-
-                        <td className="px-4 py-3">
-                          <span className={`text-sm font-bold tabular-nums ${
-                            row.stock_quantity <= 0  ? 'text-[#c7293a]'
-                            : row.stock_quantity < 10 ? 'text-amber-600'
-                            : 'text-[#1a1a2e]'
-                          }`}>
-                            {row.stock_quantity.toLocaleString('fr-FR')}
-                          </span>
-                        </td>
-
-                        {/* En production — champ éditable */}
-                        <td className="px-4 py-3">
-                          <input
-                            type="number"
-                            min={0}
-                            value={row.qty_in_production || ''}
-                            placeholder="0"
-                            onChange={(e) => setInProd(row.shopify_variant_id, Math.max(0, parseInt(e.target.value) || 0))}
-                            className={`w-20 text-xs tabular-nums rounded-lg px-2 py-1.5 border focus:outline-none focus:border-blue-400 transition-colors ${
-                              row.qty_in_production > 0
-                                ? 'border-blue-300 bg-blue-50 text-blue-700 font-semibold'
-                                : 'border-[#e8e4e0] bg-white text-[#9b9b93]'
-                            }`}
-                          />
-                        </td>
-
-                        <td className="px-4 py-3">
-                          {/* Couverture actuelle + projetée si en prod */}
-                          <div className="flex flex-col gap-1">
-                            <CoverageBadge days={row.coverage_days} />
-                            {row.qty_in_production > 0 && row.projected_coverage !== null && (
-                              <span className="inline-flex items-center gap-1 text-[10px] font-medium text-blue-600">
-                                <span className="w-1.5 h-1.5 rounded-full bg-blue-400 shrink-0" />
-                                {row.projected_coverage} j projetés
-                              </span>
-                            )}
-                          </div>
-                        </td>
-
-                        <td className="px-4 py-3">
-                          <span className="text-sm tabular-nums text-[#6b6b63]">{row.daily_sales.toFixed(2)}</span>
-                          <div className="mt-1">
-                            <SourceBadge source={row.data_source} days={row.velocity_days} from={row.velocity_from} to={row.velocity_to} />
-                          </div>
-                        </td>
-
-                        <td className="px-4 py-3">
-                          <span className="text-sm tabular-nums text-[#1a1a2e]">{row.stock_needed.toLocaleString('fr-FR')}</span>
-                        </td>
-
-                        <td className="px-4 py-3">
-                          {row.qty_to_order > 0 ? (
-                            <span className="text-sm font-bold tabular-nums text-[#1a1a2e]">{row.qty_to_order.toLocaleString('fr-FR')}</span>
-                          ) : (
-                            <span className="text-sm tabular-nums text-[#9b9b93]">—</span>
-                          )}
-                        </td>
-
-                        <td className="px-4 py-3">
-                          <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold whitespace-nowrap ${badge.cls}`}>
-                            <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${badge.dot}`} />
-                            {badge.label}
-                          </span>
-                        </td>
-
-                        <td className="px-4 py-3">
-                          <button
-                            onClick={() => inCart ? setSidebarOpen(true) : addToCart(row)}
-                            className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
-                              inCart
-                                ? 'bg-[#dcf5e7] text-[#1a7f4b]'
-                                : 'bg-[#f5f0f2] text-[#6b6b63] hover:bg-[#1a1a2e] hover:text-white'
-                            }`}
-                          >
-                            {inCart
-                              ? <><Check size={11} /> Ajouté</>
-                              : <><Plus size={11} /> Ajouter</>
-                            }
-                          </button>
-                        </td>
-                      </tr>
-                    )
-                  })
-                )}
-              </tbody>
-            </table>
-          </div>
-
-          {!loading && okRows.length > 0 && !search && (
-            <div className="px-5 py-3.5 border-t border-[#f0f0ee] flex items-center justify-center">
-              <button
-                onClick={() => setShowAll((v) => !v)}
-                className="flex items-center gap-1.5 text-xs text-[#6b6b63] hover:text-[#1a1a2e] transition-colors"
-              >
-                <ChevronDown size={14} className={`transition-transform ${showAll ? 'rotate-180' : ''}`} />
-                {showAll
-                  ? `Masquer les ${okRows.length} variants en stock OK`
-                  : `Afficher les ${okRows.length} variants en stock OK`}
+        {/* ── Variantes ─────────────────────────────────────────────────── */}
+        <section className="space-y-3">
+          <div className="flex items-center justify-between gap-3 flex-wrap">
+            <h2 className="text-sm font-bold text-[#1a1a2e]">Variantes</h2>
+            <div className="flex items-center gap-2 flex-wrap">
+              <div className="relative">
+                <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-[#9b9b93]" />
+                <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Rechercher"
+                  className="pl-7 pr-3 py-1.5 text-xs border border-[#e8e4e0] rounded-lg bg-white w-48 focus:outline-none focus:border-[#aeb0c9]" />
+              </div>
+              <button onClick={addAll} disabled={!toOrder.length}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-[#1a1a2e] text-white disabled:opacity-40">
+                <ListPlus size={13} />Tout ajouter ({toOrder.length})
               </button>
             </div>
-          )}
-        </div>
+          </div>
 
+          {GROUPS.map((g) => {
+            const list = sorted.filter((r) => g.statuses.includes(r.plan.status))
+            if (!list.length) return null
+            const open = openGroups[g.key]
+            return (
+              <div key={g.key} className={`${CARD} overflow-hidden`}>
+                <button onClick={() => setOpenGroups((o) => ({ ...o, [g.key]: !o[g.key] }))}
+                  className="w-full flex items-center gap-2 px-4 py-3 text-left hover:bg-[#faf9f8]">
+                  <ChevronDown size={14} className={`text-[#9b9b93] transition-transform ${open ? '' : '-rotate-90'}`} />
+                  <span className="text-sm font-semibold text-[#1a1a2e]">{g.title}</span>
+                  <span className="text-xs text-[#9b9b93]">{list.length} {plural(list.length, 'variante', 'variantes')}{g.hint ? `, ${g.hint}` : ''}</span>
+                </button>
+                {open && (
+                  <div className="overflow-x-auto border-t border-[#f0f0ee]">
+                    <table className="w-full text-sm min-w-[980px]">
+                      <thead>
+                        <tr className="text-[10px] text-[#9b9b93] text-left">
+                          {['Produit', 'Stock', 'En prod.', 'Ventes / jour', 'Jours restants', 'Rupture le', 'Commander avant', 'Qté conseillée', ''].map((h) => (
+                            <th key={h} className="font-semibold px-3 py-2 whitespace-nowrap">{h}</th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {list.map((r) => {
+                          const p = r.plan
+                          const isOpen = expanded === r.id
+                          const pastDeadline = p.orderBy != null && p.orderBy < today
+                          return [
+                            <tr key={r.id} className={`border-t border-[#f5f5f3] ${isOpen ? 'bg-[#faf9f8]' : 'hover:bg-[#fcfbfa]'}`}>
+                              <td className="px-3 py-2.5">
+                                <button onClick={() => toggleRow(r)} className="flex items-center gap-3 text-left">
+                                  <Thumb src={r.image} alt={r.title} />
+                                  <span className="min-w-0">
+                                    <span className="block text-xs font-semibold text-[#1a1a2e] max-w-[220px] truncate">{r.title}</span>
+                                    <span className="block text-[11px] text-[#6b6b63] truncate">{r.variantTitle ?? '—'}</span>
+                                  </span>
+                                </button>
+                              </td>
+                              <td className={`px-3 py-2.5 tabular-nums text-xs font-semibold ${r.stock <= 0 ? 'text-[#c7293a]' : 'text-[#1a1a2e]'}`}>{int(r.stock)}</td>
+                              <td className="px-3 py-2.5 tabular-nums text-xs" title={`En production : ${p.inProduction}, en transport : ${p.inTransit}${p.manual ? `, saisi à la main : ${p.manual}` : ''}`}>
+                                {p.inProduction + p.inTransit + p.manual > 0
+                                  ? <span className="text-[#1a1a2e] font-semibold">{int(p.inProduction + p.inTransit + p.manual)}{p.manual > 0 && <span className="font-normal text-[#9b9b93]"> dont {int(p.manual)} saisi</span>}</span>
+                                  : <span className="text-[#c0c0b8]">—</span>}
+                              </td>
+                              <td className="px-3 py-2.5 tabular-nums text-xs text-[#1a1a2e]">{r.velocity.daily > 0 ? dec(r.velocity.daily, 2) : '—'}</td>
+                              <td className="px-3 py-2.5"><StockGauge stockDays={p.stockDays} positionDays={p.positionDays} lead={lead} trigger={trigger} target={target} /></td>
+                              <td className="px-3 py-2.5 tabular-nums text-xs whitespace-nowrap" style={{ color: p.ruptureOn && daysBetween(today, p.ruptureOn) <= lead ? RED : undefined }}>
+                                {p.ruptureOn ? (p.ruptureOn <= today ? 'en rupture' : fmtDay(p.ruptureOn, true)) : '—'}
+                              </td>
+                              <td className="px-3 py-2.5 tabular-nums text-xs whitespace-nowrap" style={{ color: pastDeadline ? (p.lateBy > 0 ? RED : ORANGE) : undefined }}>
+                                {p.orderBy ? (pastDeadline ? 'maintenant' : fmtDay(p.orderBy, true)) : '—'}
+                              </td>
+                              <td className="px-3 py-2.5 tabular-nums text-sm font-bold text-[#1a1a2e]">{p.suggested > 0 ? int(p.suggested) : <span className="text-xs font-normal text-[#c0c0b8]">—</span>}</td>
+                              <td className="px-3 py-2.5">
+                                <div className="flex items-center justify-end gap-1.5">
+                                  {(p.status === 'order' || p.status === 'snoozed') && (
+                                    cartSet.has(r.id)
+                                      ? <span className="inline-flex items-center gap-1 px-2 py-1 text-[11px] text-[#1a7f4b] font-semibold"><Check size={12} />Ajouté</span>
+                                      : <button onClick={() => addToCart(r)} className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-semibold border border-[#e8e4e0] text-[#1a1a2e] hover:border-[#aeb0c9]"><Plus size={12} />Bon</button>
+                                  )}
+                                  {p.status === 'order' && (
+                                    <button onClick={() => act({ action: 'snooze', variantId: r.id }).then((ok) => ok && setToast('Plus de relance pendant 14 jours'))}
+                                      className="px-2 py-1 rounded-lg text-[11px] text-[#6b6b63] hover:bg-[#f5f5f3]" title="Plus de relance pendant 14 jours">Pas maintenant</button>
+                                  )}
+                                  {p.status === 'snoozed' && (
+                                    <button onClick={() => act({ action: 'unsnooze', variantId: r.id })} className="px-2 py-1 rounded-lg text-[11px] text-[#6b6b63] hover:bg-[#f5f5f3]">Relancer</button>
+                                  )}
+                                  <button onClick={() => toggleRow(r)} className="px-2 py-1 rounded-lg text-[11px] text-[#6b6b63] hover:bg-[#f5f5f3]">{p.status === 'order' ? 'Déjà commandé' : 'Détail'}</button>
+                                </div>
+                              </td>
+                            </tr>,
+                            isOpen && (
+                              <tr key={`${r.id}-x`} className="bg-[#faf9f8]">
+                                <td colSpan={9} className="px-4 pb-4 pt-1">
+                                  <div className="grid gap-3 grid-cols-1 md:grid-cols-3 text-xs">
+                                    <div className="bg-white rounded-xl p-3 space-y-1">
+                                      <p className="font-semibold text-[#1a1a2e]">Ventes par jour : {dec(r.velocity.daily, 2)}</p>
+                                      <p className="text-[#6b6b63]">
+                                        Sur {r.velocity.usefulDays} jours utiles, du {fmtDay(r.velocity.from, true)} au {fmtDay(r.velocity.to, true)}
+                                        {r.velocity.mode === 'référence' ? ' (période de référence)' : ''}.
+                                      </p>
+                                      <p className="text-[#9b9b93]">
+                                        Exclus : {r.velocity.rupture} {plural(r.velocity.rupture, 'jour', 'jours')} de rupture, {r.velocity.promo} de promo
+                                        {r.velocity.capped ? `, ${r.velocity.capped} ${plural(r.velocity.capped, 'pic plafonné', 'pics plafonnés')}` : ''}.
+                                      </p>
+                                      {r.sku && <p className="text-[#aeb0c9] font-mono text-[10px]">{r.sku}</p>}
+                                    </div>
+                                    <div className="bg-white rounded-xl p-3 space-y-2">
+                                      <p className="font-semibold text-[#1a1a2e] flex items-center gap-1.5"><Clock size={12} />Déjà commandé</p>
+                                      <div className="flex items-end gap-2 flex-wrap">
+                                        <label className="text-[11px] text-[#6b6b63]">Le
+                                          <input type="date" value={declare.on} onChange={(e) => setDeclare((d) => ({ ...d, on: e.target.value }))} className="block mt-1 border border-[#e8e4e0] rounded-lg px-2 py-1 bg-white" />
+                                        </label>
+                                        <label className="text-[11px] text-[#6b6b63]">Quantité
+                                          <input type="number" min={1} value={declare.qty} onChange={(e) => setDeclare((d) => ({ ...d, qty: Math.max(0, parseInt(e.target.value) || 0) }))} className="block mt-1 w-20 border border-[#e8e4e0] rounded-lg px-2 py-1 bg-white tabular-nums" />
+                                        </label>
+                                        <button disabled={declare.qty <= 0 || !declare.on}
+                                          onClick={() => act({ action: 'create_order', source: 'declared', orderedOn: declare.on, lines: [{ variantId: r.id, qty: declare.qty }] }).then((ok) => { if (ok) { setExpanded(null); setToast('Commande enregistrée') } })}
+                                          className="px-3 py-1.5 rounded-lg text-xs font-medium bg-[#1a1a2e] text-white disabled:opacity-40">Enregistrer</button>
+                                      </div>
+                                      <p className="text-[10px] text-[#9b9b93]">Dates de production et d’arrivée calculées depuis ce jour, décalables ensuite.</p>
+                                    </div>
+                                    <div className="bg-white rounded-xl p-3 space-y-2">
+                                      <p className="font-semibold text-[#1a1a2e] flex items-center gap-1.5"><PencilLine size={12} />En prod. saisi à la main</p>
+                                      <div className="flex items-end gap-2">
+                                        <input type="number" min={0} value={manualEdit} onChange={(e) => setManualEdit(Math.max(0, parseInt(e.target.value) || 0))} className="w-20 border border-[#e8e4e0] rounded-lg px-2 py-1 bg-white tabular-nums" aria-label="En prod. saisi à la main" />
+                                        <button onClick={() => saveManual(r.id, manualEdit)} className="px-3 py-1.5 rounded-lg text-xs font-medium border border-[#e8e4e0] text-[#1a1a2e] hover:border-[#aeb0c9]">Enregistrer</button>
+                                      </div>
+                                      <p className="text-[10px] text-[#9b9b93]">En secours seulement : les commandes validées remplissent « En prod. » toutes seules.</p>
+                                    </div>
+                                  </div>
+                                </td>
+                              </tr>
+                            ),
+                          ]
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+            )
+          })}
+        </section>
+
+        <AiInsights type="reapprovisionnement" brand={brand} context={aiContext} />
       </main>
 
-      {/* ── Cart sidebar ─────────────────────────────────────────────────────── */}
+      {/* ── Panneau Bon de commande ──────────────────────────────────────── */}
       <div className={`fixed inset-0 z-50 ${sidebarOpen ? 'pointer-events-auto' : 'pointer-events-none'}`}>
-        {/* Backdrop */}
-        <div
-          className={`absolute inset-0 bg-black/30 backdrop-blur-[2px] transition-opacity duration-300 ${sidebarOpen ? 'opacity-100' : 'opacity-0'}`}
-          onClick={() => setSidebarOpen(false)}
-        />
-
-        {/* Panel */}
+        <div className={`absolute inset-0 bg-black/30 backdrop-blur-[2px] transition-opacity duration-300 ${sidebarOpen ? 'opacity-100' : 'opacity-0'}`} onClick={() => setSidebarOpen(false)} />
         <div className={`absolute right-0 top-0 h-full w-full max-w-[460px] bg-[#faf9f8] shadow-2xl flex flex-col transition-transform duration-300 ease-out ${sidebarOpen ? 'translate-x-0' : 'translate-x-full'}`}>
-
-          {/* Header */}
           <div className="flex items-center justify-between px-6 py-5 border-b border-[#f0f0ee] shrink-0">
             <div>
               <h2 className="text-sm font-bold text-[#1a1a2e]">Bon de commande</h2>
-              <p className="text-[11px] text-[#6b6b63] mt-0.5">
-                Mōom Paris — avant le {fmtDate(deadline)}
-              </p>
+              <p className="text-[11px] text-[#6b6b63] mt-0.5">{brandLabel}, arrivée prévue le {fmtDay(addDays(today, lead), true)}</p>
             </div>
-            <button onClick={() => setSidebarOpen(false)} className="p-2 rounded-lg hover:bg-[#f5f0f2] transition-colors">
-              <X size={16} className="text-[#6b6b63]" />
-            </button>
+            <button onClick={() => setSidebarOpen(false)} className="p-2 rounded-lg hover:bg-[#f5f0f2]" aria-label="Fermer"><X size={16} className="text-[#6b6b63]" /></button>
           </div>
 
-          {/* Items */}
           <div className="flex-1 overflow-y-auto py-2">
             {cartItems.length === 0 ? (
               <div className="flex flex-col items-center justify-center h-full gap-3 text-center px-8">
-                <div className="w-12 h-12 rounded-2xl bg-[#f5f0f2] flex items-center justify-center">
-                  <ClipboardList size={22} className="text-[#aeb0c9]" />
-                </div>
+                <div className="w-12 h-12 rounded-2xl bg-[#f5f0f2] flex items-center justify-center"><ClipboardList size={22} className="text-[#aeb0c9]" /></div>
                 <p className="text-sm font-medium text-[#1a1a2e]">Aucun article</p>
-                <p className="text-xs text-[#9b9b93]">Cliquez sur &ldquo;+ Ajouter&rdquo; sur chaque ligne pour composer votre commande.</p>
+                <p className="text-xs text-[#9b9b93]">« Tout ajouter » met d’un coup toutes les lignes conseillées ; « + Bon » ajoute une ligne.</p>
+                {toOrder.length > 0 && <button onClick={addAll} className="mt-1 px-3 py-1.5 rounded-lg text-xs font-semibold bg-[#1a1a2e] text-white">Tout ajouter ({toOrder.length})</button>}
               </div>
             ) : (
               <ul className="divide-y divide-[#f5f0f2]">
                 {cartItems.map((item, i) => {
-                  const row = rowMap.get(item.shopify_variant_id)
-                  if (!row) return null
-                  const isDragTarget = dragOver === i
+                  const r = rowMap.get(item.id)
+                  if (!r) return null
                   return (
-                    <li
-                      key={item.shopify_variant_id}
-                      draggable
-                      onDragStart={() => handleDragStart(i)}
-                      onDragOver={(e) => handleDragOver(e, i)}
+                    <li key={item.id} draggable
+                      onDragStart={() => { dragIndex.current = i }}
+                      onDragOver={(e) => { e.preventDefault(); setDragOver(i) }}
                       onDrop={() => handleDrop(i)}
-                      onDragEnd={handleDragEnd}
-                      className={`flex items-center gap-3 px-5 py-3.5 transition-colors cursor-default ${
-                        isDragTarget ? 'bg-[#f0eef8] border-t-2 border-[#aeb0c9]' : 'hover:bg-[#faf9f8]'
-                      }`}
-                    >
-                      {/* Drag handle */}
-                      <GripVertical size={14} className="text-[#d0ccc8] shrink-0 cursor-grab active:cursor-grabbing" />
-
-                      {/* Image */}
-                      {row.image_url ? (
-                        // eslint-disable-next-line @next/next/no-img-element
-                        <img src={row.image_url} alt={row.product_title}
-                          className="w-10 h-10 rounded-lg object-cover bg-[#f5f0f2] shrink-0" />
-                      ) : (
-                        <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-[#e5c8d2] to-[#c4b4d4] flex items-center justify-center shrink-0">
-                          <Package size={13} className="text-white/70" />
-                        </div>
-                      )}
-
-                      {/* Info */}
+                      onDragEnd={() => { dragIndex.current = null; setDragOver(null) }}
+                      className={`flex items-center gap-3 px-5 py-3.5 transition-colors ${dragOver === i ? 'bg-[#f0eef8] border-t-2 border-[#aeb0c9]' : 'hover:bg-[#faf9f8]'}`}>
+                      <GripVertical size={14} className="text-[#d0ccc8] shrink-0 cursor-grab" />
+                      <Thumb src={r.image} alt={r.title} />
                       <div className="flex-1 min-w-0">
-                        <p className="text-xs font-semibold text-[#1a1a2e] truncate">{row.product_title}</p>
-                        {row.variant_title && (
-                          <p className="text-[10px] text-[#6b6b63] truncate mt-0.5">{row.variant_title}</p>
-                        )}
-                        {row.sku && (
-                          <p className="text-[10px] text-[#aeb0c9] truncate mt-0.5 font-mono">{row.sku}</p>
-                        )}
+                        <p className="text-xs font-semibold text-[#1a1a2e] truncate">{r.title}</p>
+                        {r.variantTitle && <p className="text-[10px] text-[#6b6b63] truncate mt-0.5">{r.variantTitle}</p>}
+                        <p className="text-[10px] text-[#9b9b93] truncate mt-0.5">conseillé : {r.plan.suggested ? int(r.plan.suggested) : '—'}{r.sku ? `, ${r.sku}` : ''}</p>
                       </div>
-
-                      {/* Qty input */}
-                      <input
-                        type="number"
-                        min={0}
-                        value={item.qty}
-                        onChange={(e) => setCartQty(item.shopify_variant_id, parseInt(e.target.value) || 0)}
-                        className="w-16 text-sm font-bold text-center border border-[#e8e4e0] rounded-lg px-2 py-1.5 text-[#1a1a2e] focus:outline-none focus:border-[#aeb0c9] bg-white tabular-nums shrink-0"
-                      />
-
-                      {/* Remove */}
-                      <button
-                        onClick={() => removeFromCart(item.shopify_variant_id)}
-                        className="p-1.5 rounded-lg hover:bg-[#fce8ea] text-[#9b9b93] hover:text-[#c7293a] transition-colors shrink-0"
-                      >
-                        <X size={13} />
-                      </button>
+                      <input type="number" min={0} value={item.qty} onChange={(e) => setCartQty(item.id, parseInt(e.target.value) || 0)}
+                        className="w-16 text-sm font-bold text-center border border-[#e8e4e0] rounded-lg px-2 py-1.5 text-[#1a1a2e] focus:outline-none focus:border-[#aeb0c9] bg-white tabular-nums shrink-0" aria-label={`Quantité ${r.title}`} />
+                      <button onClick={() => removeFromCart(item.id)} className="p-1.5 rounded-lg hover:bg-[#fce8ea] text-[#9b9b93] hover:text-[#c7293a] shrink-0" aria-label="Retirer"><X size={13} /></button>
                     </li>
                   )
                 })}
@@ -1011,57 +461,51 @@ Stock faible:\n${lowLines || 'Aucun'}`
             )}
           </div>
 
-          {/* Footer */}
           <div className="border-t border-[#f0f0ee] px-6 py-5 space-y-4 shrink-0 bg-white">
-            {/* Per-product subtotals */}
             {cartByProduct.length > 0 && (
               <div className="space-y-1.5">
-                <p className="text-[10px] font-semibold uppercase tracking-[0.08em] text-[#9b9b93]">Par produit</p>
-                {cartByProduct.map(([title, qty]) => {
-                  // Shorten long product names to fit
-                  const short = title.length > 28 ? title.slice(0, 26) + '…' : title
-                  return (
-                    <div key={title} className="flex items-center justify-between">
-                      <span className="text-xs text-[#6b6b63] truncate">{short}</span>
-                      <span className="text-xs font-semibold text-[#1a1a2e] tabular-nums shrink-0 ml-2">
-                        {qty.toLocaleString('fr-FR')} u.
-                      </span>
-                    </div>
-                  )
-                })}
+                <p className="text-[11px] font-semibold text-[#9b9b93]">Par produit</p>
+                {cartByProduct.map(([title, qty]) => (
+                  <div key={title} className="flex items-center justify-between">
+                    <span className="text-xs text-[#6b6b63] truncate">{title.length > 28 ? title.slice(0, 26) + '…' : title}</span>
+                    <span className="text-xs font-semibold text-[#1a1a2e] tabular-nums shrink-0 ml-2">{int(qty)} u.</span>
+                  </div>
+                ))}
                 <div className="h-px bg-[#f0f0ee] mt-2" />
               </div>
             )}
             <div className="flex items-center justify-between text-sm">
-              <span className="text-[#6b6b63]">
-                {cartItems.length} référence{cartItems.length > 1 ? 's' : ''}
-              </span>
-              <span className="font-bold text-[#1a1a2e]">
-                {cartTotal.toLocaleString('fr-FR')} unités
-              </span>
+              <span className="text-[#6b6b63]">{cartItems.length} {plural(cartItems.length, 'référence', 'références')}, {int(cartUnits)} unités</span>
+              <span className="font-bold text-[#1a1a2e]">{cartCost.toLocaleString('fr-FR', { style: 'currency', currency: 'EUR', maximumFractionDigits: 0 })}</span>
             </div>
-            <div className="flex gap-2">
-              <button
-                onClick={exportCartCSV}
-                disabled={cartItems.length === 0}
-                className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 border border-[#e8e4e0] rounded-xl text-sm font-medium text-[#6b6b63] hover:border-[#aeb0c9] hover:text-[#1a1a2e] transition-colors disabled:opacity-40"
-              >
-                <Download size={13} />
-                CSV
-              </button>
-              <button
-                onClick={() => printPO(cartItems, rowMap, deadline, BRAND_LABELS[brand] ?? brand)}
-                disabled={cartItems.length === 0}
-                className="flex-2 flex-1 flex items-center justify-center gap-2 px-4 py-2.5 bg-[#1a1a2e] text-white rounded-xl text-sm font-medium hover:bg-[#2d2d4e] transition-colors disabled:opacity-40"
-              >
-                <Download size={13} />
-                Exporter PDF
-              </button>
-            </div>
+            <button onClick={validate} disabled={!poLines.length || validating}
+              className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-[#1a1a2e] text-white rounded-xl text-sm font-semibold hover:bg-[#2d2d4e] disabled:opacity-40">
+              <Check size={14} />{validating ? 'Enregistrement…' : 'Valider la commande'}
+            </button>
+            <p className="text-[10px] text-[#9b9b93] text-center">Enregistre la commande, exporte le PDF et le CSV, et prépare le message pour le fournisseur.</p>
           </div>
         </div>
       </div>
 
+      {/* ── Message fournisseur ──────────────────────────────────────────── */}
+      {message && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-black/30" onClick={() => setMessage(null)} />
+          <div className={`${CARD} relative w-full max-w-lg p-5 space-y-3`}>
+            <div className="flex items-center justify-between">
+              <h2 className="text-sm font-bold text-[#1a1a2e]">Commande enregistrée. Message pour le fournisseur</h2>
+              <button onClick={() => setMessage(null)} className="p-1.5 rounded-lg hover:bg-[#f5f0f2]" aria-label="Fermer"><X size={14} /></button>
+            </div>
+            <textarea readOnly value={message} rows={12} className="w-full text-xs border border-[#e8e4e0] rounded-xl p-3 bg-[#faf9f8] font-sans" />
+            <button onClick={() => navigator.clipboard.writeText(message).then(() => setToast('Message copié'), () => setToast('Copie impossible : sélectionne le texte'))}
+              className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-[#1a1a2e] text-white rounded-xl text-sm font-semibold"><Copy size={14} />Copier le message</button>
+          </div>
+        </div>
+      )}
+
+      {toast && (
+        <div role="status" className="fixed bottom-6 left-1/2 -translate-x-1/2 z-[60] px-4 py-2.5 rounded-xl bg-[#1a1a2e] text-white text-xs shadow-lg" style={{ marginBottom: 'env(safe-area-inset-bottom, 0px)' }}>{toast}</div>
+      )}
     </div>
   )
 }

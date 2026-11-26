@@ -228,6 +228,29 @@ export async function fetchProducts(config: ShopifyConfig): Promise<ShopifyProdu
   return products
 }
 
+// ─── Stock par entrepôt (relevés quotidiens Réappro) ─────────────────────────
+
+export type InventoryLevel = { inventory_item_id: number; location_id: number; available: number | null }
+
+export async function fetchLocations(config: ShopifyConfig): Promise<Map<number, string>> {
+  const { data } = await shopifyFetch<{ locations: { id: number; name: string }[] }>(config, 'locations.json')
+  return new Map(data.locations.map((l) => [l.id, l.name]))
+}
+
+export async function fetchInventoryLevels(config: ShopifyConfig, inventoryItemIds: number[]): Promise<InventoryLevel[]> {
+  const out: InventoryLevel[] = []
+  // 50 articles par requête (limite Shopify du filtre inventory_item_ids)
+  for (let i = 0; i < inventoryItemIds.length; i += 50) {
+    const chunk = inventoryItemIds.slice(i, i + 50)
+    const { data } = await shopifyFetch<{ inventory_levels: InventoryLevel[] }>(
+      config,
+      `inventory_levels.json?inventory_item_ids=${chunk.join(',')}&limit=250`
+    )
+    out.push(...data.inventory_levels)
+  }
+  return out
+}
+
 // ─── fetchInventoryCosts ──────────────────────────────────────────────────────
 
 async function fetchInventoryCosts(

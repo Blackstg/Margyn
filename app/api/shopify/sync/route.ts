@@ -13,6 +13,7 @@ import {
   aggregateProductSales,
   type ShopifyConfig,
 } from '@/lib/shopify'
+import { recordStockSnapshots } from '@/lib/reorder/snapshots'
 
 // ─── Supabase admin client (service role) ────────────────────────────────────
 
@@ -238,7 +239,10 @@ export async function POST(req: NextRequest) {
         }
       } catch { /* gap correction is best-effort — don't fail the whole sync */ }
 
-      results[store.brand] = { snapshots: snapshotCount, products: productCount, product_sales: productSalesCount }
+      // ── 8. Relevé de stock du jour, par entrepôt (Réappro : ruptures, réceptions) ──
+      try { await recordStockSnapshots(supabase, store, products) } catch { /* best-effort */ }
+
+      results[store.brand] ={ snapshots: snapshotCount, products: productCount, product_sales: productSalesCount }
     } catch (err) {
       results[store.brand] = {
         snapshots: 0,

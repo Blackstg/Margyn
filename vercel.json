@@ -26,6 +26,7 @@
     { "path": "/api/sav/embed-history", "schedule": "30 2 * * *" },
     { "path": "/api/health/auth", "schedule": "*/2 * * * *" },
     { "path": "/api/health/token", "schedule": "0 7 * * *" },
-    { "path": "/api/cron/tracking-audit", "schedule": "30 6 * * *" }
+    { "path": "/api/cron/tracking-audit", "schedule": "30 6 * * *" },
+    { "path": "/api/cron/reorder-weekly", "schedule": "0 7 * * 1" }
   ]
 }
